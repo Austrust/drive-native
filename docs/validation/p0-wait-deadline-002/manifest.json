@@ -1,0 +1,25 @@
+{
+  "base_commit": "87320885899d7ad8daebc568fbfe76ee3e4bca84",
+  "runtime_reference": "0.1.0~dev20261030.6",
+  "diagnostic_only": true,
+  "not_a_deb_or_candidate": true,
+  "binary_sha256": {
+    "drive-native-fsd": "819511637f37ace403946798c9c1f11dc5ba7c8dd424d8b8e7a01be734f4eb16",
+    "drive-native-worker": "8a49ca609060eae50618d22eb6dd5749bb35085f6ee3861f1a8182e0296a4596"
+  },
+  "variants": [
+    {
+      "outer_seconds": 470,
+      "inner_seconds": 450,
+      "unit": "drive-native-p0-wait2-470.service",
+      "readonly": true,
+      "nodes": 91033
+    }
+  ],
+  "auth_input": "fresh getpass; no saved credential read",
+  "payload_logging": false,
+  "experiment_limit_s": 900,
+  "stop_after": "first bridge terminal error per variant or900s; initial online verification required",
+  "TLS": "original certificate validation and trust profile unchanged",
+  "original_six_tasks_restarted": false
+}

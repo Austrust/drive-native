@@ -1,0 +1,60 @@
+{
+  "counts": {
+    "unit_started": 1,
+    "unit_stopping": 1,
+    "stop_sigterm": 1,
+    "other": 3,
+    "process_killed": 1,
+    "unit_failed": 1
+  },
+  "entries": [
+    {
+      "category": "unit_started",
+      "monotonic_us": "162650936494",
+      "realtime_us": "1793390151279593",
+      "pid": "377"
+    },
+    {
+      "category": "unit_stopping",
+      "monotonic_us": "162722935632",
+      "realtime_us": "1793390223917227",
+      "pid": "377"
+    },
+    {
+      "category": "stop_sigterm",
+      "monotonic_us": "162743003666",
+      "realtime_us": "1793390243985261",
+      "pid": "377"
+    },
+    {
+      "category": "other",
+      "monotonic_us": "162743004471",
+      "realtime_us": "1793390243986067",
+      "pid": "377"
+    },
+    {
+      "category": "process_killed",
+      "monotonic_us": "162743005206",
+      "realtime_us": "1793390243986801",
+      "pid": "377"
+    },
+    {
+      "category": "unit_failed",
+      "monotonic_us": "162743005662",
+      "realtime_us": "1793390243987258",
+      "pid": "377"
+    },
+    {
+      "category": "other",
+      "monotonic_us": "162743005891",
+      "realtime_us": "1793390243987487",
+      "pid": "377"
+    },
+    {
+      "category": "other",
+      "monotonic_us": "162743005999",
+      "realtime_us": "1793390243987595",
+      "pid": "377"
+    }
+  ]
+}

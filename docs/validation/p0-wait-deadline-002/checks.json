@@ -1,0 +1,63 @@
+{
+  "long_poll_observation_entered": false,
+  "stop_timeout_preserved": true,
+  "mount_remaining": false,
+  "original_tasks": [
+    {
+      "unit": "drive-native-soak@b134e0e4903086dc8beeb7b7d210a6d2.service",
+      "properties": {
+        "MainPID": "880828",
+        "ActiveState": "active"
+      },
+      "fsd_sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678"
+    },
+    {
+      "unit": "drive-native-soak@7298618a9f57e447c393e071903a0491.service",
+      "properties": {
+        "MainPID": "880752",
+        "ActiveState": "active"
+      },
+      "fsd_sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678"
+    },
+    {
+      "unit": "drive-native-soak@b9d23989052bf43cb9e13f0babc50458.service",
+      "properties": {
+        "MainPID": "880770",
+        "ActiveState": "active"
+      },
+      "fsd_sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678"
+    },
+    {
+      "unit": "drive-native-soak@5de7d17a5d0b1e1834530c6e23a635f3.service",
+      "properties": {
+        "MainPID": "880769",
+        "ActiveState": "active"
+      },
+      "fsd_sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678"
+    },
+    {
+      "unit": "drive-native-soak@35995614c699c8d2db61a0def4ef8bd6.service",
+      "properties": {
+        "MainPID": "880883",
+        "ActiveState": "active"
+      },
+      "fsd_sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678"
+    },
+    {
+      "unit": "drive-native-soak@0bc76c0cc6a606e11aaaf4bd4687058f.service",
+      "properties": {
+        "MainPID": "880915",
+        "ActiveState": "active"
+      },
+      "fsd_sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678"
+    }
+  ],
+  "baseline_status": {
+    "state": "running",
+    "iterations": 1155,
+    "failed_observations": 10,
+    "elapsed_s": 11550.980069101002,
+    "last_sample": 1793390427.5063195,
+    "pid": 894834
+  }
+}

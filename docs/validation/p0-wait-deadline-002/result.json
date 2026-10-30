@@ -1,0 +1,24 @@
+{
+  "finished_at": 1793390244.1265583,
+  "results": [
+    {
+      "outer_seconds": 470,
+      "inner_seconds": 450,
+      "end_reason": "observer_error",
+      "error_type": "RuntimeError",
+      "stop_requested_at": 1793390223.9126565,
+      "stop": {
+        "elapsed_s": 20.204599688993767,
+        "properties": {
+          "MainPID": "0",
+          "Result": "timeout",
+          "ExecMainStatus": "9",
+          "ActiveState": "failed"
+        },
+        "mount_remaining": false
+      },
+      "observed_rows": 0
+    }
+  ],
+  "runtime_product_changed": false
+}
