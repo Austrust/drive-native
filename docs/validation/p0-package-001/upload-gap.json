@@ -1,0 +1,34 @@
+{
+  "recorded_at": "2026-10-30T19:01:18.664262+00:00",
+  "tag": "dev20261031.1",
+  "release_id": 429373476,
+  "draft": true,
+  "completed_assets": 9,
+  "missing_asset": "drive-native_0.1.0.dev20261031.1_amd64.deb",
+  "deb_sha256": "403c0db14ee84e23474376c9417d8e244465674bc686779972394588519e6f39",
+  "source_commit": "5d07592330755daee24430c382384e2a2e2fc86a",
+  "attempts": [
+    {
+      "method": "gh release create",
+      "result": "stopped after no completion; completed assets retained"
+    },
+    {
+      "method": "gh release upload with HTTP/1.1",
+      "result": "stopped after no deb completion; SOURCE_COMMIT uploaded"
+    },
+    {
+      "method": "gh api upload with HTTP/1.1",
+      "result": "stopped after more than 5 minutes; server state starter with null digest; incomplete asset 693089575 removed"
+    }
+  ],
+  "root_cause": "not established; no completed server digest for deb",
+  "upload_process_still_running": false,
+  "baseline_status": {
+    "iteration": 795,
+    "elapsed_s": 7947.622656132997,
+    "failed_observations": 8,
+    "observer_active": true,
+    "probe_active": true
+  },
+  "resume": "Upload the same local deb to draft release 429373476. Run work/p0-check-github-release.py only after state uploaded. Upload GITHUB-SHA256SUMS and github-upload-check.json, verify all digests, publish prerelease, then update gate/report and copy the two new sidecars into the existing delivery directory. Do not rebuild or overwrite the verified deb. P0 remains open for 24h review and valid link baseline."
+}
