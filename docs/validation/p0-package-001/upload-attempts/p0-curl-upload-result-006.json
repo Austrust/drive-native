@@ -1,0 +1,23 @@
+{
+  "method": "Windows curl HTTP/1.1, public DNS IPv4 for this request only, TLS verification enabled",
+  "elapsed_s": 7.095498085021973,
+  "curl_exit": 0,
+  "local_sha256": "403c0db14ee84e23474376c9417d8e244465674bc686779972394588519e6f39",
+  "metrics": {
+    "http": 201,
+    "uploaded": 53385970,
+    "speed_upload": 7692682,
+    "total": 6.939841,
+    "remote_ip": "20.205.243.161",
+    "tls_verify": 0
+  },
+  "asset": {
+    "id": 693334839,
+    "name": "drive-native_0.1.0.dev20261031.1_amd64.deb",
+    "size": 53385970,
+    "state": "uploaded",
+    "digest": "sha256:403c0db14ee84e23474376c9417d8e244465674bc686779972394588519e6f39"
+  },
+  "sha256_match": true,
+  "transport_error": ""
+}

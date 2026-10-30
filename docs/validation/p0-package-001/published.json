@@ -1,0 +1,85 @@
+{
+  "checked_at": "2026-10-30T20:31:47.300321+00:00",
+  "release_id": 429373476,
+  "tag": "dev20261031.1",
+  "source_commit": "5d07592330755daee24430c382384e2a2e2fc86a",
+  "draft": false,
+  "prerelease": true,
+  "published_at": "2026-10-30T20:31:43Z",
+  "url": "https://github.com/Austrust/drive-native/releases/tag/dev20261031.1",
+  "assets_verified": 12,
+  "assets": [
+    {
+      "name": "BUILD_VERSION",
+      "size": 21,
+      "state": "uploaded",
+      "digest": "sha256:e085dbf9b4f95d6fe90cd64841b382ce6881d76df6ee923a7b12f32ccb7220d3"
+    },
+    {
+      "name": "drive-native-dbgsym_0.1.0.dev20261031.1_amd64.ddeb",
+      "size": 445062,
+      "state": "uploaded",
+      "digest": "sha256:465d1e2bbe85c7ee51397b60e6ea9c266deeca526ed26dad6fb07106932515b4"
+    },
+    {
+      "name": "drive-native-source.tar.gz",
+      "size": 775120,
+      "state": "uploaded",
+      "digest": "sha256:556d0dfa2ab35f6d22ae5abf705bf3e874f26cf3f5e5f8e6a238e55c5724b53d"
+    },
+    {
+      "name": "drive-native-validation.tar.gz",
+      "size": 67910,
+      "state": "uploaded",
+      "digest": "sha256:d9443c796d59b442a38050de098db930daf6d481b151a01549b325f3b2c7530d"
+    },
+    {
+      "name": "drive-native_0.1.0.dev20261031.1_amd64.buildinfo",
+      "size": 8913,
+      "state": "uploaded",
+      "digest": "sha256:42497430183ac4230f9cf6e798d7c4de809c3cd3f9124db2be392658befde94f"
+    },
+    {
+      "name": "drive-native_0.1.0.dev20261031.1_amd64.changes",
+      "size": 1907,
+      "state": "uploaded",
+      "digest": "sha256:5f776a68decebbb67a28f4ebfb210b9e794b4f57c39f086cc74a4d201bf6afff"
+    },
+    {
+      "name": "drive-native_0.1.0.dev20261031.1_amd64.deb",
+      "size": 53385970,
+      "state": "uploaded",
+      "digest": "sha256:403c0db14ee84e23474376c9417d8e244465674bc686779972394588519e6f39"
+    },
+    {
+      "name": "GITHUB-SHA256SUMS",
+      "size": 967,
+      "state": "uploaded",
+      "digest": "sha256:1282f3097c6c5416eb7107afc4243934f901d244f931ab22168540a458ce65c2"
+    },
+    {
+      "name": "github-upload-check.json",
+      "size": 1943,
+      "state": "uploaded",
+      "digest": "sha256:5559c8c7d5740e416aa40f1c938a2423ee4bf9ecbf2f22adc0b1951911ade080"
+    },
+    {
+      "name": "README.md",
+      "size": 3617,
+      "state": "uploaded",
+      "digest": "sha256:4d2686ac09eb7c67fced63d0ce9a492a8a46c5d94d0190cfe507b5715c27bec4"
+    },
+    {
+      "name": "SHA256SUMS",
+      "size": 6922,
+      "state": "uploaded",
+      "digest": "sha256:fc13bc80db0ed65c3f65c76a2fe42a1b114a2fb66b871a09de0518881a8d6b32"
+    },
+    {
+      "name": "SOURCE_COMMIT",
+      "size": 41,
+      "state": "uploaded",
+      "digest": "sha256:1861c283e0e2e3ecff301c5f5bcdaab43362d5a5a1f8a2658c5a296633cbc90e"
+    }
+  ]
+}
