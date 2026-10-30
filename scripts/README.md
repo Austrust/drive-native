@@ -26,3 +26,7 @@
 - [test_prepare_debian_source.py](test_prepare_debian_source.py)
 - [verify-runtime.sh](verify-runtime.sh)
 - [verify.sh](verify.sh)
+
+## 实验脚本
+
+`native_*`、`*_probe` 及 examples 中的真实联调程序是历史实验工具，其中部分会写入测试目录。主机已替换为不可用示例地址；必须阅读工具的测试范围并配置隔离账号后显式运行。普通客户端不依赖这些脚本，自动测试不运行真实 NAS 写入。

@@ -1,10 +1,3 @@
-# trust
+# 合成 TLS 测试证书
 
-源码与开发文件。当前状态及构建方法见仓库根 README。
-
-- [ca-key.pem](ca-key.pem)
-- [ca.pem](ca.pem)
-- [server-key.pem](server-key.pem)
-- [server.csr](server.csr)
-- [server.ext](server.ext)
-- [server.pem](server.pem)
+这些证书和私钥仅用于本机 `localhost` / `127.0.0.1` 的 TLS 回归测试，不用于任何真实服务器。它们是公开测试夹具，不能用作部署凭据。`trust.rs` 验证自定义 CA、域名不匹配及过期拒绝；不得将真实密钥放入此目录。
