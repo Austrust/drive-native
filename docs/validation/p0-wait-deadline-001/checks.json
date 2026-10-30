@@ -1,0 +1,147 @@
+{
+  "variants": [
+    {
+      "outer_seconds": 450,
+      "terminal_errors": [],
+      "native_exchanges_completed": [
+        {
+          "layer": "native",
+          "phase": "exchange_end",
+          "pid": "999109",
+          "elapsed_us": "20675",
+          "outcome": "reply",
+          "monotonic_us": 161579774815,
+          "realtime_us": 1793389075886745,
+          "journal_pid": 999109
+        },
+        {
+          "layer": "native",
+          "phase": "exchange_end",
+          "pid": "999109",
+          "elapsed_us": "428285373",
+          "outcome": "reply",
+          "monotonic_us": 162008076427,
+          "realtime_us": 1793389505821868,
+          "journal_pid": 999109
+        }
+      ],
+      "history_rows_before_observation": 10,
+      "observation_window_rows": 7,
+      "stop": {
+        "elapsed_s": 0.2191036570002325,
+        "properties": {
+          "MainPID": "0",
+          "Result": "success",
+          "ExecMainStatus": "0",
+          "ActiveState": "inactive"
+        },
+        "mount_remaining": false
+      }
+    },
+    {
+      "outer_seconds": 470,
+      "terminal_errors": [],
+      "native_exchanges_completed": [
+        {
+          "layer": "native",
+          "phase": "exchange_end",
+          "pid": "999112",
+          "elapsed_us": "21098",
+          "outcome": "reply",
+          "monotonic_us": 161579763113,
+          "realtime_us": 1793389075875043,
+          "journal_pid": 999112
+        },
+        {
+          "layer": "native",
+          "phase": "exchange_end",
+          "pid": "999112",
+          "elapsed_us": "428297090",
+          "outcome": "reply",
+          "monotonic_us": 162008072550,
+          "realtime_us": 1793389505817991,
+          "journal_pid": 999112
+        }
+      ],
+      "history_rows_before_observation": 10,
+      "observation_window_rows": 7,
+      "stop": {
+        "elapsed_s": 0.22151568499975838,
+        "properties": {
+          "MainPID": "0",
+          "Result": "success",
+          "ExecMainStatus": "0",
+          "ActiveState": "inactive"
+        },
+        "mount_remaining": false
+      }
+    }
+  ],
+  "original_tasks": [
+    {
+      "view_id": 14,
+      "unit": "drive-native-soak@b134e0e4903086dc8beeb7b7d210a6d2.service",
+      "properties": {
+        "MainPID": "880828",
+        "ActiveState": "active"
+      },
+      "fsd_sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678"
+    },
+    {
+      "view_id": 11,
+      "unit": "drive-native-soak@7298618a9f57e447c393e071903a0491.service",
+      "properties": {
+        "MainPID": "880752",
+        "ActiveState": "active"
+      },
+      "fsd_sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678"
+    },
+    {
+      "view_id": 12,
+      "unit": "drive-native-soak@b9d23989052bf43cb9e13f0babc50458.service",
+      "properties": {
+        "MainPID": "880770",
+        "ActiveState": "active"
+      },
+      "fsd_sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678"
+    },
+    {
+      "view_id": 50,
+      "unit": "drive-native-soak@5de7d17a5d0b1e1834530c6e23a635f3.service",
+      "properties": {
+        "MainPID": "880769",
+        "ActiveState": "active"
+      },
+      "fsd_sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678"
+    },
+    {
+      "view_id": 1,
+      "unit": "drive-native-soak@35995614c699c8d2db61a0def4ef8bd6.service",
+      "properties": {
+        "MainPID": "880883",
+        "ActiveState": "active"
+      },
+      "fsd_sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678"
+    },
+    {
+      "view_id": 1,
+      "unit": "drive-native-soak@0bc76c0cc6a606e11aaaf4bd4687058f.service",
+      "properties": {
+        "MainPID": "880915",
+        "ActiveState": "active"
+      },
+      "fsd_sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678"
+    }
+  ],
+  "baseline_status": {
+    "state": "running",
+    "iterations": 1090,
+    "failed_observations": 10,
+    "elapsed_s": 10900.369464541,
+    "last_sample": 1793389774.115021,
+    "pid": 894834
+  },
+  "runtime_product_changed": false,
+  "experiment_NAS_writes": false,
+  "published_package": false
+}

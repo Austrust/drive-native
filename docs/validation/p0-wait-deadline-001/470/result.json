@@ -1,0 +1,30 @@
+{
+  "outer_seconds": 470,
+  "inner_seconds": 450,
+  "initial_overview": {
+    "connection": "online",
+    "mounted": true,
+    "error": null,
+    "pending_operations": 0
+  },
+  "observed_from": 1793389148.549237,
+  "end_reason": "600s_observation_deadline",
+  "before_stop_overview": {
+    "connection": "online",
+    "mounted": true,
+    "error": null,
+    "pending_operations": 0
+  },
+  "stop_requested_at": 1793389751.047238,
+  "stop": {
+    "elapsed_s": 0.22151568499975838,
+    "properties": {
+      "MainPID": "0",
+      "Result": "success",
+      "ExecMainStatus": "0",
+      "ActiveState": "inactive"
+    },
+    "mount_remaining": false
+  },
+  "observed_rows": 17
+}

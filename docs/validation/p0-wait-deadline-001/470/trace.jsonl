@@ -1,0 +1,17 @@
+{"layer": "bridge", "phase": "begin", "pid": "998932", "outer_s": "470", "monotonic_us": 161579741695, "realtime_us": 1793389075853625, "journal_pid": 998932}
+{"layer": "native", "phase": "pool_begin", "pid": "999112", "monotonic_us": 161579742744, "realtime_us": 1793389075854674, "journal_pid": 999112}
+{"layer": "native", "phase": "exchange_begin", "pid": "999112", "elapsed_us": "13", "inner_s": "450", "monotonic_us": 161579742744, "realtime_us": 1793389075854674, "journal_pid": 999112}
+{"layer": "native", "phase": "exchange_end", "pid": "999112", "elapsed_us": "21098", "outcome": "reply", "monotonic_us": 161579763113, "realtime_us": 1793389075875043, "journal_pid": 999112}
+{"layer": "native", "phase": "parse_end", "pid": "999112", "ok": "true", "monotonic_us": 161579763113, "realtime_us": 1793389075875043, "journal_pid": 999112}
+{"layer": "bridge", "phase": "reply", "pid": "998932", "elapsed_us": "21653", "outcome": "reply", "monotonic_us": 161579763409, "realtime_us": 1793389075875339, "journal_pid": 998932}
+{"layer": "bridge", "phase": "notification", "pid": "998932", "monotonic_us": 161579763409, "realtime_us": 1793389075875339, "journal_pid": 998932}
+{"layer": "bridge", "phase": "begin", "pid": "998932", "outer_s": "470", "monotonic_us": 161579775418, "realtime_us": 1793389075887348, "journal_pid": 998932}
+{"layer": "native", "phase": "pool_begin", "pid": "999112", "monotonic_us": 161579775469, "realtime_us": 1793389075887400, "journal_pid": 999112}
+{"layer": "native", "phase": "exchange_begin", "pid": "999112", "elapsed_us": "9", "inner_s": "450", "monotonic_us": 161579775469, "realtime_us": 1793389075887400, "journal_pid": 999112}
+{"layer": "native", "phase": "exchange_end", "pid": "999112", "elapsed_us": "428297090", "outcome": "reply", "monotonic_us": 162008072550, "realtime_us": 1793389505817991, "journal_pid": 999112}
+{"layer": "native", "phase": "parse_end", "pid": "999112", "ok": "true", "monotonic_us": 162008072550, "realtime_us": 1793389505817991, "journal_pid": 999112}
+{"layer": "bridge", "phase": "reply", "pid": "998932", "elapsed_us": "428297880", "outcome": "reply", "monotonic_us": 162008076724, "realtime_us": 1793389505822166, "journal_pid": 998932}
+{"layer": "bridge", "phase": "notification", "pid": "998932", "monotonic_us": 162008076724, "realtime_us": 1793389505822166, "journal_pid": 998932}
+{"layer": "bridge", "phase": "begin", "pid": "998932", "outer_s": "470", "monotonic_us": 162008093772, "realtime_us": 1793389505839214, "journal_pid": 998932}
+{"layer": "native", "phase": "pool_begin", "pid": "999112", "monotonic_us": 162008094259, "realtime_us": 1793389505839701, "journal_pid": 999112}
+{"layer": "native", "phase": "exchange_begin", "pid": "999112", "elapsed_us": "12", "inner_s": "450", "monotonic_us": 162008094259, "realtime_us": 1793389505839701, "journal_pid": 999112}
