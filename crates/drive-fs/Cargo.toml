@@ -1,0 +1,15 @@
+[package]
+name = "drive-fs"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT"
+publish = false
+
+[dependencies]
+drive-core = { path = "../drive-core" }
+fuser = { version = "=0.16.0", default-features = false, features = ["abi-7-31"] }
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"

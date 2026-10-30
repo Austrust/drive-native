@@ -1,0 +1,28 @@
+# tests
+
+源码与开发文件。当前状态及构建方法见仓库根 README。
+
+- [cache_gui_live.py](cache_gui_live.py)
+- [cache_gui_tests.py](cache_gui_tests.py)
+- [conflict_gui_live.py](conflict_gui_live.py)
+- [conflict_gui_tests.py](conflict_gui_tests.py)
+- [gui_unit_tests.py](gui_unit_tests.py)
+- [installed_package_desktop.py](installed_package_desktop.py)
+- [keyring_control.py](keyring_control.py)
+- [live_gui_test.py](live_gui_test.py)
+- [managed_service_test.py](managed_service_test.py)
+- [mounted_read_retry_test.py](mounted_read_retry_test.py)
+- [multi_mount_tests.py](multi_mount_tests.py)
+- [multi_nemo_check.py](multi_nemo_check.py)
+- [multi_process_check.py](multi_process_check.py)
+- [multi_ui_check.py](multi_ui_check.py)
+- [nemo_host_test.py](nemo_host_test.py)
+- [nemo_provider_test.py](nemo_provider_test.py)
+- [secret_service_test.py](secret_service_test.py)
+- [selector_gui_tests.py](selector_gui_tests.py)
+- [service_launcher_test.py](service_launcher_test.py)
+- [theme_tests.py](theme_tests.py)
+- [transfer_gui_live.py](transfer_gui_live.py)
+- [transfer_gui_tests.py](transfer_gui_tests.py)
+- [trust_gui_live.py](trust_gui_live.py)
+- [trust_gui_tests.py](trust_gui_tests.py)

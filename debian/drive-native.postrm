@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+case "$1" in
+    remove|purge|disappear)
+        if command -v gio-querymodules >/dev/null 2>&1; then
+            gio-querymodules /usr/lib/x86_64-linux-gnu/gio/modules
+        fi
+        ;;
+esac
+# No user configuration, cached content or pending writes are removed.
+#DEBHELPER#

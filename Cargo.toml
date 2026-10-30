@@ -1,0 +1,7 @@
+[workspace]
+members = ["crates/sproto", "crates/drive-core", "crates/drive-fs", "crates/drive-runtime"]
+resolver = "3"
+exclude = ["vendor/fuser"]
+
+[patch.crates-io]
+fuser = { path = "vendor/fuser" }

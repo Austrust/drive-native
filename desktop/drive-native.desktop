@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Drive Native
+Comment=Native Drive synchronization and offline files
+Exec=drive-native
+Icon=drive-native
+Terminal=false
+Categories=Network;FileTransfer;
+StartupNotify=true

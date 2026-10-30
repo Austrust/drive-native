@@ -1,0 +1,20 @@
+[Unit]
+Description=Drive Native user filesystem and sync service
+ConditionPathExists=%E/drive-native/profiles/%i.json
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Environment=DRIVE_NATIVE_INSTANCE=%i
+Type=dbus
+BusName=org.drivenative.Client1.i%i
+ExecStart=/usr/lib/drive-native/drive-native-fsd --config %E/drive-native/profiles/%i.json
+ExecStartPost=/usr/bin/systemctl --user --no-block restart drive-native-unlock@%i.service
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=45
+UMask=0077
+LimitCORE=0
+
+[Install]
+WantedBy=default.target

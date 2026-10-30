@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+if [ "$1" = configure ]; then
+    gio-querymodules /usr/lib/x86_64-linux-gnu/gio/modules
+fi
+#DEBHELPER#

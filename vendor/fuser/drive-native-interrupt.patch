@@ -1,0 +1,62 @@
+--- a/src/request.rs
++++ b/src/request.rs
+@@ -83,6 +83,7 @@
+                 match op {
+                     // Only allow operations that the kernel may issue without a uid set
+                     ll::Operation::Init(_)
++                    | ll::Operation::Interrupt(_)
+                     | ll::Operation::Destroy(_)
+                     | ll::Operation::Read(_)
+                     | ll::Operation::ReadDir(_)
+@@ -104,6 +105,7 @@
+                 match op {
+                     // Only allow operations that the kernel may issue without a uid set
+                     ll::Operation::Init(_)
++                    | ll::Operation::Interrupt(_)
+                     | ll::Operation::Destroy(_)
+                     | ll::Operation::Read(_)
+                     | ll::Operation::ReadDir(_)
+@@ -170,9 +172,8 @@
+                 return Err(Errno::EIO);
+             }
+ 
+-            ll::Operation::Interrupt(_) => {
+-                // TODO: handle FUSE_INTERRUPT
+-                return Err(Errno::ENOSYS);
++            ll::Operation::Interrupt(x) => {
++                se.filesystem.interrupt(self, x.unique().into(), self.reply());
+             }
+ 
+             ll::Operation::Lookup(x) => {
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -323,6 +323,14 @@
+     /// Called on filesystem exit.
+     fn destroy(&mut self) {}
+ 
++    /// Handle an advisory kernel interruption of the original request ID.
++    /// Reply EINTR to the original request if cancelled, then ignore this reply.
++    /// If the original cannot be found, defer and reply EAGAIN to this request.
++    /// The default preserves the upstream behavior for other filesystems.
++    fn interrupt(&mut self, _req: &Request<'_>, _unique: u64, reply: ReplyEmpty) {
++        reply.error(ENOSYS);
++    }
++
+     /// Look up a directory entry by name and get its attributes.
+     fn lookup(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEntry) {
+         warn!("[Not Implemented] lookup(parent: {parent:#x?}, name {name:?})");
+--- a/src/reply.rs
++++ b/src/reply.rs
+@@ -124,6 +124,12 @@
+ }
+ 
+ impl ReplyEmpty {
++    /// Consume an INTERRUPT notification without sending a reply. Only use
++    /// after handling/ignoring the advisory interruption, never for normal I/O.
++    pub fn ignore_interrupt(mut self) {
++        self.reply.sender.take();
++    }
++
+     /// Reply to a request with nothing
+     pub fn ok(self) {
+         self.reply.send_ll(&ll::Response::new_empty());

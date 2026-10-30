@@ -1,0 +1,13 @@
+[Unit]
+Description=Unlock Drive Native from the user keyring
+After=drive-native@%i.service
+PartOf=drive-native@%i.service
+ConditionPathExists=%E/drive-native/profiles/%i.json
+
+[Service]
+Environment=DRIVE_NATIVE_INSTANCE=%i
+Type=oneshot
+ExecStart=/usr/lib/drive-native/gui/drive-native-gui --unlock-service
+TimeoutStartSec=130
+UMask=0077
+LimitCORE=0

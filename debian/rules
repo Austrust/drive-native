@@ -1,0 +1,38 @@
+#!/usr/bin/make -f
+export DH_VERBOSE = 1
+export PYTHONDONTWRITEBYTECODE = 1
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+	@command -v cargo >/dev/null
+	@test -n "$(GUI_PYTHON)"
+
+override_dh_auto_build:
+	bash scripts/build-linux.sh "$(CURDIR)/build"
+
+override_dh_auto_test:
+ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
+	cargo test --workspace --all-features --locked
+endif
+
+override_dh_auto_install:
+	bash scripts/stage-linux.sh "$(CURDIR)/build" "$(CURDIR)/debian/drive-native"
+
+override_dh_installsystemduser:
+	# The GUI will enable the user unit only after explicit account setup.
+	# Installing a package must not activate arbitrary users' mounts.
+
+override_dh_shlibdeps:
+	dh_shlibdeps -Xusr/lib/drive-native/gui
+
+override_dh_strip:
+	dh_strip -Xusr/lib/drive-native/gui
+
+override_dh_dwz:
+	dh_dwz -Xusr/lib/drive-native/gui
+
+override_dh_auto_clean:
+	# Build artifacts live only in the disposable build checkout.
+	rm -rf build

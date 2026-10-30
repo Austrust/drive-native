@@ -1,0 +1,17 @@
+/target/
+/build/
+/.venv*/
+__pycache__/
+*.pyc
+*.deb
+*.ddeb
+*.buildinfo
+*.changes
+*.sqlite*
+*.db
+*.log
+.env
+.env.*
+/profiles/
+/credentials/
+/build-source-manifest.json

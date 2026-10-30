@@ -1,0 +1,86 @@
+drive-native (0.1.0~dev20261030.5+acl2) unstable; urgency=medium
+
+  * Handle large scoped native event histories and bounded metadata responses.
+  * Preserve capacity error categories; use consistent accessible Qt palettes.
+
+ -- Drive Native contributors <noreply@example.invalid>  Fri, 30 Oct 2026 22:00:00 +0800
+
+drive-native (0.1.0~dev20261030.5+acl1) unstable; urgency=medium
+
+  * Skip native permission-denied subdirectories without aborting the root.
+  * Quarantine inaccessible identities and retain cached data and pending edits.
+  * Retry directory permissions on reconnect; migrate state with backup.
+  * Keep all .5 multiple-mount and custom-name functionality.
+
+ -- Drive Native contributors <noreply@example.invalid>  Fri, 30 Oct 2026 20:00:00 +0800
+
+drive-native (0.1.0~dev20261030.5) unstable; urgency=medium
+
+  * Add independent simultaneous mounts and custom local mount names.
+  * Route GUI and Nemo through per-task D-Bus services.
+  * Preserve legacy profiles and reject overlapping mount locations.
+  * Development test build; existing team-permission recovery limits remain.
+
+ -- Drive Native contributors <noreply@example.invalid>  Fri, 30 Oct 2026 20:00:00 +0800
+
+drive-native (0.1.0~dev20261030.4) unstable; urgency=medium
+
+  * Avoid WAL writes for existing inode and root metadata queries.
+  * Batch directory inode allocation and index parent/name lookup.
+  * Keep desktop state traversal separate from filesystem inode allocation.
+  * Development test build; existing recovery and rename limits remain.
+
+ -- Drive Native contributors <noreply@example.invalid>  Fri, 30 Oct 2026 20:00:00 +0800
+
+drive-native (0.1.0~dev20261030.3) unstable; urgency=medium
+
+  * Omit the zero team-list limit, matching the official Linux request.
+  * Join team capabilities and sync root identities by view ID.
+  * Verify all four authorized NAS team roots with read-only enumeration.
+  * Development test build; existing recovery and rename limits remain.
+
+ -- Drive Native contributors <noreply@example.invalid>  Fri, 30 Oct 2026 20:00:00 +0800
+
+drive-native (0.1.0~dev20261030.2) unstable; urgency=medium
+
+  * Browse My Drive and available team folders from the Drive top level.
+  * Bind directory requests and selected permissions to their advertised view.
+  * Add change-folder setup with retained profile backup and cancel restoration.
+  * Development test build; existing recovery and rename limits remain.
+
+ -- Drive Native contributors <noreply@example.invalid>  Fri, 30 Oct 2026 20:00:00 +0800
+
+drive-native (0.1.0~dev20261030.1) unstable; urgency=medium
+
+  * Include native identity-based upload, mkdir and deletion fixes.
+  * Include root identity protection, paging recovery and read cancellation.
+  * Rebuild current independent engine with maintained fuser and state core.
+  * Development test build; unresolved rename races remain documented.
+
+ -- Drive Native contributors <noreply@example.invalid>  Fri, 30 Oct 2026 18:00:00 +0800
+
+drive-native (0.1.0~dev20261029.3) unstable; urgency=medium
+
+  * Include native recovery, conflict actions, trust and cache management.
+  * Add real transfer progress and shared payload bandwidth settings.
+  * Keep native event processing independent from body hydration.
+  * Development build for clean installation and upgrade validation.
+  * Release candidate gates remain open.
+
+ -- Drive Native contributors <noreply@example.invalid>  Thu, 29 Oct 2026 22:00:00 +0800
+
+drive-native (0.1.0~dev20261029.2) unstable; urgency=medium
+
+  * Enable the user service after setup and unlock from Secret Service.
+  * Keep complete cache accessible while the keyring is locked.
+  * Verify service state and pin credential delivery to the checked D-Bus owner.
+  * Development build; candidate release gates remain open.
+
+ -- Drive Native contributors <noreply@example.invalid>  Thu, 29 Oct 2026 09:00:00 +0800
+
+drive-native (0.1.0~dev20261029.1) unstable; urgency=medium
+
+  * Initial development packaging of the native client and desktop adapters.
+  * Candidate release gates remain open.
+
+ -- Drive Native contributors <noreply@example.invalid>  Thu, 29 Oct 2026 08:00:00 +0800
