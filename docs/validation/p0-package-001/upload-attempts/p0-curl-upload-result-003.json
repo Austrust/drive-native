@@ -1,0 +1,19 @@
+{
+  "method": "curl Schannel HTTP/1.1 with in-memory CLI authorization",
+  "elapsed_s": 659.4253816604614,
+  "curl_exit": 0,
+  "metrics": {
+    "http": 408,
+    "uploaded": 31096832,
+    "speed_upload": 47169,
+    "total": 659.263936
+  },
+  "asset": {
+    "id": null,
+    "name": null,
+    "size": null,
+    "state": null,
+    "digest": null
+  },
+  "server_message": "Upload body timed out due to inactivity"
+}

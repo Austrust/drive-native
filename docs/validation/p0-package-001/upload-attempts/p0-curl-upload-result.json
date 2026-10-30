@@ -1,0 +1,12 @@
+{
+  "method": "curl Schannel HTTP/1.1 with in-memory CLI authorization",
+  "elapsed_s": 68.2617621421814,
+  "curl_exit": 0,
+  "asset": {
+    "id": null,
+    "name": null,
+    "size": null,
+    "state": null,
+    "digest": null
+  }
+}

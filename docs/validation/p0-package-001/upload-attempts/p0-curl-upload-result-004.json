@@ -1,0 +1,6 @@
+{
+  "method": "WSL curl HTTP/1.1 with in-memory CLI authorization",
+  "elapsed_s": 2.2358968257904053,
+  "curl_exit": 127,
+  "response": "no JSON metadata received"
+}

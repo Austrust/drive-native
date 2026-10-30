@@ -1,0 +1,12 @@
+{
+  "method": "WSL curl HTTP/1.1 with in-memory CLI authorization",
+  "elapsed_s": 107.76101088523865,
+  "curl_exit": 28,
+  "metrics": {
+    "http": 100,
+    "uploaded": 12451840,
+    "speed_upload": 117851,
+    "total": 105.656619
+  },
+  "response": "no JSON metadata received"
+}

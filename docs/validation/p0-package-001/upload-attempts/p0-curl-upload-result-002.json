@@ -1,0 +1,12 @@
+{
+  "method": "curl Schannel HTTP/1.1 with in-memory CLI authorization",
+  "elapsed_s": 180.17489504814148,
+  "curl_exit": 28,
+  "metrics": {
+    "http": 100,
+    "uploaded": 20348928,
+    "speed_upload": 113041,
+    "total": 180.012951
+  },
+  "response": "no JSON metadata received"
+}

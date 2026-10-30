@@ -1,0 +1,9 @@
+{
+  "kernel_pidfd_exit_events": 6,
+  "four_lifetimes_between_450_and_451_seconds": true,
+  "all_fsd_present_at_exit": true,
+  "all_worker_binary_sha256": "c9b7bae2a75a9bdf83a17a29fe54f2111c03cd7c6ece9435a7c963834bcafa9d",
+  "root_cause_confirmed": false,
+  "process_signals_sent": false,
+  "NAS_operations": false
+}
