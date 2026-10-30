@@ -1,0 +1,7 @@
+{
+  "p0-relay-measure-more.py": "c9ab1578b0d94b640d53a63cc082f423bceca4358e50f0c3ed1f02b43099d6b1",
+  "p0-network-read.py": "506a8806a0dfd4b8e4d129a11e95fc41ad83e92d950bd686bc83bb2bde3215f8",
+  "p0-prepare-training-cache.py": "0c079bdba211fc8277807ca543a48c33352dce0e62cf6f9e98a22091e7c203ee",
+  "p0-prepare-more-relays.py": "cf37b1744634c3d44e3d268544e7711f2d11b2cbaeaf60daecb7b29d5abace18",
+  "generic_relay_git_commit": "be72923"
+}

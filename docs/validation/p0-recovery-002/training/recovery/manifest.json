@@ -1,0 +1,16 @@
+{
+  "registered_at": 1793383095.1907427,
+  "planned_trials": 30,
+  "deadline_s": 15,
+  "poll_interval_s": 0.05,
+  "scope": "training",
+  "fault": "abort both sides of owned loopback byte relay; no TLS termination, no payload capture; keep listener and fsd alive",
+  "recovery": "different worker PID plus online after authenticated initial resume; relay accepted count must increase",
+  "timing": "first drop request to verified recovery, includes local control/D-Bus overhead",
+  "cache": "read already opened immutable complete-cache handle during reconnect; compare hash to pre-fault bytes",
+  "runtime_sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678",
+  "runtime_source_commit": "62be13c9f9f4a2457a3040829f478bf43b1821df",
+  "interference": "original six mounts, two probes and other idle readonly clone stay running; no mixed synthetic load",
+  "stop_rule": "stop on first failed recovery; unrun trials remain unrun, retain failed sample",
+  "source_identity": "docs/validation/p0-baseline-audit.json"
+}

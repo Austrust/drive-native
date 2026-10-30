@@ -1,0 +1,2 @@
+{"index": -2, "time": 1793383161.0793328, "local_body_absent_before_read": true, "startup_s": 0.022742075991118327, "open_s": 0.013212513993494213, "first_byte_s": 0.2871357510157395, "complete_s": 0.2891707160160877, "bytes": 1050854, "hash_matches": true, "ok": true}
+{"index": -1, "time": 1793383161.611997, "local_body_absent_before_read": true, "startup_s": 0.022281954996287823, "open_s": 0.013038900011451915, "first_byte_s": 1.9854902609949932, "complete_s": 1.9873702120094094, "bytes": 1050854, "hash_matches": true, "ok": true}

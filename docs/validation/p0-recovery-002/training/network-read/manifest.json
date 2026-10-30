@@ -1,0 +1,18 @@
+{
+  "registered_at": 1793383161.0790393,
+  "planned_samples": 30,
+  "warmup": 2,
+  "timeout_s": 15,
+  "scope": "isolated readonly training view 11",
+  "bytes": 1050854,
+  "expected_sha256": "2b44045249a7ba9153f40bcc34f0417e18f0ccd9603cfab0e6e9132cb042a257",
+  "release": "D-Bus ReleaseSpace before every sample; require SQLite blob NULL and prior blob absent; never mutate database",
+  "clock": "open/first byte/complete exclude child process startup; include complete native download verification and publication",
+  "cache": "body cold locally, metadata/authentication warm; NAS/server caches uncontrolled",
+  "transport": "loopback opaque relay with real NAS TLS; no imposed rate/loss/delay",
+  "interference": "original six tasks and two probes plus idle personal clone; no fault/mixed load",
+  "runtime_source_commit": "62be13c9f9f4a2457a3040829f478bf43b1821df",
+  "runtime_sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678",
+  "hash_limits": "compares with prior complete downloaded version, not independent server content oracle",
+  "stop_rule": "stop on first failure, preserve and report unrun samples"
+}

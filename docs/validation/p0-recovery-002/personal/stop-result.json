@@ -1,0 +1,11 @@
+{
+  "elapsed_s": 0.21808358500129543,
+  "properties": {
+    "MainPID": "0",
+    "Result": "success",
+    "ExecMainStatus": "0",
+    "ActiveState": "inactive"
+  },
+  "relay_stopped_after_client": true,
+  "mount_remaining": false
+}

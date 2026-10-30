@@ -1,0 +1,24 @@
+{
+  "personal": {
+    "n": 30,
+    "over_3s": [
+      12,
+      23
+    ],
+    "hashes_match": true
+  },
+  "training": {
+    "n": 30,
+    "over_3s": [],
+    "hashes_match": true
+  },
+  "cold_read": {
+    "n": 30,
+    "over_2s": [
+      8
+    ]
+  },
+  "relative_links_checked": 39,
+  "executed_script_hashes_match": true,
+  "product_tests_rerun": false
+}
