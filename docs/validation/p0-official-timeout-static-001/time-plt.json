@@ -1,0 +1,11 @@
+{
+  "binary_sha256": "ea01d634762060424f4a5fd3fccb3f5c0ba7c10a81e90e144706fb2b8406314a",
+  "plt_address": "0x1e5e0",
+  "got_address": "0x5fb7a0",
+  "targets": [
+    {
+      "relocation_type": 7,
+      "symbol": "time"
+    }
+  ]
+}

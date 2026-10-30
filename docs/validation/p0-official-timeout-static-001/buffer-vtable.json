@@ -1,0 +1,65 @@
+{
+  "binary_sha256": "ea01d634762060424f4a5fd3fccb3f5c0ba7c10a81e90e144706fb2b8406314a",
+  "vtable": {
+    "address": 6269056,
+    "size": 104,
+    "section": 22
+  },
+  "slots": [
+    {
+      "vptr_offset": "0x0",
+      "target": "0x3197f0",
+      "symbol": "_ZN3cat10BufferedIOD2Ev"
+    },
+    {
+      "vptr_offset": "0x8",
+      "target": "0x319810",
+      "symbol": "_ZN3cat10BufferedIOD0Ev"
+    },
+    {
+      "vptr_offset": "0x10",
+      "target": "0x318ee0",
+      "symbol": "_ZN3cat14BufferedIOBase10handoverToERS0_"
+    },
+    {
+      "vptr_offset": "0x18",
+      "target": "0x319740",
+      "symbol": "_ZN3cat10BufferedIO4loadERNS_6IOBaseE"
+    },
+    {
+      "vptr_offset": "0x20",
+      "target": "0x3197d0",
+      "symbol": "_ZN3cat10BufferedIO6unloadEv"
+    },
+    {
+      "vptr_offset": "0x28",
+      "target": "0x319d40",
+      "symbol": "_ZN3cat10BufferedIO4readEPvm"
+    },
+    {
+      "vptr_offset": "0x30",
+      "target": "0x319aa0",
+      "symbol": "_ZN3cat10BufferedIO5writeEPKvm"
+    },
+    {
+      "vptr_offset": "0x38",
+      "target": "0x319f70",
+      "symbol": "_ZN3cat10BufferedIO8sendfileERNS_4FileEmm"
+    },
+    {
+      "vptr_offset": "0x40",
+      "target": "0x31a490",
+      "symbol": "_ZN3cat10BufferedIO8recvfileERNS_4FileEmm"
+    },
+    {
+      "vptr_offset": "0x48",
+      "target": "0x319a10",
+      "symbol": "_ZN3cat10BufferedIO5flushEv"
+    },
+    {
+      "vptr_offset": "0x50",
+      "target": "0x319340",
+      "symbol": "_ZN3cat10BufferedIO13mmap_recvfileERNS_4FileEmm"
+    }
+  ]
+}

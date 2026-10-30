@@ -1,0 +1,63 @@
+{
+  "binary_sha256": "ea01d634762060424f4a5fd3fccb3f5c0ba7c10a81e90e144706fb2b8406314a",
+  "capstone_version": "6.0.0",
+  "package_control_sha256": "205bc4a8a82248193eaae271c73366851bf7862e8fe7b3668c55a2a9164f6ca3",
+  "functions": [
+    {
+      "symbol": "_ZN10LongPoller8LongPollER7PObject",
+      "address": 380016,
+      "size": 3780,
+      "section": 14,
+      "file": "00.asm"
+    },
+    {
+      "symbol": "_ZN14ProtocolClient7RequestERK7PObjectRS0_i",
+      "address": 472288,
+      "size": 179,
+      "section": 14,
+      "file": "01.asm"
+    },
+    {
+      "symbol": "_ZN14ProtocolClient7RequestERK7PObjectS2_RS0_S3_i",
+      "address": 466992,
+      "size": 5284,
+      "section": 14,
+      "file": "02.asm"
+    },
+    {
+      "symbol": "_ZN14ProtocolClient32PerformRequestAndReceiveResponseER7Channel7PObjectRKS2_RS2_S5_i",
+      "address": 442096,
+      "size": 1280,
+      "section": 14,
+      "file": "03.asm"
+    },
+    {
+      "symbol": "_ZN7Channel10SetTimeoutEj",
+      "address": 2849632,
+      "size": 26,
+      "section": 14,
+      "file": "04.asm"
+    },
+    {
+      "symbol": "_ZN7Channel4ReadEPcmRm",
+      "address": 2853040,
+      "size": 791,
+      "section": 14,
+      "file": "05.asm"
+    },
+    {
+      "symbol": "_ZN14ProtocolClient23RecvResponseFromChannelER7ChannelR7PObjectS3_",
+      "address": 440080,
+      "size": 2007,
+      "section": 14,
+      "file": "06.asm"
+    },
+    {
+      "symbol": "_ZN3cat14BufferedIOBase10setTimeoutEj",
+      "address": 3247824,
+      "size": 4,
+      "section": 14,
+      "file": "07.asm"
+    }
+  ]
+}

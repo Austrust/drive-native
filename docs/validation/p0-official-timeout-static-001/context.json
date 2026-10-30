@@ -1,0 +1,16 @@
+{
+  "input_binary_sha256": "ea01d634762060424f4a5fd3fccb3f5c0ba7c10a81e90e144706fb2b8406314a",
+  "package_control_version": "8.2.1-20062",
+  "application_info_version": {
+    "major_version": "4",
+    "minor_version": "2",
+    "mini_version": "1",
+    "build_version": "20062"
+  },
+  "control_sha256": "205bc4a8a82248193eaae271c73366851bf7862e8fe7b3668c55a2a9164f6ca3",
+  "info_sha256": "7c791da4fb1ece57e879a375866ce48b67880ae38df6e1be3789cf91c76b959d",
+  "evidence_level": "static symbol-bounded disassembly and ELF relocations; official binary not executed",
+  "product_runtime_modified": false,
+  "server_long_poll_timeout_field_unit_verified": false,
+  "compatibility_scope": "only this exact supplied official ELF; no cross-version ABI or whole-client timeout claim"
+}

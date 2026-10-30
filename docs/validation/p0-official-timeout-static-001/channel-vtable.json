@@ -1,0 +1,220 @@
+{
+  "binary_sha256": "ea01d634762060424f4a5fd3fccb3f5c0ba7c10a81e90e144706fb2b8406314a",
+  "vtable": {
+    "address": 6263640,
+    "size": 352,
+    "section": 22
+  },
+  "slots": [
+    {
+      "vptr_offset": "0x0",
+      "target": "0x2bae50",
+      "symbol": "_ZN7ChannelD2Ev"
+    },
+    {
+      "vptr_offset": "0x8",
+      "target": "0x2baef0",
+      "symbol": "_ZN7ChannelD0Ev"
+    },
+    {
+      "vptr_offset": "0x10",
+      "target": "0x2b97d0",
+      "symbol": "_ZN7Channel4OpenEPKc"
+    },
+    {
+      "vptr_offset": "0x18",
+      "target": "0x2b9240",
+      "symbol": "_ZN7Channel4OpenEib"
+    },
+    {
+      "vptr_offset": "0x20",
+      "target": "0x2ba210",
+      "symbol": "_ZN7Channel4OpenEPKci"
+    },
+    {
+      "vptr_offset": "0x28",
+      "target": "0x2baaf0",
+      "symbol": "_ZN7Channel5CloseEv"
+    },
+    {
+      "vptr_offset": "0x30",
+      "target": "0x2b7b80",
+      "symbol": "_ZN7Channel5GetFdEv"
+    },
+    {
+      "vptr_offset": "0x38",
+      "target": "0x2b7b90",
+      "symbol": "_ZNK7Channel6IsGoodEv"
+    },
+    {
+      "vptr_offset": "0x40",
+      "target": "0x2b7b60",
+      "symbol": "_ZN7Channel10SetTimeoutEj"
+    },
+    {
+      "vptr_offset": "0x48",
+      "target": "0x2b7750",
+      "symbol": "_ZN7Channel7SetFlagEPi"
+    },
+    {
+      "vptr_offset": "0x50",
+      "target": "0x2b7c70",
+      "symbol": "_ZN7Channel10EnableHashEbRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+    },
+    {
+      "vptr_offset": "0x58",
+      "target": "0x2b7de0",
+      "symbol": "_ZN7Channel7GetHashB5cxx11Ev"
+    },
+    {
+      "vptr_offset": "0x60",
+      "target": "0x2b7bc0",
+      "symbol": "_ZN7Channel9ResetHashEv"
+    },
+    {
+      "vptr_offset": "0x68",
+      "target": "0x2ba830",
+      "symbol": "_ZN7Channel19ConvertToSSLChannelEb"
+    },
+    {
+      "vptr_offset": "0x70",
+      "target": "0x2b77d0",
+      "symbol": "_ZN7Channel8ReadByteEPh"
+    },
+    {
+      "vptr_offset": "0x78",
+      "target": "0x2b7830",
+      "symbol": "_ZN7Channel9ReadInt16EPt"
+    },
+    {
+      "vptr_offset": "0x80",
+      "target": "0x2b7890",
+      "symbol": "_ZN7Channel9ReadInt32EPj"
+    },
+    {
+      "vptr_offset": "0x88",
+      "target": "0x2b7900",
+      "symbol": "_ZN7Channel9ReadInt64EPm"
+    },
+    {
+      "vptr_offset": "0x90",
+      "target": "0x2b7970",
+      "symbol": "_ZN7Channel9WriteByteEh"
+    },
+    {
+      "vptr_offset": "0x98",
+      "target": "0x2b79c0",
+      "symbol": "_ZN7Channel10WriteInt16Et"
+    },
+    {
+      "vptr_offset": "0xa0",
+      "target": "0x2b7a10",
+      "symbol": "_ZN7Channel10WriteInt32Ej"
+    },
+    {
+      "vptr_offset": "0xa8",
+      "target": "0x2b7a70",
+      "symbol": "_ZN7Channel10WriteInt64Em"
+    },
+    {
+      "vptr_offset": "0xb0",
+      "target": "0x2b7780",
+      "symbol": "_ZN7Channel4ReadEPcm"
+    },
+    {
+      "vptr_offset": "0xb8",
+      "target": "0x2b88b0",
+      "symbol": "_ZN7Channel4ReadEPcmRm"
+    },
+    {
+      "vptr_offset": "0xc0",
+      "target": "0x2b8530",
+      "symbol": "_ZN7Channel5WriteEPKcm"
+    },
+    {
+      "vptr_offset": "0xc8",
+      "target": "0x2b7c50",
+      "symbol": "_ZN7Channel8SendfileEimmPNS_16ProgressReporterE"
+    },
+    {
+      "vptr_offset": "0xd0",
+      "target": "0x2bb1d0",
+      "symbol": "_ZN7Channel14SendfileSystemEimmPNS_16ProgressReporterE"
+    },
+    {
+      "vptr_offset": "0xd8",
+      "target": "0x2baf60",
+      "symbol": "_ZN7Channel16SendfileFallbackEimmPNS_16ProgressReporterE"
+    },
+    {
+      "vptr_offset": "0xe0",
+      "target": "0x2b7d70",
+      "symbol": "_ZN7Channel8RecvfileEimmPNS_16ProgressReporterERm"
+    },
+    {
+      "vptr_offset": "0xe8",
+      "target": "0x2bb3e0",
+      "symbol": "_ZN7Channel14RecvfileSystemEimmPNS_16ProgressReporterERm"
+    },
+    {
+      "vptr_offset": "0xf0",
+      "target": "0x2bb760",
+      "symbol": "_ZN7Channel16RecvfileFallbackEimmPNS_16ProgressReporterE"
+    },
+    {
+      "vptr_offset": "0xf8",
+      "target": "0x2b7770",
+      "symbol": "_ZN7Channel10ClearWriteEv"
+    },
+    {
+      "vptr_offset": "0x100",
+      "target": "0x2b7770",
+      "symbol": "_ZN7Channel10ClearWriteEv"
+    },
+    {
+      "vptr_offset": "0x108",
+      "target": "0x2b8700",
+      "symbol": "_ZN7Channel10FlushWriteEi"
+    },
+    {
+      "vptr_offset": "0x110",
+      "target": "0x2b8bd0",
+      "symbol": "_ZNK7Channel11GetPeerInfoERNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEERi"
+    },
+    {
+      "vptr_offset": "0x118",
+      "target": "0x2b7c00",
+      "symbol": "_ZNK7Channel19GetPeerSSLSignatureERNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+    },
+    {
+      "vptr_offset": "0x120",
+      "target": "0x2b8000",
+      "symbol": "_ZNK7Channel25GetPeerSSLCertificateHashB5cxx11Ev"
+    },
+    {
+      "vptr_offset": "0x128",
+      "target": "0x2b7760",
+      "symbol": "_ZNK7Channel8IsClosedEv"
+    },
+    {
+      "vptr_offset": "0x130",
+      "target": "0x2b7ae0",
+      "symbol": "_ZN7Channel7ConvertEm"
+    },
+    {
+      "vptr_offset": "0x138",
+      "target": "0x2b7b10",
+      "symbol": "_ZN7Channel7ConvertEj"
+    },
+    {
+      "vptr_offset": "0x140",
+      "target": "0x2b7b30",
+      "symbol": "_ZN7Channel7ConvertEt"
+    },
+    {
+      "vptr_offset": "0x148",
+      "target": "0x2b82e0",
+      "symbol": "_ZN7Channel33CreateSocketAndConnectWithTimeoutEPKci"
+    }
+  ]
+}

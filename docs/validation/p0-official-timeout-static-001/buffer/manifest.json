@@ -1,0 +1,28 @@
+{
+  "binary_sha256": "ea01d634762060424f4a5fd3fccb3f5c0ba7c10a81e90e144706fb2b8406314a",
+  "capstone_version": "6.0.0",
+  "package_control_sha256": "205bc4a8a82248193eaae271c73366851bf7862e8fe7b3668c55a2a9164f6ca3",
+  "functions": [
+    {
+      "symbol": "_ZN3cat10BufferedIO13wait_and_readEPvmm",
+      "address": 3251072,
+      "size": 446,
+      "section": 14,
+      "file": "00.asm"
+    },
+    {
+      "symbol": "_ZNK3cat14BufferedIOBase15functionTimeoutEl",
+      "address": 3248560,
+      "size": 114,
+      "section": 14,
+      "file": "01.asm"
+    },
+    {
+      "symbol": "_ZN3cat10BufferedIO4readEPvm",
+      "address": 3251520,
+      "size": 552,
+      "section": 14,
+      "file": "02.asm"
+    }
+  ]
+}
