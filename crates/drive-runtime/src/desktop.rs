@@ -75,7 +75,7 @@ fn status_name(status: &Status) -> &'static str {
     }
 }
 fn entry(
-    store: &Store,
+    store: Option<&Store>,
     id: &str,
     directory: bool,
     active: &HashSet<String>,
@@ -90,12 +90,13 @@ fn entry(
     if depth > 128 || !visiting.insert(id.to_owned()) {
         return Err(other());
     }
-    if directory && tree.is_none() { *tree=Some(status_tree::StatusTree::load(store)?); }
     let (pinned,detailed,overlay)=match tree {
         Some(t)=>t.flags(id)?,
-        None=>(store.is_pinned(id).map_err(|_|other())?,true,false),
+        None=>(store.unwrap().is_pinned(id).map_err(|_|other())?,true,false),
     };
-    let own = if detailed { store.status(id).map_err(|_|other())? }
+    let captured = tree.as_ref().and_then(|t| t.detail(id)).transpose().map_err(|_| other())?;
+    let own = if let Some((own, _, _)) = &captured { own.clone() }
+        else if detailed { store.unwrap().status(id).map_err(|_|other())? }
         else if overlay {Status::PendingUpload} else if pinned {Status::Pinning} else {Status::OnlineOnly};
     let mut status = status_name(&own);
     let offline;
@@ -149,13 +150,13 @@ fn entry(
             "online_only"
         };
     } else {
-        offline = detailed && (store
+        offline = if let Some((_, offline, _)) = &captured { *offline } else { detailed && (store.unwrap()
             .open_dirty_draft(id)
             .map_err(|_| other())?
             .is_some()
-            || store.open_cached(id).is_ok());
+            || store.unwrap().open_cached(id).is_ok()) };
         if detailed && !matches!(own, Status::Conflict | Status::PendingUpload) {
-            sync_error = store.download_failure(id).map_err(|_| other())?;
+            sync_error = if let Some((_, _, failure)) = &captured { failure.clone() } else { store.unwrap().download_failure(id).map_err(|_| other())? };
             if let Some(failure) = &sync_error {
                 status = match (offline, failure.retry_at.is_some()) {
                     (true, true) => "update_retry",
@@ -190,17 +191,20 @@ pub fn states(service: &Service, paths: Vec<String>) -> io::Result<String> {
     store
         .ensure_fs_root(&service.profile.scope.file_id)
         .map_err(|_| other())?;
+    let resolved: Vec<_> = paths.into_iter().map(|path| {
+        let node = resolve(&store, &service.profile.scope.file_id, &service.profile.mount, &path);
+        (path, node)
+    }).collect();
+    let mut tree = if resolved.iter().any(|(_, n)| n.as_ref().is_ok_and(|n| n.directory)) {
+        Some(status_tree::StatusTree::load(&store, &resolved.iter().filter_map(|(_, n)| n.as_ref().ok().map(|n| n.id.clone())).collect::<Vec<_>>())?)
+    } else { None };
+    // Folder aggregation is CPU-only after capture. Release the writer's mutex
+    // before walking the tree, so FUSE and overview requests can make progress.
+    let guard = if tree.is_some() { drop(store); None } else { Some(store) };
     let mut memo = HashMap::new();
-    let mut tree = None;
     let mut out = Vec::new();
-    for path in paths {
-        let result = resolve(
-            &store,
-            &service.profile.scope.file_id,
-            &service.profile.mount,
-            &path,
-        )
-        .and_then(|node| entry(&store, &node.id, node.directory, &active, &mut memo, &mut HashSet::new(), &mut tree, 0));
+    for (path, node) in resolved {
+        let result = node.and_then(|node| entry(guard.as_deref(), &node.id, node.directory, &active, &mut memo, &mut HashSet::new(), &mut tree, 0));
         out.push(match result {
             Ok(entry) => PathState {
                 path,
