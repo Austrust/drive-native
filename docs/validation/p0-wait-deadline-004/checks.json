@@ -1,0 +1,99 @@
+{
+  "experiment_end_reason": "confirmed_reply_after450s",
+  "initial_online_verified": true,
+  "timings": {
+    "snapshot_rpc_s": 86.322448,
+    "snapshot_install_s": 5.254629
+  },
+  "native_endings": [
+    {
+      "layer": "native",
+      "phase": "exchange_end",
+      "pid": "1026911",
+      "elapsed_us": "25946",
+      "outcome": "reply",
+      "monotonic_us": 164501312935,
+      "realtime_us": 1793392015913086,
+      "journal_pid": 1026911
+    },
+    {
+      "layer": "native",
+      "phase": "exchange_end",
+      "pid": "1026911",
+      "elapsed_us": "483633068",
+      "outcome": "reply",
+      "monotonic_us": 164984991385,
+      "realtime_us": 1793392502632526,
+      "journal_pid": 1026911
+    }
+  ],
+  "keepalive_frames": 0,
+  "stop": {
+    "elapsed_s": 20.247876998007996,
+    "properties": {
+      "MainPID": "0",
+      "Result": "timeout",
+      "ExecMainStatus": "9",
+      "ActiveState": "failed"
+    },
+    "mount_remaining": false
+  },
+  "original_tasks": [
+    {
+      "unit": "drive-native-soak@b134e0e4903086dc8beeb7b7d210a6d2.service",
+      "properties": {
+        "MainPID": "880828",
+        "ActiveState": "active"
+      },
+      "fsd_sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678"
+    },
+    {
+      "unit": "drive-native-soak@7298618a9f57e447c393e071903a0491.service",
+      "properties": {
+        "MainPID": "880752",
+        "ActiveState": "active"
+      },
+      "fsd_sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678"
+    },
+    {
+      "unit": "drive-native-soak@b9d23989052bf43cb9e13f0babc50458.service",
+      "properties": {
+        "MainPID": "880770",
+        "ActiveState": "active"
+      },
+      "fsd_sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678"
+    },
+    {
+      "unit": "drive-native-soak@5de7d17a5d0b1e1834530c6e23a635f3.service",
+      "properties": {
+        "MainPID": "880769",
+        "ActiveState": "active"
+      },
+      "fsd_sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678"
+    },
+    {
+      "unit": "drive-native-soak@35995614c699c8d2db61a0def4ef8bd6.service",
+      "properties": {
+        "MainPID": "880883",
+        "ActiveState": "active"
+      },
+      "fsd_sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678"
+    },
+    {
+      "unit": "drive-native-soak@0bc76c0cc6a606e11aaaf4bd4687058f.service",
+      "properties": {
+        "MainPID": "880915",
+        "ActiveState": "active"
+      },
+      "fsd_sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678"
+    }
+  ],
+  "baseline_status": {
+    "state": "running",
+    "iterations": 1364,
+    "failed_observations": 16,
+    "elapsed_s": 13642.919588991004,
+    "last_sample": 1793392535.5379527,
+    "pid": 894834
+  }
+}

@@ -1,0 +1,759 @@
+{
+  "finished_at": 1793392523.3662195,
+  "results": [
+    {
+      "outer_seconds": 650,
+      "inner_seconds": 600,
+      "initial_samples": [
+        {
+          "elapsed_s": 0.0010932629811577499,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 1.0030336829950102,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 2.00508038100088,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 3.007248192996485,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 4.008807756996248,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 5.010833427979378,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 6.012385362992063,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 7.014472039998509,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 8.016681003995473,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 9.018989317992236,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 10.021571517980192,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 11.023588710988406,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 12.025280807982199,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 13.02777962599066,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 14.030369594984222,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 15.032606014981866,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 16.034464829979697,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 17.036785174976103,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 18.038744024001062,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 19.04221597898868,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 20.045963487995323,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 21.048409426992293,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 22.050985207984922,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 23.053412193985423,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 24.055562995985383,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 25.05753799699596,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 26.059752364992164,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 27.06157578199054,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 28.063517587987008,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 29.06526369799394,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 30.067313912993995,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 31.069724125991343,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 32.07163319399115,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 33.07410117299878,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 34.07571189198643,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 35.077520761988126,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 36.07926585897803,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 37.08213786498527,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 38.08467370699509,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 39.086461832979694,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 40.08837615698576,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 41.090559845993994,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 42.09262183099054,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 43.094517680001445,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 44.09688963598455,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 45.09885513398331,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 46.10228184200241,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 47.10561355299433,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 48.10794769998756,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 49.1105562899902,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 50.113291783985915,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 51.11573572398629,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 52.11812290499802,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 53.1205037329928,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 54.122844936995534,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 55.12501505599357,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 56.127003750996664,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 57.12953378498787,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 58.132008508982835,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 59.13448869300191,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 60.13705158600351,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 61.13949461700395,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 62.14181498400285,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 63.14461012897664,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 64.1467995189887,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 65.14904691200354,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 66.15037911699619,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 67.1527605909796,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 68.15490123597556,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 69.1575354700035,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 70.15904198397766,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 71.16199032700388,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 72.16486239197548,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 73.1675364219991,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 74.17015907500172,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 75.17227693099994,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 76.17450311497669,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 77.1775925179827,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 78.18038530400372,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 79.183395103988,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 80.18629854297615,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 81.18905288100359,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 82.19035180498031,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 83.19262999200146,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 87.1965848459804,
+          "error_type": "Error"
+        },
+        {
+          "elapsed_s": 89.39957913398393,
+          "connection": "connecting",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        },
+        {
+          "elapsed_s": 90.40106363699306,
+          "connection": "online",
+          "mounted": true,
+          "error": null,
+          "pending_operations": 0
+        }
+      ],
+      "initial_elapsed_s": 90.40119330698508,
+      "initial_overview": {
+        "connection": "online",
+        "mounted": true,
+        "error": null,
+        "pending_operations": 0
+      },
+      "observed_from": 1793392016.8120284,
+      "end_reason": "confirmed_reply_after450s",
+      "qualifying_reply": {
+        "layer": "native",
+        "phase": "exchange_end",
+        "pid": "1026911",
+        "elapsed_us": "483633068",
+        "outcome": "reply",
+        "monotonic_us": 164984991385,
+        "realtime_us": 1793392502632526,
+        "journal_pid": 1026911
+      },
+      "before_stop_overview": {
+        "connection": "online",
+        "mounted": true,
+        "error": null,
+        "pending_operations": 0
+      },
+      "before_stop_threads": {
+        "properties": {
+          "MainPID": "1026679",
+          "Result": "success",
+          "ExecMainStatus": "0",
+          "ActiveState": "active"
+        },
+        "processes": [
+          {
+            "pid": 1026679,
+            "wait_counts": {
+              "futex_do_wait": 28,
+              "do_epoll_wait": 1,
+              "fuse_dev_do_read": 1,
+              "unix_stream_read_generic": 1
+            },
+            "state_counts": {
+              "S": 31
+            },
+            "fd_count": 20
+          }
+        ]
+      },
+      "stop_requested_at": 1793392502.9066765,
+      "stop_thread_samples": [
+        {
+          "elapsed_s": 5.168375119013945,
+          "properties": {
+            "MainPID": "1026679",
+            "Result": "success",
+            "ExecMainStatus": "0",
+            "ActiveState": "deactivating"
+          },
+          "processes": [
+            {
+              "pid": 1026679,
+              "wait_counts": {
+                "futex_do_wait": 25,
+                "do_epoll_wait": 1,
+                "fuse_dev_do_read": 1
+              },
+              "state_counts": {
+                "S": 27
+              },
+              "fd_count": 19
+            }
+          ]
+        },
+        {
+          "elapsed_s": 10.116405900014797,
+          "properties": {
+            "MainPID": "1026679",
+            "Result": "success",
+            "ExecMainStatus": "0",
+            "ActiveState": "deactivating"
+          },
+          "processes": [
+            {
+              "pid": 1026679,
+              "wait_counts": {
+                "futex_do_wait": 23,
+                "do_epoll_wait": 1,
+                "fuse_dev_do_read": 1
+              },
+              "state_counts": {
+                "S": 25
+              },
+              "fd_count": 19
+            }
+          ]
+        },
+        {
+          "elapsed_s": 15.073781565006357,
+          "properties": {
+            "MainPID": "1026679",
+            "Result": "success",
+            "ExecMainStatus": "0",
+            "ActiveState": "deactivating"
+          },
+          "processes": [
+            {
+              "pid": 1026679,
+              "wait_counts": {
+                "futex_do_wait": 23,
+                "do_epoll_wait": 1,
+                "fuse_dev_do_read": 1
+              },
+              "state_counts": {
+                "S": 25
+              },
+              "fd_count": 19
+            }
+          ]
+        },
+        {
+          "elapsed_s": 20.036168288002955,
+          "properties": {
+            "MainPID": "1026679",
+            "Result": "timeout",
+            "ExecMainStatus": "0",
+            "ActiveState": "deactivating"
+          },
+          "processes": []
+        }
+      ],
+      "stop": {
+        "elapsed_s": 20.247876998007996,
+        "properties": {
+          "MainPID": "0",
+          "Result": "timeout",
+          "ExecMainStatus": "9",
+          "ActiveState": "failed"
+        },
+        "mount_remaining": false
+      },
+      "observed_rows": 30
+    }
+  ],
+  "runtime_product_changed": false
+}

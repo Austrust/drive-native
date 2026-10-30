@@ -1,0 +1,150 @@
+   Compiling sproto v0.1.0 (/tmp/drive-p0-wait-build.fgoUVD/crates/sproto)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.11s
+     Running unittests src/lib.rs (/home/drive-native-test/.cache/drive-native-build/target/debug/deps/sproto-400dba8895339bff)
+
+running 132 tests
+test actions::list::strict_metadata_tests::malformed_remote_path_is_rejected ... ok
+test actions::list::strict_metadata_tests::missing_identity_is_not_defaulted ... ok
+test actions::list::strict_metadata_tests::unknown_file_type_is_not_silently_a_regular_file ... ok
+test actions::list::team_catalog_tests::ambiguous_view_identity_is_rejected ... ok
+test actions::list::team_catalog_tests::missing_denied_and_readonly_views_never_gain_write_access ... ok
+test actions::list::team_catalog_tests::separate_native_responses_join_by_view_not_order_or_name ... ok
+test actions::list::recorded_snapshot_pages::replay_real_page_accepts_verified_empty_files_and_rejects_merged_zero_identity ... ok
+test actions::download::regression_tests::metadata_only_is_not_success ... ok
+test actions::download::regression_tests::interrupted_transfer_keeps_old_file_and_cleans_temporary ... ok
+test actions::list::team_catalog_tests::unlimited_catalog_omits_zero_limit_like_official_linux ... ok
+test actions::list_observer::tests::barrier_does_not_leak_into_observer_tasks_or_following_operations ... ok
+test actions::list_observer::tests::observer_failure_is_not_silently_treated_as_a_complete_page ... ok
+test actions::mutations::tests::content_equality_does_not_hide_identity_or_version_race ... ok
+test actions::mutations::tests::malformed_intents_are_rejected_before_network ... ok
+test actions::namespace::tests::deletion_can_preserve_replacement_and_cannot_hide_restored_identity ... ok
+test actions::download::regression_tests::empty_file_is_materialized ... ok
+test actions::namespace::tests::identity_delete_reconciliation_follows_parent_move_but_stays_in_watch ... ok
+test actions::namespace::tests::identity_remove_keeps_conditions_and_rejects_invalid_ids ... ok
+test actions::download::regression_tests::successful_transfer_atomically_replaces_destination ... ok
+test actions::namespace::tests::incomplete_or_replaced_receipts_are_uncertain ... ok
+test actions::namespace::tests::invalid_namespace_never_reaches_wire ... ok
+test actions::namespace::tests::path_absence_and_historical_payload_are_not_delete_confirmation ... ok
+test actions::namespace::tests::reconciliation_watch_must_cover_target ... ok
+test actions::namespace::tests::rename_requires_original_identity_at_new_path_and_no_old_entry ... ok
+test actions::namespace_observer::tests::observer_does_not_apply_to_independent_requests_or_silence_failure ... ok
+test actions::native::minimal_tombstones::deleted_content_may_be_pruned_but_live_metadata_remains_mandatory ... ok
+test actions::namespace::tests::replay_real_namespace_receipts_and_conditional_errors ... ok
+test actions::native::tests::committer_fingerprint_never_exposes_token_and_rejects_disagreement ... ok
+test actions::native::tests::fail_closed_on_missing_or_regressing_cursor ... ok
+test actions::native::tests::replay_live_future_cursor_response_requires_explicit_recovery ... ok
+test actions::native::tests::scope_paths_are_component_checked ... ok
+test actions::native::tests::unknown_recovery_signal_does_not_advance_normally ... ok
+test actions::transfer::identity_path_tests::identity_upload_address_cannot_escape_to_another_path ... ok
+test actions::native::tests::replay_recorded_native_events_and_notifications ... ok
+test actions::transfer::tests::hashing_writer_checks_size_and_standard_md4_vector ... ok
+test actions::transfer::tests::stale_version_and_bad_checksum_never_publish ... ok
+test actions::transfer::tests::streaming_encoder_roundtrips_empty_and_nonempty ... ok
+test actions::upload_observer::tests::observer_does_not_apply_to_independent_requests_or_silence_failure ... ok
+test channel::continuation_regressions::changed_metadata_across_continuations_is_rejected ... ok
+test actions::download::regression_tests::cancelled_transfer_keeps_old_file ... ok
+test channel::continuation_regressions::error_in_final_continuation_is_not_discarded ... ok
+test channel::continuation_regressions::unsupported_download_continuation_fails_closed ... ok
+test channel::tests::recv_download_binary_drains_correctly ... ok
+test channel::tests::recv_download_binary_ex_drains_correctly ... ok
+test channel::tests::recv_download_no_binary_data ... ok
+test channel::tests::recv_download_skips_keepalives ... ok
+test channel::tests::recv_download_streams_binary_data ... ok
+test channel::tests::recv_merges_arrays_absent_from_header_frame ... ok
+test channel::tests::recv_reassembles_body_continue_frames ... ok
+test channel::tests::recv_returns_single_frame_without_body_continue ... ok
+test client::auth_regression::auth_uses_preauth_restore_and_complete_agent_envelope ... ok
+test error::tests::error_missing_fields ... ok
+test error::tests::no_error_field ... ok
+test error::tests::null_error ... ok
+test error::tests::server_error ... ok
+test error::tests::session_invalid_errors ... ok
+test flow::tests::directional_budget_is_shared_and_no_initial_burst ... ok
+test flow::tests::progress_comes_from_actual_bytes_and_has_no_synced_phase ... ok
+test frame::tests::bad_magic ... ok
+test frame::tests::header_byte_layout ... ok
+test frame::tests::recv_response_reads_raw_pobject ... ok
+test frame::tests::roundtrip_via_duplex ... ok
+test frame::tests::send_message_all_scmd_types ... ok
+test frame::tests::version_boundaries ... ok
+test pool::cancellation_tests::cancelled_request_never_returns_connection_to_pool ... ok
+test channel::continuation_regressions::invalid_custom_ca_is_rejected ... ok
+test pool::cancellation_tests::new_borrow_invalidates_prior_success ... ok
+test pool::cancellation_tests::only_completed_request_is_reusable ... ok
+test pool::tests::warm_holds_permits_while_creating ... ok
+test pool::tests::warm_releases_permits_on_connection_failure ... ok
+test pool::tests::warm_skips_existing_idle_channels ... ok
+test pool::tests::zero_max_channels_returns_error ... ok
+test pstream::decode::regression_tests::binary_ex_without_payload_is_rejected ... ok
+test pstream::decode::regression_tests::duplicate_map_key_rejected ... ok
+test pstream::decode::regression_tests::multiple_binary_chunks_and_followup_remain_decodable ... ok
+test pstream::decode::regression_tests::nested_arrays_respect_depth_limit ... ok
+test pstream::decode::resource_limit_tests::bad_null_padding_is_rejected ... ok
+test pstream::decode::tests::binary_ex_send_hash_after_binary ... ok
+test pstream::decode::tests::binary_ex_streams_and_captures_send_hash ... ok
+test pstream::decode::tests::binary_streams_to_writer ... ok
+test pstream::decode::tests::binary_without_writer_is_error ... ok
+test pstream::decode::tests::empty_buffer ... ok
+test pstream::decode::tests::invalid_integer_size ... ok
+test pstream::decode::tests::map_non_string_key ... ok
+test pstream::decode::tests::map_with_binary_preserves_trailing_fields ... ok
+test pstream::decode::tests::truncated_integer ... ok
+test pstream::decode::tests::truncated_string ... ok
+test pstream::decode::tests::unexpected_end_marker ... ok
+test pstream::decode::tests::unknown_tag ... ok
+test pstream::decode::tests::unterminated_array ... ok
+test pstream::decode::tests::unterminated_map ... ok
+test pstream::encode::tests::spec_array_wire_format ... ok
+test pstream::encode::tests::spec_integer_minimum_width ... ok
+test pstream::encode::tests::spec_map_wire_format ... ok
+test pstream::encode::tests::spec_null_wire_format ... ok
+test pstream::encode::tests::spec_string_wire_format ... ok
+test pstream::encode::tests::spec_underscore_stripping_rule ... ok
+test pstream::tests::accessors_return_none_on_wrong_type ... ok
+test pstream::tests::at_proto_key_not_stripped ... ok
+test pstream::tests::from_bool_conversion ... ok
+test pstream::tests::golden_vector_update_settings ... ok
+test pstream::tests::is_keep_alive_detection ... ok
+test pstream::tests::nested_structures ... ok
+test pstream::tests::pmap_macro ... ok
+test pstream::tests::roundtrip_array ... ok
+test pstream::tests::roundtrip_empty_array ... ok
+test pstream::tests::roundtrip_empty_map ... ok
+test pstream::tests::roundtrip_empty_string ... ok
+test pstream::tests::roundtrip_integers ... ok
+test pstream::tests::roundtrip_map ... ok
+test pstream::tests::roundtrip_null ... ok
+test pstream::tests::roundtrip_string ... ok
+test pstream::tests::roundtrip_u64_max ... ok
+test pstream::tests::roundtrip_unicode_string ... ok
+test pstream::decode::resource_limit_tests::valid_large_event_sized_response_decodes ... ok
+test pstream::tests::spec_keep_alive_message ... ok
+test pstream::tests::spec_magic_bytes ... ok
+test pstream::tests::spec_proto_envelope_structure ... ok
+test pstream::tests::spec_version_byte ... ok
+test pstream::tests::underscore_not_stripped_from_values ... ok
+test pstream::tests::underscore_stripping ... ok
+test pstream::tests::underscore_stripping_multiple_keys ... ok
+test research::tests::notification_is_not_accepted_as_a_file_event_batch ... ok
+test research::tests::reconstructed_body_preserves_subscription_identity ... ok
+test trust::tests::extra_trust_parser_accepts_public_cert_and_rejects_private_keys_or_junk ... ok
+test flow::tests::changed_limit_wakes_pacing_and_cancel_releases_no_shared_lock ... ok
+test trust::tests::explicit_trust_enables_private_chain ... ok
+test trust::tests::explicit_trust_never_bypasses_hostname_check ... ok
+test trust::tests::explicit_trust_never_bypasses_expired_server_certificate ... ok
+test trust::tests::private_chain_is_rejected_without_explicit_task_trust ... ok
+test flow::tests::progressing_transfer_can_outlive_deadline_but_stalled_transfer_cannot ... ok
+test pstream::decode::resource_limit_tests::flat_collection_cannot_exhaust_memory ... ok
+
+test result: ok. 132 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.43s
+
+   Doc-tests sproto
+
+running 3 tests
+test crates/sproto/src/pstream/mod.rs - pstream::pmap (line 130) ... ignored
+test crates/sproto/src/client.rs - client::Credentials (line 88) ... ok
+test crates/sproto/src/client.rs - client::Config (line 36) ... ok
+
+test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+all doctests ran in 1.68s; merged doctests compilation took 1.67s
