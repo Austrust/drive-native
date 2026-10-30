@@ -1,0 +1,46 @@
+warning: struct `cuse_init_in` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:810:12
+    |
+810 | pub struct cuse_init_in {
+    |            ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: struct `cuse_init_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:819:12
+    |
+819 | pub struct cuse_init_out {
+    |            ^^^^^^^^^^^^^
+
+warning: struct `fuse_ioctl_iovec` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:864:12
+    |
+864 | pub struct fuse_ioctl_iovec {
+    |            ^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:992:12
+    |
+992 | pub struct fuse_notify_retrieve_out {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_in` is never constructed
+    --> vendor/fuser/src/ll/fuse_abi.rs:1002:12
+     |
+1002 | pub struct fuse_notify_retrieve_in {
+     |            ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `fuser` (lib) generated 5 warnings
+    Finished `release` profile [optimized] target(s) in 1.48s
+     Running tests/mounted.rs (/home/drive-native-test/.cache/drive-native-build/target/release/deps/mounted-a37cf81248f45e22)
+
+running 6 tests
+test kernel_atomic_replace_keeps_source_inode_and_old_target_handle ... ok
+test kernel_cache_mount_metadata_reads_version_switch_and_offline_error ... ok
+test kernel_offline_nested_mkdir_moves_and_restart_preserve_tree_and_child_bytes ... ok
+test kernel_permissions_owner_restore_and_local_capacity_are_real ... ok
+test kernel_random_write_shared_handles_truncate_fsync_and_recovery ... ok
+test kernel_unlink_open_handles_same_name_recreate_and_offline_missing_guard ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.10s
+
