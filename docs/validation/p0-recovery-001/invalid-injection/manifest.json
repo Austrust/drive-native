@@ -1,0 +1,13 @@
+{
+  "registered_at": 1793381725.4030278,
+  "scope": "team_14",
+  "fault": "kill only established TCP connections belonging to verified readonly worker to NAS:6690; keep fsd alive",
+  "planned_trials": 1,
+  "timeout_s": 15,
+  "poll_interval_s": 0.1,
+  "fsd_sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678",
+  "worker_sha256": "c9b7bae2a75a9bdf83a17a29fe54f2111c03cd7c6ece9435a7c963834bcafa9d",
+  "cached_read": "preopened immutable complete-cache handle; compare to bytes read before injection",
+  "timing": "from first ss -K invocation until different verified worker and online after pull; includes subprocess overhead",
+  "interference": "six tasks and diagnostic/24h probes running; no other synthetic load"
+}

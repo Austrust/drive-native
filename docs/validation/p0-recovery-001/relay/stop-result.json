@@ -1,0 +1,11 @@
+{
+  "seconds": 0.2188042129855603,
+  "properties": {
+    "MainPID": "0",
+    "Result": "success",
+    "ExecMainStatus": "0",
+    "ActiveState": "inactive"
+  },
+  "normal_shutdown": true,
+  "relay_stopped_after_client": true
+}

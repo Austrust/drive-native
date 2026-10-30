@@ -1,0 +1,9 @@
+{
+  "preregistered_at": 1793381462.490972,
+  "phase": "mixed_held",
+  "rounds": 5,
+  "lanes": 48,
+  "stop_watch_after_seconds": 5,
+  "systemd_timeout_unchanged": true,
+  "purpose": "reproduce shutdown failure; subset of previous 7-phase workload, no product change"
+}

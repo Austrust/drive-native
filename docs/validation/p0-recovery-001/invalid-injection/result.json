@@ -1,0 +1,874 @@
+{
+  "recovered": false,
+  "seconds": 15.039238919009222,
+  "commands": [
+    {
+      "returncode": 0,
+      "matched_rows": 0
+    }
+  ],
+  "observations": [
+    {
+      "elapsed_s": 0.1333612680027727,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 0.25581909200991504,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 0.3798183339822572,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 0.5019167480058968,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 0.6239327660005074,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 0.746999914990738,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 0.869063479010947,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 0.9916692530096043,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 1.1155938080046326,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 1.2373458500078414,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 1.359197793994099,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 1.479885478009237,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 1.6005691890022717,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 1.7211316670000087,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 1.8417642560089007,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 1.9645493819843978,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 2.0877593159966636,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 2.2105949859833345,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 2.332337853993522,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 2.4540951210074127,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 2.576300827990053,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 2.697761104995152,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 2.8190080680069514,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 2.939708805002738,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 3.0608138749958016,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 3.1813109159993473,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 3.3020023989956826,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 3.422452770988457,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 3.544914388010511,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 3.6675350370060187,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 3.789738863008097,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 3.912906451005256,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 4.037196914985543,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 4.159590967989061,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 4.280690608982695,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 4.401950269995723,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 4.524196740007028,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 4.648762086988427,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 4.771839877997991,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 4.894695296999998,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 5.018385670002317,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 5.139639122004155,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 5.262448433000827,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 5.386545204994036,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 5.51158505899366,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 5.633829601982143,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 5.757226007990539,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 5.879839045985136,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 6.003645393997431,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 6.127311104995897,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 6.248604580992833,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 6.370920952002052,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 6.492640365991974,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 6.614466100989375,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 6.736190714989789,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 6.857593649008777,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 6.980235399008961,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 7.105008092999924,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 7.227144072006922,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 7.349325646995567,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 7.471724856004585,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 7.594498152990127,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 7.716465228993911,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 7.842843678983627,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 7.9670471790013835,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 8.099571106984513,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 8.223028898006305,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 8.345938640006352,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 8.469322924007429,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 8.596021817997098,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 8.718927543988684,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 8.839752356987447,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 8.961278253002092,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 9.082373184006428,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 9.204543173982529,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 9.328017377993092,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 9.450381467002444,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 9.573143304005498,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 9.695412350993138,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 9.816927984007634,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 9.937741022993578,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 10.059099290985614,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 10.181189463008195,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 10.30255343299359,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 10.423478018987225,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 10.55263912800001,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 10.675141802988946,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 10.799812343000667,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 10.921394942997722,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 11.044271705002757,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 11.167028135998407,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 11.28933952000807,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 11.41105924200383,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 11.537121772009414,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 11.65999077699962,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 11.781032903993037,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 11.902828151010908,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 12.023873972997535,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 12.144677542994032,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 12.265211699996144,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 12.387019627989503,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 12.509006962995045,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 12.631321666995063,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 12.752121894009179,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 12.872958341002231,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 12.994640232995152,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 13.116066585993394,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 13.237948174995836,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 13.358720415009884,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 13.480546784005128,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 13.602171445003478,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 13.724470240995288,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 13.845259733992862,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 13.966202479990898,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 14.087325900996802,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 14.20873099999153,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 14.33001136299572,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 14.451161206990946,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 14.575079656002345,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 14.696281949989498,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 14.817772834008792,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    },
+    {
+      "elapsed_s": 14.939117928006453,
+      "connection": "online",
+      "mounted": true,
+      "error": null,
+      "new_worker": false
+    }
+  ],
+  "cache": {
+    "bytes": 1001486,
+    "matches_opened_version": true,
+    "read_s": 0.0035442399966996163
+  },
+  "fsd_survived": true,
+  "old_worker_pid": 916049,
+  "scope": "single actual TCP-reset pilot, not percentile or all-scope acceptance"
+}

@@ -1,0 +1,8 @@
+{
+  "valid_fault": false,
+  "reason": "ss -K returned 0 but socket remained ESTAB; identical behavior on independently created loopback connection; no actual interruption established",
+  "client_recovery_failure": false,
+  "kernel_cause": "not determined",
+  "private_output": "full endpoint diagnostics retained only in local experiment state",
+  "replacement": "owned transparent byte relay; original failed injector data retained"
+}

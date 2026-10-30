@@ -1,0 +1,24 @@
+{
+  "captured_at": 1793382399.398884,
+  "runtime_source_commit": "62be13c9f9f4a2457a3040829f478bf43b1821df",
+  "fsd_sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678",
+  "package_sha256": "4a66edf61d1a32f385f6f61f401db3c181b74f80df44cd0411140ae373c73cf4",
+  "source_scope": "team_14",
+  "nodes_before": 91033,
+  "tls_name_unchanged": true,
+  "readonly_profile": true,
+  "initialization_issue": "measurement-001 aborted on 3s GetOverview timeout before any fault; service remained active and later returned online in 1.18ms without restart; preserved as initialization observation, not a recovery sample",
+  "trials_over_3_seconds": [
+    24
+  ],
+  "all_cached_reads_match_opened_version": true,
+  "original_six_mounts_restarted": false,
+  "nas_writes": false,
+  "credentials_saved": false,
+  "system_reference": "../p0-baseline-audit.json",
+  "nas_version": "DSM 7.4.1 / Drive Server 4.0.3-27892 from existing project record; not re-queried in this run",
+  "timing_limits": "does not measure silent packet loss, prolonged outage, server restart, sleep/resume, all scopes or native version convergence",
+  "p0-byte-relay.py_lf_sha256": "96974a211950b5b155b88bbea7c9110d5fb9bc874cf85e44804193532142f409",
+  "p0-relay-measure.py_lf_sha256": "5b88132502e3ed62e38148f2b3daed042cc7d74f357d2fd0af84c7dc17ba226f",
+  "p0-reproduce-stop.py_lf_sha256": "e1442486653b3fe07fc71de4e1a7bba82303361416d02d59c8475e44f196263d"
+}

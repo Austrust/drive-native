@@ -1,0 +1,32 @@
+{
+  "registered_at": 1793381462.6331701,
+  "phase": "mixed_held",
+  "samples": 240,
+  "lanes": 48,
+  "rounds": 5,
+  "warmup_per_kind": 2,
+  "timeout_s": 15,
+  "fixture": {
+    "cached_bytes": 1048576,
+    "cached_file": "d000/f00000",
+    "cached_node": "file-000000",
+    "content_sha256": "631b84027d6b9e52b539c4e8373622d23032dfadc64d60af87339c9037e4f769",
+    "dataset_sha256": "7d4a09cceccf73c5e671cc622307e0eaff0079433a6c00700c22301ddba3df9f",
+    "directories_including_root": 106,
+    "directory": "d000",
+    "directory_children": 2000,
+    "files": 209894,
+    "generation_seconds": 10.992752069,
+    "nodes": 210000,
+    "purpose": "local fixed workload; no native protocol or remote identity validation",
+    "schema": 1
+  },
+  "binary_sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678",
+  "runtime_source_commit": "62be13c9f9f4a2457a3040829f478bf43b1821df",
+  "interference": "caller must record other running tasks and probes in run context",
+  "native_network": "disabled: no unlock, no credentials, loopback discard address",
+  "timing": "worker operation only; process start and parent wall latency separate; errors/timeouts retained",
+  "cache": "warm/disk groups verify backing-blob residency with mincore; FUSE DIRECT_IO; lower block/hypervisor storage cache uncontrolled",
+  "percentiles": "nearest-rank; timeout duration is a right-censored lower bound",
+  "runner_lf_sha256": "6b3c9f6161156560faa5feef3b02470673d81f253562f736d109b0016d75254e"
+}

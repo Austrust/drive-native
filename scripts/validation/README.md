@@ -39,3 +39,17 @@ python3 scripts/validation/benchmark_local.py \
 运行会显著占用 CPU，必须登记对其他实验的干扰；单文件成功/超时、setup失败全部保留。已完成的固定夹具基线见 [报告](../../docs/validation/p0-fixed-001/REPORT.md)。初次实测使用项目本地启动适配脚本；通用 `prepare_benchmark.py` 随后在全新夹具中实际通过启动、2000项目录及缓存哈希检查，见 [launcher-check.json](../../docs/validation/p0-fixed-001/launcher-check.json)。
 
 停止服务后还必须检查 `systemctl --user show <unit> -p Result -p ExecMainStatus`，不能只看 stop 命令退出码。此次高并发固定夹具在停止时被 systemd 超时强杀，原始状态保留为失败证据；通用启动工具另建的短测服务正常停止。
+
+## 自有连接中断器
+
+`byte_relay.py` 仅监听回环地址，将字节原样转发给显式指定的上游。它不终止 TLS、不保存凭据或正文；客户端必须继续验证真实服务器的证书名称与 CA。只用于已隔离的只读测试实例，不改变生产任务配置或系统全局网络。
+
+```sh
+mkdir -m 700 /private/new-relay
+python3 scripts/validation/byte_relay.py --state /private/new-relay --upstream-host <NAS地址>
+python3 scripts/validation/test_byte_relay.py
+```
+
+就绪后在状态目录写入 `relay-ready.json`。同用户通过权限0600的 `relay.sock` 发送 `status\n` 查询计数，或发送 `drop\n` 中断本工具持有的连接；监听器继续运行。仅 `aborted_streams` 非零不够证明恢复成功，还须检查连接代次、客户端恢复状态和实际本地读。停止客户端后再停止转发器，检查退出结果。残留 socket 不自动覆盖，避免误接管其他测试。
+
+本机回环测试已在WSL通过1项，覆盖透明回传和实际连接关闭。真实NAS基线使用其固定参数前身，实际执行脚本、哈希及全部样本见[恢复报告](../../docs/validation/p0-recovery-001/REPORT.md)。它只模拟显式断开，不能替代丢包、限速、长时间不可达或服务器重启实验。
