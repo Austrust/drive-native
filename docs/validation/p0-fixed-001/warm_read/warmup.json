@@ -1,0 +1,38 @@
+[
+  {
+    "kind": "warm_read",
+    "index": 0,
+    "ready": true,
+    "setup_seconds": 0.00010432099224999547,
+    "resident_pages": 256,
+    "total_pages": 256,
+    "cache_condition_met": true,
+    "process_ready_s": 0.16373469002428465,
+    "parent_start": 1793380112.5756502,
+    "parent_seconds": 0.02320421699550934,
+    "start": 1793380112.5757546,
+    "open_s": 0.008238710986915976,
+    "first_byte_s": 0.0084885619871784,
+    "content_complete_s": 0.01288737601134926,
+    "ok": true,
+    "seconds": 0.01304720900952816
+  },
+  {
+    "kind": "warm_read",
+    "index": 1,
+    "ready": true,
+    "setup_seconds": 0.00010842201299965382,
+    "resident_pages": 256,
+    "total_pages": 256,
+    "cache_condition_met": true,
+    "process_ready_s": 0.16256994800642133,
+    "parent_start": 1793380112.7614803,
+    "parent_seconds": 0.02505760101485066,
+    "start": 1793380112.761569,
+    "open_s": 0.010889659984968603,
+    "first_byte_s": 0.01110590499592945,
+    "content_complete_s": 0.015061926998896524,
+    "ok": true,
+    "seconds": 0.015215758001431823
+  }
+]

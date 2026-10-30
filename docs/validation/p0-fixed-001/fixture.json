@@ -1,0 +1,15 @@
+{
+  "cached_bytes": 1048576,
+  "cached_file": "d000/f00000",
+  "cached_node": "file-000000",
+  "content_sha256": "631b84027d6b9e52b539c4e8373622d23032dfadc64d60af87339c9037e4f769",
+  "dataset_sha256": "7d4a09cceccf73c5e671cc622307e0eaff0079433a6c00700c22301ddba3df9f",
+  "directories_including_root": 106,
+  "directory": "d000",
+  "directory_children": 2000,
+  "files": 209894,
+  "generation_seconds": 11.073110424,
+  "nodes": 210000,
+  "purpose": "local fixed workload; no native protocol or remote identity validation",
+  "schema": 1
+}

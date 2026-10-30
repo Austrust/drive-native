@@ -1,0 +1,13 @@
+{
+  "service": "drive-native-p0-fixed.service",
+  "properties": {
+    "Result": "timeout",
+    "ExecMainCode": "2",
+    "ExecMainStatus": "9",
+    "ActiveState": "failed"
+  },
+  "normal_shutdown": false,
+  "stack_capture": "attempted after threads were observed waiting; /proc PID disappeared before gdb attached, no backtrace obtained",
+  "observed_waits": "futex_do_wait on most threads and fuse_dev_do_read on one FUSE thread; insufficient for root cause",
+  "context": "planned stop of synthetic fixed fixture after completed measurements; six NAS baseline mounts not stopped"
+}

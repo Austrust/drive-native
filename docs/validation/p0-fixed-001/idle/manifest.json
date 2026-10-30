@@ -1,0 +1,12 @@
+{
+  "registered_at": 1793380427.4470878,
+  "settle_seconds": 90,
+  "window_seconds": 300,
+  "sample_interval_seconds": 5,
+  "unit": "drive-native-p0-fixed.service",
+  "binary_sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678",
+  "nodes": 210000,
+  "scope": "synthetic locked/offline fsd and direct children; no GUI, no network worker, no requests during measured window; other NAS mounts/probes remain running",
+  "cpu": "sum CPU-seconds differences for identical PID set / monotonic wall interval, one core=100%; PID change invalidates interval",
+  "memory": "sum RSS duplicates shared pages; also record summed PSS; no allocator trimming"
+}

@@ -1,0 +1,80 @@
+[
+  {
+    "kind": "cached_read",
+    "index": 0,
+    "ready": true,
+    "setup_seconds": 0.00014010697486810386,
+    "process_ready_s": 0.16360370998154394,
+    "parent_start": 1793380131.2528956,
+    "parent_seconds": 0.02317609899910167,
+    "start": 1793380131.2530093,
+    "open_s": 0.00721369797247462,
+    "first_byte_s": 0.007408434990793467,
+    "content_complete_s": 0.011552922980627045,
+    "ok": true,
+    "seconds": 0.011719995993189514
+  },
+  {
+    "kind": "cached_read",
+    "index": 1,
+    "ready": true,
+    "setup_seconds": 0.00010886197560466826,
+    "process_ready_s": 0.167016519990284,
+    "parent_start": 1793380131.4431434,
+    "parent_seconds": 0.02562478100298904,
+    "start": 1793380131.4432344,
+    "open_s": 0.00775959700695239,
+    "first_byte_s": 0.007995231018867344,
+    "content_complete_s": 0.01218250801321119,
+    "ok": true,
+    "seconds": 0.012341819005087018
+  },
+  {
+    "kind": "directory",
+    "index": 0,
+    "ready": true,
+    "setup_seconds": 0.0001084629911929369,
+    "process_ready_s": 0.16327185201225802,
+    "parent_start": 1793380131.6320872,
+    "parent_seconds": 1.0175251890032087,
+    "start": 1793380131.6321669,
+    "ok": true,
+    "seconds": 1.0049358829855919
+  },
+  {
+    "kind": "directory",
+    "index": 1,
+    "ready": true,
+    "setup_seconds": 0.00010567100252956152,
+    "process_ready_s": 0.15829118998954073,
+    "parent_start": 1793380132.8079438,
+    "parent_seconds": 1.0096939739887603,
+    "start": 1793380132.8080251,
+    "ok": true,
+    "seconds": 1.000494866981171
+  },
+  {
+    "kind": "status",
+    "index": 0,
+    "ready": true,
+    "setup_seconds": 0.0017609310161788017,
+    "process_ready_s": 0.16262978399754502,
+    "parent_start": 1793380133.9803073,
+    "parent_seconds": 0.9558161500026472,
+    "start": 1793380133.9803867,
+    "ok": true,
+    "seconds": 0.9459559039969463
+  },
+  {
+    "kind": "status",
+    "index": 1,
+    "ready": true,
+    "setup_seconds": 0.0017427829734515399,
+    "process_ready_s": 0.16572282099514268,
+    "parent_start": 1793380135.1018867,
+    "parent_seconds": 0.9829159450018778,
+    "start": 1793380135.102004,
+    "ok": true,
+    "seconds": 0.96768871700624
+  }
+]

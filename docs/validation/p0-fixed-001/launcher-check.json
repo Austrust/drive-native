@@ -1,0 +1,22 @@
+{
+  "checked_at": 1793380950.717238,
+  "binary_sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678",
+  "mounted": true,
+  "connection": "locked",
+  "directory_children": 2000,
+  "cached_hash_verified": true,
+  "directory_fsync": {
+    "returned": "success"
+  },
+  "scope": "synthetic read-only mount, no NAS; not writable durability fault validation",
+  "launcher_service_stopped": true,
+  "completed_fixed_benchmark_service_stopped": true,
+  "state_retained": true,
+  "fixed_benchmark_stop_result": {
+    "Result": "timeout",
+    "ExecMainCode": "2",
+    "ExecMainStatus": "9",
+    "ActiveState": "failed"
+  },
+  "fixed_benchmark_normal_shutdown": false
+}

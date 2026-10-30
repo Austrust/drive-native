@@ -1,0 +1,157 @@
+{
+  "scope": "partial baseline failure context; observation not finished",
+  "failures": [
+    {
+      "failure": {
+        "time": 1793379934.6628885,
+        "task": "b9d23989052bf43cb9e13f0babc50458",
+        "iteration": 109,
+        "connection": "offline",
+        "mounted": true,
+        "error": "network_unavailable",
+        "background_error": null,
+        "overview_ms": 8.035340026253834,
+        "processes": [
+          {
+            "pid": 880770,
+            "rss_kib": 12588,
+            "pss_kib": 5829,
+            "threads": 28,
+            "fds": 17,
+            "cpu_seconds": 6.67
+          }
+        ],
+        "ok": false,
+        "elapsed_ms": 31.31996002048254
+      },
+      "neighbors": [
+        {
+          "time": 1793379914.5768375,
+          "iteration": 107,
+          "connection": "online",
+          "mounted": true,
+          "error": null,
+          "overview_ms": 7.9021030105650425,
+          "processes": [
+            {
+              "pid": 880770,
+              "rss_kib": 12588,
+              "pss_kib": 5826,
+              "threads": 30,
+              "fds": 19,
+              "cpu_seconds": 6.64
+            },
+            {
+              "pid": 900081,
+              "rss_kib": 7224,
+              "pss_kib": 2009,
+              "threads": 15,
+              "fds": 12,
+              "cpu_seconds": 0.0
+            }
+          ]
+        },
+        {
+          "time": 1793379924.5873265,
+          "iteration": 108,
+          "connection": "online",
+          "mounted": true,
+          "error": null,
+          "overview_ms": 5.738356994697824,
+          "processes": [
+            {
+              "pid": 880770,
+              "rss_kib": 12588,
+              "pss_kib": 5826,
+              "threads": 30,
+              "fds": 19,
+              "cpu_seconds": 6.65,
+              "binary_sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678",
+              "expected_binary": true
+            },
+            {
+              "pid": 900081,
+              "rss_kib": 7224,
+              "pss_kib": 2010,
+              "threads": 15,
+              "fds": 12,
+              "cpu_seconds": 0.0,
+              "binary_sha256": "c9b7bae2a75a9bdf83a17a29fe54f2111c03cd7c6ece9435a7c963834bcafa9d",
+              "expected_binary": true
+            }
+          ]
+        },
+        {
+          "time": 1793379934.6628885,
+          "iteration": 109,
+          "connection": "offline",
+          "mounted": true,
+          "error": "network_unavailable",
+          "overview_ms": 8.035340026253834,
+          "processes": [
+            {
+              "pid": 880770,
+              "rss_kib": 12588,
+              "pss_kib": 5829,
+              "threads": 28,
+              "fds": 17,
+              "cpu_seconds": 6.67
+            }
+          ]
+        },
+        {
+          "time": 1793379944.672676,
+          "iteration": 110,
+          "connection": "online",
+          "mounted": true,
+          "error": null,
+          "overview_ms": 7.543186016846448,
+          "processes": [
+            {
+              "pid": 880770,
+              "rss_kib": 12588,
+              "pss_kib": 5827,
+              "threads": 30,
+              "fds": 19,
+              "cpu_seconds": 6.7
+            },
+            {
+              "pid": 903982,
+              "rss_kib": 7036,
+              "pss_kib": 1986,
+              "threads": 16,
+              "fds": 12,
+              "cpu_seconds": 0.0
+            }
+          ]
+        },
+        {
+          "time": 1793379954.6804316,
+          "iteration": 111,
+          "connection": "online",
+          "mounted": true,
+          "error": null,
+          "overview_ms": 7.107857003575191,
+          "processes": [
+            {
+              "pid": 880770,
+              "rss_kib": 12592,
+              "pss_kib": 5832,
+              "threads": 30,
+              "fds": 19,
+              "cpu_seconds": 6.71
+            },
+            {
+              "pid": 903982,
+              "rss_kib": 7164,
+              "pss_kib": 1990,
+              "threads": 15,
+              "fds": 12,
+              "cpu_seconds": 0.0
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

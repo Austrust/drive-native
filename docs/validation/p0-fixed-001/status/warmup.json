@@ -1,0 +1,26 @@
+[
+  {
+    "kind": "status",
+    "index": 0,
+    "ready": true,
+    "setup_seconds": 0.0017510270117782056,
+    "process_ready_s": 0.1670096080051735,
+    "parent_start": 1793380076.7192526,
+    "parent_seconds": 1.0646269510034472,
+    "start": 1793380076.7193995,
+    "ok": true,
+    "seconds": 1.0556901870004367
+  },
+  {
+    "kind": "status",
+    "index": 1,
+    "ready": true,
+    "setup_seconds": 0.001741865009535104,
+    "process_ready_s": 0.17076765702222474,
+    "parent_start": 1793380077.9546936,
+    "parent_seconds": 0.9615056629991159,
+    "start": 1793380077.9547753,
+    "ok": true,
+    "seconds": 0.9519485879864078
+  }
+]

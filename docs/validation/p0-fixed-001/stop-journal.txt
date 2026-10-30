@@ -1,0 +1,12 @@
+Oct 31 01:04:32 DESKTOP-41B0VF8 systemd[377]: Started drive-native-p0-fixed.service - <test-home>/.local/lib/drive-native-soak/perf/drive-native-fsd --config <test-home>/.local/state/drive-native-p0/fixed-001/profile.json.
+Oct 31 01:04:32 DESKTOP-41B0VF8 drive-native-fsd[903502]: drive-native-fsd: startup or local service failed; inspect profile and local status
+Oct 31 01:04:32 DESKTOP-41B0VF8 systemd[377]: drive-native-p0-fixed.service: Main process exited, code=exited, status=1/FAILURE
+Oct 31 01:04:32 DESKTOP-41B0VF8 systemd[377]: drive-native-p0-fixed.service: Failed with result 'exit-code'.
+Oct 31 01:06:47 DESKTOP-41B0VF8 systemd[377]: Started drive-native-p0-fixed.service - <test-home>/.local/lib/drive-native-soak/perf/drive-native-fsd --config <test-home>/.local/state/drive-native-p0/fixed-001/profile.json.
+Oct 31 01:22:30 DESKTOP-41B0VF8 systemd[377]: Stopping drive-native-p0-fixed.service - <test-home>/.local/lib/drive-native-soak/perf/drive-native-fsd --config <test-home>/.local/state/drive-native-p0/fixed-001/profile.json...
+Oct 31 01:24:01 DESKTOP-41B0VF8 systemd[377]: drive-native-p0-fixed.service: State 'stop-sigterm' timed out. Killing.
+Oct 31 01:24:01 DESKTOP-41B0VF8 systemd[377]: drive-native-p0-fixed.service: Killing process 904578 (drive-native-fs) with signal SIGKILL.
+Oct 31 01:24:01 DESKTOP-41B0VF8 systemd[377]: drive-native-p0-fixed.service: Main process exited, code=killed, status=9/KILL
+Oct 31 01:24:01 DESKTOP-41B0VF8 systemd[377]: drive-native-p0-fixed.service: Failed with result 'timeout'.
+Oct 31 01:24:01 DESKTOP-41B0VF8 systemd[377]: Stopped drive-native-p0-fixed.service - <test-home>/.local/lib/drive-native-soak/perf/drive-native-fsd --config <test-home>/.local/state/drive-native-p0/fixed-001/profile.json.
+Oct 31 01:24:01 DESKTOP-41B0VF8 systemd[377]: drive-native-p0-fixed.service: Consumed 5min 12.485s CPU time, 1.7G memory peak, 4.0K memory swap peak.

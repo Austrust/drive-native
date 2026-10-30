@@ -1,0 +1,19 @@
+{
+  "observed_window_seconds": 300.0102740879811,
+  "samples": 61,
+  "errors": 0,
+  "stable_pid_set": true,
+  "single_core_cpu_percent": 0.0999965754212915,
+  "rss_kib_min": 1773828,
+  "rss_kib_max": 1773828,
+  "rss_kib_first": 1773828,
+  "rss_kib_last": 1773828,
+  "pss_kib_min": 1767145,
+  "pss_kib_max": 1767147,
+  "rss_growth_percent": 0.0,
+  "fds_min": 18,
+  "fds_max": 18,
+  "threads_min": 44,
+  "threads_max": 44,
+  "scope": "offline synthetic 210k-node task, after mixed load; no GUI or network worker; not online idle or 7-day growth proof"
+}

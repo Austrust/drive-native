@@ -1,0 +1,18 @@
+{
+  "binary_sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678",
+  "builder_sha256": "8110d490748fd53f093f2e3c2d0fd23e7d5ab800a75a1e6dc4eae4fadc307701",
+  "builder_source_commit": "a2e65b0",
+  "runtime_source_commit": "62be13c9f9f4a2457a3040829f478bf43b1821df",
+  "native_network": "disabled: no unlock, no credentials, loopback discard address",
+  "interference": "six NAS mounts and two probes remain active; no official A/B inference",
+  "identity_reference": "../p0-baseline-audit.json",
+  "cpu": "Intel Core i5-10500; WSL Ubuntu 24.04; 12 logical CPUs",
+  "setup_issue": {
+    "initial_failure": "Store::open fixture directory created with 0755; fsd rejected non-private state",
+    "correction": "changed only synthetic state directory to 0700; restarted confirmed failed synthetic service",
+    "runtime_changed": false
+  },
+  "independent_namespace_checks": "read-only SQLite asserted 210000 total nodes and 2000 children; enumeration compares all expected generated names",
+  "results_scope": "offline local fixture, not native NAS throughput, ACL coverage, server events or whole-product reliability",
+  "recorded_at": 1793380474.8746698
+}

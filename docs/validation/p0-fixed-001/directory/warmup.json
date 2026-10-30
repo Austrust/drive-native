@@ -1,0 +1,26 @@
+[
+  {
+    "kind": "directory",
+    "index": 0,
+    "ready": true,
+    "setup_seconds": 0.00010669900802895427,
+    "process_ready_s": 0.16088663999107666,
+    "parent_start": 1793380038.030279,
+    "parent_seconds": 1.0619960409821942,
+    "start": 1793380038.0303776,
+    "ok": true,
+    "seconds": 1.051416133006569
+  },
+  {
+    "kind": "directory",
+    "index": 1,
+    "ready": true,
+    "setup_seconds": 0.00011076999362558126,
+    "process_ready_s": 0.1729049510031473,
+    "parent_start": 1793380039.2652237,
+    "parent_seconds": 1.0533974260033574,
+    "start": 1793380039.265341,
+    "ok": true,
+    "seconds": 1.042052025994053
+  }
+]
