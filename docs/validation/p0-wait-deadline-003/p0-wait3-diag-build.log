@@ -1,0 +1,39 @@
+   Compiling fuser v0.16.0 (/tmp/drive-p0-wait-build.hAVSTj/vendor/fuser)
+   Compiling sproto v0.1.0 (/tmp/drive-p0-wait-build.hAVSTj/crates/sproto)
+   Compiling drive-core v0.1.0 (/tmp/drive-p0-wait-build.hAVSTj/crates/drive-core)
+warning: struct `cuse_init_in` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:810:12
+    |
+810 | pub struct cuse_init_in {
+    |            ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: struct `cuse_init_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:819:12
+    |
+819 | pub struct cuse_init_out {
+    |            ^^^^^^^^^^^^^
+
+warning: struct `fuse_ioctl_iovec` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:864:12
+    |
+864 | pub struct fuse_ioctl_iovec {
+    |            ^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:992:12
+    |
+992 | pub struct fuse_notify_retrieve_out {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_in` is never constructed
+    --> vendor/fuser/src/ll/fuse_abi.rs:1002:12
+     |
+1002 | pub struct fuse_notify_retrieve_in {
+     |            ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `fuser` (lib) generated 5 warnings
+   Compiling drive-fs v0.1.0 (/tmp/drive-p0-wait-build.hAVSTj/crates/drive-fs)
+   Compiling drive-runtime v0.1.0 (/tmp/drive-p0-wait-build.hAVSTj/crates/drive-runtime)
+    Finished `release` profile [optimized] target(s) in 23.29s

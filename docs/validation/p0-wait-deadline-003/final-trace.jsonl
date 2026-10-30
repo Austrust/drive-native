@@ -1,0 +1,31 @@
+{"layer": "bridge", "phase": "initial_pull", "pid": "1016657", "count": "12", "monotonic_us": 163341738479, "realtime_us": 1793390846251502, "journal_pid": 1016657}
+{"layer": "bridge", "phase": "snapshot_rpc_begin", "pid": "1016657", "monotonic_us": 163341738479, "realtime_us": 1793390846251502, "journal_pid": 1016657}
+{"layer": "bridge", "phase": "snapshot_rpc_end", "pid": "1016657", "monotonic_us": 163427993896, "realtime_us": 1793390932900402, "journal_pid": 1016657}
+{"layer": "bridge", "phase": "snapshot_install_begin", "pid": "1016657", "monotonic_us": 163428280653, "realtime_us": 1793390933187160, "journal_pid": 1016657}
+{"layer": "bridge", "phase": "snapshot_install_end", "pid": "1016657", "count": "364", "monotonic_us": 163433461490, "realtime_us": 1793390938367996, "journal_pid": 1016657}
+{"layer": "bridge", "phase": "snapshot_notifications_end", "pid": "1016657", "monotonic_us": 163433461490, "realtime_us": 1793390938367996, "journal_pid": 1016657}
+{"layer": "bridge", "phase": "begin", "pid": "1016657", "outer_s": "470", "monotonic_us": 163433594518, "realtime_us": 1793390938501024, "journal_pid": 1016657}
+{"layer": "native", "phase": "pool_begin", "pid": "1016836", "monotonic_us": 163433594849, "realtime_us": 1793390938501355, "journal_pid": 1016836}
+{"layer": "native", "phase": "exchange_begin", "pid": "1016836", "elapsed_us": "31", "inner_s": "450", "monotonic_us": 163433594849, "realtime_us": 1793390938501355, "journal_pid": 1016836}
+{"layer": "channel", "phase": "send_begin", "pid": "1016836", "elapsed_us": "1", "monotonic_us": 163433594849, "realtime_us": 1793390938501355, "journal_pid": 1016836}
+{"layer": "channel", "phase": "send_end", "pid": "1016836", "elapsed_us": "38", "monotonic_us": 163433595389, "realtime_us": 1793390938501895, "journal_pid": 1016836}
+{"layer": "channel", "phase": "receive_begin", "pid": "1016836", "elapsed_us": "42", "monotonic_us": 163433595389, "realtime_us": 1793390938501895, "journal_pid": 1016836}
+{"layer": "channel", "phase": "frame", "pid": "1016836", "elapsed_us": "30284", "kind": "response", "monotonic_us": 163433625179, "realtime_us": 1793390938531685, "journal_pid": 1016836}
+{"layer": "native", "phase": "exchange_end", "pid": "1016836", "elapsed_us": "30360", "outcome": "reply", "monotonic_us": 163433625179, "realtime_us": 1793390938531685, "journal_pid": 1016836}
+{"layer": "native", "phase": "notification_summary", "pid": "1016836", "changes": "0", "profile_changed": "true", "monotonic_us": 163433625179, "realtime_us": 1793390938531685, "journal_pid": 1016836}
+{"layer": "native", "phase": "parse_end", "pid": "1016836", "ok": "true", "monotonic_us": 163433625179, "realtime_us": 1793390938531685, "journal_pid": 1016836}
+{"layer": "bridge", "phase": "reply", "pid": "1016657", "elapsed_us": "30982", "outcome": "reply", "monotonic_us": 163433625626, "realtime_us": 1793390938532132, "journal_pid": 1016657}
+{"layer": "bridge", "phase": "notification", "pid": "1016657", "monotonic_us": 163433625626, "realtime_us": 1793390938532132, "journal_pid": 1016657}
+{"layer": "bridge", "phase": "begin", "pid": "1016657", "outer_s": "470", "monotonic_us": 163433642961, "realtime_us": 1793390938549467, "journal_pid": 1016657}
+{"layer": "native", "phase": "pool_begin", "pid": "1016836", "monotonic_us": 163433643324, "realtime_us": 1793390938549830, "journal_pid": 1016836}
+{"layer": "native", "phase": "exchange_begin", "pid": "1016836", "elapsed_us": "32", "inner_s": "450", "monotonic_us": 163433643324, "realtime_us": 1793390938549830, "journal_pid": 1016836}
+{"layer": "channel", "phase": "send_begin", "pid": "1016836", "elapsed_us": "0", "monotonic_us": 163433643324, "realtime_us": 1793390938549830, "journal_pid": 1016836}
+{"layer": "channel", "phase": "send_end", "pid": "1016836", "elapsed_us": "154", "monotonic_us": 163433643689, "realtime_us": 1793390938550195, "journal_pid": 1016836}
+{"layer": "channel", "phase": "receive_begin", "pid": "1016836", "elapsed_us": "159", "monotonic_us": 163433643689, "realtime_us": 1793390938550195, "journal_pid": 1016836}
+{"layer": "native", "phase": "exchange_end", "pid": "1016836", "elapsed_us": "450000874", "outcome": "native_timeout", "monotonic_us": 163883644254, "realtime_us": 1793391393139438, "journal_pid": 1016836}
+{"layer": "bridge", "phase": "reply", "pid": "1016657", "elapsed_us": "450002574", "outcome": "reply", "monotonic_us": 163883648314, "realtime_us": 1793391393143498, "journal_pid": 1016657}
+{"layer": "bridge", "phase": "remote_failure", "pid": "1016657", "outcome": "io_NotConnected", "monotonic_us": 163883648314, "realtime_us": 1793391393143498, "journal_pid": 1016657}
+{"layer": "service", "phase": "shutdown_begin", "pid": "1016657", "monotonic_us": 163884019965, "realtime_us": 1793391393515148, "journal_pid": 1016657}
+{"layer": "service", "phase": "shutdown_end", "pid": "1016657", "monotonic_us": 163884020658, "realtime_us": 1793391393515842, "journal_pid": 1016657}
+{"layer": "service", "phase": "shutdown_begin", "pid": "1016657", "monotonic_us": 163884020658, "realtime_us": 1793391393515842, "journal_pid": 1016657}
+{"layer": "service", "phase": "shutdown_end", "pid": "1016657", "monotonic_us": 163884020658, "realtime_us": 1793391393515842, "journal_pid": 1016657}

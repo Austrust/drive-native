@@ -1,0 +1,60 @@
+{
+  "sha256": "e2288b191e8db97673c3468595e3a2d441579d2da365927c1108c000549fdf9c",
+  "bytes": 8052033,
+  "machine": "x86-64",
+  "has_section_table": false,
+  "dynamic_symbol_count": 7522,
+  "binary_executed": false,
+  "method": "PT_DYNAMIC and GNU/SysV hash; bounded dynamic symbols; RIP references and direct/PLT calls; no execution",
+  "functions": [
+    {
+      "name": "_ZN12LongPollTask10SubscriberC2ER10Connectioni",
+      "address": "0x53f460",
+      "size": 115,
+      "disassembly": "function-53f460.asm"
+    },
+    {
+      "name": "_ZN12LongPollTask19SendTimeoutResponseERKNS_10SubscriberE",
+      "address": "0x53fde0",
+      "size": 1120,
+      "disassembly": "function-53fde0.asm"
+    },
+    {
+      "name": "_ZN15LongPollHandler6HandleER7RequestR8Response",
+      "address": "0x3ff8c0",
+      "size": 3656,
+      "disassembly": "function-3ff8c0.asm"
+    },
+    {
+      "name": "_ZN12LongPollTask19HandleSubscriptionsERKNS_10SubscriberEb",
+      "address": "0x5433f0",
+      "size": 6800,
+      "disassembly": "function-5433f0.asm"
+    },
+    {
+      "name": "_ZNK12LongPollTask10Subscriber9IsTimeoutEv",
+      "address": "0x53f6a0",
+      "size": 23,
+      "disassembly": "function-53f6a0.asm"
+    },
+    {
+      "name": "_ZN15LongPollHandler15CheckParametersER7RequestR8Response",
+      "address": "0x3fd670",
+      "size": 6641,
+      "disassembly": "function-3fd670.asm"
+    }
+  ],
+  "server_version_from_existing_provenance": "Drive Server 4.0.3-27892; not queried again in this experiment",
+  "input_source": "previously authorized software-only SSH copy, rehashed locally; no new server access for static analysis",
+  "modulo_reduction": {
+    "magic": "0x2d82d82d82d82d83",
+    "arithmetic_check_nonnegative_inputs": 20000,
+    "observed_formula": "timeout + (server time at scheduling % 90)",
+    "request_timeout": 400,
+    "nominal_delay_range_seconds": [
+      400,
+      489
+    ],
+    "warning": "this is scheduling arithmetic, not a wall-clock service response guarantee; no server timestamp was captured for the live request"
+  }
+}

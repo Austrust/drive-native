@@ -1,6 +1,6 @@
 # 官方 Linux 长轮询：通道超时与整个请求截止的区别
 
-2026-10-31，静态核验用户提供的官方Linux ELF。**该构建的长轮询把600传给通道超时；缓冲读取层用秒数判断无数据进展的时间，并在读到数据后刷新计时点。它与native当前450秒的整个请求截止不是相同语义。** 这是定位周期性worker退出的依据，还不是当前NAS问题的实测根因或修复。
+2026-10-31，静态核验用户提供的官方Linux ELF。**该构建的长轮询把600传给通道超时；缓冲读取层用秒数判断无数据进展的时间，并在读到数据后刷新计时点。它与native当前450秒的整个请求截止不是相同语义。** 本报告只记录客户端静态证据；后续[MFM诊断003](../p0-wait-deadline-003/REPORT.md)补充了服务器秒数预算与本地450秒超时的真实记录，尚未完成产品修复验证。
 
 ## 构建和适用范围
 
@@ -12,7 +12,7 @@
 
 | 步骤 | 静态位置及证据 | 确认内容 |
 |---|---|---|
-| 构造long_poll | [LongPoller::LongPoll](protocol/00.asm)，0x5cd9e、0x5d415～0x5d41d | 报文字段timeout写入400；调用Request的额外整数参数为600。报文字段400的服务器端单位仍未验证 |
+| 构造long_poll | [LongPoller::LongPoll](protocol/00.asm)，0x5cd9e、0x5d415～0x5d41d | 报文字段timeout写入400；调用Request的额外整数参数为600。本次客户端静态范围未核验400的服务器端单位；后续服务器证据见003 |
 | 转交参数 | [Request简化重载](protocol/01.asm)，0x734e4、0x73522、0x73534；[完整重载](protocol/02.asm)，0x72072、0x72172～0x7219b | 参数经寄存器和栈传到PerformRequestAndReceiveResponse；没有把400和600混为同一字段 |
 | 设置通道预算 | [PerformRequestAndReceiveResponse](protocol/03.asm)，0x6c0c2～0x6c0cc、0x6c14d～0x6c158；[Channel虚表](channel-vtable.json) | 虚表偏移0x40是SetTimeout，发送/接收前设置传入值，结束路径恢复60 |
 | 保存预算 | [Channel::SetTimeout](protocol/04.asm)，0x2b7b60～0x2b7b6c；[BufferedIOBase::setTimeout](protocol/07.asm)，0x318ed0 | 通道字段和缓冲I/O对象的+0x18字段保存相同值 |

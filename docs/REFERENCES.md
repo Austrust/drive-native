@@ -14,6 +14,8 @@
 
 为解释450秒worker退出，已重新核对用户提供的官方4.2.1 build20062 ELF（包control为8.2.1-20062），SHA-256 `ea01d634762060424f4a5fd3fccb3f5c0ba7c10a81e90e144706fb2b8406314a`。LongPoller→ProtocolClient→Channel→BufferedIO调用链表明通道采用600秒进展超时，收到keep_alive继续接收，底层正数读取刷新计时点；native的450秒整个请求截止不等价。具体函数地址、虚表/PLT核验、版本差异和证据边界见[静态报告](validation/p0-official-timeout-static-001/REPORT.md)。尚未把该差异与真实退出前的保活行为关联；未执行官方客户端、未复制业务代码或改变产品。
 
+后续[服务器静态证据与MFM实测](validation/p0-wait-deadline-003/REPORT.md)确认：Drive Server 4.0.3-27892的syncd（SHA-256 `e2288b191e8db97673c3468595e3a2d441579d2da365927c1108c000549fdf9c`）在请求400秒基础上叠加time%90；native实测在450秒本地超时。等待预算不兼容已定位，尚未运行产品修复或把全部历史断连归因于它。
+
 ## SeaDrive 静态调用链：用于 P1 设计评审
 
 来源固定为上述提交，读取经 GitHub API；以下为行为归纳，不是代码移植。只确认静态锁范围，不声明锁的运行时持有时长。
