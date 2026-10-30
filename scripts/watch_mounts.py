@@ -1,10 +1,19 @@
 """Local watchdog; records bounded diagnostics, never credentials or file bodies."""
-import asyncio,ast,json,pathlib,time
-ROOT=pathlib.Path.home()/'.local/state/drive-native-soak'
+import argparse,asyncio,ast,json,pathlib,time
+parser=argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--state-dir',type=pathlib.Path,default=pathlib.Path.home()/'.local/state/drive-native-soak')
+options=parser.parse_args()
+ROOT=options.state_dir
 TASKS=json.loads((ROOT/'catalog.json').read_text())
 def emit(row):
  row['time']=time.time()
- with (ROOT/'watch-probe.jsonl').open('a') as f:f.write(json.dumps(row,ensure_ascii=False)+'\n')
+ log=ROOT/'watch-probe.jsonl'
+ if log.exists() and log.stat().st_size>=8*1024*1024:
+  for i in range(2,0,-1):
+   old=ROOT/f'watch-probe.jsonl.{i}'
+   if old.exists():old.replace(ROOT/f'watch-probe.jsonl.{i+1}')
+  log.replace(ROOT/'watch-probe.jsonl.1')
+ with log.open('a') as f:f.write(json.dumps(row,ensure_ascii=False)+'\n')
 async def run(args,timeout=3):
  p=await asyncio.create_subprocess_exec(*args,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.DEVNULL)
  try:

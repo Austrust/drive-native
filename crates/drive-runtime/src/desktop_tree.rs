@@ -4,7 +4,11 @@ use std::{
     collections::{HashMap, HashSet},
     io,
 };
-type Detail = (drive_core::Status, bool, Option<drive_core::download_jobs::DownloadFailure>);
+type Detail = (
+    drive_core::Status,
+    bool,
+    Option<drive_core::download_jobs::DownloadFailure>,
+);
 pub(super) struct StatusTree {
     details: HashMap<String, Result<Detail, ()>>,
     rows: HashMap<String, StatusSeed>,
@@ -27,16 +31,31 @@ impl StatusTree {
         let mut pending = roots.to_vec();
         while let Some(id) = pending.pop() {
             if wanted.insert(id.clone()) {
-                if let Some(entries) = children.get(&id) { pending.extend(entries.iter().map(|(id, _)| id.clone())); }
+                if let Some(entries) = children.get(&id) {
+                    pending.extend(entries.iter().map(|(id, _)| id.clone()));
+                }
             }
         }
         let mut details = HashMap::new();
         for n in rows.iter().filter(|n| n.detailed && wanted.contains(&n.id)) {
             let detail = (|| -> io::Result<Detail> {
-            let own = store.status(&n.id).map_err(io::Error::other)?;
-            let offline = !n.directory && (store.open_dirty_draft(&n.id).map_err(io::Error::other)?.is_some() || store.open_cached(&n.id).is_ok());
-            let failure = if n.directory || matches!(own, drive_core::Status::Conflict | drive_core::Status::PendingUpload) { None } else { store.download_failure(&n.id).map_err(io::Error::other)? };
-            Ok((own, offline, failure))
+                let own = store.status(&n.id).map_err(io::Error::other)?;
+                let offline = !n.directory
+                    && (store
+                        .open_dirty_draft(&n.id)
+                        .map_err(io::Error::other)?
+                        .is_some()
+                        || store.open_cached(&n.id).is_ok());
+                let failure = if n.directory
+                    || matches!(
+                        own,
+                        drive_core::Status::Conflict | drive_core::Status::PendingUpload
+                    ) {
+                    None
+                } else {
+                    store.download_failure(&n.id).map_err(io::Error::other)?
+                };
+                Ok((own, offline, failure))
             })();
             details.insert(n.id.clone(), detail.map_err(|_| ()));
         }
@@ -71,7 +90,9 @@ impl StatusTree {
         let (pin, overlay) = self.inherited(id, &mut HashSet::new())?;
         Ok((pin, self.rows.get(id).unwrap().detailed, overlay))
     }
-    pub fn detail(&self, id: &str) -> Option<Result<Detail, ()>> { self.details.get(id).cloned() }
+    pub fn detail(&self, id: &str) -> Option<Result<Detail, ()>> {
+        self.details.get(id).cloned()
+    }
     pub fn children(&self, id: &str) -> Vec<(String, bool)> {
         self.children.get(id).cloned().unwrap_or_default()
     }

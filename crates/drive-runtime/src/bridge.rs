@@ -238,7 +238,8 @@ impl Bridge {
     }
     /// Initial cursor zero is restricted to the verified lab bootstrap in the live
     /// test. Complete snapshot/permission recovery remains a production gate.
-    /// Retry quarantined directory permissions once per authenticated connection.
+    /// Retry quarantined permissions on an explicit session boundary. The service
+    /// uses cursor-based pull for transport retries within that session.
     pub fn initial_pull(&self) -> io::Result<bool> {
         let denied = self.store.lock().unwrap().inaccessible_count().map_err(io::Error::other)?;
         if denied > 0 {
