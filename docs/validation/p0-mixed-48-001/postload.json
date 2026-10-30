@@ -1,0 +1,68 @@
+{
+  "purpose": "three sequential requests per kind after mixed load; no restart; not a percentile acceptance run",
+  "samples": [
+    {
+      "kind": "directory",
+      "index": 0,
+      "at": 1793379466.8649724,
+      "ok": true,
+      "seconds": 1.9910357639892027
+    },
+    {
+      "kind": "directory",
+      "index": 1,
+      "at": 1793379468.8560112,
+      "ok": true,
+      "seconds": 1.9642015330027789
+    },
+    {
+      "kind": "directory",
+      "index": 2,
+      "at": 1793379470.820215,
+      "ok": true,
+      "seconds": 1.9874148440139834
+    },
+    {
+      "kind": "cached_read",
+      "index": 0,
+      "at": 1793379472.8076336,
+      "ok": true,
+      "seconds": 0.05162758700316772
+    },
+    {
+      "kind": "cached_read",
+      "index": 1,
+      "at": 1793379472.8592637,
+      "ok": true,
+      "seconds": 0.19101380801294
+    },
+    {
+      "kind": "cached_read",
+      "index": 2,
+      "at": 1793379473.0502799,
+      "ok": true,
+      "seconds": 0.1878101809998043
+    },
+    {
+      "kind": "status",
+      "index": 0,
+      "at": 1793379473.2381196,
+      "ok": true,
+      "seconds": 1.2328833770006895
+    },
+    {
+      "kind": "status",
+      "index": 1,
+      "at": 1793379474.54387,
+      "ok": true,
+      "seconds": 1.0434888640011195
+    },
+    {
+      "kind": "status",
+      "index": 2,
+      "at": 1793379475.587373,
+      "ok": true,
+      "seconds": 1.0463065110088792
+    }
+  ]
+}

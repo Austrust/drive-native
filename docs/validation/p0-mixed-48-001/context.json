@@ -1,0 +1,19 @@
+{
+  "collected_at": 1793379466.8595254,
+  "identity_reference": "../p0-baseline-audit.json",
+  "cpu": "Intel Core i5-10500, 6 cores / 12 threads exposed to WSL",
+  "nas_version_source": "prior project record, not re-queried during benchmark",
+  "nas_reported_version": "DSM 7.4.1; Drive Server 4.0.3-27892",
+  "network": "native TCP 6690 to LAN NAS; no link throughput baseline in this run",
+  "observed_peak_overlapping_request_intervals_per_round": [
+    48,
+    48,
+    48,
+    48,
+    48
+  ],
+  "runner_sha256": "eaa826f76586a21d3c162339bd708b241c229dd6554f6b92d8fd5226f50ae856",
+  "metadata_timing": "context collected after run; original preregistration is unmodified",
+  "postload_probe": "GetOverview observer health is not evidence that FUSE remains responsive",
+  "runner_lf_normalized_sha256": "eaa826f76586a21d3c162339bd708b241c229dd6554f6b92d8fd5226f50ae856"
+}

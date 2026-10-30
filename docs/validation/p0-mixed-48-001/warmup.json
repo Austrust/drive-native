@@ -1,0 +1,54 @@
+[
+  {
+    "kind": "directory",
+    "index": 0,
+    "warmup": true,
+    "start": 1793379068.658927,
+    "ok": true,
+    "seconds": 2.0416474410158116
+  },
+  {
+    "kind": "directory",
+    "index": 1,
+    "warmup": true,
+    "start": 1793379070.700579,
+    "ok": true,
+    "seconds": 1.9950838630029466
+  },
+  {
+    "kind": "status",
+    "index": 0,
+    "warmup": true,
+    "start": 1793379072.6956677,
+    "ok": true,
+    "seconds": 1.053534206992481
+  },
+  {
+    "kind": "status",
+    "index": 1,
+    "warmup": true,
+    "start": 1793379073.7492049,
+    "ok": true,
+    "seconds": 1.0793487890041433
+  },
+  {
+    "kind": "cached_read",
+    "index": 0,
+    "warmup": true,
+    "start": 1793379074.8285587,
+    "ok": true,
+    "first_byte_s": 0.4242197099956684,
+    "content_complete_s": 0.42849764999118634,
+    "seconds": 0.4553886979992967
+  },
+  {
+    "kind": "cached_read",
+    "index": 1,
+    "warmup": true,
+    "start": 1793379075.28395,
+    "ok": true,
+    "first_byte_s": 0.16103550800471567,
+    "content_complete_s": 0.16701793399988674,
+    "seconds": 0.1941515869984869
+  }
+]

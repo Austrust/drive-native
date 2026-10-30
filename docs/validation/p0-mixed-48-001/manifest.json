@@ -1,0 +1,21 @@
+{
+  "preregistered_at": 1793379068.6584687,
+  "lanes": 48,
+  "mix": {
+    "directory": 16,
+    "status": 16,
+    "cached_read": 16
+  },
+  "rounds": 5,
+  "warmup_per_kind": 2,
+  "timeout_s": 15,
+  "nodes": 212483,
+  "directory_children": 2702,
+  "directory_target_2000_exact": false,
+  "file_bytes": 1005024,
+  "cache_condition": "existing complete local blob; warmed by two reads; kernel/disk cache not independently controlled",
+  "timing": "subprocess launch to complete output; content worker additionally measures first-byte and content-complete; no app startup measured",
+  "percentiles": "nearest rank; timed-out samples included at observed timeout duration, right-censored; errors separately counted",
+  "interference": "existing six tasks and both diagnostic/24h probes remain active; planned load interval recorded",
+  "paths_local_only": true
+}
