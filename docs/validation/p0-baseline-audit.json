@@ -1,0 +1,174 @@
+{
+  "observed_at": 1793378656.6200624,
+  "source_commit": "62be13c9f9f4a2457a3040829f478bf43b1821df",
+  "checkout_commit": "c43b86df6a64ceda62abee26d8c7e9e815a0cd3a",
+  "archive_files_checked": 349,
+  "archive_mismatches": [],
+  "package_sha256": "4a66edf61d1a32f385f6f61f401db3c181b74f80df44cd0411140ae373c73cf4",
+  "package_version": "0.1.0~dev20261030.6",
+  "system": {
+    "kernel": "6.18.54.1-microsoft-standard-WSL2",
+    "cpu_logical": 12,
+    "machine": "x86_64",
+    "os_release": "PRETTY_NAME=\"Ubuntu 24.04.5 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nVERSION=\"24.04.5 LTS (Noble Numbat)\"\nVERSION_CODENAME=noble\nID=ubuntu\nID_LIKE=debian\nHOME_URL=\"https://www.ubuntu.com/\"\nSUPPORT_URL=\"https://help.ubuntu.com/\"\nBUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"\nPRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"\nUBUNTU_CODENAME=noble\nLOGO=ubuntu-logo\n"
+  },
+  "tasks": [
+    {
+      "scope": "team_14",
+      "readonly_profile": true,
+      "processes": [
+        {
+          "pid": 880828,
+          "rss_kib": 340408,
+          "threads": 32,
+          "fds": 20,
+          "sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678"
+        },
+        {
+          "pid": 889458,
+          "rss_kib": 7168,
+          "threads": 15,
+          "fds": 12,
+          "sha256": "c9b7bae2a75a9bdf83a17a29fe54f2111c03cd7c6ece9435a7c963834bcafa9d"
+        }
+      ],
+      "fsd_matches_installed_package": true,
+      "workers_match_installed_package": true,
+      "workers_present": 1,
+      "nodes": 91033,
+      "cached_files": 3,
+      "largest_directory_children": 20002
+    },
+    {
+      "scope": "team_11",
+      "readonly_profile": true,
+      "processes": [
+        {
+          "pid": 880752,
+          "rss_kib": 12204,
+          "threads": 30,
+          "fds": 19,
+          "sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678"
+        },
+        {
+          "pid": 891085,
+          "rss_kib": 7140,
+          "threads": 15,
+          "fds": 12,
+          "sha256": "c9b7bae2a75a9bdf83a17a29fe54f2111c03cd7c6ece9435a7c963834bcafa9d"
+        }
+      ],
+      "fsd_matches_installed_package": true,
+      "workers_match_installed_package": true,
+      "workers_present": 1,
+      "nodes": 666,
+      "cached_files": 0,
+      "largest_directory_children": 74
+    },
+    {
+      "scope": "team_12",
+      "readonly_profile": true,
+      "processes": [
+        {
+          "pid": 880770,
+          "rss_kib": 12496,
+          "threads": 30,
+          "fds": 19,
+          "sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678"
+        },
+        {
+          "pid": 891013,
+          "rss_kib": 7124,
+          "threads": 15,
+          "fds": 12,
+          "sha256": "c9b7bae2a75a9bdf83a17a29fe54f2111c03cd7c6ece9435a7c963834bcafa9d"
+        }
+      ],
+      "fsd_matches_installed_package": true,
+      "workers_match_installed_package": true,
+      "workers_present": 1,
+      "nodes": 839,
+      "cached_files": 0,
+      "largest_directory_children": 38
+    },
+    {
+      "scope": "team_50",
+      "readonly_profile": true,
+      "processes": [
+        {
+          "pid": 880769,
+          "rss_kib": 10100,
+          "threads": 29,
+          "fds": 19,
+          "sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678"
+        },
+        {
+          "pid": 881061,
+          "rss_kib": 7192,
+          "threads": 15,
+          "fds": 12,
+          "sha256": "c9b7bae2a75a9bdf83a17a29fe54f2111c03cd7c6ece9435a7c963834bcafa9d"
+        }
+      ],
+      "fsd_matches_installed_package": true,
+      "workers_match_installed_package": true,
+      "workers_present": 1,
+      "nodes": 269,
+      "cached_files": 0,
+      "largest_directory_children": 26
+    },
+    {
+      "scope": "personal_root",
+      "readonly_profile": true,
+      "processes": [
+        {
+          "pid": 880883,
+          "rss_kib": 304988,
+          "threads": 30,
+          "fds": 19,
+          "sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678"
+        },
+        {
+          "pid": 888890,
+          "rss_kib": 7240,
+          "threads": 15,
+          "fds": 12,
+          "sha256": "c9b7bae2a75a9bdf83a17a29fe54f2111c03cd7c6ece9435a7c963834bcafa9d"
+        }
+      ],
+      "fsd_matches_installed_package": true,
+      "workers_match_installed_package": true,
+      "workers_present": 1,
+      "nodes": 215039,
+      "cached_files": 0,
+      "largest_directory_children": 6000
+    },
+    {
+      "scope": "personal_subtree",
+      "readonly_profile": true,
+      "processes": [
+        {
+          "pid": 880915,
+          "rss_kib": 353676,
+          "threads": 32,
+          "fds": 19,
+          "sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678"
+        },
+        {
+          "pid": 888873,
+          "rss_kib": 7360,
+          "threads": 15,
+          "fds": 12,
+          "sha256": "c9b7bae2a75a9bdf83a17a29fe54f2111c03cd7c6ece9435a7c963834bcafa9d"
+        }
+      ],
+      "fsd_matches_installed_package": true,
+      "workers_match_installed_package": true,
+      "workers_present": 1,
+      "nodes": 212458,
+      "cached_files": 3,
+      "largest_directory_children": 6000
+    }
+  ],
+  "probe": "MainPID=838892\nExecMainStartTimestamp=Fri 2026-10-30 23:48:31 CST\nActiveState=active"
+}
