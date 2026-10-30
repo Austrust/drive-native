@@ -1,6 +1,6 @@
 # P0 持久性契约核验草案
 
-以下是源码检查，不是断电验收承诺。引用构建基线 `.6`，需要独立判定器和故障注入补证。
+引用构建基线 `.6`。源码检查已补普通可写挂载及正常重启的实测，见 [P0边界报告](validation/p0-durability-001/REPORT.md)；仍不是断电验收承诺，故障模型尚需补证。
 
 | 边界 | 现有实现 | 可声明范围/待验 |
 |---|---|---|
@@ -9,6 +9,8 @@
 | release/close | release调用sync并移除句柄 | 不能假定应用能够可靠收到所有close后的内核release错误；须单列应用行为 |
 | 目录fsync | FUSE实现未覆盖fsyncdir | 未达到显式目录fsync契约，必须测试默认行为并在后续阶段处理 |
 | 服务器已确认 | 原生确认及版本核对之后的状态 | 不将本地fsync、传输100%视为服务器已提交；未知提交不得盲重试 |
+
+合成夹具实测：write后仅有dirty草稿，文件fsync后生成匹配内容哈希的dirty_blob及pending upload；临时文件替换、目录和文件在正常重启后通过独立命名空间/哈希校验。6项现有FUSE内核测试显式执行通过。该实验只有1轮正常生命周期，没有注入崩溃或断电，不计入P2/P3重复次数。
 
 源码入口：[writable.rs](../crates/drive-fs/src/writable.rs)、[lib.rs](../crates/drive-fs/src/lib.rs)、[drafts.rs](../crates/drive-core/src/drafts.rs)。判定器需比较持久边界前后版本、草稿、日志与命名空间，不仅读取GUI状态。
 

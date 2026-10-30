@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "files": {
+    "A.bin": "1c3fdaf62acfdf875b687f17bf904ff52517bc2231e7b490437ac00c3ce3b81e",
+    "created/B.bin": "fda6f4654a0f47e5fb2084ad98bdbfbabb5a14e5aec49d71769e3fe444219627"
+  },
+  "directories": [
+    "created"
+  ]
+}

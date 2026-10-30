@@ -1,0 +1,38 @@
+{
+  "label": "after-close",
+  "time": 1793384355.9063132,
+  "node": {
+    "id": "baseline-file",
+    "remote_version": "fixture-v1",
+    "local_version": "fixture-v1",
+    "blob": "76bf229e-7151-4326-bf3c-ebddc879e06f",
+    "dirty_blob": "8a66c82f-ede3-4ba8-bf1c-d50d2b32eed7",
+    "base_version": "fixture-v1",
+    "dirty_generation": 1
+  },
+  "drafts": [
+    {
+      "node": "baseline-file",
+      "token": "72e26084-1dd6-42ce-9621-c30664d8e870",
+      "base": "fixture-v1",
+      "generation": 1,
+      "checkpoint": 1,
+      "dirty": 1,
+      "sha256": "0615b6fcd23102d70fb80da9e47d93e66bdd90d80ce96702b1fef5ea92d76287"
+    }
+  ],
+  "operations": [
+    {
+      "id": "08020817-d7f5-4761-98b4-2dcccbb356eb",
+      "node": "baseline-file",
+      "kind": "upload",
+      "base": "fixture-v1",
+      "blob": "8a66c82f-ede3-4ba8-bf1c-d50d2b32eed7",
+      "generation": 1,
+      "state": "pending"
+    }
+  ],
+  "namespace_jobs": 0,
+  "blob_sha256": "d67c656e01756650d77717b0839985a056ec28ffe174601d690fc407a2ceffca",
+  "dirty_blob_sha256": "0615b6fcd23102d70fb80da9e47d93e66bdd90d80ce96702b1fef5ea92d76287"
+}

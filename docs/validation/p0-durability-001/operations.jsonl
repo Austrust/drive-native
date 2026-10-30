@@ -1,0 +1,5 @@
+{"step": "write", "ok": true, "elapsed_s": 0.008813910011667758}
+{"step": "fsync", "ok": true, "elapsed_s": 0.012608782009920105}
+{"step": "atomic-save-replace", "ok": true, "elapsed_s": 0.046659162995638326}
+{"step": "parent-fsync", "ok": true, "elapsed_s": 0.0016094949969556183}
+{"step": "mkdir-child-fsync", "ok": true, "elapsed_s": 0.04881759101408534}

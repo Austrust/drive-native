@@ -1,0 +1,15 @@
+{
+  "registered_at": 1793384338.9828002,
+  "scope": "synthetic local-only fixture; never Unlock; no NAS",
+  "cases": [
+    "write without fsync and inspect",
+    "fsync while handle remains open and inspect",
+    "close and inspect",
+    "temp write+fsync+rename replace+directory fsync",
+    "mkdir and child write+fsync+directory fsync",
+    "normal unmount/restart independent namespace/content verification"
+  ],
+  "rounds": 1,
+  "limitations": "boundary observation only, not P2 repetitions or P3 failure/power-loss injection",
+  "operation_deadline_s": 15
+}

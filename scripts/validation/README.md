@@ -53,3 +53,9 @@ python3 scripts/validation/test_byte_relay.py
 就绪后在状态目录写入 `relay-ready.json`。同用户通过权限0600的 `relay.sock` 发送 `status\n` 查询计数，或发送 `drop\n` 中断本工具持有的连接；监听器继续运行。仅 `aborted_streams` 非零不够证明恢复成功，还须检查连接代次、客户端恢复状态和实际本地读。停止客户端后再停止转发器，检查退出结果。残留 socket 不自动覆盖，避免误接管其他测试。
 
 本机回环测试已在WSL通过1项，覆盖透明回传和实际连接关闭。真实NAS基线使用其固定参数前身，实际执行脚本、哈希及全部样本见[恢复报告](../../docs/validation/p0-recovery-001/REPORT.md)。它只模拟显式断开，不能替代丢包、限速、长时间不可达或服务器重启实验。
+
+## 小型持久性边界夹具
+
+`cargo run --release --locked -p drive-core --example durability_fixture -- /absolute/new-fixture` 仅生成三节点合成SQLite状态及确定性内容，拒绝覆盖已有目录，不启动网络或挂载。与210k性能夹具分开使用。
+
+使用`.6`服务启动本地可写挂载、保持网络锁定，检查write/fsync、普通保存和正常卸载/重启的实际脚本、预先登记的期望及独立校验结果见[边界报告](../../docs/validation/p0-durability-001/REPORT.md)。该流程1轮通过；6项既有mounted内核测试也显式执行通过。它不替代故障注入、真正磁盘满/EIO或独立断电测试。

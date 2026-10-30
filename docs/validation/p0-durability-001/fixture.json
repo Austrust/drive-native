@@ -1,0 +1,8 @@
+{
+  "body_sha256": "d67c656e01756650d77717b0839985a056ec28ffe174601d690fc407a2ceffca",
+  "body_size": 4096,
+  "file": "lab/A.bin",
+  "network": "none; synthetic identities cannot authenticate",
+  "nodes": 3,
+  "schema": 1
+}

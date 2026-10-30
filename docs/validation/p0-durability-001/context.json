@@ -1,0 +1,13 @@
+{
+  "fsd_sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678",
+  "builder_sha256": "ddad000571ee283df9d4d2d2707d7aa90e1e0fc408362e41243e829c7898bd2e",
+  "builder_source": "71006ad",
+  "runtime_source": "62be13c9f9f4a2457a3040829f478bf43b1821df",
+  "kernel_tests_sha256": "b7ea5bb287488547ecf24e34347c39abebb2bd9116846ccb10b06500a79e51fa",
+  "package_sha256": "4a66edf61d1a32f385f6f61f401db3c181b74f80df44cd0411140ae373c73cf4",
+  "uid": 1000,
+  "network_unlocked": false,
+  "nas_writes": false,
+  "original_mounts_restarted": false,
+  "scope": "one normal lifecycle observation plus six existing mounted kernel tests; no failure injection"
+}

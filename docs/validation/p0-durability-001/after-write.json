@@ -1,0 +1,27 @@
+{
+  "label": "after-write",
+  "time": 1793384355.8915322,
+  "node": {
+    "id": "baseline-file",
+    "remote_version": "fixture-v1",
+    "local_version": "fixture-v1",
+    "blob": "76bf229e-7151-4326-bf3c-ebddc879e06f",
+    "dirty_blob": null,
+    "base_version": null,
+    "dirty_generation": 0
+  },
+  "drafts": [
+    {
+      "node": "baseline-file",
+      "token": "72e26084-1dd6-42ce-9621-c30664d8e870",
+      "base": "fixture-v1",
+      "generation": 1,
+      "checkpoint": 0,
+      "dirty": 1,
+      "sha256": "0615b6fcd23102d70fb80da9e47d93e66bdd90d80ce96702b1fef5ea92d76287"
+    }
+  ],
+  "operations": [],
+  "namespace_jobs": 0,
+  "blob_sha256": "d67c656e01756650d77717b0839985a056ec28ffe174601d690fc407a2ceffca"
+}

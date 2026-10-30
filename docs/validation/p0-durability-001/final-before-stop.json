@@ -1,0 +1,92 @@
+{
+  "label": "final-before-stop",
+  "time": 1793384356.0120742,
+  "node": {
+    "id": "baseline-file",
+    "remote_version": "fixture-v1",
+    "local_version": "fixture-v1",
+    "blob": "76bf229e-7151-4326-bf3c-ebddc879e06f",
+    "dirty_blob": "8a66c82f-ede3-4ba8-bf1c-d50d2b32eed7",
+    "base_version": "fixture-v1",
+    "dirty_generation": 1
+  },
+  "drafts": [
+    {
+      "node": "baseline-file",
+      "token": "72e26084-1dd6-42ce-9621-c30664d8e870",
+      "base": "fixture-v1",
+      "generation": 1,
+      "checkpoint": 1,
+      "dirty": 1,
+      "sha256": "0615b6fcd23102d70fb80da9e47d93e66bdd90d80ce96702b1fef5ea92d76287"
+    },
+    {
+      "node": "local:6ee33819-e267-411b-b24d-807f29cd0615",
+      "token": "46c9e40d-8ac4-49fc-be58-1b8a78581b05",
+      "base": "local-create-v1",
+      "generation": 1,
+      "checkpoint": 1,
+      "dirty": 1,
+      "sha256": "1c3fdaf62acfdf875b687f17bf904ff52517bc2231e7b490437ac00c3ce3b81e"
+    },
+    {
+      "node": "local:692730b5-c77f-4e33-b7bf-88436d18a972",
+      "token": "c66b2364-ed88-40db-9781-ef8ae384c97e",
+      "base": "local-create-v1",
+      "generation": 1,
+      "checkpoint": 1,
+      "dirty": 1,
+      "sha256": "fda6f4654a0f47e5fb2084ad98bdbfbabb5a14e5aec49d71769e3fe444219627"
+    }
+  ],
+  "operations": [
+    {
+      "id": "08020817-d7f5-4761-98b4-2dcccbb356eb",
+      "node": "baseline-file",
+      "kind": "upload",
+      "base": "fixture-v1",
+      "blob": "8a66c82f-ede3-4ba8-bf1c-d50d2b32eed7",
+      "generation": 1,
+      "state": "superseded"
+    },
+    {
+      "id": "f6a7ad74-7e25-45d5-b2b8-40c0f2c867ab",
+      "node": "local:6ee33819-e267-411b-b24d-807f29cd0615",
+      "kind": "upload",
+      "base": "local-create-v1",
+      "blob": "14d77b28-d464-4c6f-9cac-086a36e8fbc6",
+      "generation": 1,
+      "state": "superseded"
+    },
+    {
+      "id": "c17dc243-95f9-47e5-a0e0-ca462981d919",
+      "node": "local:6ee33819-e267-411b-b24d-807f29cd0615",
+      "kind": "upload",
+      "base": "local-create-v1",
+      "blob": "8709d061-77eb-4c19-842e-2f78b533e13d",
+      "generation": 2,
+      "state": "superseded"
+    },
+    {
+      "id": "d273da55-0dfb-41f1-b7f0-5dd2c88d1a51",
+      "node": "local:692730b5-c77f-4e33-b7bf-88436d18a972",
+      "kind": "upload",
+      "base": "local-create-v1",
+      "blob": "2a06a65c-18df-47d5-917a-3939499b4d8d",
+      "generation": 1,
+      "state": "superseded"
+    },
+    {
+      "id": "dd5a60cb-9eac-4cb4-9a28-c04b26010e1b",
+      "node": "local:692730b5-c77f-4e33-b7bf-88436d18a972",
+      "kind": "upload",
+      "base": "local-create-v1",
+      "blob": "14bb7635-5129-4128-955b-80ab27352d57",
+      "generation": 2,
+      "state": "pending"
+    }
+  ],
+  "namespace_jobs": 2,
+  "blob_sha256": "d67c656e01756650d77717b0839985a056ec28ffe174601d690fc407a2ceffca",
+  "dirty_blob_sha256": "0615b6fcd23102d70fb80da9e47d93e66bdd90d80ce96702b1fef5ea92d76287"
+}

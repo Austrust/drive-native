@@ -1,0 +1,5 @@
+{
+  "passed": true,
+  "errors": [],
+  "scope": "quiescent fixture files and specified local records; not server identity or power-loss proof"
+}

@@ -1,0 +1,10 @@
+{
+  "source_hashes_match": true,
+  "pre_fsync_draft_verified": true,
+  "post_fsync_snapshot_verified": true,
+  "independent_oracle_passes": 2,
+  "kernel_tests_passed": 6,
+  "links_checked": 55,
+  "power_loss_tested": false,
+  "full_product_regression_rerun": false
+}
