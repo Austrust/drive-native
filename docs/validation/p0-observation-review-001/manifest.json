@@ -1,0 +1,14 @@
+{
+  "started_at": 1793378841.449908,
+  "duration_s": 86400,
+  "build_commit": "62be13c9f9f4a2457a3040829f478bf43b1821df",
+  "package_sha256": "4a66edf61d1a32f385f6f61f401db3c181b74f80df44cd0411140ae373c73cf4",
+  "allowed_binary_sha256": [
+    "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678",
+    "c9b7bae2a75a9bdf83a17a29fe54f2111c03cd7c6ece9435a7c963834bcafa9d"
+  ],
+  "purpose": "P0 WSL observational baseline; not P6 stability acceptance",
+  "nas_writes": false,
+  "process_scope": "fsd and direct worker children; RSS sum includes shared-page duplication; PSS also recorded; GUI excluded",
+  "known_interference": "existing local watch probe remains active; development workload must be recorded; no official A/B inference"
+}

@@ -1,0 +1,10 @@
+{
+  "frozen_snapshot_hash_verified": true,
+  "task_samples": 5112,
+  "failure_samples": 8,
+  "bounded_worker_segments": 78,
+  "intervals_covering_450_seconds": 62,
+  "links_checked": 28,
+  "full_24h_completed": false,
+  "root_cause_proven": false
+}

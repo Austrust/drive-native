@@ -1,0 +1,556 @@
+{
+  "scope": "partial .6 observational baseline; GetOverview and process statistics, not FUSE correctness or performance acceptance",
+  "captured_at": 1793387391.6647086,
+  "observations_sha256": "e9fb9b15b923e883a66d5b0540c465aee19313c86acc07c04e88793dd47ca3b4",
+  "observations_bytes": 2571184,
+  "planned_loads_sha256": "9391962fcc0db21962acf8615f5cd50cf2cd36df527ee7fc865c1106821da86b",
+  "parse_error_lines": [],
+  "status_snapshot": {
+    "state": "running",
+    "iterations": 852,
+    "failed_observations": 8,
+    "elapsed_s": 8518.141916094988,
+    "last_sample": 1793387382.1481764,
+    "pid": 894834
+  },
+  "tasks": {
+    "b134e0e4903086dc8beeb7b7d210a6d2": {
+      "sample_count": 852,
+      "first_iteration": 0,
+      "last_iteration": 851,
+      "missing_iterations": [],
+      "duplicate_iterations": [],
+      "failed_samples": 2,
+      "connection_counts": {
+        "online": 850,
+        "connecting": 1,
+        "offline": 1
+      },
+      "errors": {
+        "network_unavailable": 2
+      },
+      "mounted_false_or_unknown": 0,
+      "intervals_over_15s_or_nonpositive": [],
+      "fsd_pids": [
+        880828
+      ],
+      "worker_pid_count": 18,
+      "binary_check_count": 284,
+      "binary_mismatches": [],
+      "overview_ms_all_observed": {
+        "n": 852,
+        "p50": 7.32455900288187,
+        "p95": 9.184485010337085,
+        "p99": 27.470044005895033,
+        "max": 100.67765502026305
+      },
+      "overview_missing": 0,
+      "rss_sum_kib": {
+        "n": 852,
+        "p50": 321412,
+        "p95": 343560,
+        "p99": 343848,
+        "max": 354508
+      },
+      "pss_sum_kib": {
+        "n": 852,
+        "p50": 309443,
+        "p95": 331502,
+        "p99": 331795,
+        "max": 342604
+      },
+      "resource_missing": 0,
+      "cpu_same_pid_segments": {
+        "n": 833,
+        "covered_s": 8359.80763745308,
+        "mean_percent_one_core": 0.8299234026530479
+      }
+    },
+    "7298618a9f57e447c393e071903a0491": {
+      "sample_count": 852,
+      "first_iteration": 0,
+      "last_iteration": 851,
+      "missing_iterations": [],
+      "duplicate_iterations": [],
+      "failed_samples": 1,
+      "connection_counts": {
+        "online": 851,
+        "offline": 1
+      },
+      "errors": {
+        "network_unavailable": 1
+      },
+      "mounted_false_or_unknown": 0,
+      "intervals_over_15s_or_nonpositive": [],
+      "fsd_pids": [
+        880752
+      ],
+      "worker_pid_count": 12,
+      "binary_check_count": 283,
+      "binary_mismatches": [],
+      "overview_ms_all_observed": {
+        "n": 852,
+        "p50": 7.175268983701244,
+        "p95": 8.936182013712823,
+        "p99": 22.812893002992496,
+        "max": 58.249121997505426
+      },
+      "overview_missing": 0,
+      "rss_sum_kib": {
+        "n": 852,
+        "p50": 19700,
+        "p95": 19856,
+        "p99": 19856,
+        "max": 19856
+      },
+      "pss_sum_kib": {
+        "n": 852,
+        "p50": 7702,
+        "p95": 7852,
+        "p99": 7854,
+        "max": 7854
+      },
+      "resource_missing": 0,
+      "cpu_same_pid_segments": {
+        "n": 839,
+        "covered_s": 8419.88158941269,
+        "mean_percent_one_core": 0.13919435654222195
+      }
+    },
+    "b9d23989052bf43cb9e13f0babc50458": {
+      "sample_count": 852,
+      "first_iteration": 0,
+      "last_iteration": 851,
+      "missing_iterations": [],
+      "duplicate_iterations": [],
+      "failed_samples": 1,
+      "connection_counts": {
+        "online": 851,
+        "offline": 1
+      },
+      "errors": {
+        "network_unavailable": 1
+      },
+      "mounted_false_or_unknown": 0,
+      "intervals_over_15s_or_nonpositive": [],
+      "fsd_pids": [
+        880770
+      ],
+      "worker_pid_count": 19,
+      "binary_check_count": 284,
+      "binary_mismatches": [],
+      "overview_ms_all_observed": {
+        "n": 852,
+        "p50": 7.841877988539636,
+        "p95": 9.206315007759258,
+        "p99": 21.257004991639405,
+        "max": 121.366872015642
+      },
+      "overview_missing": 0,
+      "rss_sum_kib": {
+        "n": 852,
+        "p50": 19852,
+        "p95": 20068,
+        "p99": 20076,
+        "max": 20080
+      },
+      "pss_sum_kib": {
+        "n": 852,
+        "p50": 7899,
+        "p95": 8064,
+        "p99": 8090,
+        "max": 8097
+      },
+      "resource_missing": 0,
+      "cpu_same_pid_segments": {
+        "n": 832,
+        "covered_s": 8349.48266530037,
+        "mean_percent_one_core": 0.18001115281624824
+      }
+    },
+    "5de7d17a5d0b1e1834530c6e23a635f3": {
+      "sample_count": 852,
+      "first_iteration": 0,
+      "last_iteration": 851,
+      "missing_iterations": [],
+      "duplicate_iterations": [],
+      "failed_samples": 2,
+      "connection_counts": {
+        "online": 850,
+        "connecting": 1,
+        "offline": 1
+      },
+      "errors": {
+        "network_unavailable": 2
+      },
+      "mounted_false_or_unknown": 0,
+      "intervals_over_15s_or_nonpositive": [],
+      "fsd_pids": [
+        880769
+      ],
+      "worker_pid_count": 15,
+      "binary_check_count": 284,
+      "binary_mismatches": [],
+      "overview_ms_all_observed": {
+        "n": 852,
+        "p50": 8.14025299041532,
+        "p95": 9.48251600493677,
+        "p99": 27.094554010545835,
+        "max": 114.55602600472048
+      },
+      "overview_missing": 0,
+      "rss_sum_kib": {
+        "n": 852,
+        "p50": 17960,
+        "p95": 18124,
+        "p99": 18124,
+        "max": 18124
+      },
+      "pss_sum_kib": {
+        "n": 852,
+        "p50": 6134,
+        "p95": 6321,
+        "p99": 6325,
+        "max": 6325
+      },
+      "resource_missing": 0,
+      "cpu_same_pid_segments": {
+        "n": 836,
+        "covered_s": 8390.29977440834,
+        "mean_percent_one_core": 0.13563281772971553
+      }
+    },
+    "35995614c699c8d2db61a0def4ef8bd6": {
+      "sample_count": 852,
+      "first_iteration": 0,
+      "last_iteration": 851,
+      "missing_iterations": [],
+      "duplicate_iterations": [],
+      "failed_samples": 1,
+      "connection_counts": {
+        "online": 851,
+        "connecting": 1
+      },
+      "errors": {
+        "network_unavailable": 1
+      },
+      "mounted_false_or_unknown": 0,
+      "intervals_over_15s_or_nonpositive": [],
+      "fsd_pids": [
+        880883
+      ],
+      "worker_pid_count": 13,
+      "binary_check_count": 284,
+      "binary_mismatches": [],
+      "overview_ms_all_observed": {
+        "n": 852,
+        "p50": 8.344432018930092,
+        "p95": 9.97104198904708,
+        "p99": 164.3076820182614,
+        "max": 521.7755449994002
+      },
+      "overview_missing": 0,
+      "rss_sum_kib": {
+        "n": 852,
+        "p50": 414524,
+        "p95": 433408,
+        "p99": 433408,
+        "max": 468656
+      },
+      "pss_sum_kib": {
+        "n": 852,
+        "p50": 402710,
+        "p95": 421600,
+        "p99": 421600,
+        "max": 456823
+      },
+      "resource_missing": 0,
+      "cpu_same_pid_segments": {
+        "n": 839,
+        "covered_s": 8419.87288761139,
+        "mean_percent_one_core": 2.075090708994847
+      }
+    },
+    "0bc76c0cc6a606e11aaaf4bd4687058f": {
+      "sample_count": 852,
+      "first_iteration": 0,
+      "last_iteration": 851,
+      "missing_iterations": [],
+      "duplicate_iterations": [],
+      "failed_samples": 1,
+      "connection_counts": {
+        "online": 851,
+        "connecting": 1
+      },
+      "errors": {
+        "network_unavailable": 1
+      },
+      "mounted_false_or_unknown": 0,
+      "intervals_over_15s_or_nonpositive": [],
+      "fsd_pids": [
+        880915
+      ],
+      "worker_pid_count": 13,
+      "binary_check_count": 284,
+      "binary_mismatches": [],
+      "overview_ms_all_observed": {
+        "n": 852,
+        "p50": 8.682929998030886,
+        "p95": 12.810478016035631,
+        "p99": 497.0710139896255,
+        "max": 4852.144283009693
+      },
+      "overview_missing": 0,
+      "rss_sum_kib": {
+        "n": 852,
+        "p50": 1576960,
+        "p95": 1607912,
+        "p99": 1608084,
+        "max": 1628472
+      },
+      "pss_sum_kib": {
+        "n": 852,
+        "p50": 1564945,
+        "p95": 1596141,
+        "p99": 1596299,
+        "max": 1617833
+      },
+      "resource_missing": 0,
+      "cpu_same_pid_segments": {
+        "n": 839,
+        "covered_s": 8419.87307024002,
+        "mean_percent_one_core": 3.8190599468363886
+      }
+    }
+  },
+  "new_product_code": false,
+  "runtime_touched": false,
+  "start_records": 1,
+  "finished_records": 0,
+  "unknown_task_ids": [],
+  "failures": [
+    {
+      "time": 1793381368.8843238,
+      "task": "b134e0e4903086dc8beeb7b7d210a6d2",
+      "iteration": 252,
+      "connection": "connecting",
+      "mounted": true,
+      "error": "network_unavailable",
+      "background_error": null,
+      "overview_ms": 7.501485000830144,
+      "processes": [
+        {
+          "pid": 880828,
+          "rss_kib": 312284,
+          "pss_kib": 305544,
+          "threads": 32,
+          "fds": 21,
+          "cpu_seconds": 58.83,
+          "binary_sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678",
+          "expected_binary": true
+        },
+        {
+          "pid": 916049,
+          "rss_kib": 6320,
+          "pss_kib": 1670,
+          "threads": 15,
+          "fds": 12,
+          "cpu_seconds": 0.0,
+          "binary_sha256": "c9b7bae2a75a9bdf83a17a29fe54f2111c03cd7c6ece9435a7c963834bcafa9d",
+          "expected_binary": true
+        }
+      ],
+      "ok": false,
+      "elapsed_ms": 49.13242600741796
+    },
+    {
+      "time": 1793381820.4068615,
+      "task": "b134e0e4903086dc8beeb7b7d210a6d2",
+      "iteration": 297,
+      "connection": "offline",
+      "mounted": true,
+      "error": "network_unavailable",
+      "background_error": null,
+      "overview_ms": 7.165251998230815,
+      "processes": [
+        {
+          "pid": 880828,
+          "rss_kib": 314124,
+          "pss_kib": 307382,
+          "threads": 30,
+          "fds": 18,
+          "cpu_seconds": 63.04
+        }
+      ],
+      "ok": false,
+      "elapsed_ms": 27.245595993008465
+    },
+    {
+      "time": 1793382211.923918,
+      "task": "7298618a9f57e447c393e071903a0491",
+      "iteration": 336,
+      "connection": "offline",
+      "mounted": true,
+      "error": "network_unavailable",
+      "background_error": null,
+      "overview_ms": 6.9346769887488335,
+      "processes": [
+        {
+          "pid": 880752,
+          "rss_kib": 12464,
+          "pss_kib": 5567,
+          "threads": 28,
+          "fds": 17,
+          "cpu_seconds": 8.27,
+          "binary_sha256": "3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678",
+          "expected_binary": true
+        }
+      ],
+      "ok": false,
+      "elapsed_ms": 32.76384298806079
+    },
+    {
+      "time": 1793379934.6628885,
+      "task": "b9d23989052bf43cb9e13f0babc50458",
+      "iteration": 109,
+      "connection": "offline",
+      "mounted": true,
+      "error": "network_unavailable",
+      "background_error": null,
+      "overview_ms": 8.035340026253834,
+      "processes": [
+        {
+          "pid": 880770,
+          "rss_kib": 12588,
+          "pss_kib": 5829,
+          "threads": 28,
+          "fds": 17,
+          "cpu_seconds": 6.67
+        }
+      ],
+      "ok": false,
+      "elapsed_ms": 31.31996002048254
+    },
+    {
+      "time": 1793383917.5359087,
+      "task": "5de7d17a5d0b1e1834530c6e23a635f3",
+      "iteration": 506,
+      "connection": "connecting",
+      "mounted": true,
+      "error": "network_unavailable",
+      "background_error": null,
+      "overview_ms": 7.723758986685425,
+      "processes": [
+        {
+          "pid": 880769,
+          "rss_kib": 10752,
+          "pss_kib": 4043,
+          "threads": 30,
+          "fds": 20,
+          "cpu_seconds": 10.24
+        },
+        {
+          "pid": 938138,
+          "rss_kib": 6324,
+          "pss_kib": 1620,
+          "threads": 15,
+          "fds": 12,
+          "cpu_seconds": 0.0
+        }
+      ],
+      "ok": false,
+      "elapsed_ms": 32.20852499362081
+    },
+    {
+      "time": 1793384369.1590023,
+      "task": "5de7d17a5d0b1e1834530c6e23a635f3",
+      "iteration": 551,
+      "connection": "offline",
+      "mounted": true,
+      "error": "network_unavailable",
+      "background_error": null,
+      "overview_ms": 6.338506005704403,
+      "processes": [
+        {
+          "pid": 880769,
+          "rss_kib": 10764,
+          "pss_kib": 4056,
+          "threads": 28,
+          "fds": 17,
+          "cpu_seconds": 10.84
+        }
+      ],
+      "ok": false,
+      "elapsed_ms": 29.718471021624282
+    },
+    {
+      "time": 1793385423.5735972,
+      "task": "35995614c699c8d2db61a0def4ef8bd6",
+      "iteration": 656,
+      "connection": "connecting",
+      "mounted": true,
+      "error": "network_unavailable",
+      "background_error": null,
+      "overview_ms": 9.700361988507211,
+      "processes": [
+        {
+          "pid": 880883,
+          "rss_kib": 411788,
+          "pss_kib": 405158,
+          "threads": 31,
+          "fds": 20,
+          "cpu_seconds": 197.57
+        },
+        {
+          "pid": 954680,
+          "rss_kib": 6304,
+          "pss_kib": 1663,
+          "threads": 15,
+          "fds": 12,
+          "cpu_seconds": 0.0
+        }
+      ],
+      "ok": false,
+      "elapsed_ms": 43.513769982382655
+    },
+    {
+      "time": 1793385423.5742114,
+      "task": "0bc76c0cc6a606e11aaaf4bd4687058f",
+      "iteration": 656,
+      "connection": "connecting",
+      "mounted": true,
+      "error": "network_unavailable",
+      "background_error": null,
+      "overview_ms": 13.719466980546713,
+      "processes": [
+        {
+          "pid": 880915,
+          "rss_kib": 1586492,
+          "pss_kib": 1579877,
+          "threads": 46,
+          "fds": 20,
+          "cpu_seconds": 367.12
+        },
+        {
+          "pid": 954681,
+          "rss_kib": 6480,
+          "pss_kib": 1708,
+          "threads": 15,
+          "fds": 12,
+          "cpu_seconds": 0.0
+        }
+      ],
+      "ok": false,
+      "elapsed_ms": 127.94578800094314
+    }
+  ],
+  "complete_24h_record_present": false,
+  "product_stability_accepted": false,
+  "limitations": [
+    "Active observer may append after the frozen snapshot; status and snapshot end are not an atomic pair.",
+    "10-second sampling cannot establish exact disconnection or recovery duration.",
+    "Resource distributions include recorded development/network loads, not idle-window acceptance.",
+    "CPU pairs exclude PID changes and gaps; omitted intervals are not counted as zero usage.",
+    "No FUSE access, content consistency or server convergence assertion follows from GetOverview."
+  ]
+}

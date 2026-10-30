@@ -1,0 +1,590 @@
+{
+  "0bc76c0cc6a606e11aaaf4bd4687058f": {
+    "fully_bounded_segments": [
+      {
+        "pid": 900305,
+        "first_iteration": 67,
+        "last_iteration": 111,
+        "observed_lifetime_lower_s": 441.2555375099182,
+        "sample_bounded_lifetime_upper_s": 461.38923239707947
+      },
+      {
+        "pid": 904186,
+        "first_iteration": 112,
+        "last_iteration": 289,
+        "observed_lifetime_lower_s": 1775.3389377593994,
+        "sample_bounded_lifetime_upper_s": 1795.3964653015137
+      },
+      {
+        "pid": 919956,
+        "first_iteration": 290,
+        "last_iteration": 334,
+        "observed_lifetime_lower_s": 441.7460858821869,
+        "sample_bounded_lifetime_upper_s": 461.7662441730499
+      },
+      {
+        "pid": 923399,
+        "first_iteration": 335,
+        "last_iteration": 379,
+        "observed_lifetime_lower_s": 441.2893867492676,
+        "sample_bounded_lifetime_upper_s": 461.3100891113281
+      },
+      {
+        "pid": 927310,
+        "first_iteration": 380,
+        "last_iteration": 424,
+        "observed_lifetime_lower_s": 441.48488426208496,
+        "sample_bounded_lifetime_upper_s": 461.507178068161
+      },
+      {
+        "pid": 931466,
+        "first_iteration": 425,
+        "last_iteration": 469,
+        "observed_lifetime_lower_s": 441.55092692375183,
+        "sample_bounded_lifetime_upper_s": 461.57254433631897
+      },
+      {
+        "pid": 935368,
+        "first_iteration": 470,
+        "last_iteration": 514,
+        "observed_lifetime_lower_s": 441.69213247299194,
+        "sample_bounded_lifetime_upper_s": 461.71231722831726
+      },
+      {
+        "pid": 938856,
+        "first_iteration": 515,
+        "last_iteration": 655,
+        "observed_lifetime_lower_s": 1405.672082901001,
+        "sample_bounded_lifetime_upper_s": 1425.690503358841
+      },
+      {
+        "pid": 954681,
+        "first_iteration": 656,
+        "last_iteration": 701,
+        "observed_lifetime_lower_s": 451.817280292511,
+        "sample_bounded_lifetime_upper_s": 471.96395111083984
+      },
+      {
+        "pid": 973672,
+        "first_iteration": 702,
+        "last_iteration": 773,
+        "observed_lifetime_lower_s": 712.8450059890747,
+        "sample_bounded_lifetime_upper_s": 733.1151211261749
+      },
+      {
+        "pid": 978849,
+        "first_iteration": 774,
+        "last_iteration": 828,
+        "observed_lifetime_lower_s": 542.4426636695862,
+        "sample_bounded_lifetime_upper_s": 562.5863144397736
+      }
+    ],
+    "first_and_last_segments_excluded": true,
+    "sampling_seconds": 10,
+    "root_cause_confirmed": false
+  },
+  "35995614c699c8d2db61a0def4ef8bd6": {
+    "fully_bounded_segments": [
+      {
+        "pid": 900322,
+        "first_iteration": 67,
+        "last_iteration": 111,
+        "observed_lifetime_lower_s": 441.25549125671387,
+        "sample_bounded_lifetime_upper_s": 461.3892846107483
+      },
+      {
+        "pid": 904203,
+        "first_iteration": 112,
+        "last_iteration": 289,
+        "observed_lifetime_lower_s": 1775.3387959003448,
+        "sample_bounded_lifetime_upper_s": 1795.3964955806732
+      },
+      {
+        "pid": 919957,
+        "first_iteration": 290,
+        "last_iteration": 334,
+        "observed_lifetime_lower_s": 441.7460608482361,
+        "sample_bounded_lifetime_upper_s": 461.7663903236389
+      },
+      {
+        "pid": 923416,
+        "first_iteration": 335,
+        "last_iteration": 379,
+        "observed_lifetime_lower_s": 441.289324760437,
+        "sample_bounded_lifetime_upper_s": 461.3100507259369
+      },
+      {
+        "pid": 927327,
+        "first_iteration": 380,
+        "last_iteration": 424,
+        "observed_lifetime_lower_s": 441.4848141670227,
+        "sample_bounded_lifetime_upper_s": 461.50718212127686
+      },
+      {
+        "pid": 931483,
+        "first_iteration": 425,
+        "last_iteration": 469,
+        "observed_lifetime_lower_s": 441.5509479045868,
+        "sample_bounded_lifetime_upper_s": 461.5726115703583
+      },
+      {
+        "pid": 935385,
+        "first_iteration": 470,
+        "last_iteration": 514,
+        "observed_lifetime_lower_s": 441.69197964668274,
+        "sample_bounded_lifetime_upper_s": 461.71229243278503
+      },
+      {
+        "pid": 938873,
+        "first_iteration": 515,
+        "last_iteration": 655,
+        "observed_lifetime_lower_s": 1405.6720626354218,
+        "sample_bounded_lifetime_upper_s": 1425.6904497146606
+      },
+      {
+        "pid": 954680,
+        "first_iteration": 656,
+        "last_iteration": 701,
+        "observed_lifetime_lower_s": 451.8174877166748,
+        "sample_bounded_lifetime_upper_s": 471.9639620780945
+      },
+      {
+        "pid": 973689,
+        "first_iteration": 702,
+        "last_iteration": 773,
+        "observed_lifetime_lower_s": 712.845071554184,
+        "sample_bounded_lifetime_upper_s": 733.1151072978973
+      },
+      {
+        "pid": 978848,
+        "first_iteration": 774,
+        "last_iteration": 828,
+        "observed_lifetime_lower_s": 542.4427216053009,
+        "sample_bounded_lifetime_upper_s": 562.586270570755
+      }
+    ],
+    "first_and_last_segments_excluded": true,
+    "sampling_seconds": 10,
+    "root_cause_confirmed": false
+  },
+  "5de7d17a5d0b1e1834530c6e23a635f3": {
+    "fully_bounded_segments": [
+      {
+        "pid": 899409,
+        "first_iteration": 56,
+        "last_iteration": 100,
+        "observed_lifetime_lower_s": 441.3847050666809,
+        "sample_bounded_lifetime_upper_s": 461.4079520702362
+      },
+      {
+        "pid": 903306,
+        "first_iteration": 101,
+        "last_iteration": 145,
+        "observed_lifetime_lower_s": 441.28896927833557,
+        "sample_bounded_lifetime_upper_s": 461.3077962398529
+      },
+      {
+        "pid": 908029,
+        "first_iteration": 146,
+        "last_iteration": 190,
+        "observed_lifetime_lower_s": 441.13279914855957,
+        "sample_bounded_lifetime_upper_s": 461.15067315101624
+      },
+      {
+        "pid": 911396,
+        "first_iteration": 191,
+        "last_iteration": 235,
+        "observed_lifetime_lower_s": 441.40286350250244,
+        "sample_bounded_lifetime_upper_s": 461.423011302948
+      },
+      {
+        "pid": 914799,
+        "first_iteration": 236,
+        "last_iteration": 280,
+        "observed_lifetime_lower_s": 441.53127932548523,
+        "sample_bounded_lifetime_upper_s": 461.5506103038788
+      },
+      {
+        "pid": 918689,
+        "first_iteration": 281,
+        "last_iteration": 325,
+        "observed_lifetime_lower_s": 441.65155720710754,
+        "sample_bounded_lifetime_upper_s": 461.6684000492096
+      },
+      {
+        "pid": 922723,
+        "first_iteration": 326,
+        "last_iteration": 370,
+        "observed_lifetime_lower_s": 441.3043029308319,
+        "sample_bounded_lifetime_upper_s": 461.3229968547821
+      },
+      {
+        "pid": 926663,
+        "first_iteration": 371,
+        "last_iteration": 415,
+        "observed_lifetime_lower_s": 441.5455391407013,
+        "sample_bounded_lifetime_upper_s": 461.5666251182556
+      },
+      {
+        "pid": 930179,
+        "first_iteration": 416,
+        "last_iteration": 460,
+        "observed_lifetime_lower_s": 441.47110199928284,
+        "sample_bounded_lifetime_upper_s": 461.49075055122375
+      },
+      {
+        "pid": 934660,
+        "first_iteration": 461,
+        "last_iteration": 505,
+        "observed_lifetime_lower_s": 441.71214532852173,
+        "sample_bounded_lifetime_upper_s": 461.72962737083435
+      },
+      {
+        "pid": 938138,
+        "first_iteration": 506,
+        "last_iteration": 550,
+        "observed_lifetime_lower_s": 441.6151285171509,
+        "sample_bounded_lifetime_upper_s": 461.6311082839966
+      },
+      {
+        "pid": 941664,
+        "first_iteration": 552,
+        "last_iteration": 771,
+        "observed_lifetime_lower_s": 2199.2781171798706,
+        "sample_bounded_lifetime_upper_s": 2219.2138509750366
+      },
+      {
+        "pid": 978674,
+        "first_iteration": 772,
+        "last_iteration": 816,
+        "observed_lifetime_lower_s": 441.904100894928,
+        "sample_bounded_lifetime_upper_s": 461.92438101768494
+      }
+    ],
+    "first_and_last_segments_excluded": true,
+    "sampling_seconds": 10,
+    "root_cause_confirmed": false
+  },
+  "7298618a9f57e447c393e071903a0491": {
+    "fully_bounded_segments": [
+      {
+        "pid": 896340,
+        "first_iteration": 21,
+        "last_iteration": 65,
+        "observed_lifetime_lower_s": 441.16400361061096,
+        "sample_bounded_lifetime_upper_s": 461.1845107078552
+      },
+      {
+        "pid": 900221,
+        "first_iteration": 66,
+        "last_iteration": 110,
+        "observed_lifetime_lower_s": 441.3344864845276,
+        "sample_bounded_lifetime_upper_s": 461.35249304771423
+      },
+      {
+        "pid": 904084,
+        "first_iteration": 111,
+        "last_iteration": 155,
+        "observed_lifetime_lower_s": 441.27472281455994,
+        "sample_bounded_lifetime_upper_s": 461.34807229042053
+      },
+      {
+        "pid": 908786,
+        "first_iteration": 156,
+        "last_iteration": 200,
+        "observed_lifetime_lower_s": 441.0583498477936,
+        "sample_bounded_lifetime_upper_s": 461.1609137058258
+      },
+      {
+        "pid": 912162,
+        "first_iteration": 201,
+        "last_iteration": 245,
+        "observed_lifetime_lower_s": 441.39780497550964,
+        "sample_bounded_lifetime_upper_s": 461.5511872768402
+      },
+      {
+        "pid": 915564,
+        "first_iteration": 246,
+        "last_iteration": 290,
+        "observed_lifetime_lower_s": 441.4466743469238,
+        "sample_bounded_lifetime_upper_s": 461.6608576774597
+      },
+      {
+        "pid": 920115,
+        "first_iteration": 291,
+        "last_iteration": 335,
+        "observed_lifetime_lower_s": 441.6578962802887,
+        "sample_bounded_lifetime_upper_s": 461.8473172187805
+      },
+      {
+        "pid": 923548,
+        "first_iteration": 337,
+        "last_iteration": 640,
+        "observed_lifetime_lower_s": 3041.0127453804016,
+        "sample_bounded_lifetime_upper_s": 3061.0338492393494
+      },
+      {
+        "pid": 948754,
+        "first_iteration": 641,
+        "last_iteration": 771,
+        "observed_lifetime_lower_s": 1305.4035437107086,
+        "sample_bounded_lifetime_upper_s": 1325.4246532917023
+      },
+      {
+        "pid": 978675,
+        "first_iteration": 772,
+        "last_iteration": 816,
+        "observed_lifetime_lower_s": 441.90394616127014,
+        "sample_bounded_lifetime_upper_s": 461.92431688308716
+      }
+    ],
+    "first_and_last_segments_excluded": true,
+    "sampling_seconds": 10,
+    "root_cause_confirmed": false
+  },
+  "b134e0e4903086dc8beeb7b7d210a6d2": {
+    "fully_bounded_segments": [
+      {
+        "pid": 897610,
+        "first_iteration": 31,
+        "last_iteration": 116,
+        "observed_lifetime_lower_s": 852.3641903400421,
+        "sample_bounded_lifetime_upper_s": 872.4414303302765
+      },
+      {
+        "pid": 904628,
+        "first_iteration": 117,
+        "last_iteration": 161,
+        "observed_lifetime_lower_s": 441.2735254764557,
+        "sample_bounded_lifetime_upper_s": 461.3553442955017
+      },
+      {
+        "pid": 909245,
+        "first_iteration": 162,
+        "last_iteration": 206,
+        "observed_lifetime_lower_s": 441.01918506622314,
+        "sample_bounded_lifetime_upper_s": 461.18846559524536
+      },
+      {
+        "pid": 912695,
+        "first_iteration": 207,
+        "last_iteration": 251,
+        "observed_lifetime_lower_s": 441.4760751724243,
+        "sample_bounded_lifetime_upper_s": 461.67877078056335
+      },
+      {
+        "pid": 916049,
+        "first_iteration": 252,
+        "last_iteration": 296,
+        "observed_lifetime_lower_s": 441.43248772621155,
+        "sample_bounded_lifetime_upper_s": 461.6289339065552
+      },
+      {
+        "pid": 920611,
+        "first_iteration": 298,
+        "last_iteration": 342,
+        "observed_lifetime_lower_s": 441.6109821796417,
+        "sample_bounded_lifetime_upper_s": 461.6295704841614
+      },
+      {
+        "pid": 924037,
+        "first_iteration": 343,
+        "last_iteration": 387,
+        "observed_lifetime_lower_s": 441.4085352420807,
+        "sample_bounded_lifetime_upper_s": 461.42928886413574
+      },
+      {
+        "pid": 927948,
+        "first_iteration": 388,
+        "last_iteration": 432,
+        "observed_lifetime_lower_s": 441.4494454860687,
+        "sample_bounded_lifetime_upper_s": 461.47016620635986
+      },
+      {
+        "pid": 932571,
+        "first_iteration": 433,
+        "last_iteration": 477,
+        "observed_lifetime_lower_s": 441.63505721092224,
+        "sample_bounded_lifetime_upper_s": 461.65048480033875
+      },
+      {
+        "pid": 936010,
+        "first_iteration": 478,
+        "last_iteration": 522,
+        "observed_lifetime_lower_s": 441.673216342926,
+        "sample_bounded_lifetime_upper_s": 461.6882598400116
+      },
+      {
+        "pid": 939413,
+        "first_iteration": 523,
+        "last_iteration": 567,
+        "observed_lifetime_lower_s": 441.4123594760895,
+        "sample_bounded_lifetime_upper_s": 461.4332113265991
+      },
+      {
+        "pid": 943533,
+        "first_iteration": 568,
+        "last_iteration": 612,
+        "observed_lifetime_lower_s": 441.957218170166,
+        "sample_bounded_lifetime_upper_s": 461.9768569469452
+      },
+      {
+        "pid": 946775,
+        "first_iteration": 613,
+        "last_iteration": 657,
+        "observed_lifetime_lower_s": 442.0711123943329,
+        "sample_bounded_lifetime_upper_s": 462.0903856754303
+      },
+      {
+        "pid": 955226,
+        "first_iteration": 658,
+        "last_iteration": 702,
+        "observed_lifetime_lower_s": 441.8183813095093,
+        "sample_bounded_lifetime_upper_s": 461.8392503261566
+      },
+      {
+        "pid": 973825,
+        "first_iteration": 703,
+        "last_iteration": 747,
+        "observed_lifetime_lower_s": 441.8677291870117,
+        "sample_bounded_lifetime_upper_s": 461.888916015625
+      },
+      {
+        "pid": 976987,
+        "first_iteration": 748,
+        "last_iteration": 834,
+        "observed_lifetime_lower_s": 863.8603985309601,
+        "sample_bounded_lifetime_upper_s": 883.8746457099915
+      }
+    ],
+    "first_and_last_segments_excluded": true,
+    "sampling_seconds": 10,
+    "root_cause_confirmed": false
+  },
+  "b9d23989052bf43cb9e13f0babc50458": {
+    "fully_bounded_segments": [
+      {
+        "pid": 896190,
+        "first_iteration": 19,
+        "last_iteration": 63,
+        "observed_lifetime_lower_s": 441.0920593738556,
+        "sample_bounded_lifetime_upper_s": 461.2336792945862
+      },
+      {
+        "pid": 900081,
+        "first_iteration": 64,
+        "last_iteration": 108,
+        "observed_lifetime_lower_s": 441.27030968666077,
+        "sample_bounded_lifetime_upper_s": 461.4282341003418
+      },
+      {
+        "pid": 903982,
+        "first_iteration": 110,
+        "last_iteration": 154,
+        "observed_lifetime_lower_s": 441.2736265659332,
+        "sample_bounded_lifetime_upper_s": 461.29224467277527
+      },
+      {
+        "pid": 908684,
+        "first_iteration": 155,
+        "last_iteration": 199,
+        "observed_lifetime_lower_s": 441.11404371261597,
+        "sample_bounded_lifetime_upper_s": 461.13279271125793
+      },
+      {
+        "pid": 912067,
+        "first_iteration": 200,
+        "last_iteration": 244,
+        "observed_lifetime_lower_s": 441.425616979599,
+        "sample_bounded_lifetime_upper_s": 461.44468092918396
+      },
+      {
+        "pid": 915478,
+        "first_iteration": 245,
+        "last_iteration": 289,
+        "observed_lifetime_lower_s": 441.55225133895874,
+        "sample_bounded_lifetime_upper_s": 461.5722396373749
+      },
+      {
+        "pid": 919990,
+        "first_iteration": 290,
+        "last_iteration": 334,
+        "observed_lifetime_lower_s": 441.7459318637848,
+        "sample_bounded_lifetime_upper_s": 461.76646733283997
+      },
+      {
+        "pid": 923382,
+        "first_iteration": 335,
+        "last_iteration": 379,
+        "observed_lifetime_lower_s": 441.2893717288971,
+        "sample_bounded_lifetime_upper_s": 461.3101303577423
+      },
+      {
+        "pid": 927292,
+        "first_iteration": 380,
+        "last_iteration": 424,
+        "observed_lifetime_lower_s": 441.4846646785736,
+        "sample_bounded_lifetime_upper_s": 461.5071876049042
+      },
+      {
+        "pid": 931447,
+        "first_iteration": 425,
+        "last_iteration": 469,
+        "observed_lifetime_lower_s": 441.55095863342285,
+        "sample_bounded_lifetime_upper_s": 461.57275891304016
+      },
+      {
+        "pid": 935350,
+        "first_iteration": 470,
+        "last_iteration": 514,
+        "observed_lifetime_lower_s": 441.69203090667725,
+        "sample_bounded_lifetime_upper_s": 461.712274312973
+      },
+      {
+        "pid": 938837,
+        "first_iteration": 515,
+        "last_iteration": 559,
+        "observed_lifetime_lower_s": 441.43679571151733,
+        "sample_bounded_lifetime_upper_s": 461.4569194316864
+      },
+      {
+        "pid": 942693,
+        "first_iteration": 560,
+        "last_iteration": 604,
+        "observed_lifetime_lower_s": 441.8315453529358,
+        "sample_bounded_lifetime_upper_s": 461.8449184894562
+      },
+      {
+        "pid": 946189,
+        "first_iteration": 605,
+        "last_iteration": 692,
+        "observed_lifetime_lower_s": 873.9073491096497,
+        "sample_bounded_lifetime_upper_s": 894.0486745834351
+      },
+      {
+        "pid": 973044,
+        "first_iteration": 693,
+        "last_iteration": 737,
+        "observed_lifetime_lower_s": 441.7167127132416,
+        "sample_bounded_lifetime_upper_s": 461.9898931980133
+      },
+      {
+        "pid": 976256,
+        "first_iteration": 738,
+        "last_iteration": 782,
+        "observed_lifetime_lower_s": 441.6605591773987,
+        "sample_bounded_lifetime_upper_s": 461.91740131378174
+      },
+      {
+        "pid": 979526,
+        "first_iteration": 783,
+        "last_iteration": 827,
+        "observed_lifetime_lower_s": 441.94389176368713,
+        "sample_bounded_lifetime_upper_s": 462.21624064445496
+      }
+    ],
+    "first_and_last_segments_excluded": true,
+    "sampling_seconds": 10,
+    "root_cause_confirmed": false
+  }
+}

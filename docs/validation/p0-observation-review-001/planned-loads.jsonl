@@ -1,0 +1,36 @@
+{"start": 1793379068.6588454, "run": "mixed-48-001", "kind": "48-lane readonly benchmark"}
+{"end": 1793379154.3266718, "run": "mixed-48-001"}
+{"start": 1793379861.3623662, "run": "fixed-001-setup", "kind": "local fixture setup; build occurred immediately before, outside idle measurement"}
+{"end": 1793380037.7027419, "run": "fixed-001-setup", "note": "first startup failed: fixture state directory 0755; captured failure, changed own synthetic state to 0700, restarted only failed synthetic service"}
+{"start": 1793380037.7027628, "run": "fixed-001-measurement", "kind": "local synthetic sequential and 48-way load; fixed .6 binary, no NAS connection"}
+{"end": 1793380302.398579, "run": "fixed-001-measurement"}
+{"start": 1793381462.4909153, "run": "stop-repro-001", "kind": "synthetic mixed-held load then explicit stop; no NAS"}
+{"end": 1793381547.1483183, "run": "stop-repro-001"}
+{"start": 1793381725.4032345, "run": "tcp-pilot-001", "kind": "planned TCP reset of readonly team_14 worker"}
+{"end": 1793381740.5475194, "run": "tcp-pilot-001"}
+{"start": 1793382295.7180707, "run": "relay-001/measurement-002", "kind": "30 preregistered isolated transport resets"}
+{"end": 1793382353.0054822, "run": "relay-001/measurement-002"}
+{"start": 1793382918.3981066, "run": "relay-personal-001", "kind": "additional isolated readonly clone initialization"}
+{"start": 1793382918.4803512, "run": "relay-training-001", "kind": "additional isolated readonly clone initialization"}
+{"start": 1793383010.114981, "run": "relay-personal-001/measurement-001", "kind": "30 preregistered isolated transport resets"}
+{"end": 1793383074.686124, "run": "relay-personal-001/measurement-001"}
+{"start": 1793383095.1909602, "run": "relay-training-001/measurement-001", "kind": "30 preregistered isolated transport resets"}
+{"end": 1793383148.208968, "run": "relay-training-001/measurement-001"}
+{"start": 1793383161.0793047, "run": "relay-training-001/network-read-001", "kind": "32 sequential cold-body downloads <=2 MiB each"}
+{"end": 1793383223.4202464, "run": "relay-training-001/network-read-001"}
+{"end": 1793383273.2740808, "run": "relay-personal-001"}
+{"end": 1793383273.6809251, "run": "relay-training-001"}
+{"start": 1793383548.7292445, "run": "relay-phase-001", "kind": "additional isolated readonly clone initialization"}
+{"start": 1793383608.0466247, "run": "relay-phase-001/phases-001", "kind": "12 cold-body reads with 20ms GetTransfers phase sampling"}
+{"end": 1793383630.480012, "run": "relay-phase-001/phases-001"}
+{"start": 1793383798.2989566, "run": "link-001", "kind": "preregistered single-stream reverse iperf3 baseline"}
+{"end": 1793383798.3118694, "run": "link-001"}
+{"start": 1793383864.4475935, "run": "relay-phase-001/large-read-001", "kind": "4 sequential cold-body downloads of fixed 70289047 bytes"}
+{"end": 1793383881.1589773, "run": "relay-phase-001/large-read-001"}
+{"end": 1793383923.2391758, "run": "relay-phase-001"}
+{"start": 1793384338.983666, "run": "durability-001", "kind": "small synthetic writable boundary test; no network"}
+{"end": 1793384393.2430327, "run": "durability-001"}
+{"start": 1793385310.43003, "recorded_at": 1793385389.204874, "run": "p0-dev31-package", "kind": "locked source package compilation, GUI/Rust/FUSE regressions and isolated chroot install", "registration": "retrospective from first GUI log mtime, not preregistered"}
+{"end": 1793385709.3589966, "run": "p0-dev31-package"}
+{"start": 1793385815.0, "recorded_at": 1793386485.6927483, "run": "p0-dev31-github-upload", "kind": "WAN upload of 53MB development package and evidence; repeated incomplete attempts", "registration": "retrospective from uploader process start; may interfere with shared network"}
+{"end": 1793386881.8449948, "run": "p0-dev31-github-upload", "result": "upload stopped without complete deb; draft retained"}
