@@ -550,6 +550,11 @@ impl Service {
     }
     fn supervise(&self) {
         let mut delay = 1;
+        // Explicit unlock/resume/trust changes create a new generation and
+        // refresh quarantined permissions. A transport reconnect in the same
+        // generation resumes the cursor instead of re-enumerating every denied
+        // subtree. Cursor/restore invalidation still invokes snapshot recovery.
+        let mut permissions_generation = None;
         loop {
             let (generation, password, trusted_ca_pem) = {
                 let mut c = self.control.lock().unwrap();
@@ -603,7 +608,12 @@ impl Service {
                         &serde_json::to_string(&self.profile.scope)?,
                     )?;
                 }
-                self.bridge.initial_pull()?;
+                if permissions_generation == Some(generation) {
+                    self.bridge.pull()?;
+                } else {
+                    self.bridge.initial_pull()?;
+                    permissions_generation = Some(generation);
+                }
                 {
                     let mut c = self.control.lock().unwrap();
                     if c.generation != generation {

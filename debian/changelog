@@ -3,6 +3,7 @@ drive-native (0.1.0~dev20261030.6) unstable; urgency=medium
   * Batch directory status aggregation to avoid recursive database lock starvation.
   * Filter download candidates before per-file checks on large online-only trees.
   * Accept minimal historical deletion records without relaxing live metadata checks.
+  * Resume event cursors on transport reconnect; refresh permissions on explicit sessions.
 
  -- Drive Native contributors <noreply@example.invalid>  Fri, 30 Oct 2026 23:45:00 +0800
 
