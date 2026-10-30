@@ -1,0 +1,15 @@
+{
+  "time": 1793385709.3554924,
+  "status": {
+    "state": "running",
+    "iterations": 685,
+    "failed_observations": 8,
+    "elapsed_s": 6846.728865874,
+    "last_sample": 1793385705.1455076,
+    "pid": 894834
+  },
+  "original_six_tasks_running": true,
+  "observer_and_probe_active": true,
+  "baseline_runtime_version": "0.1.0~dev20261030.6",
+  "baseline_restarted": false
+}

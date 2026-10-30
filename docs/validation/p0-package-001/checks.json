@@ -1,0 +1,74 @@
+{
+  "version": "0.1.0~dev20261031.1",
+  "source_commit": "5d07592330755daee24430c382384e2a2e2fc86a",
+  "deb_sha256": "403c0db14ee84e23474376c9417d8e244465674bc686779972394588519e6f39",
+  "source_sha256": "556d0dfa2ab35f6d22ae5abf705bf3e874f26cf3f5e5f8e6a238e55c5724b53d",
+  "source_archive_files_match_git": 511,
+  "package_regular_files_match_installed": 320,
+  "package_symlinks_match_installed": 17,
+  "runtime_behavior_changes_from_dev20261030_6": "none; 2 files rustfmt-equivalent, 1 doc-comment-only, 2 fixture examples added",
+  "changed_crate_files": [
+    "crates/drive-core/examples/durability_fixture.rs",
+    "crates/drive-core/examples/performance_fixture.rs",
+    "crates/drive-runtime/src/bridge.rs",
+    "crates/drive-runtime/src/desktop.rs",
+    "crates/drive-runtime/src/desktop_tree.rs"
+  ],
+  "rust_regression": {
+    "passed": 358,
+    "failed": 0,
+    "default_ignored": 9,
+    "ignored_explanation": "8 ordinary-user FUSE tests explicitly run separately; 1 ignored sproto documentation example"
+  },
+  "gui": {
+    "passed": 41,
+    "modules": {
+      "cache_gui_tests": 5,
+      "conflict_gui_tests": 8,
+      "gui_unit_tests": 5,
+      "multi_mount_tests": 5,
+      "selector_gui_tests": 5,
+      "theme_tests": 1,
+      "transfer_gui_tests": 6,
+      "trust_gui_tests": 6
+    }
+  },
+  "explicit_kernel": {
+    "mounted": 6,
+    "interrupted": 1,
+    "backoff": 1
+  },
+  "validation_tool_tests": {
+    "oracle-tests": 11,
+    "relay-tests": 1,
+    "source-preparation-tests": 5
+  },
+  "installed_document_links_checked": 57,
+  "commit_pinned_links_checked": 42,
+  "installed_identity_matches": true,
+  "installation": {
+    "environment": "isolated Ubuntu24.04 chroot in WSL, upgraded from .6",
+    "dpkg_verify": true,
+    "dependency_check": true,
+    "ordinary_user_gui_verify": {
+      "passed": true,
+      "qt": "6.12.0",
+      "dbus": true,
+      "secretstorage_imported": true,
+      "account_accessed": false
+    },
+    "gui_offscreen_smoke_seconds": 3,
+    "rollback_to_6": true,
+    "remove_reinstall": true,
+    "synthetic_user_sentinel_preserved": true,
+    "real_pending_writes_migrated": false
+  },
+  "not_run": [
+    "new runtime NAS performance comparison (runtime unchanged)",
+    "Mint desktop/suspend",
+    "24h completed baseline",
+    "P3 repeated fault and independent power failure",
+    "P6 seven-day candidate acceptance"
+  ],
+  "release_class": "development documentation/baseline build; no performance fix or gate completion claimed"
+}
