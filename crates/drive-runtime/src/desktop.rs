@@ -2,6 +2,7 @@
 //! querying an icon never opens a FUSE file or performs a NAS request.
 use crate::service::Service;
 use drive_core::{Node, Status, Store};
+#[path="desktop_tree.rs"]mod status_tree;
 use serde::Serialize;
 use std::{
     collections::{HashMap, HashSet},
@@ -75,28 +76,35 @@ fn status_name(status: &Status) -> &'static str {
 }
 fn entry(
     store: &Store,
-    node: &Node,
+    id: &str,
+    directory: bool,
     active: &HashSet<String>,
     memo: &mut HashMap<String, EntryState>,
     visiting: &mut HashSet<String>,
+    tree: &mut Option<status_tree::StatusTree>,
     depth: usize,
 ) -> io::Result<EntryState> {
-    if let Some(state) = memo.get(&node.id) {
+    if let Some(state) = memo.get(id) {
         return Ok(state.clone());
     }
-    if depth > 128 || !visiting.insert(node.id.clone()) {
+    if depth > 128 || !visiting.insert(id.to_owned()) {
         return Err(other());
     }
-    let own = store.status(&node.id).map_err(|_| other())?;
-    let pinned = store.is_pinned(&node.id).map_err(|_| other())?;
+    if directory && tree.is_none() { *tree=Some(status_tree::StatusTree::load(store)?); }
+    let (pinned,detailed,overlay)=match tree {
+        Some(t)=>t.flags(id)?,
+        None=>(store.is_pinned(id).map_err(|_|other())?,true,false),
+    };
+    let own = if detailed { store.status(id).map_err(|_|other())? }
+        else if overlay {Status::PendingUpload} else if pinned {Status::Pinning} else {Status::OnlineOnly};
     let mut status = status_name(&own);
     let offline;
     let mut sync_error = None;
-    if node.directory {
-        let children = store.child_nodes(&node.id).map_err(|_| other())?;
+    if directory {
+        let children = tree.as_ref().unwrap().children(id);
         let states: Vec<_> = children
             .iter()
-            .map(|c| entry(store, c, active, memo, visiting, depth + 1))
+            .map(|(id,directory)| entry(store, id, *directory, active, memo, visiting, tree, depth + 1))
             .collect::<io::Result<_>>()?;
         offline = states.iter().all(|s| s.offline_available);
         sync_error = states
@@ -141,13 +149,13 @@ fn entry(
             "online_only"
         };
     } else {
-        offline = store
-            .open_dirty_draft(&node.id)
+        offline = detailed && (store
+            .open_dirty_draft(id)
             .map_err(|_| other())?
             .is_some()
-            || store.open_cached(&node.id).is_ok();
-        if !matches!(own, Status::Conflict | Status::PendingUpload) {
-            sync_error = store.download_failure(&node.id).map_err(|_| other())?;
+            || store.open_cached(id).is_ok());
+        if detailed && !matches!(own, Status::Conflict | Status::PendingUpload) {
+            sync_error = store.download_failure(id).map_err(|_| other())?;
             if let Some(failure) = &sync_error {
                 status = match (offline, failure.retry_at.is_some()) {
                     (true, true) => "update_retry",
@@ -157,20 +165,20 @@ fn entry(
                 };
             }
         }
-        if active.contains(&node.id) && !matches!(own, Status::Conflict | Status::PendingUpload) {
+        if active.contains(id) && !matches!(own, Status::Conflict | Status::PendingUpload) {
             status = if offline { "updating" } else { "downloading" };
         }
     }
-    visiting.remove(&node.id);
+    visiting.remove(id);
     let state = EntryState {
-        id: node.id.clone(),
-        directory: node.directory,
+        id: id.to_owned(),
+        directory: directory,
         status,
         pinned,
         offline_available: offline,
         sync_error,
     };
-    memo.insert(node.id.clone(), state.clone());
+    memo.insert(id.to_owned(), state.clone());
     Ok(state)
 }
 pub fn states(service: &Service, paths: Vec<String>) -> io::Result<String> {
@@ -183,6 +191,7 @@ pub fn states(service: &Service, paths: Vec<String>) -> io::Result<String> {
         .ensure_fs_root(&service.profile.scope.file_id)
         .map_err(|_| other())?;
     let mut memo = HashMap::new();
+    let mut tree = None;
     let mut out = Vec::new();
     for path in paths {
         let result = resolve(
@@ -191,7 +200,7 @@ pub fn states(service: &Service, paths: Vec<String>) -> io::Result<String> {
             &service.profile.mount,
             &path,
         )
-        .and_then(|node| entry(&store, &node, &active, &mut memo, &mut HashSet::new(), 0));
+        .and_then(|node| entry(&store, &node.id, node.directory, &active, &mut memo, &mut HashSet::new(), &mut tree, 0));
         out.push(match result {
             Ok(entry) => PathState {
                 path,

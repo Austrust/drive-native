@@ -516,7 +516,7 @@ impl Store {
         Ok(())
     }
     pub fn downloads_needed(&self) -> Result<Vec<DownloadTicket>> {
-        let mut q=self.db.prepare("SELECT id,remote_version,blob IS NOT NULL FROM nodes WHERE directory=0 AND deleted=0 AND id NOT IN (SELECT id FROM access_blocked) AND dirty_blob IS NULL AND (blob IS NULL OR local_version!=remote_version)")?;
+        let mut q=self.db.prepare("WITH RECURSIVE pinned_nodes(id) AS (SELECT id FROM nodes WHERE pinned=1 UNION SELECT n.id FROM nodes n JOIN pinned_nodes p ON n.parent=p.id) SELECT n.id,n.remote_version,n.blob IS NOT NULL FROM nodes n WHERE n.directory=0 AND n.deleted=0 AND n.id NOT IN (SELECT id FROM access_blocked) AND n.dirty_blob IS NULL AND (n.blob IS NULL OR n.local_version!=n.remote_version) AND (n.blob IS NOT NULL OR n.id IN (SELECT id FROM pinned_nodes) OR EXISTS(SELECT 1 FROM transfers t WHERE t.node=n.id AND t.version=n.remote_version AND t.direction='download' AND t.state IN ('pending','inflight','retry','failed')))")?;
         let candidates = q
             .query_map([], |r| {
                 Ok((

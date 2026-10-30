@@ -36,3 +36,5 @@ pub mod commit_origin;
 pub mod directory_conflicts;
 
 pub mod transfer_policy;
+
+pub mod desktop_status;
