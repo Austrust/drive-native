@@ -1,0 +1,19 @@
+{
+  "phases-001": {
+    "samples": 10,
+    "hashes_match": true,
+    "two_requests_per_sample": true
+  },
+  "large-read-001": {
+    "samples": 3,
+    "hashes_match": true,
+    "MiB_per_s": [
+      23.155619445476177,
+      15.710167690483422,
+      15.96260617208175
+    ]
+  },
+  "executed_script_hashes_match": true,
+  "links_checked": 47,
+  "product_tests_rerun": false
+}

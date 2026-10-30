@@ -1,0 +1,576 @@
+[
+  {
+    "index": 0,
+    "complete_s": 1.7698605099867564,
+    "phase_interval_estimates_s": {
+      "no_rpc": 1.5942910080193542,
+      "transferring": 0.1710779929999262
+    },
+    "transitions": [
+      {
+        "at": 0.02198932200553827,
+        "phase": "transferring",
+        "progress": {
+          "bytes": 0,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "transferring",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 0.042855970008531585,
+        "phase": "no_rpc",
+        "progress": null
+      },
+      {
+        "at": 1.6151576560223475,
+        "phase": "transferring",
+        "progress": {
+          "bytes": 0,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "transferring",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 1.7653690010192804,
+        "phase": "no_rpc",
+        "progress": null
+      }
+    ],
+    "max_query_s": 0.0027870850171893835
+  },
+  {
+    "index": 1,
+    "complete_s": 1.8363120539870579,
+    "phase_interval_estimates_s": {
+      "no_rpc": 1.5539715510094538,
+      "transferring": 0.21480298601090908,
+      "queued": 0.06313696698634885
+    },
+    "transitions": [
+      {
+        "at": 0.021971003006910905,
+        "phase": "transferring",
+        "progress": {
+          "bytes": 0,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "transferring",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 0.04284995500347577,
+        "phase": "no_rpc",
+        "progress": null
+      },
+      {
+        "at": 1.5748505030060187,
+        "phase": "queued",
+        "progress": {
+          "bytes": 0,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "queued",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 1.6379874699923676,
+        "phase": "transferring",
+        "progress": {
+          "bytes": 0,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "transferring",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 1.8319115040067118,
+        "phase": "no_rpc",
+        "progress": null
+      }
+    ],
+    "max_query_s": 0.003364112984854728
+  },
+  {
+    "index": 2,
+    "complete_s": 1.7600055380025879,
+    "phase_interval_estimates_s": {
+      "no_rpc": 1.4903699769929517,
+      "transferring": 0.2218834500235971,
+      "queued": 0.04232210500049405
+    },
+    "transitions": [
+      {
+        "at": 0.02190617300220765,
+        "phase": "transferring",
+        "progress": {
+          "bytes": 0,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "transferring",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 0.04283070101519115,
+        "phase": "no_rpc",
+        "progress": null
+      },
+      {
+        "at": 1.5112945050059352,
+        "phase": "queued",
+        "progress": {
+          "bytes": 0,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "queued",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 1.5536166100064293,
+        "phase": "transferring",
+        "progress": {
+          "bytes": 0,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "transferring",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 1.7545755320170429,
+        "phase": "no_rpc",
+        "progress": null
+      }
+    ],
+    "max_query_s": 0.011418630019761622
+  },
+  {
+    "index": 3,
+    "complete_s": 1.7208000049868133,
+    "phase_interval_estimates_s": {
+      "no_rpc": 1.467047578014899,
+      "transferring": 0.1905280819919426,
+      "queued": 0.0422406529833097,
+      "verifying": 0.020963852992281318
+    },
+    "transitions": [
+      {
+        "at": 0.021929565002210438,
+        "phase": "transferring",
+        "progress": {
+          "bytes": 0,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "transferring",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 0.04301196298911236,
+        "phase": "no_rpc",
+        "progress": null
+      },
+      {
+        "at": 1.488129976001801,
+        "phase": "queued",
+        "progress": {
+          "bytes": 0,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "queued",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 1.5303706289851107,
+        "phase": "transferring",
+        "progress": {
+          "bytes": 0,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "transferring",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 1.6998163129901513,
+        "phase": "verifying",
+        "progress": {
+          "bytes": 1050854,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "verifying",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 1.7207801659824327,
+        "phase": "no_rpc",
+        "progress": null
+      }
+    ],
+    "max_query_s": 0.0015406489837914705
+  },
+  {
+    "index": 4,
+    "complete_s": 1.688296199979959,
+    "phase_interval_estimates_s": {
+      "no_rpc": 1.4879280749883037,
+      "transferring": 0.1541122510097921,
+      "queued": 0.04231601799256168
+    },
+    "transitions": [
+      {
+        "at": 0.02215072399121709,
+        "phase": "transferring",
+        "progress": {
+          "bytes": 0,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "transferring",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 0.04330431800917722,
+        "phase": "no_rpc",
+        "progress": null
+      },
+      {
+        "at": 1.5090816690062638,
+        "phase": "queued",
+        "progress": {
+          "bytes": 0,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "queued",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 1.5513976869988255,
+        "phase": "transferring",
+        "progress": {
+          "bytes": 0,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "transferring",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 1.6843563439906575,
+        "phase": "no_rpc",
+        "progress": null
+      }
+    ],
+    "max_query_s": 0.006841338996309787
+  },
+  {
+    "index": 5,
+    "complete_s": 1.8064354149973951,
+    "phase_interval_estimates_s": {
+      "no_rpc": 1.5718526529963128,
+      "transferring": 0.1695531140139792,
+      "queued": 0.04207623298862018,
+      "verifying": 0.021525735006434843
+    },
+    "transitions": [
+      {
+        "at": 0.02234939398476854,
+        "phase": "transferring",
+        "progress": {
+          "bytes": 0,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "transferring",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 0.044362049986375496,
+        "phase": "no_rpc",
+        "progress": null
+      },
+      {
+        "at": 1.5938653089979198,
+        "phase": "queued",
+        "progress": {
+          "bytes": 0,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "queued",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 1.63594154198654,
+        "phase": "transferring",
+        "progress": {
+          "bytes": 0,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "transferring",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 1.7834819999989122,
+        "phase": "verifying",
+        "progress": {
+          "bytes": 1050854,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "verifying",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 1.805007735005347,
+        "phase": "no_rpc",
+        "progress": null
+      }
+    ],
+    "max_query_s": 0.0019191350147593766
+  },
+  {
+    "index": 6,
+    "complete_s": 1.6177117010229267,
+    "phase_interval_estimates_s": {
+      "no_rpc": 1.427972792997025,
+      "transferring": 0.14843064502929337,
+      "queued": 0.02152163698337972,
+      "verifying": 0.02179867899394594
+    },
+    "transitions": [
+      {
+        "at": 0.022095639986218885,
+        "phase": "transferring",
+        "progress": {
+          "bytes": 0,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "transferring",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 0.04311416400014423,
+        "phase": "no_rpc",
+        "progress": null
+      },
+      {
+        "at": 1.4489913170109503,
+        "phase": "queued",
+        "progress": {
+          "bytes": 0,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "queued",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 1.47051295399433,
+        "phase": "transferring",
+        "progress": {
+          "bytes": 0,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "transferring",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 1.597925075009698,
+        "phase": "verifying",
+        "progress": {
+          "bytes": 1050854,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "verifying",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 1.619723754003644,
+        "phase": "no_rpc",
+        "progress": null
+      }
+    ],
+    "max_query_s": 0.0036061989958398044
+  },
+  {
+    "index": 7,
+    "complete_s": 1.7637682709901128,
+    "phase_interval_estimates_s": {
+      "no_rpc": 1.5235347900015768,
+      "transferring": 0.193102279008599,
+      "queued": 0.04296055599115789
+    },
+    "transitions": [
+      {
+        "at": 0.021947620989521965,
+        "phase": "transferring",
+        "progress": {
+          "bytes": 0,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "transferring",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 0.0432198399794288,
+        "phase": "no_rpc",
+        "progress": null
+      },
+      {
+        "at": 1.5448070089914836,
+        "phase": "queued",
+        "progress": {
+          "bytes": 0,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "queued",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 1.5877675649826415,
+        "phase": "transferring",
+        "progress": {
+          "bytes": 0,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "transferring",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 1.7595976250013337,
+        "phase": "no_rpc",
+        "progress": null
+      }
+    ],
+    "max_query_s": 0.0030517269915435463
+  },
+  {
+    "index": 8,
+    "complete_s": 1.7910660810011905,
+    "phase_interval_estimates_s": {
+      "no_rpc": 1.5199714659829624,
+      "transferring": 0.224813314009225,
+      "queued": 0.04247418200247921
+    },
+    "transitions": [
+      {
+        "at": 0.02220515499357134,
+        "phase": "transferring",
+        "progress": {
+          "bytes": 0,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "transferring",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 0.04340461399988271,
+        "phase": "no_rpc",
+        "progress": null
+      },
+      {
+        "at": 1.5411709249892738,
+        "phase": "queued",
+        "progress": {
+          "bytes": 0,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "queued",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 1.583645106991753,
+        "phase": "transferring",
+        "progress": {
+          "bytes": 0,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "transferring",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 1.7872589619946666,
+        "phase": "no_rpc",
+        "progress": null
+      }
+    ],
+    "max_query_s": 0.013836619997164235
+  },
+  {
+    "index": 9,
+    "complete_s": 1.7348538789956365,
+    "phase_interval_estimates_s": {
+      "no_rpc": 1.4753075089829508,
+      "transferring": 0.21321222503320314,
+      "queued": 0.04222721699625254
+    },
+    "transitions": [
+      {
+        "at": 0.02194119300111197,
+        "phase": "transferring",
+        "progress": {
+          "bytes": 0,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "transferring",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 0.04297114201472141,
+        "phase": "no_rpc",
+        "progress": null
+      },
+      {
+        "at": 1.4963374579965603,
+        "phase": "queued",
+        "progress": {
+          "bytes": 0,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "queued",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 1.5385646749928128,
+        "phase": "transferring",
+        "progress": {
+          "bytes": 0,
+          "direction": "download",
+          "epoch": 1,
+          "phase": "transferring",
+          "total": 1050854
+        }
+      },
+      {
+        "at": 1.7307469510124065,
+        "phase": "no_rpc",
+        "progress": null
+      }
+    ],
+    "max_query_s": 0.001898753020213917
+  }
+]

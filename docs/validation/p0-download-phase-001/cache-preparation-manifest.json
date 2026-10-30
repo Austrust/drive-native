@@ -1,0 +1,8 @@
+{
+  "scope": "training",
+  "purpose": "prepare one cache file before transport test; exploratory first read, not 30-sample throughput acceptance",
+  "expected_size": 1050854,
+  "registered_at": 1793383597.6822693,
+  "timeout_s": 60,
+  "readonly": true
+}

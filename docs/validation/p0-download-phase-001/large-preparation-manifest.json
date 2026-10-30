@@ -1,0 +1,8 @@
+{
+  "scope": "training",
+  "purpose": "prepare one uncached 64-to-128MiB file, smallest eligible, before 3 repeated cold reads",
+  "expected_size": 70289047,
+  "registered_at": 1793383835.1198313,
+  "timeout_s": 120,
+  "readonly": true
+}

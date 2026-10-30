@@ -1,0 +1,14 @@
+{
+  "connection": "online",
+  "error": null,
+  "mounted": true,
+  "downloads_started": 24,
+  "download_errors": 0,
+  "download_diagnostics": {
+    "failures_seen": 11,
+    "last_failure": {
+      "kind": "server_rejected",
+      "server_code": 32772
+    }
+  }
+}
