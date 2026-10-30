@@ -23,10 +23,13 @@
 - [prepare-gui-build.sh](prepare-gui-build.sh)
 - [source_snapshot.py](source_snapshot.py)
 - [stage-linux.sh](stage-linux.sh)
+- [stage-docs.py](stage-docs.py)：安装可离线阅读的说明，并将外部证据链接固定到构建提交。
 - [test_prepare_debian_source.py](test_prepare_debian_source.py)
 - [verify-runtime.sh](verify-runtime.sh)
 - [verify.sh](verify.sh)
 
 ## 实验脚本
+
+[validation](validation/README.md) 提供 P0 基线、固定夹具、断连探针和独立校验工具；验证状态见仓库根 DELIVERY_GATES.md。
 
 `native_*`、`*_probe` 及 examples 中的真实联调程序是历史实验工具，其中部分会写入测试目录。主机已替换为不可用示例地址；必须阅读工具的测试范围并配置隔离账号后显式运行。普通客户端不依赖这些脚本，自动测试不运行真实 NAS 写入。

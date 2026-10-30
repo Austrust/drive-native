@@ -1,3 +1,13 @@
+drive-native (0.1.0~dev20261031.1) unstable; urgency=medium
+
+  * Ship readable baseline documentation and source/build identity with the package.
+  * Pin unbundled evidence links to the source commit instead of leaving broken paths.
+  * Include reproducible P0 validation tools in the source distribution.
+  * Keep runtime behavior, schema 18 and IPC 12 unchanged from dev20261030.6.
+  * Development baseline only; performance and reliability acceptance remain open.
+
+ -- Drive Native contributors <noreply@example.invalid>  Sat, 31 Oct 2026 03:00:00 +0800
+
 drive-native (0.1.0~dev20261030.6) unstable; urgency=medium
 
   * Batch directory status aggregation to avoid recursive database lock starvation.

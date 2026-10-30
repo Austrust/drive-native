@@ -33,6 +33,10 @@ override_dh_strip:
 override_dh_dwz:
 	dh_dwz -Xusr/lib/drive-native/gui
 
+override_dh_compress:
+	# Keep offline Markdown links and the installed identity files directly readable.
+	dh_compress -X.md -XSOURCE_COMMIT -XBUILD_VERSION
+
 override_dh_auto_clean:
 	# Build artifacts live only in the disposable build checkout.
 	rm -rf build

@@ -2,7 +2,7 @@
 
 面向 Linux Mint Cinnamon / Nemo 的 Synology Drive 原生协议按需同步客户端。使用 Rust、FUSE、SQLite、PySide6 和 Nemo 扩展；独立连接 Drive Server，不依赖 WebDAV 或官方客户端进程。
 
-**开发测试版本，尚未完成日常使用验收。** 当前版本为 `0.1.0~dev20261030.6`，基于 `.5+acl2` 构建归档继续维护；目录性能和重连验证见 [性能报告](docs/PERFORMANCE.md)。官方 Linux 引擎适配是另一个项目，不包含在此仓库。
+**开发测试版本，尚未完成日常使用验收。** 当前源码版本为 `0.1.0~dev20261031.1`；本轮补齐安装包文档、源码身份和P0基线入口，运行行为与 `.6` 一致，详见[发布说明](docs/RELEASE_NOTES.md)。已发布安装包以 [GitHub Releases](https://github.com/Austrust/drive-native/releases) 为准。官方 Linux 适配冻结为协议参照及备用分支，不包含在此产品中。
 
 ## 已实现
 
@@ -25,9 +25,13 @@ cargo test --workspace --all-features --locked
 python3 -m venv .venv-build
 .venv-build/bin/pip install -r scripts/gui-requirements.lock
 export GUI_PYTHON="$PWD/.venv-build/bin/python"
+# Git checkout must be clean.
+export DRIVE_NATIVE_SOURCE_COMMIT="$(git rev-parse HEAD)"
 chmod +x debian/rules debian/drive-native.postinst debian/drive-native.postrm
 dpkg-buildpackage -b -us -uc
 ```
+
+从发布的源码归档构建时，将配套 `SOURCE_COMMIT` 文件保留在解压后的 `source/` 旁边；在该源码目录中改用 `export DRIVE_NATIVE_SOURCE_COMMIT="$(cat ../SOURCE_COMMIT)"`。
 
 安装生成的 `.deb` 后从应用菜单打开 Drive Native。首次配置连接地址、证书服务器名称及账号，选择同步目录。凭据由用户输入，通过 Secret Service 保存；不要将凭据或用户数据库提交到 Git。
 

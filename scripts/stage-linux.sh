@@ -25,7 +25,8 @@ install -Dm644 desktop/drive-native.service "$stage/usr/lib/systemd/user/drive-n
 install -Dm644 desktop/drive-native-unlock.service "$stage/usr/lib/systemd/user/drive-native-unlock.service"
 doc="$stage/usr/share/doc/drive-native"
 install -d "$doc"
-install -m644 LICENSE DELIVERY_GATES.md "$doc/"
+install -m644 LICENSE "$doc/"
+python3 scripts/stage-docs.py "$doc"
 install -m644 crates/sproto/LICENSE "$doc/sproto-LICENSE"
 install -m644 "$build/gui-dependencies.txt" scripts/gui-requirements.lock "$doc/"
 # No giomodule.cache is shipped: maintainer scripts update the shared cache.
