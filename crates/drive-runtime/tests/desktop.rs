@@ -63,6 +63,32 @@ fn get(s: &Service, path: &str) -> serde_json::Value {
         .unwrap()["entries"][0]
         .clone()
 }
+
+#[test]
+fn large_online_only_tree_has_bounded_local_status_cost() {
+    let d = tempfile::tempdir().unwrap();
+    let mut store = Store::open(d.path()).unwrap();
+    let mut nodes = vec![node("root", None, true)];
+    for folder in 0..100 {
+        let id = format!("folder-{folder}");
+        nodes.push(node(&id, Some("root"), true));
+        for file in 0..100 {
+            nodes.push(node(&format!("file-{folder}-{file}"), Some(&id), false));
+        }
+    }
+    store.install_remote_snapshot(&nodes, "1", "server").unwrap();
+    store.ensure_fs_root("root").unwrap();
+    assert!(store.downloads_needed().unwrap().is_empty());
+    let service = Service::new(profile(), store, PathBuf::from("/nonexistent-worker")).unwrap();
+    let start = std::time::Instant::now();
+    let state = get(&service, ".");
+    assert_eq!(state["status"], "online_only");
+    assert_eq!(state["offline_available"], false);
+    // Deliberately generous: catches recursive per-node SQL regressions without
+    // requiring benchmark-grade timing on ordinary CI machines.
+    assert!(start.elapsed() < std::time::Duration::from_secs(15));
+    assert_eq!(std::fs::read_dir(d.path().join("blobs")).unwrap().count(), 0);
+}
 #[test]
 fn folder_completion_follows_every_child_and_stale_cache_remains_visible() {
     let (_d, s) = fixture();
