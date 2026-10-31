@@ -270,7 +270,6 @@ impl<'a> Projector<'a> {
         let mut seen = HashSet::new();
         let mut pin = false;
         let mut overlay = false;
-        let mut visible = true;
         while let Some(id) = current {
             if seen.len() >= 128 || !seen.insert(id.clone()) {
                 return Err(Stop::Rebuild(RebuildReason::InvalidGraph));
@@ -278,9 +277,14 @@ impl<'a> Projector<'a> {
             let Some(n) = self.raw(&id)? else {
                 return Err(Stop::Rebuild(RebuildReason::InvalidGraph));
             };
+            // A definite local visibility exclusion is already sufficient.
+            // Historical hidden rows may have missing ancestors; validating
+            // those ancestors must not reject an unrelated visible tree.
+            if n.deleted || n.shadowed || n.denied {
+                return Ok(None);
+            }
             pin |= n.pinned;
             overlay |= n.overlay;
-            visible &= !n.deleted && !n.shadowed;
             current = n.parent;
         }
         // access_blocked propagates along BOTH local and retained remote edges.
@@ -304,7 +308,9 @@ impl<'a> Projector<'a> {
             let Some(n) = self.raw(&id)? else {
                 return Err(Stop::Rebuild(RebuildReason::InvalidGraph));
             };
-            visible &= !n.denied;
+            if n.denied {
+                return Ok(None);
+            }
             pending.push((id, true, depth));
             if let Some(parent) = n.parent {
                 pending.push((parent, false, depth + 1))
@@ -312,9 +318,6 @@ impl<'a> Projector<'a> {
             if let Some(parent) = n.remote_parent {
                 pending.push((parent, false, depth + 1))
             }
-        }
-        if !visible {
-            return Ok(None);
         }
         let dirty_draft = node.content.draft.as_ref().is_some_and(|d| d.dirty);
         let draft_conflict = dirty_draft

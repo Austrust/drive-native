@@ -380,6 +380,40 @@ fn invalid_parent_graph_and_remote_cycles_require_rebuild() {
 }
 
 #[test]
+fn hidden_history_with_missing_ancestors_does_not_block_visible_snapshot_or_delta() {
+    for hide in [
+        "UPDATE nodes SET deleted=1 WHERE id='p'",
+        "INSERT INTO access_denied(node) VALUES('p')",
+    ] {
+        let (_d, s) = fixture();
+        let before = cursor(&s);
+        // A hidden historical branch can remain in durable metadata after an
+        // incomplete event history. It must not poison an unrelated visible root.
+        s.db.execute("UPDATE nodes SET parent='missing-history' WHERE id='p'", [])
+            .unwrap();
+        s.db.execute(hide, []).unwrap();
+        let snapshot = ready(s.snapshot_status(ProjectionBudget::default()).unwrap());
+        assert_eq!(snapshot.atoms.len(), 3);
+        assert!(snapshot.atoms.iter().all(|n| n.id != "p" && n.id != "a"));
+        let change = delta(&s, &before);
+        for id in ["p", "a"] {
+            assert!(change.nodes.iter().any(|n| n.id == id && n.atom.is_none()));
+        }
+        s.db.execute("UPDATE nodes SET deleted=0 WHERE id='p'", [])
+            .unwrap();
+        s.db.execute("DELETE FROM access_denied WHERE node='p'", [])
+            .unwrap();
+        assert!(matches!(
+            s.snapshot_status(ProjectionBudget::default()).unwrap(),
+            Capture::Rebuild {
+                reason: RebuildReason::InvalidGraph,
+                ..
+            }
+        ));
+    }
+}
+
+#[test]
 fn dirty_draft_conflict_unlink_and_current_version_failure_follow_core_rules() {
     let (_d, s) = fixture();
     let c = cursor(&s);
