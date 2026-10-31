@@ -3,7 +3,7 @@
 use super::*;
 use crate::snapshot_progress::{Phase, Progress, emit};
 use sproto::actions::list::{FileType, NodeInfo};
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 pub const SNAPSHOT_NODE_LIMIT: usize = 500_000;
 #[derive(Clone, Serialize, Deserialize)]
@@ -128,6 +128,10 @@ impl NativeReadSession {
             units: 0,
             items: 1,
         });
+        // Only a locally observed namespace collision is eligible for a race
+        // check. A transport/permission/format failure is not made transient by
+        // unrelated activity on the server's global cursor.
+        let mut conflict = None;
         let enumeration: Result<()> = async {
             // Bounded parallel metadata requests; no unbounded per-directory tasks.
             // Dropping JoinSet cancels siblings on failure/cancellation.
@@ -169,14 +173,15 @@ impl NativeReadSession {
                     }
                     Err(error) => return Err(error.into()),
                 };
-                let mut names = HashSet::new();
+                let mut names = HashMap::new();
                 for child in children {
                     if child.is_removed {
                         continue;
                     }
-                    if !identities.insert(child.file_id.clone())
-                        || !names.insert(child.name.clone())
+                    if let Some(collision) =
+                        remember_child(&mut identities, &mut names, &child.file_id, &child.name)
                     {
+                        conflict = Some(collision);
                         return Err(Error::State(
                             "snapshot identity or name changed during enumeration".into(),
                         ));
@@ -212,10 +217,20 @@ impl NativeReadSession {
         }
         .await;
         if let Err(error) = enumeration {
-            // Only a verified advance on the same native event stream permits
-            // treating an inconsistent enumeration as a transient race.
-            let observed = self.scoped_events(&watch).await?;
-            return Err(classify_enumeration_error(error, watch.cursor, &observed));
+            // Advancement alone (including an empty scoped page) does not
+            // explain the collision. Require an event for an involved identity.
+            return Err(resolve_enumeration_failure(
+                error,
+                conflict,
+                &self.scope,
+                watch.cursor,
+                |cursor| {
+                    let mut probe = watch.clone();
+                    probe.cursor = cursor;
+                    async move { self.scoped_events(&probe).await }
+                },
+            )
+            .await);
         }
         Ok(RemoteSnapshot {
             scope: self.scope.clone(),
@@ -417,43 +432,96 @@ impl Store {
     }
 }
 
-fn classify_enumeration_error(error: Error, cursor: EventCursor, observed: &EventBatch) -> Error {
-    if !observed.recovery_required && observed.next.0 > cursor.0 {
+/// Private evidence created only by duplicate identity/name detection, never by
+/// matching an error's text. At most two identities, not a copy of the candidate.
+struct EnumerationConflict {
+    first: String,
+    second: Option<String>,
+}
+fn remember_child(
+    identities: &mut HashSet<String>,
+    names: &mut HashMap<String, String>,
+    id: &str,
+    name: &str,
+) -> Option<EnumerationConflict> {
+    if !identities.insert(id.to_owned()) {
+        return Some(EnumerationConflict {
+            first: id.to_owned(),
+            second: None,
+        });
+    }
+    names
+        .insert(name.to_owned(), id.to_owned())
+        .map(|first| EnumerationConflict {
+            first,
+            second: Some(id.to_owned()),
+        })
+}
+fn classify_enumeration_error(
+    error: Error,
+    conflict: &EnumerationConflict,
+    scope: &Scope,
+    cursor: EventCursor,
+    observed: &EventBatch,
+) -> Error {
+    let related = observed.events.iter().any(|event| {
+        let identity = event.file_id == conflict.first
+            || conflict
+                .second
+                .as_ref()
+                .is_some_and(|id| id == &event.file_id);
+        let destination = match &event.kind {
+            EventKind::Move { destination, .. } => destination.as_str(),
+            _ => event.path.as_str(),
+        };
+        identity && (scope.contains(&event.path) || scope.contains(destination))
+    });
+    if !observed.recovery_required && observed.next.0 > cursor.0 && related {
         Error::SnapshotChanged
     } else {
         error
     }
 }
-#[cfg(test)]
-mod race_tests {
-    use super::*;
-    #[test]
-    fn only_verified_cursor_advance_marks_an_enumeration_race() {
-        for (next, recovery, changed) in [
-            (11, false, true),
-            (10, false, false),
-            (9, false, false),
-            (11, true, false),
-        ] {
-            let batch = EventBatch {
-                events: vec![],
-                next: EventCursor(next),
-                recovery_required: recovery,
-            };
-            let error = classify_enumeration_error(
-                Error::State("invalid duplicate identity".into()),
-                EventCursor(10),
-                &batch,
-            );
-            assert_eq!(matches!(error, Error::SnapshotChanged), changed);
-            if !changed {
-                assert!(
-                    matches!(error,Error::State(ref text) if text=="invalid duplicate identity")
-                );
-            }
+async fn resolve_enumeration_failure<F, Fut>(
+    mut error: Error,
+    conflict: Option<EnumerationConflict>,
+    scope: &Scope,
+    mut cursor: EventCursor,
+    mut observe: F,
+) -> Error
+where
+    F: FnMut(EventCursor) -> Fut,
+    Fut: std::future::Future<Output = Result<EventBatch>>,
+{
+    let Some(conflict) = conflict else {
+        return error;
+    };
+    // Related events may follow empty advancing pages. Use the existing fence
+    // budgets, but never treat an incomplete probe as evidence of a race.
+    let started = std::time::Instant::now();
+    for _ in 0..4096 {
+        if started.elapsed() > std::time::Duration::from_secs(900) {
+            break;
         }
+        let observed = match observe(cursor).await {
+            Ok(batch) => batch,
+            // Verification failure keeps its transport/root/protocol category.
+            Err(error) => return error,
+        };
+        error = classify_enumeration_error(error, &conflict, scope, cursor, &observed);
+        if matches!(error, Error::SnapshotChanged)
+            || observed.recovery_required
+            || observed.next.0 <= cursor.0
+        {
+            return error;
+        }
+        cursor = observed.next;
     }
+    error
 }
+#[cfg(test)]
+#[path = "native_snapshot_error_tests.rs"]
+mod race_tests;
 
 #[derive(Debug,PartialEq)]enum FenceStep { Changed, Continue, Complete }
 fn snapshot_fence_step(cursor: EventCursor, next: EventCursor, count: usize) -> FenceStep {
