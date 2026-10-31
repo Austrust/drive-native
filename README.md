@@ -24,6 +24,8 @@ Ubuntu更新包已逐项整合，继续在独立分支修复原生恢复及按�
 
 ## 构建和测试
 
+隔离开发中的[分页只读 WAL 状态快照](docs/STATUS_WAL_SNAPSHOT.md)用于大目录索引初始化，尚未接入桌面；验证状态和调用边界见该文档。
+
 在 Ubuntu 24.04 / Linux 文件系统中构建。准备 Rust 1.89+、Debian control 中列出的构建依赖和独立 Python 虚拟环境；历史包构建使用 Rust 1.99.1。
 
 ```sh
