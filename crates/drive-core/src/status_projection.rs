@@ -99,7 +99,7 @@ pub enum Capture<T> {
     },
 }
 
-enum Stop {
+pub(crate) enum Stop {
     Rebuild(RebuildReason),
     Error(Error),
 }
@@ -164,13 +164,16 @@ fn length(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<usize> {
         .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(index, value))
 }
 struct Projector<'a> {
-    store: &'a Store,
+    db: &'a rusqlite::Connection,
     meter: Meter,
     raw: HashMap<String, Option<Raw>>,
     overlay_children: Option<HashMap<String, Vec<String>>>,
 }
 impl<'a> Projector<'a> {
     fn new(store: &'a Store, budget: ProjectionBudget) -> Result<Self> {
+        Self::connection(&store.db, budget)
+    }
+    fn connection(db: &'a rusqlite::Connection, budget: ProjectionBudget) -> Result<Self> {
         if budget.max_changes == 0
             || budget.max_changes > 65_536
             || budget.max_nodes == 0
@@ -182,7 +185,7 @@ impl<'a> Projector<'a> {
             return Err(Error::State("invalid status projection budget".into()));
         }
         Ok(Self {
-            store,
+            db,
             meter: Meter {
                 budget,
                 bytes: 0,
@@ -203,7 +206,7 @@ impl<'a> Projector<'a> {
         }
         // Check encoded lengths before allocating strings from SQLite. Each
         // unique source row is charged with room for output and worklist copies.
-        let mut q=self.store.db.prepare_cached("SELECT n.parent,n.name,n.directory,n.pinned,n.deleted,n.conflict,
+        let mut q=self.db.prepare_cached("SELECT n.parent,n.name,n.directory,n.pinned,n.deleted,n.conflict,
             EXISTS(SELECT 1 FROM access_denied a WHERE a.node=n.id),
             EXISTS(SELECT 1 FROM nodes l JOIN local_creations c ON c.node=l.id WHERE l.parent=n.parent AND l.name=n.name AND l.id!=n.id AND l.deleted=0),
             o.node IS NOT NULL,json_extract(o.remote,'$.parent'),EXISTS(SELECT 1 FROM local_unlinks u WHERE u.node=n.id),
@@ -382,7 +385,7 @@ impl<'a> Projector<'a> {
         parent: Option<&str>,
         name: Option<&str>,
     ) -> ProjectResult<Vec<String>> {
-        let mut q = self.store.db.prepare_cached(sql)?;
+        let mut q = self.db.prepare_cached(sql)?;
         let mut rows = q.query(params![parent, name])?;
         let mut out = Vec::new();
         while let Some(r) = rows.next()? {
@@ -404,7 +407,7 @@ impl<'a> Projector<'a> {
         if self.overlay_children.is_none() {
             let mut edges: HashMap<String, Vec<String>> = HashMap::new();
             let mut count = 0;
-            let mut q=self.store.db.prepare("SELECT node,json_extract(remote,'$.parent'),length(CAST(node AS BLOB))+coalesce(length(CAST(json_extract(remote,'$.parent') AS BLOB)),0) FROM namespace_overlay WHERE json_extract(remote,'$.parent') IS NOT NULL")?;
+            let mut q=self.db.prepare("SELECT node,json_extract(remote,'$.parent'),length(CAST(node AS BLOB))+coalesce(length(CAST(json_extract(remote,'$.parent') AS BLOB)),0) FROM namespace_overlay WHERE json_extract(remote,'$.parent') IS NOT NULL")?;
             let mut rows = q.query([])?;
             while let Some(r) = rows.next()? {
                 count += 1;
@@ -430,6 +433,52 @@ fn complete<T>(result: ProjectResult<T>, watermark: JournalWatermark) -> Result<
         Err(Stop::Rebuild(reason)) => Ok(Capture::Rebuild { reason, watermark }),
         Err(Stop::Error(e)) => Err(e),
     }
+}
+
+/// Main-schema-only page, also usable by a connection with a pinned WAL view.
+/// The caller bounds accumulated output and the lifetime across these pages.
+pub(crate) struct SnapshotPage {
+    pub atoms: Vec<StatusAtom>,
+    pub last: Option<String>,
+    pub scanned: usize,
+    pub bytes: usize,
+    pub work: usize,
+    pub exhausted: bool,
+}
+pub(crate) fn snapshot_page(
+    db: &rusqlite::Connection,
+    after: Option<&str>,
+    limit: usize,
+    budget: ProjectionBudget,
+) -> ProjectResult<SnapshotPage> {
+    let mut p = Projector::connection(db, budget)?;
+    let mut ids = Vec::new();
+    // Separate SQL avoids an OR predicate preventing the primary-key seek.
+    let sql = if after.is_some() {
+        "SELECT id,length(CAST(id AS BLOB)) FROM main.nodes WHERE id>?1 ORDER BY id LIMIT ?2"
+    } else {
+        "SELECT id,length(CAST(id AS BLOB)) FROM main.nodes WHERE ?1 IS NULL ORDER BY id LIMIT ?2"
+    };
+    let mut q = db.prepare_cached(sql)?;
+    let mut rows = q.query(params![after, limit as i64])?;
+    while let Some(row) = rows.next()? {
+        p.meter.spend(length(row, 1)?.saturating_mul(4).saturating_add(128))?;
+        ids.push(row.get::<_, String>(0)?);
+    }
+    drop(rows);
+    drop(q);
+    let scanned = ids.len();
+    let last = ids.last().cloned();
+    let mut atoms = Vec::new();
+    for id in ids {
+        if let Some(atom) = p.atom(&id)? {
+            atoms.push(atom);
+        }
+    }
+    Ok(SnapshotPage {
+        atoms, last, scanned, bytes: p.meter.bytes, work: p.meter.work,
+        exhausted: scanned < limit,
+    })
 }
 impl Store {
     /// Capture the WHOLE committed Store's visible tree under its existing
