@@ -593,6 +593,7 @@ impl Service {
                 )
             };
             let mut worker = None;
+            self.bridge.initialization.begin();
             let mut stage = Stage::StartWorker;
             let started = std::time::Instant::now();
             let result = (|| -> io::Result<()> {
@@ -608,10 +609,14 @@ impl Service {
                     c.active = Some(worker.rpc.clone());
                 }
                 stage = Stage::Authenticate;
+                self.bridge
+                    .initialization
+                    .phase(crate::initialization::Phase::Authenticating);
                 let restore = Bridge::authenticate(
                     &worker.rpc,
                     self.profile.login(password, trusted_ca_pem),
                 )?;
+                self.bridge.initialization.activity();
                 {
                     let c = self.control.lock().unwrap();
                     if c.generation != generation {
@@ -625,13 +630,21 @@ impl Service {
                         .transfer_limits()
                         .map_err(io::Error::other)?;
                     stage = Stage::ConfigureTransfers;
+                    self.bridge
+                        .initialization
+                        .phase(crate::initialization::Phase::Configuring);
                     Self::configure_transfers(&worker.rpc, limits)?;
+                    self.bridge.initialization.activity();
                     stage = Stage::BindScope;
+                    self.bridge
+                        .initialization
+                        .phase(crate::initialization::Phase::Binding);
                     self.bridge.attach(
                         worker.rpc.clone(),
                         &restore,
                         &serde_json::to_string(&self.profile.scope)?,
                     )?;
+                    self.bridge.initialization.activity();
                 }
                 if permissions_generation == Some(generation) {
                     stage = Stage::ResumeEvents;
@@ -653,6 +666,7 @@ impl Service {
                 delay = 1;
                 self.bridge.event_loop_observed(|current| stage = current)
             })();
+            self.bridge.initialization.end();
             let requested = self.stop.load(Ordering::Acquire)
                 || self.control.lock().unwrap().generation != generation;
             let worker_pid = worker.as_ref().map(WorkerProcess::pid);

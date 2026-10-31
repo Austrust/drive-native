@@ -31,12 +31,34 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     store.consume_startup_pause(&profile.task_id)?;
     let service = Service::new(profile, store, worker)?;
     let conn = zbus::connection::Builder::session()
-        .name(drive_runtime::instance::bus_name(std::env::var("DRIVE_NATIVE_INSTANCE").ok().as_deref())?)
+        .name(drive_runtime::instance::bus_name(
+            std::env::var("DRIVE_NATIVE_INSTANCE").ok().as_deref(),
+        )?)
         .serve_at(OBJECT_PATH, Desktop(service.clone()))
         .build()
         .await?;
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     let tasks = service.start();
+    // Separate signal path: no Store lock, no metadata/stat refresh on progress.
+    let progress_service = service.clone();
+    let progress_conn = conn.clone();
+    let progress_task = tokio::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_millis(250));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut last = 0;
+        while !progress_service.stop.load(Ordering::Acquire) {
+            tick.tick().await;
+            let revision = progress_service.bridge.initialization.revision();
+            if revision != last {
+                if let Ok(emitter) =
+                    zbus::object_server::SignalEmitter::new(&progress_conn, OBJECT_PATH)
+                {
+                    let _ = Desktop::progress_changed(&emitter, revision).await;
+                }
+                last = revision;
+            }
+        }
+    });
     let mut mounted: Option<fuser::BackgroundSession> = None;
     let mut registration: Option<drive_runtime::mount_registry::MountRegistration> = None;
     let mut last = None;
@@ -75,6 +97,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         Ok::<(),Box<dyn std::error::Error>>(())
     }.await;
     service.shutdown();
+    progress_task.abort();
     tokio::task::spawn_blocking(move || {
         tasks.join();
         if let Some(session) = mounted {

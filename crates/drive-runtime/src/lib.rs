@@ -1,11 +1,13 @@
 pub mod bridge;
 mod connection_diagnostics;
 pub mod desktop;
+mod index_progress;
+pub mod initialization;
 pub mod mount_registry;
 pub mod rpc;
-mod wait_activity;
 pub mod service;
 pub mod transport;
+mod wait_activity;
 pub mod wire;
 pub mod worker;
 

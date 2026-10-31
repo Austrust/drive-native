@@ -89,6 +89,7 @@ pub struct Bridge {
     upload_signal: (Mutex<bool>, Condvar),
     pub last_error: Mutex<Option<String>>,
     pub cache_error: Mutex<Option<String>>,
+    pub initialization: Arc<crate::initialization::Tracker>,
 }
 impl Bridge {
     pub fn transfer_entries(&self) -> Vec<crate::transfers::TransferEntry> {
@@ -244,6 +245,7 @@ impl Bridge {
             upload_signal: (Mutex::new(false), Condvar::new()),
             last_error: Mutex::new(None),
             cache_error: Mutex::new(None),
+            initialization: Arc::new(crate::initialization::Tracker::default()),
         })
     }
     pub fn set_notifier(&self, notifier: fuser::Notifier) {
@@ -254,13 +256,25 @@ impl Bridge {
     /// Retry quarantined permissions on an explicit session boundary. The service
     /// uses cursor-based pull for transport retries within that session.
     pub fn initial_pull(&self) -> io::Result<bool> {
-        let denied = self.store.lock().unwrap().inaccessible_count().map_err(io::Error::other)?;
+        let denied = self
+            .store
+            .lock()
+            .unwrap()
+            .inaccessible_count()
+            .map_err(io::Error::other)?;
         if denied > 0 {
             let _event = self.event_gate.lock().unwrap();
-            self.rebuild_snapshot()
-        } else { self.pull() }
+            self.rebuild_snapshot(crate::initialization::RecoveryReason::PermissionRecheck)
+        } else {
+            self.pull()
+        }
     }
     pub fn pull(&self) -> io::Result<bool> {
+        self.pull_after_notification(false)
+    }
+    fn pull_after_notification(&self, changed_notification: bool) -> io::Result<bool> {
+        self.initialization
+            .phase(crate::initialization::Phase::CatchingUp);
         let _event = self.event_gate.lock().unwrap();
         let cursor = self
             .store
@@ -269,19 +283,32 @@ impl Bridge {
             .cursor()
             .map_err(io::Error::other)?;
         if cursor.is_empty() {
-            return self.rebuild_snapshot();
+            return self.rebuild_snapshot(crate::initialization::RecoveryReason::InitialIndex);
         }
         let response = self
             .connection()
             .call(Command::Pull { cursor }, Duration::from_secs(60))?;
         let batch = match response.body {
             Response::Events(batch) => batch,
-            Response::Failed { category } if matches!(category.as_str(), "native_cursor_reset" | "native_filtered_type_changed") => {
-                return self.rebuild_snapshot();
+            Response::Failed { category }
+                if matches!(
+                    category.as_str(),
+                    "native_cursor_reset" | "native_filtered_type_changed"
+                ) =>
+            {
+                return self.rebuild_snapshot(if category == "native_cursor_reset" {
+                    crate::initialization::RecoveryReason::CursorInvalidated
+                } else {
+                    crate::initialization::RecoveryReason::FilteredTypeChanged
+                });
             }
             body => return Err(operation_error(body)),
         };
-        let Some(batch) = batch else { return Ok(false) };
+        let Some(batch) = batch else {
+            self.initialization.pulled(false, 0, changed_notification);
+            return Ok(false);
+        };
+        let event_count = batch.events.len();
         let mut invalidations = Vec::new();
         let mut store = self.store.lock().unwrap();
         for event in &batch.events {
@@ -309,14 +336,17 @@ impl Bridge {
             }
         }
         drop(store);
+        self.initialization
+            .pulled(true, event_count, changed_notification);
         for (p, name) in invalidations {
             let _ = self.notifications.try_send(Invalidation::Entry(p, name));
         }
         self.signal_upload();
         Ok(true)
     }
-    fn rebuild_snapshot(&self) -> io::Result<bool> {
+    fn rebuild_snapshot(&self, reason: crate::initialization::RecoveryReason) -> io::Result<bool> {
         use std::io::Read;
+        self.initialization.recovery(reason);
         let _mutations = self.recovery_gate.write().unwrap();
         let cursor = self
             .store
@@ -325,13 +355,19 @@ impl Bridge {
             .cursor()
             .map_err(io::Error::other)?;
         let rpc = self.connection();
-        let response = rpc.call(Command::RecoverySnapshot, Duration::from_secs(3600))?;
+        let progress = self.initialization.clone();
+        let response = rpc.call_index(
+            Duration::from_secs(3600),
+            Arc::new(move |p| progress.index(p)),
+        )?;
         let (size, hash) = match response.body {
             Response::RecoverySnapshot { size, sha256 } if size <= 512 * 1024 * 1024 => {
                 (size, sha256)
             }
             body => return Err(operation_error(body)),
         };
+        self.initialization
+            .phase(crate::initialization::Phase::Importing);
         let descriptor = response
             .descriptor
             .ok_or_else(|| io::Error::other("snapshot descriptor absent"))?;
@@ -367,6 +403,7 @@ impl Bridge {
             }
         }
         self.signal_upload();
+        self.initialization.activity();
         Ok(true)
     }
     pub fn refresh_cached(&self) {
@@ -397,9 +434,10 @@ impl Bridge {
     ) -> io::Result<()> {
         use crate::connection_diagnostics::Stage;
         let mut digest = String::new();
+        let mut changed_notification = false;
         loop {
             stage(Stage::PullEvents);
-            self.pull()?;
+            self.pull_after_notification(changed_notification)?;
             // The persistent transfer scheduler owns hydration. Waiting for a
             // body here stalls the native event cursor while a large/limited
             // download is running. A wake only inspects local queued work.
@@ -411,11 +449,17 @@ impl Bridge {
                 .cursor()
                 .map_err(io::Error::other)?;
             stage(Stage::WaitNotification);
-            let response = self
-                .connection()
-                .call(Command::Wait { cursor, digest }, crate::wire::NOTIFICATION_IDLE)?;
+            self.initialization
+                .phase(crate::initialization::Phase::Waiting);
+            let response = self.connection().call(
+                Command::Wait { cursor, digest },
+                crate::wire::NOTIFICATION_IDLE,
+            )?;
             digest = match response.body {
-                Response::Notification { digest, .. } => digest,
+                Response::Notification { digest, changed } => {
+                    changed_notification = changed;
+                    digest
+                }
                 body => return Err(operation_error(body)),
             };
         }

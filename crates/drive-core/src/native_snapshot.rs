@@ -1,6 +1,7 @@
 //! Native snapshot enumeration fenced by the same incremental event stream.
 //! Used only for initial/recovery indexing, never as a periodic change detector.
 use super::*;
+use crate::snapshot_progress::{Phase, Progress, emit};
 use sproto::actions::list::{FileType, NodeInfo};
 use std::collections::{HashSet, VecDeque};
 
@@ -21,7 +22,7 @@ impl NativeReadSession {
     /// Collect a candidate, not yet authorized for installation. An independent
     /// fence check is mandatory even when every directory list succeeded.
     pub async fn snapshot_candidate(&self) -> Result<RemoteSnapshot> {
-        self.snapshot_candidate_with_observer(|_| async { Ok(()) })
+        self.snapshot_candidate_with_observer(|_| async { Ok(()) }, 1)
             .await
     }
     /// Explicit research barrier after a directory has been enumerated. The
@@ -32,11 +33,12 @@ impl NativeReadSession {
         F: FnMut(String) -> Fut,
         Fut: std::future::Future<Output = Result<()>>,
     {
-        self.snapshot_candidate_with_observer(observer).await
+        self.snapshot_candidate_with_observer(observer, 1).await
     }
     async fn snapshot_candidate_with_observer<F, Fut>(
         &self,
         mut observer: F,
+        attempt: u8,
     ) -> Result<RemoteSnapshot>
     where
         F: FnMut(String) -> Fut,
@@ -49,7 +51,13 @@ impl NativeReadSession {
         // Scoped history can have empty pages with advancing global cursors.
         // Only a stationary, empty response is the verified boundary.
         let started = std::time::Instant::now();
-        for _ in 0..4096 {
+        emit(Progress {
+            attempt,
+            phase: Phase::Seed,
+            units: 0,
+            items: 0,
+        });
+        for page in 0..4096 {
             if started.elapsed() > std::time::Duration::from_secs(900) {
                 return Err(Error::State("snapshot seed time budget exceeded".into()));
             }
@@ -63,6 +71,12 @@ impl NativeReadSession {
             if event_count > 2_000_000 {
                 return Err(Error::State("snapshot seed budget exceeded".into()));
             }
+            emit(Progress {
+                attempt,
+                phase: Phase::Seed,
+                units: page + 1,
+                items: event_count as u64,
+            });
             // Translate only the selected root here. Full directory contents come
             // from list replies; a historical event replay is not a full snapshot.
             for event in batch
@@ -107,14 +121,25 @@ impl NativeReadSession {
         let mut identities = HashSet::from([self.scope.file_id.clone()]);
         let mut pending =
             VecDeque::from([(self.scope.file_id.clone(), self.scope.path.clone(), 0usize)]);
+        let mut directories = 0;
+        emit(Progress {
+            attempt,
+            phase: Phase::Enumerate,
+            units: 0,
+            items: 1,
+        });
         let enumeration: Result<()> = async {
             // Bounded parallel metadata requests; no unbounded per-directory tasks.
             // Dropping JoinSet cancels siblings on failure/cancellation.
             let mut requests = tokio::task::JoinSet::new();
             while !pending.is_empty() || !requests.is_empty() {
                 while requests.len() < 4 {
-                    let Some((parent, path, depth)) = pending.pop_front() else { break };
-                    if depth > 128 { return Err(Error::State("snapshot depth exceeded".into())); }
+                    let Some((parent, path, depth)) = pending.pop_front() else {
+                        break;
+                    };
+                    if depth > 128 {
+                        return Err(Error::State("snapshot depth exceeded".into()));
+                    }
                     let client = self.client.clone();
                     let view = self.scope.view_id;
                     requests.spawn(async move {
@@ -122,13 +147,24 @@ impl NativeReadSession {
                         (parent, path, depth, result)
                     });
                 }
-                let (parent, path, depth, result) = requests.join_next().await
+                let (parent, path, depth, result) = requests
+                    .join_next()
+                    .await
                     .ok_or_else(|| Error::State("snapshot enumeration task absent".into()))?
                     .map_err(|_| Error::State("snapshot enumeration task failed".into()))?;
                 let children = match result {
                     Ok(children) => children,
-                    Err(sproto::Error::Server { code: 12290, .. }) if parent != self.scope.file_id => {
+                    Err(sproto::Error::Server { code: 12290, .. })
+                        if parent != self.scope.file_id =>
+                    {
                         inaccessible.push(parent);
+                        directories += 1;
+                        emit(Progress {
+                            attempt,
+                            phase: Phase::Enumerate,
+                            units: directories,
+                            items: nodes.len() as u64,
+                        });
                         continue;
                     }
                     Err(error) => return Err(error.into()),
@@ -163,6 +199,13 @@ impl NativeReadSession {
                         return Err(Error::State("snapshot node budget exceeded".into()));
                     }
                 }
+                directories += 1;
+                emit(Progress {
+                    attempt,
+                    phase: Phase::Enumerate,
+                    units: directories,
+                    items: nodes.len() as u64,
+                });
                 observer(path).await?;
             }
             Ok(())
@@ -227,12 +270,26 @@ impl NativeReadSession {
     /// A global cursor may advance for unrelated paths. Keep the older snapshot
     /// cursor: subsequent pulls still replay everything after it, so no event is lost.
     pub async fn snapshot_unchanged(&self, snapshot: &RemoteSnapshot) -> Result<bool> {
+        self.snapshot_unchanged_observed(snapshot, 1).await
+    }
+    async fn snapshot_unchanged_observed(
+        &self,
+        snapshot: &RemoteSnapshot,
+        attempt: u8,
+    ) -> Result<bool> {
         if snapshot.scope != self.scope || snapshot.restore != self.client.restore_identity() {
             return Err(Error::State("snapshot task or server changed".into()));
         }
         let mut watch = self.watch(&snapshot.cursor)?;
         let started = std::time::Instant::now();
-        for _ in 0..4096 {
+        let mut events = 0;
+        emit(Progress {
+            attempt,
+            phase: Phase::Fence,
+            units: 0,
+            items: 0,
+        });
+        for page in 0..4096 {
             if started.elapsed() > std::time::Duration::from_secs(900) {
                 return Err(Error::State("snapshot seed time budget exceeded".into()));
             }
@@ -240,6 +297,13 @@ impl NativeReadSession {
             if batch.recovery_required {
                 return Err(Error::Unsupported("unverified native merge/rescan mode"));
             }
+            events += batch.events.len() as u64;
+            emit(Progress {
+                attempt,
+                phase: Phase::Fence,
+                units: page + 1,
+                items: events,
+            });
             match snapshot_fence_step(watch.cursor, batch.next, batch.events.len()) {
                 FenceStep::Changed => return Ok(false),
                 FenceStep::Complete => return Ok(true),
@@ -269,13 +333,16 @@ impl NativeReadSession {
         F: FnMut(String) -> Fut,
         Fut: std::future::Future<Output = Result<()>>,
     {
-        for _ in 0..3 {
-            let snapshot = match self.snapshot_candidate_with_observer(&mut observer).await {
+        for attempt in 1..=3 {
+            let snapshot = match self
+                .snapshot_candidate_with_observer(&mut observer, attempt)
+                .await
+            {
                 Ok(snapshot) => snapshot,
                 Err(Error::SnapshotChanged) => continue,
                 Err(error) => return Err(error),
             };
-            if self.snapshot_unchanged(&snapshot).await? {
+            if self.snapshot_unchanged_observed(&snapshot, attempt).await? {
                 return Ok(snapshot);
             }
         }
