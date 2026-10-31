@@ -55,6 +55,7 @@ dpkg-buildpackage -b -us -uc
 | [docs/STATUS_CHANGE_JOURNAL.md](docs/STATUS_CHANGE_JOURNAL.md) | 事务性状态变化日志基础层；尚未接入增量桌面聚合 |
 | [docs/STORE_COMMIT_NOTIFICATIONS.md](docs/STORE_COMMIT_NOTIFICATIONS.md) | 统一 Store guard、已提交语义失效与非阻塞合并唤醒 |
 | [docs/INCREMENTAL_STATUS_INDEX.md](docs/INCREMENTAL_STATUS_INDEX.md) | 纯增量状态聚合与后续一致性接口；完整索引及桌面接入待实现 |
+| [docs/STATUS_PROJECTION.md](docs/STATUS_PROJECTION.md) | 同一 Store 边界的提交投影与有界快照；尚未接入桌面 |
 | [docs/INITIALIZATION_PROGRESS.md](docs/INITIALIZATION_PROGRESS.md) | 初始化阶段、真实计数、轻量进度接口与 IPC 配对边界 |
 | [docs/SNAPSHOT_ERROR_CLASSIFICATION.md](docs/SNAPSHOT_ERROR_CLASSIFICATION.md) | 枚举失败的相关竞态验证；保留原一致性围栏 |
 | [docs/UPGRADE_RECOVERY.md](docs/UPGRADE_RECOVERY.md) | 暂停、正常升级接管、失败保留数据与尚未完成的安装包验证 |
