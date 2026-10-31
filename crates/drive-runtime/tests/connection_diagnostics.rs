@@ -138,7 +138,7 @@ fn actual_supervisor_persists_stage_and_pre_cleanup_state_without_losing_cache()
         let file = root.path().join("state/connection-diagnostics.json");
         wait_for(|| file.exists());
         // Stop retries before examining the immutable saved first transition.
-        service.pause();
+        service.pause().unwrap();
         let raw = fs::read_to_string(&file).unwrap();
         assert!(!raw.contains("synthetic-private-input"));
         let saved: serde_json::Value = serde_json::from_str(&raw).unwrap();
@@ -180,7 +180,7 @@ fn pause_interrupts_wait_without_inventing_a_failure_or_resetting_the_cursor() {
         service.control.lock().unwrap().state,
         ConnectionState::Online
     );
-    service.pause();
+    service.pause().unwrap();
     let file = root.path().join("state/connection-diagnostics.json");
     wait_for(|| file.exists());
     let snapshot: serde_json::Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();

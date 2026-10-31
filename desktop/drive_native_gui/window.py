@@ -30,6 +30,7 @@ from .config import load_profile, config_path, binary, archive_profile, restore_
 from .wizard import SetupWizard
 from .credentials import secret_job
 from .lifecycle import ServiceLauncher, same_task
+from .upgrade import BackendUpgrade
 
 STATUS = {
     "download_retry": ("下载失败 · 将重试", "#bc8425"),
@@ -57,6 +58,7 @@ CONNECTION = {
     "stopping": "正在停止",
 }
 ERRORS = {
+    "worker_image_unavailable": "后台组件不完整，网络同步已暂停。本地内容仍可用；请修复安装后重新启动挂载，无需清除缓存。",
     "authentication_or_protocol_rejected": "账号认证未通过，请重新输入密码并检查 Drive 权限。",
     "trust_settings_not_durable": "证书设置未确认保存。请在连接证书中重新读取并保存；本地缓存仍可使用。",
     "certificate_or_configuration": "证书或连接配置需要检查。",
@@ -184,6 +186,13 @@ class MainWindow(QMainWindow):
         self.pause = QPushButton("暂停同步")
         self.pause.clicked.connect(self.toggle_pause)
         head.addWidget(self.pause)
+        self.update_backend = QPushButton("应用后台更新…")
+        self.update_backend.hide()
+        self.update_backend.clicked.connect(self.apply_backend_update)
+        head.addWidget(self.update_backend)
+        self.backend_upgrade = BackendUpgrade(self.bus, self.launcher, self)
+        self.backend_upgrade.changed.connect(self.update_backend.setVisible)
+        self.backend_upgrade.finished.connect(self.backend_updated)
         content.addLayout(head)
         cards = QHBoxLayout()
         cards.setSpacing(14)
@@ -671,6 +680,23 @@ class MainWindow(QMainWindow):
             QDesktopServices.openUrl(
                 QUrl.fromLocalFile(str(Path(self.overview["mount"]) / self.folder))
             )
+
+    def apply_backend_update(self):
+        if not same_task(self.profile, self.overview):
+            self.show_error("任务身份尚未确认，请等待状态刷新。")
+            return
+        answer = QMessageBox.question(self, "应用后台更新", "请先保存并关闭此挂载中的文件。将暂停同步、正常停止旧挂载，再启动已安装的后台；缓存和未上传修改会保留。", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if answer == QMessageBox.Yes:
+            if self.backend_upgrade.begin(self.profile):
+                self.update_backend.setEnabled(False)
+
+    def backend_updated(self, error):
+        self.update_backend.setEnabled(True)
+        if error:
+            self.show_error(error)
+        else:
+            self.show_error("后台已切换。请检查暂停状态后继续同步。")
+        self.schedule_refresh()
 
     def toggle_pause(self):
         self.bus.call(

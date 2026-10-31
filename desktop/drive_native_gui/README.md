@@ -10,6 +10,8 @@
 - [credentials.py](credentials.py)
 - [issues.py](issues.py)
 - [lifecycle.py](lifecycle.py)
+- [upgrade.py](upgrade.py)：识别仍运行的旧后台，经暂停和正常退出后接管；不强杀进程。
+- [pause_handover.py](pause_handover.py)：旧版暂停尚不持久化时，通过任务启动标记把暂停意图交给新后台；不直接写运行中的状态库。
 - [manager.py](manager.py)
 - [setup_client.py](setup_client.py)
 - [startup.py](startup.py)

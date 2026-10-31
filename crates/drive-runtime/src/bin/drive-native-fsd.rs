@@ -27,7 +27,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .ok_or("no user data directory")?;
     let state = prepare_paths(&profile, &base)?;
     let worker = std::env::current_exe()?.with_file_name("drive-native-worker");
-    let service = Service::new(profile, drive_core::Store::open(&state)?, worker)?;
+    let mut store = drive_core::Store::open(&state)?;
+    store.consume_startup_pause(&profile.task_id)?;
+    let service = Service::new(profile, store, worker)?;
     let conn = zbus::connection::Builder::session()
         .name(drive_runtime::instance::bus_name(std::env::var("DRIVE_NATIVE_INSTANCE").ok().as_deref())?)
         .serve_at(OBJECT_PATH, Desktop(service.clone()))

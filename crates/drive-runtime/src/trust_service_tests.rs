@@ -142,8 +142,8 @@ fn post_rename_sync_failure_adopts_visible_removal_blocks_unlock_and_requires_cu
         assert_eq!(c.error, Some("trust_settings_not_durable"));
         assert!(c.generation > generation);
     }
-    s.pause();
-    s.resume();
+    s.pause().unwrap();
+    s.resume().unwrap();
     assert_eq!(
         s.control.lock().unwrap().state,
         ConnectionState::NeedsAttention
@@ -164,7 +164,7 @@ fn post_rename_sync_failure_adopts_visible_removal_blocks_unlock_and_requires_cu
 #[test]
 fn failed_save_and_recovery_preserve_pause() {
     let (_d, s) = fixture();
-    s.pause();
+    s.pause().unwrap();
     let old = s.trust_settings();
     assert!(
         s.set_trust_settings_with(&old.fingerprint(), changed(&s), fail_after_rename)
@@ -221,7 +221,7 @@ fn restart_confirms_visible_settings_and_startup_sync_failure_keeps_cache_availa
 fn transfer_settings_are_task_bound_persisted_and_preserve_pause() {
     use crate::desktop;
     let (d, s) = fixture();
-    s.pause();
+    s.pause().unwrap();
     let old: serde_json::Value =
         serde_json::from_str(&desktop::transfer_settings(&s).unwrap()).unwrap();
     let mut request = serde_json::json!({"schema":1,"task_id":"wrong", "expected_version":old["version"],"limits":{"download_bps":65536,"upload_bps":32768}});
@@ -303,4 +303,44 @@ fn live_transfer_setting_acknowledgement_is_required_without_losing_saved_policy
         peer.join().unwrap();
         rpc.close();
     }
+}
+
+#[test]
+fn durable_pause_controls_handover_and_unlock() {
+    let (d, service) = fixture();
+    service.pause().unwrap();
+    let profile = service.profile.clone();
+    drop(service);
+    let store = Store::open(d.path()).unwrap();
+    let service = Service::new(profile, store, PathBuf::from("/unused-worker")).unwrap();
+    assert_eq!(service.control.lock().unwrap().state, ConnectionState::Paused);
+    service.unlock("synthetic-unused".into()).unwrap();
+    assert_eq!(service.control.lock().unwrap().state, ConnectionState::Paused);
+    service.resume().unwrap();
+    assert!(!service.control.lock().unwrap().paused);
+    assert!(!service.bridge.store.lock().unwrap().sync_paused().unwrap());
+}
+
+#[test]
+fn installed_worker_replacement_keeps_old_executable_inode() {
+    let (d, service) = fixture();
+    let profile = service.profile.clone();
+    drop(service);
+    let worker = d.path().join("worker");
+    fs::copy("/bin/true", &worker).unwrap();
+    let service = Service::new(profile, Store::open(d.path()).unwrap(), worker.clone()).unwrap();
+    let replacement = d.path().join("replacement");
+    fs::copy("/bin/false", &replacement).unwrap();
+    fs::rename(replacement, worker).unwrap();
+    let pinned = service.worker_executable().unwrap();
+    let original = fs::metadata(&pinned).unwrap();
+    assert!(std::process::Command::new(&pinned).status().unwrap().success());
+    drop(service);
+    assert!(fs::metadata(pinned).map_or(true, |m| m.ino() != original.ino() || m.dev() != original.dev()));
+}
+
+#[test]
+fn missing_worker_image_cannot_fall_back_to_replaced_path() {
+    let (_d, service) = fixture();
+    assert_eq!(service.worker_executable().unwrap_err().kind(), io::ErrorKind::InvalidInput);
 }

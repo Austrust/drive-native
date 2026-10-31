@@ -188,7 +188,8 @@ pub struct Service {
     changed: Condvar,
     pub stop: AtomicBool,
     pub mounted: AtomicBool,
-    worker: PathBuf,
+    // Keep the matching worker inode alive across atomic package replacement.
+    worker_image: Option<fs::File>,
     pub(crate) diagnostics: crate::connection_diagnostics::Recorder,
 }
 pub struct Tasks {
@@ -224,13 +225,17 @@ impl Service {
             &profile.task_id,
             &profile.trusted_ca_pem,
         )?;
+        let worker_image = fs::File::open(&worker).ok();
+        let paused = store.sync_paused().map_err(io::Error::other)?;
         let trust_pending_durability = sync(store.storage_directory()).is_err();
         let diagnostics = crate::connection_diagnostics::Recorder::open(store.storage_directory());
         Ok(Arc::new(Self {
             profile,
             bridge: Arc::new(Bridge::offline(Arc::new(Mutex::new(store)))?),
             control: Mutex::new(Control {
-                state: if trust_pending_durability {
+                state: if paused {
+                    ConnectionState::Paused
+                } else if trust_pending_durability {
                     ConnectionState::NeedsAttention
                 } else {
                     ConnectionState::Locked
@@ -238,7 +243,7 @@ impl Service {
                 error: trust_pending_durability.then_some("trust_settings_not_durable"),
                 revision: 0,
                 generation: 0,
-                paused: false,
+                paused,
                 attention: trust_pending_durability,
                 password: None,
                 active: None,
@@ -248,9 +253,14 @@ impl Service {
             changed: Condvar::new(),
             stop: AtomicBool::new(false),
             mounted: AtomicBool::new(false),
-            worker,
+            worker_image,
             diagnostics,
         }))
+    }
+    fn worker_executable(&self) -> io::Result<PathBuf> {
+        use std::os::fd::AsRawFd;
+        self.worker_image.as_ref().map(|image| PathBuf::from(format!("/proc/self/fd/{}", image.as_raw_fd())))
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "matching worker image unavailable; restart after repairing installation"))
     }
     fn configure_transfers(
         rpc: &Arc<Rpc>,
@@ -474,20 +484,23 @@ impl Service {
         self.interrupt(&mut c);
         Ok(())
     }
-    pub fn pause(&self) {
+    pub fn pause(&self) -> io::Result<()> {
         let mut c = self.control.lock().unwrap();
         if self.stop.load(Ordering::Acquire) {
-            return;
+            return Err(io::Error::other("mount is stopping"));
         }
+        self.bridge.store.lock().unwrap().set_sync_paused(true).map_err(io::Error::other)?;
         c.paused = true;
         c.state = ConnectionState::Paused;
         self.interrupt(&mut c);
+        Ok(())
     }
-    pub fn resume(&self) {
+    pub fn resume(&self) -> io::Result<()> {
         let mut c = self.control.lock().unwrap();
         if self.stop.load(Ordering::Acquire) {
-            return;
+            return Err(io::Error::other("mount is stopping"));
         }
+        self.bridge.store.lock().unwrap().set_sync_paused(false).map_err(io::Error::other)?;
         c.paused = false;
         // Authentication/certificate/recovery failures require a fresh explicit
         // unlock; pause/resume must not silently retry rejected credentials.
@@ -499,6 +512,7 @@ impl Service {
             ConnectionState::Connecting
         };
         self.interrupt(&mut c);
+        Ok(())
     }
     pub fn shutdown(&self) {
         let mut c = self.control.lock().unwrap();
@@ -582,7 +596,7 @@ impl Service {
             let mut stage = Stage::StartWorker;
             let started = std::time::Instant::now();
             let result = (|| -> io::Result<()> {
-                worker = Some(WorkerProcess::start(&self.worker).map_err(|_| {
+                worker = Some(WorkerProcess::start(&self.worker_executable()?).map_err(|_| {
                     io::Error::new(io::ErrorKind::InvalidInput, "worker executable unavailable")
                 })?);
                 let worker = worker.as_ref().unwrap();
@@ -674,7 +688,9 @@ impl Service {
                     ConnectionState::NeedsAttention
                 };
                 c.error = Some(
-                    if let Some(category) = crate::bridge::capacity_error(&error) {
+                    if self.worker_image.is_none() {
+                        "worker_image_unavailable"
+                    } else if let Some(category) = crate::bridge::capacity_error(&error) {
                         category
                     } else if crate::bridge::is_root_unavailable(&error) {
                         "native_root_unavailable"

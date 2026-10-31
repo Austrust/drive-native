@@ -49,7 +49,7 @@ class ClientBus(QObject):
         destination = (
             self.owner
             if method
-            in ("Unlock", "KeepBoth", "SetCacheSettings", "SetTransferSettings", "SetTrustSettings")
+            in ("Unlock", "KeepBoth", "SetCacheSettings", "SetTransferSettings", "SetTrustSettings", "Pause", "Resume", "StopMount")
             else self.service
         )
         if not destination:
