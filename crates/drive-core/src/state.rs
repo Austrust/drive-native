@@ -1062,7 +1062,7 @@ impl Store {
             }
             verified.extend(visiting);
         }
-        let tx = self.db.transaction()?;
+        crate::status_changes::replace_snapshot(&mut self.db, |tx| {
         tx.execute_batch("CREATE TEMP TABLE recovery_ids(id TEXT PRIMARY KEY);")?;
         for n in nodes {
             tx.execute("INSERT INTO recovery_ids VALUES(?1)", [&n.id])?;
@@ -1105,8 +1105,8 @@ impl Store {
         )?;
         tx.execute("INSERT INTO metadata(key,value) VALUES('server_restore_id',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[server])?;
         tx.execute_batch("DROP TABLE recovery_ids;")?;
-        tx.commit()?;
         Ok(())
+        })
     }
 
     pub fn pending_operations(&self) -> Result<i64> {

@@ -61,6 +61,81 @@ fn consistent(store: &Store) {
 }
 
 #[test]
+fn complete_snapshot_publishes_one_gap_and_incremental_writes_resume() {
+    let (_dir, mut s) = fixture();
+    s.pin("a", true).unwrap();
+    let before = s.status_change_watermark().unwrap();
+    s.install_remote_snapshot(&[node("root", None, true), node("a", Some("root"), false)], "2", "server").unwrap();
+    let after = s.status_change_watermark().unwrap();
+    assert_eq!(after.cursor.sequence, before.cursor.sequence + 1);
+    assert_eq!(after.retained_after, after.cursor.sequence);
+    assert_eq!((after.entries, after.bytes), (0, 0));
+    assert_eq!(after.overflows, before.overflows);
+    assert_eq!(after.snapshot_resets, before.snapshot_resets + 1);
+    assert!(matches!(s.read_status_changes(&before.cursor, 10).unwrap(), ChangePage::Rebuild { reason: GapReason::HistoryDiscarded, .. }));
+    s.pin("a", false).unwrap();
+    assert_eq!(rows(&s, &after.cursor).len(), 1);
+    consistent(&s);
+}
+
+#[test]
+fn snapshot_error_and_panic_restore_main_rows_journal_and_trigger_gate() {
+    let (_dir, mut s) = fixture();
+    s.pin("a", true).unwrap();
+    let before = s.status_change_watermark().unwrap();
+    let result: Result<()> = replace_snapshot(&mut s.db, |tx| {
+        tx.execute("UPDATE nodes SET name='bad' WHERE id='a'", [])?;
+        Err(Error::State("injected failure".into()))
+    });
+    assert!(result.is_err());
+    assert_eq!(s.status_change_watermark().unwrap(), before);
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _: Result<()> = replace_snapshot(&mut s.db, |tx| {
+            tx.execute("DELETE FROM nodes WHERE id='a'", [])?;
+            panic!("injected interruption");
+        });
+    }));
+    assert!(panic.is_err());
+    assert_eq!(s.status_change_watermark().unwrap(), before);
+    let name: String = s.db.query_row("SELECT name FROM nodes WHERE id='a'", [], |r| r.get(0)).unwrap();
+    assert_eq!(name, "a");
+    s.pin("a", false).unwrap();
+    assert_eq!(rows(&s, &before.cursor).len(), 1);
+    consistent(&s);
+}
+
+#[test]
+fn snapshot_savepoint_failure_and_sequence_exhaustion_fail_closed() {
+    let (_dir, mut s) = fixture();
+    let before = s.status_change_watermark().unwrap();
+    replace_snapshot(&mut s.db, |tx| {
+        tx.execute_batch("SAVEPOINT inner_edit; UPDATE nodes SET name='bad' WHERE id='a'; ROLLBACK TO inner_edit; RELEASE inner_edit;")?;
+        Ok(())
+    }).unwrap();
+    assert_eq!(s.status_change_watermark().unwrap().cursor.sequence, before.cursor.sequence + 1);
+    let name: String = s.db.query_row("SELECT name FROM nodes WHERE id='a'", [], |r| r.get(0)).unwrap();
+    assert_eq!(name, "a");
+    s.db.execute("UPDATE dn_status_meta SET head=9223372036854775807", []).unwrap();
+    let full = s.status_change_watermark().unwrap();
+    assert!(replace_snapshot(&mut s.db, |tx| {
+        tx.execute("DELETE FROM nodes WHERE id='a'", [])?;
+        Ok(())
+    }).is_err());
+    assert_eq!(s.status_change_watermark().unwrap(), full);
+    assert!(s.node("a").is_ok());
+}
+
+#[test]
+fn incorrectly_committed_bulk_flag_and_nested_transaction_are_rejected() {
+    let (_dir, mut s) = fixture();
+    s.db.execute_batch("BEGIN;").unwrap();
+    assert!(replace_snapshot(&mut s.db, |_| Ok(())).is_err());
+    s.db.execute_batch("ROLLBACK; UPDATE dn_status_meta SET bulk=1;").unwrap();
+    assert!(s.status_change_watermark().is_err());
+    assert!(replace_snapshot(&mut s.db, |_| Ok(())).is_err());
+}
+
+#[test]
 fn uncommitted_rows_are_unreadable_and_savepoint_rollback_restores_sequence_and_budget() {
     let (_dir, s) = fixture();
     let initial = s.status_change_watermark().unwrap();
