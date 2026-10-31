@@ -206,9 +206,9 @@ fn locked_service_has_no_worker_and_pause_resume_stop_need_no_credentials() {
     let (_d, s) = fixture();
     let tasks = s.start();
     assert_eq!(s.control.lock().unwrap().state, ConnectionState::Locked);
-    s.pause();
+    s.pause().unwrap();
     assert_eq!(s.control.lock().unwrap().state, ConnectionState::Paused);
-    s.resume();
+    s.resume().unwrap();
     assert_eq!(s.control.lock().unwrap().state, ConnectionState::Locked);
     assert!(s.unlock(String::new()).is_err());
     s.shutdown();
@@ -269,8 +269,8 @@ fn permanent_startup_failure_requires_explicit_action_and_diagnostics_hide_crede
     }
     let overview = desktop::overview(&s).unwrap();
     assert!(!overview.contains(secret));
-    s.pause();
-    s.resume();
+    s.pause().unwrap();
+    s.resume().unwrap();
     assert_eq!(
         s.control.lock().unwrap().state,
         ConnectionState::NeedsAttention
@@ -418,7 +418,7 @@ fn cache_settings_are_task_bound_and_never_erase_content_while_paused() {
     ] {
         assert!(desktop::set_cache_settings(&s, &invalid.to_string()).is_err());
     }
-    s.pause();
+    s.pause().unwrap();
     let body = serde_json::json!({"schema":1,"task_id":s.profile.task_id,"limit_bytes":1048576})
         .to_string();
     let result: serde_json::Value =
@@ -443,7 +443,7 @@ fn trust_settings_bind_task_and_version_and_preserve_pause_and_cached_content() 
     };
     assert!(desktop::set_trust_settings(&s, &make("wrong-task", original_version)).is_err());
     assert!(desktop::set_trust_settings(&s, &make(&s.profile.task_id, "stale")).is_err());
-    s.pause();
+    s.pause().unwrap();
     let result: serde_json::Value = serde_json::from_str(
         &desktop::set_trust_settings(&s, &make(&s.profile.task_id, original_version)).unwrap(),
     )

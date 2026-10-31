@@ -661,11 +661,13 @@ impl Desktop {
         let s = self.0.clone();
         local(move || release(&s, &path)).await
     }
-    fn pause(&self) {
-        self.0.pause();
+    async fn pause(&self) -> zbus::fdo::Result<()> {
+        let s = self.0.clone();
+        local(move || s.pause()).await
     }
-    fn resume(&self) {
-        self.0.resume();
+    async fn resume(&self) -> zbus::fdo::Result<()> {
+        let s = self.0.clone();
+        local(move || s.resume()).await
     }
     fn unlock(&self, password: String) -> zbus::fdo::Result<()> {
         self.0.unlock(password).map_err(|_| {

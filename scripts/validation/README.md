@@ -1,6 +1,8 @@
 # 独立验证工具
 
-这些脚本不导入客户端代码。当前提供静止、隔离夹具的内容/命名空间/指定草稿和操作记录比较；不是已经完成的故障注入体系。
+内容判定脚本不导入客户端代码。当前提供静止、隔离夹具的内容/命名空间/指定草稿和操作记录比较；不是已经完成的故障注入体系。
+
+[upgrade_pause_probe.py](upgrade_pause_probe.py) 在私有 `dbus-run-session` 与全新目录运行两个安装包的合成 FUSE 接管探针；不使用 NAS 或钥匙环。`--fixed-handover --new-binaries <dir>` 可用隔离开发二进制覆盖新包组件，验证旧版暂停标记迁移与再次升级；该模式导入 GUI 的暂停标记函数，应设置 `PYTHONPATH=desktop`。组件覆盖测试不等于最终安装包验收。
 
 ```sh
 python3 scripts/validation/test_verify_fixture.py
