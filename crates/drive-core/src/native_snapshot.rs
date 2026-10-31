@@ -5,6 +5,9 @@ use crate::snapshot_progress::{Phase, Progress, emit};
 use sproto::actions::list::{FileType, NodeInfo};
 use std::collections::{HashMap, HashSet, VecDeque};
 
+#[path = "native_snapshot_reconcile.rs"]
+mod reconcile;
+
 pub const SNAPSHOT_NODE_LIMIT: usize = 500_000;
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -309,7 +312,31 @@ impl NativeReadSession {
                 Err(Error::SnapshotChanged) => continue,
                 Err(error) => return Err(error),
             };
-            if self.snapshot_unchanged_observed(&snapshot, attempt).await? {
+            let watch = self.watch(&snapshot.cursor)?;
+            if let Some(snapshot) = reconcile::converge(
+                snapshot,
+                attempt,
+                |cursor| {
+                    let mut watch = watch.clone();
+                    watch.cursor = cursor;
+                    async move { self.scoped_events(&watch).await }
+                },
+                |parent, path| async move {
+                    let children = self.client.list_dir(self.scope.view_id, &path).await?;
+                    let mut nodes = Vec::new();
+                    for child in children.into_iter().filter(|child| !child.is_removed) {
+                        // No proof that a skipped target/ACL change is confined
+                        // to regular files. Keep the original recovery route.
+                        if child.file_type == FileType::Symlink {
+                            return Err(Error::SnapshotChanged);
+                        }
+                        nodes.push(self.snapshot_node(&parent, &child)?);
+                    }
+                    Ok(nodes)
+                },
+            )
+            .await?
+            {
                 return Ok(snapshot);
             }
         }
