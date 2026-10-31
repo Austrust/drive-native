@@ -16,7 +16,108 @@ pub struct FileRecord {
 // Shared with the desktop count/page projection; preserve ACL and local creation precedence.
 const VISIBLE_CHILDREN: &str = "n.id NOT IN (SELECT id FROM access_blocked) AND n.parent=?1 AND n.deleted=0 AND NOT EXISTS(SELECT 1 FROM nodes l JOIN local_creations c ON c.node=l.id WHERE l.parent=n.parent AND l.name=n.name AND l.id!=n.id AND l.deleted=0)";
 
+/// Directory enumeration never needs body state, hashes or per-file attributes.
+#[derive(Debug, PartialEq, Eq)]
+pub struct DirectoryEntry {
+    pub ino: u64,
+    pub directory: bool,
+    pub name: String,
+}
+#[derive(Debug)]
+pub struct DirectorySnapshot {
+    pub entries: Vec<DirectoryEntry>,
+    /// Owned allocation estimate (entry capacity and UTF-8 name capacity).
+    pub bytes: usize,
+}
+
 impl Store {
+    /// Build one stable directory view in a single transaction. Inodes are
+    /// allocated in one INSERT SELECT, without constructing FileRecords or
+    /// touching cached bodies/drafts. The byte limit is checked before allocation.
+    pub fn directory_snapshot(&self, ino: u64, max_bytes: usize) -> Result<DirectorySnapshot> {
+        let tx = self.db.unchecked_transaction()?;
+        let id: String = tx.query_row(
+            "SELECT node FROM fs_inodes WHERE ino=?1",
+            [sql_unsigned(ino)?],
+            |r| r.get(0),
+        )?;
+        let node = self.node(&id)?;
+        if !node.directory {
+            return Err(Error::Io(std::io::Error::from_raw_os_error(libc::ENOTDIR)));
+        }
+        let sql = format!(
+            "SELECT count(*),coalesce(sum(length(CAST(n.name AS BLOB))),0) FROM nodes n WHERE {VISIBLE_CHILDREN}"
+        );
+        let (count, names) = tx.query_row(&sql, [&id], |r| {
+            Ok((read_unsigned(r, 0)?, read_unsigned(r, 1)?))
+        })?;
+        let count =
+            usize::try_from(count).map_err(|_| Error::State("directory size overflow".into()))?;
+        let names =
+            usize::try_from(names).map_err(|_| Error::State("directory size overflow".into()))?;
+        let count = count
+            .checked_add(2)
+            .ok_or_else(|| Error::State("directory size overflow".into()))?;
+        let bytes = count
+            .checked_mul(std::mem::size_of::<DirectoryEntry>())
+            .and_then(|n| n.checked_add(names))
+            .and_then(|n| n.checked_add(3))
+            .ok_or_else(|| Error::State("directory size overflow".into()))?;
+        if bytes > max_bytes {
+            return Err(Error::Io(std::io::Error::from_raw_os_error(libc::ENOMEM)));
+        }
+        let parent_ino = match node.parent.as_deref() {
+            None => 1,
+            Some(parent) => {
+                self.node(parent)?;
+                tx.execute("INSERT INTO fs_inodes(node) SELECT ?1 WHERE NOT EXISTS(SELECT 1 FROM fs_inodes WHERE node=?1)", [parent])?;
+                tx.query_row("SELECT ino FROM fs_inodes WHERE node=?1", [parent], |r| {
+                    read_unsigned(r, 0)
+                })?
+            }
+        };
+        let insert = format!(
+            "INSERT INTO fs_inodes(node) SELECT n.id FROM nodes n WHERE {VISIBLE_CHILDREN} AND NOT EXISTS(SELECT 1 FROM fs_inodes i WHERE i.node=n.id) ORDER BY n.name,n.id"
+        );
+        tx.execute(&insert, [&id])?;
+        let mut entries = Vec::with_capacity(count);
+        entries.push(DirectoryEntry {
+            ino,
+            directory: true,
+            name: ".".into(),
+        });
+        entries.push(DirectoryEntry {
+            ino: parent_ino,
+            directory: true,
+            name: "..".into(),
+        });
+        let select = format!(
+            "SELECT i.ino,n.directory,n.name FROM nodes n JOIN fs_inodes i ON i.node=n.id WHERE {VISIBLE_CHILDREN} ORDER BY n.name,n.id"
+        );
+        {
+            let mut query = tx.prepare(&select)?;
+            let rows = query.query_map([&id], |r| {
+                Ok(DirectoryEntry {
+                    ino: read_unsigned(r, 0)?,
+                    directory: r.get(1)?,
+                    name: r.get(2)?,
+                })
+            })?;
+            for row in rows {
+                entries.push(row?);
+            }
+        }
+        let actual = entries.capacity() * std::mem::size_of::<DirectoryEntry>()
+            + entries.iter().map(|e| e.name.capacity()).sum::<usize>();
+        if actual > max_bytes {
+            return Err(Error::Io(std::io::Error::from_raw_os_error(libc::ENOMEM)));
+        }
+        tx.commit()?;
+        Ok(DirectorySnapshot {
+            entries,
+            bytes: actual,
+        })
+    }
     /// Local change token for coalescing desktop notifications. This is not a
     /// server cursor; false-positive notifications after a rollback are safe.
     pub fn local_revision(&self) -> u64 {
@@ -56,7 +157,8 @@ impl Store {
             return Err(Error::State("mount root identity changed".into()));
         }
         if existing.is_none() {
-            self.db.execute("INSERT INTO fs_inodes(ino,node) VALUES(1,?1)", [id])?;
+            self.db
+                .execute("INSERT INTO fs_inodes(ino,node) VALUES(1,?1)", [id])?;
         }
         let actual: i64 =
             self.db
@@ -106,13 +208,19 @@ impl Store {
         }
         // INSERT OR IGNORE still advances AUTOINCREMENT and fsyncs the WAL.
         // Existing inode queries must remain read-only, including getattr.
-        let existing = self.db.query_row("SELECT ino FROM fs_inodes WHERE node=?1", [id],
-            |r| read_unsigned(r, 0)).optional()?;
+        let existing = self
+            .db
+            .query_row("SELECT ino FROM fs_inodes WHERE node=?1", [id], |r| {
+                read_unsigned(r, 0)
+            })
+            .optional()?;
         let ino = match existing {
             Some(ino) => ino,
             None => {
-                self.db.execute("INSERT INTO fs_inodes(node) VALUES(?1)", [id])?;
-                u64::try_from(self.db.last_insert_rowid()).map_err(|_| Error::State("invalid inode".into()))?
+                self.db
+                    .execute("INSERT INTO fs_inodes(node) VALUES(?1)", [id])?;
+                u64::try_from(self.db.last_insert_rowid())
+                    .map_err(|_| Error::State("invalid inode".into()))?
             }
         };
         let meta = node.metadata.clone().unwrap_or(NodeMetadata {
@@ -183,7 +291,10 @@ impl Store {
             .query_map([parent], |r| r.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         let tx = self.db.unchecked_transaction()?;
-        let records = ids.iter().map(|id| self.record(id)).collect::<Result<Vec<_>>>()?;
+        let records = ids
+            .iter()
+            .map(|id| self.record(id))
+            .collect::<Result<Vec<_>>>()?;
         tx.commit()?;
         Ok(records)
     }
@@ -197,9 +308,19 @@ impl Store {
         if !self.node(parent)?.directory {
             return Err(Error::State("not a directory".into()));
         }
-        let sql = format!("SELECT n.id FROM nodes n WHERE {VISIBLE_CHILDREN} ORDER BY n.name,n.id LIMIT ?2 OFFSET ?3");
+        let sql = format!(
+            "SELECT n.id FROM nodes n WHERE {VISIBLE_CHILDREN} ORDER BY n.name,n.id LIMIT ?2 OFFSET ?3"
+        );
         let mut q = self.db.prepare(&sql)?;
-        let ids = q.query_map(params![parent, i64::try_from(limit).unwrap_or(i64::MAX), i64::try_from(offset).unwrap_or(i64::MAX)], |r| r.get::<_, String>(0))?
+        let ids = q
+            .query_map(
+                params![
+                    parent,
+                    i64::try_from(limit).unwrap_or(i64::MAX),
+                    i64::try_from(offset).unwrap_or(i64::MAX)
+                ],
+                |r| r.get::<_, String>(0),
+            )?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         ids.iter().map(|id| self.node(id)).collect()
     }

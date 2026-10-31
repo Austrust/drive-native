@@ -50,6 +50,7 @@ dpkg-buildpackage -b -us -uc
 | [vendor](vendor/README.md) | 固定的 fuser 补丁及上游许可 |
 | [docs/P1_ARCHITECTURE.md](docs/P1_ARCHITECTURE.md) | P1修改契约；通知诊断与部分读取隔离已实现，完整性能验收仍开放 |
 | [docs/FUSE_READ_ISOLATION.md](docs/FUSE_READ_ISOLATION.md) | 已打开内容读取隔离的实现、回归与未完成范围 |
+| [docs/FUSE_DIRECTORY_VIEWS.md](docs/FUSE_DIRECTORY_VIEWS.md) | 目录轻量投影、稳定续读句柄与独立验证范围 |
 | [docs/STATUS.md](docs/STATUS.md) | 验证范围、已知问题及后续工作 |
 | [docs/PROVENANCE.md](docs/PROVENANCE.md) | 源码归档来源和版本关系 |
 
