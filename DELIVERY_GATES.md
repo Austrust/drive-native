@@ -20,7 +20,9 @@
 
 ## 当前整合工作
 
-后续源码[恢复与增量状态基础整合](docs/validation/incremental-status-001/REPORT.md)加入 seed 重用、精确失效、提交通知、投影、纯树、分页 WAL 与瞬态证明；`95face9` 整合回归 542 项 Rust、13 项显式 FUSE 通过。实际 desktop 路径未切换，运行层双源发布屏障尚待接入。[三轮成本验证](docs/validation/status-write-cost-003/REPORT.md)保留前两失败，并确认事务内语句复用解除批量导入回退；本轮开发 deb 可继续安装门禁。P1、Personal、普通目录全量同步及原数据安全/长期门槛仍开放。
+本轮 `.5` 已完成[最终构建、隔离安装与发布核验](docs/validation/native-package-005/REPORT.md)：550 项 Rust、71 项 GUI、13 项 debug/release 显式 FUSE；暂停接管、实际回退读取及卸载重装保留未上传数据。批量导入回退已解除，下载正文准备移出 Store 锁。按用户要求暂停目标，原 P0 观察保持；运行时增量桌面 owner、Personal_Sync 真实 FSD 恢复、普通目录全量同步及 P0–P6 全部剩余门槛仍开放。
+
+后续源码[恢复与增量状态基础整合](docs/validation/incremental-status-001/REPORT.md)加入 seed 重用、精确失效、提交通知、投影、纯树、分页 WAL 与瞬态证明；`95face9` 整合回归 542 项 Rust、13 项显式 FUSE 通过。实际 desktop 路径未切换，运行层双源发布屏障尚待接入。[三轮成本验证](docs/validation/status-write-cost-003/REPORT.md)保留前两失败，并确认事务内语句复用解除批量导入回退；本轮安装门禁结果见上方 `.5` 报告。P1、Personal、普通目录全量同步及原数据安全/长期门槛仍开放。
 
 `.4`开发包已完成[整合验证](docs/validation/native-package-004/REPORT.md)：420项Rust、13项debug/release显式FUSE、71项GUI，隔离暂停后实际安装接管、回退/清除重装和待上传数据恢复、Nemo/Nautilus缓存状态刷新通过。混合负载预开缓存文件读取到关闭p95为7.064秒→24.763毫秒，独立复测25.837毫秒；全树状态、混合整体、资源仍未通过。一次停止因WSL Pro的外部命名空间副本超过105秒，保留为失败；定点正常释放副本后退出，后续新实例全负载自主退出0.120秒。首次构建的假worker夹具失败也保留。可下载状态以Releases为准，不改变P0–P6。
 
