@@ -20,6 +20,8 @@
 
 Ubuntu更新包已逐项整合，继续在独立分支修复原生恢复及按需性能；[采用决定](docs/UBUNTU_INTEGRATION.md)。既有P0观察继续运行，不代表新代码已通过长期验收。
 
+[下一批恢复及增量状态基础](docs/validation/incremental-status-001/REPORT.md)已完成源码整合和 503 项 Rust、13 项显式 FUSE 回归。运行时增量桌面状态尚未接入，写入成本与新 deb 门禁继续验证；不将这些基础模块算作 Personal 或整体性能问题已经解决。
+
 ## 构建和测试
 
 在 Ubuntu 24.04 / Linux 文件系统中构建。准备 Rust 1.89+、Debian control 中列出的构建依赖和独立 Python 虚拟环境；历史包构建使用 Rust 1.99.1。

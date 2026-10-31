@@ -20,6 +20,8 @@
 
 ## 当前整合工作
 
+后续源码[恢复与增量状态基础整合](docs/validation/incremental-status-001/REPORT.md)通过 503 项 Rust、13 项显式 FUSE 及全部消费者编译；包含 seed 重用、精确失效、提交通知、投影及纯树。实际 desktop 路径未切换，分页 WAL、瞬态状态和发布屏障仍待接入；固定成本对照发现全量导入明显回退，新 deb 门禁关闭，正在隔离修复；不关闭 P1、Personal 或普通目录全量同步门槛。
+
 `.4`开发包已完成[整合验证](docs/validation/native-package-004/REPORT.md)：420项Rust、13项debug/release显式FUSE、71项GUI，隔离暂停后实际安装接管、回退/清除重装和待上传数据恢复、Nemo/Nautilus缓存状态刷新通过。混合负载预开缓存文件读取到关闭p95为7.064秒→24.763毫秒，独立复测25.837毫秒；全树状态、混合整体、资源仍未通过。一次停止因WSL Pro的外部命名空间副本超过105秒，保留为失败；定点正常释放副本后退出，后续新实例全负载自主退出0.120秒。首次构建的假worker夹具失败也保留。可下载状态以Releases为准，不改变P0–P6。
 
 此前`.3`[通知诊断与读取隔离](docs/validation/native-package-003/REPORT.md)已发布。后续[通知补测](docs/NOTIFICATION_IDLE.md)补齐MFM/培养超过450秒合法回复；Personal频繁通知有真实推进，但初始化/FSD提交及其超过450秒覆盖仍未验证。[阶段进度](docs/INITIALIZATION_PROGRESS.md)已实现，不等于Personal初始化问题已解决。下一批枚举错误重分类及状态聚合基础保持独立，未进入`.4`。
