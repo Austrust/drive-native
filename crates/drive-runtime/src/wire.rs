@@ -1,6 +1,6 @@
 use drive_core::{Batch, Node, native::Scope};
 use serde::{Deserialize, Serialize};
-pub const VERSION: u16 = 14;
+pub const VERSION: u16 = 15;
 // 30 s channel acquisition + 30 s send + 600 s receive idle + 30 s IPC margin.
 pub const NOTIFICATION_IDLE: std::time::Duration = std::time::Duration::from_secs(690);
 // Deliberately no Debug: authentication material must not enter diagnostics.

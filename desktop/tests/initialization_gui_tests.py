@@ -29,6 +29,16 @@ class Bus(QObject):
 
 
 class ProgressTests(unittest.TestCase):
+    def test_watermark_and_reconciliation_are_not_history_or_completed_sync(self):
+        title, detail = progress_text({'active': True, 'phase': 'watermark', 'units': 2})
+        self.assertIn('当前事件水位', title)
+        self.assertNotIn('历史', title)
+        self.assertIn('2 次', detail)
+        title, detail = progress_text({'active': True, 'phase': 'reconciling', 'units': 3})
+        self.assertIn('协调', title)
+        self.assertIn('3 个', detail)
+        self.assertIn('尚未提交', detail)
+
     def test_idle_wait_is_not_reported_as_stalled_or_estimated_percent(self):
         title, detail = progress_text({'active': True, 'phase': 'waiting', 'since_progress_ms': 480000})
         self.assertIn('等待远端变更', title)
