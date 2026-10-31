@@ -33,7 +33,7 @@ fn fixture() -> (tempfile::TempDir, Arc<Bridge>, UnixStream) {
     let (a, b) = UnixStream::pair().unwrap();
     b.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
     let bridge = Arc::new(
-        Bridge::from_connection(Arc::new(Mutex::new(store)), Arc::new(Rpc::new(a).unwrap()))
+        Bridge::from_connection(Arc::new(drive_core::SharedStore::new(store)), Arc::new(Rpc::new(a).unwrap()))
             .unwrap(),
     );
     (dir, bridge, b)

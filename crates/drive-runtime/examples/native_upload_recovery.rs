@@ -16,7 +16,7 @@ use sproto::{
 };
 use std::{
     io::Write,
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::{Duration, Instant},
 };
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -221,7 +221,7 @@ async fn main() -> Result<()> {
     drop(session);
     drop(author);
     drop(store);
-    let store = Arc::new(Mutex::new(Store::open(&data)?));
+    let store = Arc::new(drive_core::SharedStore::new(Store::open(&data)?));
     for (_, op, _, origin) in &cases {
         assert_eq!(store.lock().unwrap().upload_job(op)?.state, "uncertain");
         assert_eq!(&store.lock().unwrap().upload_origin(op)?, origin);

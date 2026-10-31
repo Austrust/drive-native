@@ -3,7 +3,7 @@ use drive_core::*;
 use std::{
     path::Path,
     process::Command,
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 fn office(
     helper: &Path,
@@ -79,7 +79,7 @@ fn main() -> Result<()> {
         &bytes,
         &sha256(&bytes),
     )?;
-    let store = Arc::new(Mutex::new(s));
+    let store = Arc::new(drive_core::SharedStore::new(s));
     let mount = d.path().join("mount");
     std::fs::create_dir(&mount)?;
     let fs = drive_fs::CacheFilesystem::new(store.clone(), "root", uid, gid)?.with_writes_enabled();

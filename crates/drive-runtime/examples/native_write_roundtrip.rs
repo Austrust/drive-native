@@ -12,7 +12,7 @@ use sproto::{
 use std::{
     io::{Read, Write},
     sync::{
-        Arc, Mutex,
+        Arc,
         atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant},
@@ -101,7 +101,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let mut worker = WorkerProcess::start(&worker_path)?;
-    let store = Arc::new(Mutex::new(Store::open(scratch.path().join("state"))?));
+    let store = Arc::new(drive_core::SharedStore::new(Store::open(scratch.path().join("state"))?));
     let bridge = Arc::new(Bridge::connect(store.clone(), worker.rpc.clone(), login())?);
     bridge.pull()?;
     let filesystem = drive_fs::CacheFilesystem::new(store.clone(), &scope.file_id, uid, gid)?
@@ -290,7 +290,7 @@ fn save(path: &std::path::Path, body: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 async fn wait_status(
-    store: &Arc<Mutex<Store>>,
+    store: &Arc<drive_core::SharedStore>,
     id: &str,
     wanted: Status,
     bridge: &Bridge,

@@ -16,9 +16,9 @@ fn node(version: &str) -> Node {
         }),
     }
 }
-fn fixture(socket: UnixStream) -> (tempfile::TempDir, Arc<Mutex<Store>>, Bridge) {
+fn fixture(socket: UnixStream) -> (tempfile::TempDir, Arc<drive_core::SharedStore>, Bridge) {
     let dir = tempfile::tempdir().unwrap();
-    let store = Arc::new(Mutex::new(Store::open(dir.path()).unwrap()));
+    let store = Arc::new(drive_core::SharedStore::new(Store::open(dir.path()).unwrap()));
     let bridge = Bridge::connect(
         store.clone(),
         Arc::new(Rpc::new(socket).unwrap()),
@@ -595,7 +595,7 @@ fn new_file_provenance_is_durable_before_upload_and_preserved_for_reconciliation
     use drive_core::{directories::DirectoryOrigin, upload_origin::UploadOrigin};
     let (a, mut b) = UnixStream::pair().unwrap();
     b.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
-    let (tx, rx) = std::sync::mpsc::channel::<(Arc<Mutex<Store>>, String)>();
+    let (tx, rx) = std::sync::mpsc::channel::<(Arc<drive_core::SharedStore>, String)>();
     let server = std::thread::spawn(move || {
         handshake(&mut b);
         let (store, op) = rx.recv().unwrap();
@@ -717,7 +717,7 @@ fn replacement_origin_roundtrip(lose_preparation: bool) {
     use drive_core::{commit_origin::CommitOrigin, upload_origin::UploadOrigin};
     let (a, mut b) = UnixStream::pair().unwrap();
     b.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
-    let (tx, rx) = std::sync::mpsc::channel::<Arc<Mutex<Store>>>();
+    let (tx, rx) = std::sync::mpsc::channel::<Arc<drive_core::SharedStore>>();
     let server = std::thread::spawn(move || {
         handshake(&mut b);
         let store = rx.recv().unwrap();

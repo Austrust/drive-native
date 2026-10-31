@@ -108,7 +108,7 @@ pub trait Hydrator: Send + Sync {
 pub struct CacheFilesystem {
     storage: Arc<std::fs::File>,
     writable: bool,
-    store: Arc<Mutex<Store>>,
+    store: Arc<drive_core::SharedStore>,
     handles: Arc<Mutex<Handles>>,
     // Serializes registration/promotion/namespace barriers, never held by reads.
     // Inside this gate, Store and the handle table are acquired separately.
@@ -134,7 +134,7 @@ impl CacheFilesystem {
     }
 
     pub fn new(
-        store: Arc<Mutex<Store>>,
+        store: Arc<drive_core::SharedStore>,
         root: &str,
         uid: u32,
         gid: u32,

@@ -16,7 +16,7 @@ use sproto::{
 };
 use std::{
     io::Write,
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::{Duration, Instant},
 };
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -115,7 +115,7 @@ async fn run_case(
             &hash,
         )?;
     }
-    let shared = Arc::new(Mutex::new(store));
+    let shared = Arc::new(drive_core::SharedStore::new(store));
     let fs = drive_fs::CacheFilesystem::new(
         shared.clone(),
         &scope.file_id,
@@ -247,7 +247,7 @@ async fn run_case(
     }
     drop(session);
     drop(store);
-    let shared = Arc::new(Mutex::new(Store::open(&state)?));
+    let shared = Arc::new(drive_core::SharedStore::new(Store::open(&state)?));
     let q = shared.lock().unwrap().next_replace()?.unwrap();
     assert_eq!(q.state, "uncertain");
     assert_eq!(q.job.creation_origin, Some(origin));

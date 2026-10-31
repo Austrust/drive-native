@@ -4,7 +4,7 @@ use drive_fs::{Hydrator, ReadCancellation};
 use std::{
     process::{Command, Stdio},
     sync::{
-        Arc, Mutex,
+        Arc,
         atomic::{AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
@@ -77,7 +77,7 @@ fn fatal_signal_cancels_kernel_read_and_frees_hydration_worker() {
         started: AtomicUsize::new(0),
         cancelled: AtomicUsize::new(0),
     });
-    let fs = drive_fs::CacheFilesystem::new(Arc::new(Mutex::new(store)), "root", uid, unsafe {
+    let fs = drive_fs::CacheFilesystem::new(Arc::new(drive_core::SharedStore::new(store)), "root", uid, unsafe {
         libc::getgid()
     })
     .unwrap()

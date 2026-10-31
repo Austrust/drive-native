@@ -20,7 +20,7 @@ impl Hydrator for Saved {
         Err(libc::ENETDOWN)
     }
 }
-fn fixture() -> (tempfile::TempDir, Arc<Mutex<Store>>, CacheFilesystem) {
+fn fixture() -> (tempfile::TempDir, Arc<drive_core::SharedStore>, CacheFilesystem) {
     let uid = unsafe { libc::getuid() };
     assert_ne!(uid, 0);
     let temp = tempfile::tempdir().unwrap();
@@ -56,7 +56,7 @@ fn fixture() -> (tempfile::TempDir, Arc<Mutex<Store>>, CacheFilesystem) {
             )
             .unwrap();
     }
-    let store = Arc::new(Mutex::new(store));
+    let store = Arc::new(drive_core::SharedStore::new(store));
     let fs = CacheFilesystem::new(store.clone(), "root", uid, unsafe { libc::getgid() })
         .unwrap()
         .with_writes_enabled();
@@ -76,7 +76,7 @@ fn mount(fs: CacheFilesystem, path: &std::path::Path) -> fuser::BackgroundSessio
     )
     .unwrap()
 }
-fn block_workers(jobs: &SyncSender<Job>, store: &Arc<Mutex<Store>>) -> bool {
+fn block_workers(jobs: &SyncSender<Job>, store: &Arc<drive_core::SharedStore>) -> bool {
     let (started, ready) = mpsc::channel();
     for _ in 0..4 {
         let store = store.clone();

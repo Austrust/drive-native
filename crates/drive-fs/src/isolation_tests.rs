@@ -44,7 +44,7 @@ fn held_content_reads_survive_all_metadata_workers_waiting_for_store() {
             )
             .unwrap();
     }
-    let store = Arc::new(Mutex::new(store));
+    let store = Arc::new(drive_core::SharedStore::new(store));
     let fs = CacheFilesystem::new(store.clone(), "root", uid, gid)
         .unwrap()
         .with_writes_enabled();

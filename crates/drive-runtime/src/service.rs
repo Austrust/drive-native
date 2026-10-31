@@ -231,7 +231,7 @@ impl Service {
         let diagnostics = crate::connection_diagnostics::Recorder::open(store.storage_directory());
         Ok(Arc::new(Self {
             profile,
-            bridge: Arc::new(Bridge::offline(Arc::new(Mutex::new(store)))?),
+            bridge: Arc::new(Bridge::offline(Arc::new(drive_core::SharedStore::new(store)))?),
             control: Mutex::new(Control {
                 state: if paused {
                     ConnectionState::Paused
