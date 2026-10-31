@@ -60,6 +60,7 @@ from drive_native_gui.config import config_path
 app = QApplication([])
 window = MainWindow()
 window.show()
+window.files_button.setChecked(True)
 report = {
     "passed": False,
     "scope": scope,
