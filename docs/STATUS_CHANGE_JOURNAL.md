@@ -10,6 +10,8 @@ trigger 与原数据的语句、事务和 savepoint 一同提交或回滚。公�
 
 完整远端快照安装使用单次事务失效：在同一事务中抑制逐行记录，执行快照写入，清空旧日志并推进一次 `head/floor`，最后恢复逐行记录并提交。消费者收到明确的 HistoryDiscarded，重新建立完整投影；`snapshot_resets` 与容量溢出分开计数。同样内容再次安装仍保守失效。私有闭包接口没有可忘记配对的 begin/end；错误、panic、提交失败和序号耗尽均回滚主数据、门控和日志。此路径只用于完整快照，不适用于普通事件或任意批量写入。
 
+仅抑制 trigger 执行不等于避免 SQL prepare 的程序编译。快照事务内将身份集合插入、节点 UPSERT 与元数据 UPSERT/DELETE 各准备一次，在行间复用；语句在事务结束前析构，不跨事务缓存 bulk 状态或 TEMP schema。元数据校验与普通写路径共用，普通增量路径不因此关闭日志。该改动的成本效果须以独立新窗口验证，不能用日志计数减少代替性能证据。
+
 启用本写连接的 `recursive_triggers`，使 INSERT OR REPLACE 的隐式删除同样可见。没有增加 main-schema trigger。任何以后引入的主库 trigger、连接替换、关闭 recursive_triggers 或绕过 Store 的写入都须重新审查：本接口不捕捉其他连接的写入；现有唯一 writer 所有权仍是前提。
 
 ## API 与预算

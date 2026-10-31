@@ -1064,13 +1064,17 @@ impl Store {
         }
         crate::status_changes::replace_snapshot(&mut self.db, |tx| {
         tx.execute_batch("CREATE TEMP TABLE recovery_ids(id TEXT PRIMARY KEY);")?;
-        for n in nodes {
-            tx.execute("INSERT INTO recovery_ids VALUES(?1)", [&n.id])?;
+        {
+            let mut insert = tx.prepare("INSERT INTO recovery_ids VALUES(?1)")?;
+            for n in nodes { insert.execute([&n.id])?; }
         }
         // Permission loss is not deletion. Keep previous denied roots that the
         // server now omits, until the same identity is positively enumerated.
         tx.execute("DELETE FROM access_denied WHERE node IN (SELECT id FROM recovery_ids)", [])?;
-        for id in &inaccessible { tx.execute("INSERT OR IGNORE INTO access_denied VALUES(?1)", [id])?; }
+        {
+            let mut insert = tx.prepare("INSERT OR IGNORE INTO access_denied VALUES(?1)")?;
+            for id in &inaccessible { insert.execute([id])?; }
+        }
         tx.execute("INSERT OR IGNORE INTO recovery_ids SELECT id FROM access_blocked", [])?;
         // Only absent objects become tombstones. Dirty content remains visible as
         // a conflict and stays protected from garbage collection.
@@ -1080,17 +1084,20 @@ impl Store {
         tx.execute("UPDATE operations SET state='conflict' WHERE kind='upload' AND state='pending' AND node IN (SELECT id FROM nodes WHERE deleted=1 AND conflict=1)", [])?;
         tx.execute("UPDATE namespace_overlay SET remote='null' WHERE node NOT IN (SELECT id FROM recovery_ids)",[])?;
         tx.execute("UPDATE nodes SET conflict=1 WHERE id IN (SELECT node FROM namespace_overlay WHERE remote='null') AND id NOT IN (SELECT node FROM local_unlinks)",[])?;
+        {
+        let mut upsert = tx.prepare("INSERT INTO nodes(id,parent,name,remote_version,directory) VALUES(?1,?2,?3,?4,?5)
+                ON CONFLICT(id) DO UPDATE SET parent=excluded.parent,name=excluded.name,remote_version=excluded.remote_version,directory=excluded.directory,deleted=CASE WHEN EXISTS(SELECT 1 FROM local_unlinks WHERE node=nodes.id) THEN 1 ELSE 0 END,
+                conflict=CASE WHEN nodes.dirty_blob IS NOT NULL AND nodes.base_version!=excluded.remote_version AND NOT EXISTS(SELECT 1 FROM local_unlinks WHERE node=nodes.id) THEN 1 ELSE nodes.conflict END")?;
+        let mut metadata = crate::filesystem::SnapshotMetadataWriter::new(tx)?;
         for original in nodes {
             let Some(Change::Upsert(n)) =
-                crate::namespace::overlay_change(&tx, &Change::Upsert(original.clone()))?
+                crate::namespace::overlay_change(tx, &Change::Upsert(original.clone()))?
             else {
                 continue;
             };
-            tx.execute("INSERT INTO nodes(id,parent,name,remote_version,directory) VALUES(?1,?2,?3,?4,?5)
-                ON CONFLICT(id) DO UPDATE SET parent=excluded.parent,name=excluded.name,remote_version=excluded.remote_version,directory=excluded.directory,deleted=CASE WHEN EXISTS(SELECT 1 FROM local_unlinks WHERE node=nodes.id) THEN 1 ELSE 0 END,
-                conflict=CASE WHEN nodes.dirty_blob IS NOT NULL AND nodes.base_version!=excluded.remote_version AND NOT EXISTS(SELECT 1 FROM local_unlinks WHERE node=nodes.id) THEN 1 ELSE nodes.conflict END",
-                params![n.id,n.parent,n.name,n.version,n.directory])?;
-            crate::filesystem::write_metadata(&tx, &n)?;
+            upsert.execute(params![n.id,n.parent,n.name,n.version,n.directory])?;
+            metadata.write(&n)?;
+        }
         }
         tx.execute(
             "UPDATE operations SET state='uncertain' WHERE state='inflight'",

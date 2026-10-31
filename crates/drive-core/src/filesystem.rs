@@ -353,16 +353,45 @@ impl Store {
     }
 }
 
+const UPSERT_METADATA: &str = "INSERT INTO node_metadata(node,size,mtime,mode) VALUES(?1,?2,?3,?4) ON CONFLICT(node) DO UPDATE SET size=excluded.size,mtime=excluded.mtime,mode=excluded.mode";
+const DELETE_METADATA: &str = "DELETE FROM node_metadata WHERE node=?1";
+
+fn checked_metadata(m: &NodeMetadata) -> Result<(i64, i64, u32)> {
+    if m.mode & !0o777 != 0 {
+        return Err(Error::State("unsupported filesystem mode bits".into()));
+    }
+    Ok((sql_unsigned(m.size)?, sql_unsigned(m.mtime)?, m.mode))
+}
+
 pub(crate) fn write_metadata(tx: &rusqlite::Transaction<'_>, n: &Node) -> Result<()> {
     if let Some(m) = &n.metadata {
-        if m.mode & !0o777 != 0 {
-            return Err(Error::State("unsupported filesystem mode bits".into()));
-        }
-        tx.execute("INSERT INTO node_metadata(node,size,mtime,mode) VALUES(?1,?2,?3,?4) ON CONFLICT(node) DO UPDATE SET size=excluded.size,mtime=excluded.mtime,mode=excluded.mode",params![n.id,sql_unsigned(m.size)?,sql_unsigned(m.mtime)?,m.mode])?;
+        let (size, mtime, mode) = checked_metadata(m)?;
+        tx.execute(UPSERT_METADATA, params![n.id, size, mtime, mode])?;
     } else {
-        tx.execute("DELETE FROM node_metadata WHERE node=?1", [&n.id])?;
+        tx.execute(DELETE_METADATA, [&n.id])?;
     }
     Ok(())
+}
+
+/// Snapshot-local statements. Preparing an UPSERT also compiles its triggers;
+/// reuse that program across rows, without retaining it across transactions.
+pub(crate) struct SnapshotMetadataWriter<'db> {
+    upsert: rusqlite::Statement<'db>,
+    delete: rusqlite::Statement<'db>,
+}
+impl<'db> SnapshotMetadataWriter<'db> {
+    pub(crate) fn new(db: &'db rusqlite::Connection) -> Result<Self> {
+        Ok(Self { upsert: db.prepare(UPSERT_METADATA)?, delete: db.prepare(DELETE_METADATA)? })
+    }
+    pub(crate) fn write(&mut self, n: &Node) -> Result<()> {
+        if let Some(m) = &n.metadata {
+            let (size, mtime, mode) = checked_metadata(m)?;
+            self.upsert.execute(params![n.id, size, mtime, mode])?;
+        } else {
+            self.delete.execute([&n.id])?;
+        }
+        Ok(())
+    }
 }
 
 fn read_unsigned(row: &rusqlite::Row<'_>, column: usize) -> rusqlite::Result<u64> {
