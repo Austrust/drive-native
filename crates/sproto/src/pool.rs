@@ -351,6 +351,40 @@ mod tests {
 #[cfg(test)]
 mod cancellation_tests {
     use super::*;
+    #[tokio::test(start_paused = true)]
+    async fn cancelled_partial_notification_closes_stream_and_releases_permit() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let channels = Arc::new(Mutex::new(Vec::new()));
+        let permits = Arc::new(Semaphore::new(1));
+        let (stream, mut peer) = tokio::io::duplex(4096);
+        let mut guard = Guard {
+            reusable: false,
+            channel: Some(Channel::from_stream(stream)),
+            _permit: permits.clone().acquire_owned().await.unwrap(),
+            channels: channels.clone(),
+        };
+        let task = tokio::spawn(async move {
+            let result = guard
+                .channel()
+                .request_with_read_idle(
+                    crate::frame::SCMD_REQUEST,
+                    &pmap! {},
+                    std::time::Duration::from_secs(600),
+                )
+                .await;
+            guard.poison_on_err(result)
+        });
+        let mut request = [0; 1024];
+        assert!(peer.read(&mut request).await.unwrap() > 0);
+        peer.write_all(&[0x42]).await.unwrap(); // incomplete response consumed before cancellation
+        tokio::task::yield_now().await;
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        peer.read_to_end(&mut Vec::new()).await.unwrap(); // EOF, including any remaining request bytes
+        assert_eq!(permits.available_permits(), 1);
+        assert!(channels.lock().unwrap().is_empty());
+    }
+
     async fn guard() -> (Guard, Arc<Mutex<Vec<Channel>>>) {
         let channels = Arc::new(Mutex::new(Vec::new()));
         let (stream, _peer) = tokio::io::duplex(16);

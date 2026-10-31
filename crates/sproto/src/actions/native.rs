@@ -155,11 +155,14 @@ impl Client {
                 "timeout" => 400u64,"subscribe" => subscriptions,"profile_digest" => digest,
             },
         );
-        let mut guard = self.pool.acquire().await?;
+        // Bound setup separately; queueing must not consume the response budget.
+        let mut guard = tokio::time::timeout(Duration::from_secs(30), self.pool.acquire())
+            .await
+            .map_err(|_| Error::Timeout("notification channel acquisition"))??;
         let result = async {
             let r = guard
                 .channel()
-                .request_with_timeout(frame::SCMD_REQUEST, &request, Duration::from_secs(450))
+                .request_with_read_idle(frame::SCMD_REQUEST, &request, Duration::from_secs(600))
                 .await?;
             parse_notification(&r, digest)
         }
@@ -300,14 +303,22 @@ fn parse_events(r: &PObject, cursor: EventCursor) -> Result<EventBatch> {
             kind,
             path,
             file_id: identity(e, "file_id")?,
-            parent_id: if removed { String::new() } else { identity(f, "parent_id")? },
+            parent_id: if removed {
+                String::new()
+            } else {
+                identity(f, "parent_id")?
+            },
             version: NativeVersion {
                 sync_id,
                 max_id: integer(f, "max_id")?,
             },
             file_type,
             size: if removed { 0 } else { integer(f, "file_size")? },
-            hash: if removed { String::new() } else { string(f, "file_hash")? },
+            hash: if removed {
+                String::new()
+            } else {
+                string(f, "file_hash")?
+            },
             mtime: if removed { 0 } else { integer(f, "mtime")? },
             removed,
         });
@@ -476,16 +487,23 @@ mod tests {
     }
 }
 
-#[cfg(test)]mod minimal_tombstones {
- use super::*;
- #[test]fn deleted_content_may_be_pruned_but_live_metadata_remains_mandatory(){
-  for removed in [0u64,1u64]{
-   let r=pmap!{"next_sync_id"=>22675u64,"event_list"=>PObject::Array(vec![pmap!{"type"=>"remove","path"=>"/old.txt","file_id"=>"42","sync_id"=>22675u64,"file"=>pmap!{"file_type"=>"file","is_removed"=>removed,"max_id"=>7u64}}])};
-   let v=parse_events(&r,EventCursor(22000));
-   if removed==1 {let e=v.unwrap().events.remove(0);assert!(e.removed);assert_eq!(e.file_id,"42");}
-   else {assert!(v.is_err());}
-  }
-  let r=pmap!{"next_sync_id"=>22675u64,"event_list"=>PObject::Array(vec![pmap!{"type"=>"modify","path"=>"/live.txt","file_id"=>"42","sync_id"=>22675u64,"file"=>pmap!{"file_type"=>"file","is_removed"=>0u64,"max_id"=>7u64}}])};
-  assert!(parse_events(&r,EventCursor(22000)).is_err());
- }
+#[cfg(test)]
+mod minimal_tombstones {
+    use super::*;
+    #[test]
+    fn deleted_content_may_be_pruned_but_live_metadata_remains_mandatory() {
+        for removed in [0u64, 1u64] {
+            let r = pmap! {"next_sync_id"=>22675u64,"event_list"=>PObject::Array(vec![pmap!{"type"=>"remove","path"=>"/old.txt","file_id"=>"42","sync_id"=>22675u64,"file"=>pmap!{"file_type"=>"file","is_removed"=>removed,"max_id"=>7u64}}])};
+            let v = parse_events(&r, EventCursor(22000));
+            if removed == 1 {
+                let e = v.unwrap().events.remove(0);
+                assert!(e.removed);
+                assert_eq!(e.file_id, "42");
+            } else {
+                assert!(v.is_err());
+            }
+        }
+        let r = pmap! {"next_sync_id"=>22675u64,"event_list"=>PObject::Array(vec![pmap!{"type"=>"modify","path"=>"/live.txt","file_id"=>"42","sync_id"=>22675u64,"file"=>pmap!{"file_type"=>"file","is_removed"=>0u64,"max_id"=>7u64}}])};
+        assert!(parse_events(&r, EventCursor(22000)).is_err());
+    }
 }
