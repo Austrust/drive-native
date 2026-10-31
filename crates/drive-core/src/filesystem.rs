@@ -13,6 +13,9 @@ pub struct FileRecord {
     pub status: Status,
     pub unlinked: bool,
 }
+// Shared with the desktop count/page projection; preserve ACL and local creation precedence.
+const VISIBLE_CHILDREN: &str = "n.id NOT IN (SELECT id FROM access_blocked) AND n.parent=?1 AND n.deleted=0 AND NOT EXISTS(SELECT 1 FROM nodes l JOIN local_creations c ON c.node=l.id WHERE l.parent=n.parent AND l.name=n.name AND l.id!=n.id AND l.deleted=0)";
+
 impl Store {
     /// Local change token for coalescing desktop notifications. This is not a
     /// server cursor; false-positive notifications after a rollback are safe.
@@ -186,11 +189,28 @@ impl Store {
     }
     /// Desktop aggregation needs node metadata, never inode allocation or body handles.
     pub fn child_nodes(&self, parent: &str) -> Result<Vec<Node>> {
-        if !self.node(parent)?.directory { return Err(Error::State("not a directory".into())); }
-        let mut q = self.db.prepare("SELECT n.id FROM nodes n WHERE n.id NOT IN (SELECT id FROM access_blocked) AND n.parent=?1 AND n.deleted=0 AND NOT EXISTS(SELECT 1 FROM nodes l JOIN local_creations c ON c.node=l.id WHERE l.parent=n.parent AND l.name=n.name AND l.id!=n.id AND l.deleted=0) ORDER BY n.name,n.id")?;
-        let ids = q.query_map([parent], |r| r.get::<_, String>(0))?
+        self.child_nodes_page(parent, 0, usize::MAX)
+    }
+    /// Local metadata only: paginate before constructing nodes. No inode or body IO.
+    /// Pages reflect the current store state, not a stable cross-request snapshot.
+    pub fn child_nodes_page(&self, parent: &str, offset: usize, limit: usize) -> Result<Vec<Node>> {
+        if !self.node(parent)?.directory {
+            return Err(Error::State("not a directory".into()));
+        }
+        let sql = format!("SELECT n.id FROM nodes n WHERE {VISIBLE_CHILDREN} ORDER BY n.name,n.id LIMIT ?2 OFFSET ?3");
+        let mut q = self.db.prepare(&sql)?;
+        let ids = q.query_map(params![parent, i64::try_from(limit).unwrap_or(i64::MAX), i64::try_from(offset).unwrap_or(i64::MAX)], |r| r.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         ids.iter().map(|id| self.node(id)).collect()
+    }
+    /// Count the same visible set used by child_nodes_page, including local shadows.
+    pub fn child_node_count(&self, parent: &str) -> Result<usize> {
+        if !self.node(parent)?.directory {
+            return Err(Error::State("not a directory".into()));
+        }
+        let sql = format!("SELECT count(*) FROM nodes n WHERE {VISIBLE_CHILDREN}");
+        let count: i64 = self.db.query_row(&sql, [parent], |r| r.get(0))?;
+        usize::try_from(count).map_err(|_| Error::State("invalid child count".into()))
     }
     pub fn lookup(&self, parent: &str, name: &str) -> Result<FileRecord> {
         self.record(&self.lookup_node(parent, name)?.id)

@@ -65,6 +65,35 @@ fn get(s: &Service, path: &str) -> serde_json::Value {
 }
 
 #[test]
+fn directory_pages_are_complete_without_inode_allocation_or_downloads() {
+    let d = tempfile::tempdir().unwrap();
+    let mut store = Store::open(d.path()).unwrap();
+    let mut nodes = vec![node("root", None, true)];
+    nodes.extend((0..513).rev().map(|i| node(&format!("item-{i:04}"), Some("root"), false)));
+    store.install_remote_snapshot(&nodes, "1", "server").unwrap();
+    store.ensure_fs_root("root").unwrap();
+    let before = store.local_revision();
+    let service = Service::new(profile(), store, PathBuf::from("/nonexistent-worker")).unwrap();
+    let mut paths = Vec::new();
+    for (offset, expected_count) in [(0, 256), (256, 256), (512, 1), (513, 0), (u32::MAX, 0)] {
+        let page: serde_json::Value = serde_json::from_str(&desktop::directory(&service, "", offset).unwrap()).unwrap();
+        assert_eq!(page["total"], 513);
+        assert_eq!(page["offset"], offset);
+        let entries = page["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), expected_count);
+        for entry in entries {
+            assert_eq!(entry["status"], "online_only");
+            assert!(entry["error"].is_null());
+            paths.push(entry["path"].as_str().unwrap().to_owned());
+        }
+    }
+    assert_eq!(paths, (0..513).map(|i| format!("item-{i:04}")).collect::<Vec<_>>());
+    assert_eq!(service.bridge.store.lock().unwrap().local_revision(), before);
+    assert!(service.bridge.store.lock().unwrap().downloads_needed().unwrap().is_empty());
+    assert_eq!(std::fs::read_dir(d.path().join("blobs")).unwrap().count(), 0);
+}
+
+#[test]
 fn large_online_only_tree_has_bounded_local_status_cost() {
     let d = tempfile::tempdir().unwrap();
     let mut store = Store::open(d.path()).unwrap();

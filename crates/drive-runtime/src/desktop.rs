@@ -434,17 +434,14 @@ pub fn directory(service: &Service, path: &str, offset: u32) -> io::Result<Strin
             &service.profile.mount,
             path,
         )?;
-        let entries = store.children(&node.id).map_err(|_| other())?;
-        let total = entries.len();
-        let paths = entries
-            .into_iter()
-            .skip(offset as usize)
-            .take(256)
+        let total = store.child_node_count(&node.id).map_err(|_| other())?;
+        let entries = store.child_nodes_page(&node.id, offset as usize, 256).map_err(|_| other())?;
+        let paths = entries.into_iter()
             .map(|r| {
                 if path.is_empty() {
-                    r.node.name
+                    r.name
                 } else {
-                    format!("{}/{}", path.trim_end_matches('/'), r.node.name)
+                    format!("{}/{}", path.trim_end_matches('/'), r.name)
                 }
             })
             .collect();
