@@ -22,7 +22,7 @@ impl NativeReadSession {
     /// Collect a candidate, not yet authorized for installation. An independent
     /// fence check is mandatory even when every directory list succeeded.
     pub async fn snapshot_candidate(&self) -> Result<RemoteSnapshot> {
-        self.snapshot_candidate_with_observer(|_| async { Ok(()) }, 1)
+        self.snapshot_candidate_with_observer(|_| async { Ok(()) }, 1, &mut None)
             .await
     }
     /// Explicit research barrier after a directory has been enumerated. The
@@ -33,89 +33,38 @@ impl NativeReadSession {
         F: FnMut(String) -> Fut,
         Fut: std::future::Future<Output = Result<()>>,
     {
-        self.snapshot_candidate_with_observer(observer, 1).await
+        self.snapshot_candidate_with_observer(observer, 1, &mut None)
+            .await
     }
     async fn snapshot_candidate_with_observer<F, Fut>(
         &self,
         mut observer: F,
         attempt: u8,
+        seed: &mut Option<SnapshotSeed>,
     ) -> Result<RemoteSnapshot>
     where
         F: FnMut(String) -> Fut,
         Fut: std::future::Future<Output = Result<()>>,
     {
-        let mut watch = self.watch("")?;
-        let mut root = None;
-        let mut event_count = 0usize;
-        let mut boundary = false;
-        // Scoped history can have empty pages with advancing global cursors.
-        // Only a stationary, empty response is the verified boundary.
-        let started = std::time::Instant::now();
-        emit(Progress {
+        let watch_template = self.watch("")?;
+        let completed = collect_snapshot_seed(
+            &self.scope,
+            self.client.restore_identity(),
+            seed.as_ref(),
             attempt,
-            phase: Phase::Seed,
-            units: 0,
-            items: 0,
-        });
-        for page in 0..4096 {
-            if started.elapsed() > std::time::Duration::from_secs(900) {
-                return Err(Error::State("snapshot seed time budget exceeded".into()));
-            }
-            let batch = self.scoped_events(&watch).await?;
-            if batch.recovery_required {
-                return Err(Error::Unsupported("unverified native merge/rescan mode"));
-            }
-            event_count = event_count
-                .checked_add(batch.events.len())
-                .ok_or_else(|| Error::State("snapshot seed event overflow".into()))?;
-            if event_count > 2_000_000 {
-                return Err(Error::State("snapshot seed budget exceeded".into()));
-            }
-            emit(Progress {
-                attempt,
-                phase: Phase::Seed,
-                units: page + 1,
-                items: event_count as u64,
-            });
-            // Translate only the selected root here. Full directory contents come
-            // from list replies; a historical event replay is not a full snapshot.
-            for event in batch
-                .events
-                .iter()
-                .filter(|e| e.file_id == self.scope.file_id)
-            {
-                let root_batch = EventBatch {
-                    events: vec![event.clone()],
-                    next: batch.next,
-                    recovery_required: false,
-                };
-                let changes =
-                    translate(&self.scope, self.client.restore_identity(), "", root_batch)?
-                        .ok_or_else(|| Error::State("root event missing".into()))?;
-                for e in changes.events {
-                    match e.change {
-                        Change::Upsert(n) if n.directory && n.parent.is_none() => root = Some(n),
-                        _ => return Err(Error::State("selected root removed or replaced".into())),
-                    }
-                }
-            }
-            if batch.next == watch.cursor {
-                if !batch.events.is_empty() {
-                    return Err(Error::State(
-                        "stationary seed cursor contains events".into(),
-                    ));
-                }
-                boundary = true;
-                break;
-            }
-            watch.cursor = batch.next;
-        }
-        if !boundary {
-            return Err(Error::State("snapshot seed did not reach boundary".into()));
-        }
-        let root = root
-            .ok_or_else(|| Error::State("selected root identity absent from native seed".into()))?;
-        let mut nodes = vec![root];
+            |cursor| {
+                let mut watch = watch_template.clone();
+                watch.cursor = cursor;
+                async move { self.scoped_events(&watch).await }
+            },
+        )
+        .await?;
+        // Publish root and boundary together. Neither enumeration failures nor
+        // a failed fence may advance this cached seed independently of the root.
+        let mut watch = watch_template;
+        watch.cursor = completed.cursor;
+        let mut nodes = vec![completed.root.clone()];
+        *seed = Some(completed);
         let mut inaccessible = Vec::new();
         let mut skipped_symlinks = 0u64;
         let mut identities = HashSet::from([self.scope.file_id.clone()]);
@@ -348,9 +297,12 @@ impl NativeReadSession {
         F: FnMut(String) -> Fut,
         Fut: std::future::Future<Output = Result<()>>,
     {
+        // Private to this call and authenticated session. On any non-race error
+        // or cancellation it is dropped; never serialized or reused on reconnect.
+        let mut seed = None;
         for attempt in 1..=3 {
             let snapshot = match self
-                .snapshot_candidate_with_observer(&mut observer, attempt)
+                .snapshot_candidate_with_observer(&mut observer, attempt, &mut seed)
                 .await
             {
                 Ok(snapshot) => snapshot,
@@ -413,9 +365,17 @@ impl Store {
                 return Err(Error::State("snapshot node token mismatch".into()));
             }
         }
-        self.install_remote_snapshot_with_access(&snapshot.nodes, &snapshot.cursor, &snapshot.restore, &snapshot.inaccessible)?;
+        self.install_remote_snapshot_with_access(
+            &snapshot.nodes,
+            &snapshot.cursor,
+            &snapshot.restore,
+            &snapshot.inaccessible,
+        )?;
         // Informational only; content/cursor commit remains transactional above.
-        self.db.execute("INSERT OR REPLACE INTO metadata(key,value) VALUES('skipped_symlinks',?1)", [snapshot.skipped_symlinks.to_string()])?;
+        self.db.execute(
+            "INSERT OR REPLACE INTO metadata(key,value) VALUES('skipped_symlinks',?1)",
+            [snapshot.skipped_symlinks.to_string()],
+        )?;
         Ok(())
     }
     /// Existing inode and parent-name pairs whose kernel caches may need eviction.
@@ -431,6 +391,122 @@ impl Store {
         .collect::<std::result::Result<Vec<_>, _>>()?)
     }
 }
+
+/// An observed stationary boundary and its selected root, inseparable. This is
+/// not a directory snapshot and must never be installed or persisted by itself.
+#[derive(Clone, Debug)]
+struct SnapshotSeed {
+    scope: Scope,
+    restore: String,
+    cursor: EventCursor,
+    root: Node,
+}
+
+async fn collect_snapshot_seed<F, Fut>(
+    scope: &Scope,
+    restore: &str,
+    previous: Option<&SnapshotSeed>,
+    attempt: u8,
+    mut fetch: F,
+) -> Result<SnapshotSeed>
+where
+    F: FnMut(EventCursor) -> Fut,
+    Fut: std::future::Future<Output = Result<EventBatch>>,
+{
+    if previous.is_some_and(|seed| seed.scope != *scope || seed.restore != restore) {
+        return Err(Error::State("snapshot seed task or server changed".into()));
+    }
+    let mut cursor = previous.map_or(EventCursor(0), |seed| seed.cursor);
+    let mut root = previous.map(|seed| seed.root.clone());
+    let mut event_count = 0usize;
+    let started = std::time::Instant::now();
+    emit(Progress {
+        attempt,
+        phase: Phase::Seed,
+        units: 0,
+        items: 0,
+    });
+    // These are the same per-attempt limits as the original seed path. The
+    // caller still permits only three candidates and each still needs a fence.
+    for page in 0..4096 {
+        if started.elapsed() > std::time::Duration::from_secs(900) {
+            return Err(Error::State("snapshot seed time budget exceeded".into()));
+        }
+        let batch = fetch(cursor).await?;
+        if batch.recovery_required {
+            return Err(Error::Unsupported("unverified native merge/rescan mode"));
+        }
+        if batch.next.0 < cursor.0 {
+            return Err(Error::State("snapshot seed cursor moved backwards".into()));
+        }
+        if batch.next == cursor && !batch.events.is_empty() {
+            return Err(Error::State(
+                "stationary seed cursor contains events".into(),
+            ));
+        }
+        event_count = event_count
+            .checked_add(batch.events.len())
+            .ok_or_else(|| Error::State("snapshot seed event overflow".into()))?;
+        if event_count > 2_000_000 {
+            return Err(Error::State("snapshot seed budget exceeded".into()));
+        }
+        emit(Progress {
+            attempt,
+            phase: Phase::Seed,
+            units: page + 1,
+            items: event_count as u64,
+        });
+        for event in &batch.events {
+            // The production fetch already normalizes verified root roundtrips.
+            // Keep the reducer closed to replacement identities as well.
+            root_guard::root_event(scope, event)?;
+        }
+        // Only the root is replayed here; every attempt still enumerates actual
+        // directory replies. A later root deletion/replacement cannot be skipped.
+        for event in batch
+            .events
+            .iter()
+            .filter(|event| event.file_id == scope.file_id)
+        {
+            let changes = translate(
+                scope,
+                restore,
+                "",
+                EventBatch {
+                    events: vec![event.clone()],
+                    next: batch.next,
+                    recovery_required: false,
+                },
+            )?
+            .ok_or_else(|| Error::State("root event missing".into()))?;
+            for event in changes.events {
+                match event.change {
+                    Change::Upsert(node) if node.directory && node.parent.is_none() => {
+                        root = Some(node)
+                    }
+                    _ => return Err(Error::State("selected root removed or replaced".into())),
+                }
+            }
+        }
+        if batch.next == cursor {
+            return Ok(SnapshotSeed {
+                scope: scope.clone(),
+                restore: restore.into(),
+                cursor,
+                root: root.ok_or_else(|| {
+                    Error::State("selected root identity absent from native seed".into())
+                })?,
+            });
+        }
+        // Empty advancing pages are not a boundary, even for a cached root.
+        cursor = batch.next;
+    }
+    Err(Error::State("snapshot seed did not reach boundary".into()))
+}
+
+#[cfg(test)]
+#[path = "native_snapshot_seed_tests.rs"]
+mod seed_tests;
 
 /// Private evidence created only by duplicate identity/name detection, never by
 /// matching an error's text. At most two identities, not a copy of the candidate.
@@ -523,18 +599,41 @@ where
 #[path = "native_snapshot_error_tests.rs"]
 mod race_tests;
 
-#[derive(Debug,PartialEq)]enum FenceStep { Changed, Continue, Complete }
-fn snapshot_fence_step(cursor: EventCursor, next: EventCursor, count: usize) -> FenceStep {
-    if count != 0 || next.0 < cursor.0 { FenceStep::Changed }
-    else if next == cursor { FenceStep::Complete }
-    else { FenceStep::Continue }
+#[derive(Debug, PartialEq)]
+enum FenceStep {
+    Changed,
+    Continue,
+    Complete,
 }
-#[cfg(test)]mod scoped_fence_tests {
+fn snapshot_fence_step(cursor: EventCursor, next: EventCursor, count: usize) -> FenceStep {
+    if count != 0 || next.0 < cursor.0 {
+        FenceStep::Changed
+    } else if next == cursor {
+        FenceStep::Complete
+    } else {
+        FenceStep::Continue
+    }
+}
+#[cfg(test)]
+mod scoped_fence_tests {
     use super::*;
-    #[test]fn empty_advancing_page_is_not_a_complete_fence(){
-        assert_eq!(snapshot_fence_step(EventCursor(2000),EventCursor(4000),0),FenceStep::Continue);
-        assert_eq!(snapshot_fence_step(EventCursor(4000),EventCursor(6000),31),FenceStep::Changed);
-        assert_eq!(snapshot_fence_step(EventCursor(6000),EventCursor(6000),0),FenceStep::Complete);
-        assert_eq!(snapshot_fence_step(EventCursor(6000),EventCursor(4000),0),FenceStep::Changed);
+    #[test]
+    fn empty_advancing_page_is_not_a_complete_fence() {
+        assert_eq!(
+            snapshot_fence_step(EventCursor(2000), EventCursor(4000), 0),
+            FenceStep::Continue
+        );
+        assert_eq!(
+            snapshot_fence_step(EventCursor(4000), EventCursor(6000), 31),
+            FenceStep::Changed
+        );
+        assert_eq!(
+            snapshot_fence_step(EventCursor(6000), EventCursor(6000), 0),
+            FenceStep::Complete
+        );
+        assert_eq!(
+            snapshot_fence_step(EventCursor(6000), EventCursor(4000), 0),
+            FenceStep::Changed
+        );
     }
 }
