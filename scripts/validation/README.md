@@ -6,7 +6,7 @@
 
 ## 实际安装文件与 managed 用户服务接管
 
-[managed_upgrade_probe.py](managed_upgrade_probe.py) 已准备，当前仅完成静态检查，尚未执行服务或安装验证。它要求宿主有可用的 systemd 用户总线、FUSE 和 PySide6；使用与新包对应的公开 GUI 源码、公开 `multi_mount_fixture` 构建器，以及一个已安装旧 `.3` 的独立 chroot 根。测试用户需要读取和执行 chroot 中的安装文件。不要使用 `dbus-run-session`，因为本测试使用宿主用户 manager 的总线。
+[managed_upgrade_probe.py](managed_upgrade_probe.py) 已用于[`.4` 实际安装接管验证](../../docs/validation/native-package-004/REPORT.md)。它要求宿主有可用的 systemd 用户总线、FUSE 和 PySide6；使用与新包对应的公开 GUI 源码、公开 `multi_mount_fixture` 构建器，以及一个已安装旧 `.3` 的独立 chroot 根。测试用户需要读取和执行 chroot 中的安装文件。不要使用 `dbus-run-session`，因为本测试使用宿主用户 manager 的总线。
 
 工具只操作新建的合成夹具及唯一 `drive-native-upgrade-test-<随机ID>.service`，不 enable，不修改宿主安装包或全局 D-Bus 环境，不访问 NAS/钥匙环。服务的配置、状态、挂载、运行时目录和 D-Bus 名称单独隔离。`--load-log` 可追加带数字时间的负载记录。
 
@@ -34,6 +34,27 @@ PYTHONPATH="$PWD/desktop" .venv-build/bin/python scripts/validation/managed_upgr
 ```
 
 `result.json` 的成功只表示本次合成 managed 安装接管通过，不替代 NAS、Mint、故障注入或长期验收。
+
+## 初始化阶段独立观察
+
+[initialization_probe.py](initialization_probe.py) 只查询指定现存 FSD 的本地 D-Bus，不创建任务、解锁账号、读取凭据、控制服务或访问 NAS。它监听 `ProgressChanged`，合并信号后读取不持有 Store 锁的 `GetInitialization`；活跃窗口默认每 2 秒补采。`GetOverview` 使用另一条单飞请求通道及独立超时，因此慢状态查询不会挡住阶段记录。默认观察 1 小时，不轮换验收日志。
+
+```sh
+python3 scripts/validation/initialization_probe.py \
+  --bus org.drivenative.Client1.<隔离实例名> \
+  --output /absolute/existing-parent/new-observation --seconds 3600
+```
+
+输出仅包含允许的阶段、计数、耗时、是否挂载/有错误等字段；不保存原始错误文本、任务路径或未知返回字段。owner 更换和查询缺口会重置无进展判定；正常 `waiting` 不算卡住。`no_counter_progress` 只表示连续观察中计数未变化，**不是死锁诊断**。新会话的认证、枚举、fence 和实际导入仍需从真实 FSD 记录确认，独立 worker 的拉取进度不能替代。
+
+真实只读观察使用全新空状态和独立身份；`writable=false` 仅限制文件系统写入口，不是后台上传总闸，不能据此安全地复用含待上传修改的数据库。探针本身不执行这个初始化流程，也不会寻找登录凭据。
+
+```sh
+dbus-run-session -- python3 scripts/validation/test_initialization_probe.py \
+  --output /absolute/existing-parent/new-synthetic-test
+```
+
+2026-10-31 的合成独立总线测试通过 4 项纯逻辑测试；1000 个进度信号被合并，Overview 持续超时时仍获得 30 次进度采样并看到阶段切换。首轮测试暴露探针结束超限 stdout 子进程时未排空管道的问题，已修复后重跑；这是测试工具修复，不是 FSD 性能或 NAS 初始化验收。
 
 ## 内容与状态判定
 
