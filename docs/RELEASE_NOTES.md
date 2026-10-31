@@ -1,3 +1,24 @@
+# 0.1.0~dev20261031.2：桌面与目录分页开发构建
+
+本轮整合 GIO 枚举器回收修复、Nemo/Nautilus 共用状态扩展、仅状态改变时刷新图标、GUI 按需展开目录及隐藏页面停止查询、SQLite 目录分页和登录错误分类。逐项来源及实际验证见 [整合记录](UBUNTU_INTEGRATION.md)。数据库 schema 18、IPC 12 不变。
+
+本版本仍是开发构建。MFM 断连、Personal_Sync 恢复、FUSE 队列与真正全量同步未在本批修复；不能据此宣称日常或候选验收完成。发布安装包及构建验证以 GitHub Releases 为准。
+
+## 选择文件管理器集成
+
+一个包包含两个扩展入口，共用本地状态实现。依赖使用 `nemo-python | python3-nautilus`，相应 GI 由绑定包带入；APT 不会根据当前桌面自动选择第二项。请明确选择实际使用的文件管理器绑定：
+
+```sh
+# Linux Mint Cinnamon / Nemo
+sudo apt install nemo-python ./drive-native_0.1.0~dev20261031.2_amd64.deb
+# Ubuntu 24.04 GNOME / Nautilus
+sudo apt install python3-nautilus ./drive-native_0.1.0~dev20261031.2_amd64.deb
+```
+
+升级前正常停止需要升级的挂载并退出旧 GUI，保留未上传内容及状态备份。安装不启动挂载、不结束用户文件管理器；已运行的文件管理器需要在方便时重新启动才能加载新扩展。原冻结基线使用独立路径，保持原观察窗口。普通卸载和清除包配置均不删除用户数据。
+
+---
+
 # 0.1.0~dev20261031.1：P0 基线开发构建
 
 本轮改善安装包中的说明文档与源码可追溯性：主要说明可在 `/usr/share/doc/drive-native/` 离线阅读，未随包附带的证据链接指向构建对应的Git提交；`SOURCE_COMMIT` 和 `BUILD_VERSION` 标识安装内容。原始测试数据、实验数据库和账号配置不进入deb。

@@ -1,3 +1,14 @@
+drive-native (0.1.0~dev20261031.2) unstable; urgency=medium
+
+  * Close wrapped GIO enumerators before releasing the underlying object.
+  * Share Nemo/Nautilus status integration and avoid unchanged icon invalidations.
+  * Load GUI directory pages on demand and stop queries from hidden panels.
+  * Page directory metadata in SQLite and distinguish login failure categories.
+  * Accept either file-manager Python binding; document explicit host selection.
+  * Keep schema 18 and IPC 12; recovery and full-sync acceptance remain open.
+
+ -- Drive Native contributors <noreply@example.invalid>  Sat, 31 Oct 2026 16:32:00 +0800
+
 drive-native (0.1.0~dev20261031.1) unstable; urgency=medium
 
   * Ship readable baseline documentation and source/build identity with the package.
