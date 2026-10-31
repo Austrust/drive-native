@@ -36,7 +36,7 @@ class PureTests(unittest.TestCase):
 
     def test_invalid_or_unbounded_progress_is_refused(self):
         for key, value in [('phase', 'CANARY'), ('attempt', -1), ('items', True),
-                           ('recent_stages', [{}] * 17), ('phase_totals_ms', [[]] * 13)]:
+                           ('recent_stages', [{}] * 17), ('phase_totals_ms', [[]] * (len(probe.PHASES) + 1))]:
             document = state()
             document['initialization'][key] = value
             with self.assertRaises(ValueError):

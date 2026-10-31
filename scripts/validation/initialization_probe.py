@@ -17,12 +17,12 @@ import time
 IFACE = 'org.drivenative.Client1'
 PATH = '/org/drivenative/Client1'
 PHASES = {'starting', 'authenticating', 'configuring', 'binding', 'catching_up',
-          'recovering', 'seeding', 'enumerating', 'fencing', 'importing', 'waiting'}
+          'recovering', 'watermark', 'seeding', 'enumerating', 'fencing', 'reconciling', 'importing', 'waiting'}
 RECOVERY = {'initial_index', 'permission_recheck', 'cursor_invalidated', 'filtered_type_changed'}
 COUNTERS = ('attempt', 'started_unix_ms', 'elapsed_ms', 'phase_started_unix_ms',
             'phase_elapsed_ms', 'units', 'items', 'snapshot_attempt', 'cursor_advances',
             'events_applied', 'changed_without_advance', 'consecutive_changed_without_advance')
-ACTIVE_PHASES = {'seeding', 'enumerating', 'fencing', 'importing', 'catching_up'}
+ACTIVE_PHASES = {'watermark', 'seeding', 'enumerating', 'fencing', 'reconciling', 'importing', 'catching_up'}
 PROGRESS_SIGNAL = re.compile(r'org\.drivenative\.Client1\.ProgressChanged\s+\((?:uint64\s+)?(\d+),?\)')
 OWNER = re.compile(r'is owned by (:\d+\.\d+)\s*$')
 
@@ -48,7 +48,7 @@ def sanitize_progress(document):
     result['since_progress_ms'] = None if since is None else integer(since)
     spans = value.get('recent_stages')
     totals = value.get('phase_totals_ms')
-    if not isinstance(spans, list) or len(spans) > 16 or not isinstance(totals, list) or len(totals) > 12:
+    if not isinstance(spans, list) or len(spans) > 16 or not isinstance(totals, list) or len(totals) > len(PHASES):
         raise ValueError('invalid bounded stage history')
     result['recent_stages'] = []
     for span in spans:

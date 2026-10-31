@@ -6,9 +6,11 @@ use std::sync::Arc;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Phase {
+    Watermark,
     Seed,
     Enumerate,
     Fence,
+    Reconcile,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -19,9 +19,11 @@ pub enum Phase {
     Binding,
     CatchingUp,
     Recovering,
+    Watermark,
     Seeding,
     Enumerating,
     Fencing,
+    Reconciling,
     Importing,
     Waiting,
 }
@@ -66,6 +68,21 @@ pub struct Snapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn watermark_and_local_reconciliation_have_distinct_observed_stages() {
+        let tracker = Tracker::default();
+        tracker.begin();
+        for (index, phase) in [
+            (IndexPhase::Watermark, Phase::Watermark),
+            (IndexPhase::Reconcile, Phase::Reconciling),
+        ] {
+            tracker.index(Progress { attempt: 1, phase: index, units: 2, items: 3 });
+            assert_eq!(tracker.snapshot().phase, phase);
+            assert_eq!(tracker.snapshot().units, 2);
+            assert!(tracker.snapshot().active);
+        }
+    }
 
     #[test]
     fn changed_notification_without_advancement_is_distinct_from_idle_wait() {
@@ -119,7 +136,7 @@ mod tests {
                 .iter()
                 .any(|(p, _)| *p == Phase::Authenticating)
         );
-        assert!(state.phase_totals_ms.len() <= 12);
+        assert!(state.phase_totals_ms.len() <= 14);
     }
 
     #[test]
@@ -278,9 +295,11 @@ impl Tracker {
     pub fn index(&self, p: Progress) {
         let mut s = self.state.lock().unwrap();
         let phase = match p.phase {
+            IndexPhase::Watermark => Phase::Watermark,
             IndexPhase::Seed => Phase::Seeding,
             IndexPhase::Enumerate => Phase::Enumerating,
             IndexPhase::Fence => Phase::Fencing,
+            IndexPhase::Reconcile => Phase::Reconciling,
         };
         let advanced = s.snapshot_attempt != p.attempt
             || s.phase != phase

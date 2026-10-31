@@ -3,8 +3,10 @@ PHASES = {
     "starting": "正在启动同步进程", "authenticating": "正在认证",
     "configuring": "正在配置传输", "binding": "正在绑定同步目录",
     "catching_up": "正在追赶远端变更", "recovering": "正在准备索引恢复",
+    "watermark": "正在取得当前事件水位并核对根目录",
     "seeding": "正在读取目录历史", "enumerating": "正在枚举目录",
     "fencing": "正在核对枚举期间的变更", "importing": "正在提交本地索引",
+    "reconciling": "正在协调扫描期间变化的目录",
     "waiting": "已连接 · 等待远端变更",
 }
 
@@ -26,6 +28,10 @@ def progress_text(progress):
     units, items = progress.get("units", 0), progress.get("items", 0)
     if phase == "enumerating":
         detail += f" · 已处理 {units} 个目录，发现 {items} 个条目"
+    elif phase == "watermark":
+        detail += f" · 已完成 {units} 次边界与身份核对"
+    elif phase == "reconciling":
+        detail += f" · 已重查 {units} 个受影响目录，候选索引尚未提交"
     elif phase in ("seeding", "fencing"):
         detail += f" · 已读取 {units} 批，{items} 条事件"
     elif phase == "catching_up":
