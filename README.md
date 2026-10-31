@@ -2,7 +2,7 @@
 
 面向 Linux Mint Cinnamon / Nemo 的 Synology Drive 原生协议按需同步客户端。使用 Rust、FUSE、SQLite、PySide6 和 Nemo 扩展；独立连接 Drive Server，不依赖 WebDAV 或官方客户端进程。
 
-**开发测试版本，尚未完成日常使用验收。** `0.1.0~dev20261031.2` 已完成桌面整合、目录分页及隔离安装验证，见[构建验证](docs/validation/desktop-package-002/REPORT.md)、[整合记录](docs/UBUNTU_INTEGRATION.md)和[发布说明](docs/RELEASE_NOTES.md)。安装包发布状态以 [GitHub Releases](https://github.com/Austrust/drive-native/releases) 为准。MFM断连、Personal_Sync恢复、FUSE性能与真正全量同步仍待后续开发；官方 Linux 适配冻结为协议参照及备用分支，不包含在此产品中。
+**开发测试版本，尚未完成日常使用验收。** `0.1.0~dev20261031.3` 已发布通知诊断与已打开内容读取隔离，见[本包验证](docs/validation/native-package-003/REPORT.md)和[发布说明](docs/RELEASE_NOTES.md)。保留此前[桌面整合与目录分页](docs/UBUNTU_INTEGRATION.md)。安装包见 [GitHub Releases](https://github.com/Austrust/drive-native/releases)。全部断连、Personal_Sync、大目录/混合性能与真正全量同步仍未完成；官方 Linux 适配冻结为协议参照及备用分支，不包含在此产品中。
 
 ## 已实现
 
@@ -18,7 +18,7 @@
 
 最新诊断结论见 [2026-10-31 性能与同步问题摘要](docs/PERFORMANCE_FINDINGS_20261031.md)。本次仅公开结论，详细证据保留本地；这些诊断不代表产品修复或候选验收完成。
 
-当前正在独立开发分支整合 Ubuntu 更新包；[采用决定与回归记录](docs/UBUNTU_INTEGRATION.md)。既有 P0 观察继续运行，不代表新代码已通过长期验收。
+Ubuntu更新包已逐项整合，继续在独立分支修复原生恢复及按需性能；[采用决定](docs/UBUNTU_INTEGRATION.md)。既有P0观察继续运行，不代表新代码已通过长期验收。
 
 ## 构建和测试
 

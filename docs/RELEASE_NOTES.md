@@ -1,6 +1,6 @@
 # 0.1.0~dev20261031.3：通知诊断与已打开内容读取隔离
 
-本批源码已完成389项Rust、9项显式FUSE、49项GUI回归；安装包构建及安装生命周期以对应发布验证记录为准。新增[接收进展驱动的通知期限](NOTIFICATION_IDLE.md)、[退出前连接诊断](CONNECTION_DIAGNOSTICS.md)及[已打开文件读取隔离](FUSE_READ_ISOLATION.md)。最后一项避免元数据线程全部等待Store时拖住已有缓存/草稿的读取，不代表新打开文件、大目录及48路混合性能已经达标。
+本包已发布，389项Rust、9项显式FUSE（debug/release）、49项GUI及隔离安装生命周期通过，见[发布验证](validation/native-package-003/REPORT.md)。新增[接收进展驱动的通知期限](NOTIFICATION_IDLE.md)、[退出前连接诊断](CONNECTION_DIAGNOSTICS.md)及[已打开文件读取隔离](FUSE_READ_ISOLATION.md)。最后一项避免元数据线程全部等待Store时拖住已有缓存/草稿的读取，不代表新打开文件、大目录及48路混合性能已经达标。
 
 schema18不变，IPC升级为13。升级或回退前正常停止所升级任务并退出旧GUI，再成对更换fsd/worker；不能把新worker和仍运行的旧fsd混用。保留用户数据库、缓存、草稿及未上传数据。隔离的原P0观察实例不替换。
 
