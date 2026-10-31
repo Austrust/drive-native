@@ -369,6 +369,10 @@ class MainWindow(QMainWindow):
         if not error:
             self.received_overview(data, None)
             return
+        if self.bus.owner:
+            # A busy Store does not mean the already running service is absent.
+            self.received_overview(None, error)
+            return
         if self.profile:
             self.start_service()
         else:
@@ -384,6 +388,9 @@ class MainWindow(QMainWindow):
         self.schedule_refresh()
 
     def offline_ui(self):
+        self.overview = {}
+        self.progress_timer.stop()
+        self.progress_label.hide()
         self.connection_value.setText("尚未连接")
         self.pause.setEnabled(False)
         self.open_folder.setEnabled(False)
@@ -474,8 +481,8 @@ class MainWindow(QMainWindow):
     def service_availability(self, available):
         self.loading = False
         if not available:
+            self.offline_ui()
             self.connection_value.setText("后台已停止")
-            self.pause.setEnabled(False)
         self.schedule_refresh()
 
     def schedule_refresh(self):
@@ -524,13 +531,22 @@ class MainWindow(QMainWindow):
                 self.progress_timer.start()
         else:
             self.progress_timer.stop()
-        if title and self.overview.get("connection") in ("connecting", "online"):
+        if title and self.bus.owner and (
+                not self.overview or self.overview.get("connection") in ("connecting", "online")):
             self.connection_value.setText(title)
 
     def received_overview(self, data, error):
         if error:
             self.loading = False
-            self.offline_ui()
+            if not self.bus.owner:
+                self.offline_ui()
+            else:
+                # NoReply/Timeout can be a slow local transaction. Preserve the
+                # last confirmed mount/control state; only owner loss is offline.
+                self.show_error(f"暂时无法读取状态详情（{error}）。保留上次确认的挂载状态。")
+                self.refresh_progress()
+                self.ready.emit()
+            self.followup_refresh()
             return
         self.overview = data
         state = data["connection"]
