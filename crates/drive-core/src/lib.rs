@@ -45,6 +45,7 @@ pub mod status_aggregate;
 pub mod status_projection;
 pub mod status_index;
 pub mod status_snapshot;
+pub mod status_transient;
 
 pub mod task_control;
 pub mod snapshot_progress;
