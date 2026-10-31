@@ -36,6 +36,7 @@ tokio = { version = "1", features = ["full"] }
 rustls = { version = "0.23", features = ["ring"] }
 
 [dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
 rpassword = "7"
 serde_json = "1"
 anyhow = "1"
