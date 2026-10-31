@@ -65,6 +65,28 @@ fn outer_error_after_commit_wakes_once_for_the_entire_guard() {
 }
 
 #[test]
+fn committed_snapshot_gap_wakes_even_when_later_diagnostic_fails() {
+    let (_dir, shared, n) = fixture();
+    let before = shared.lock().unwrap().status_change_watermark().unwrap();
+    let result = (|| -> crate::Result<()> {
+        let mut guard = shared.lock().unwrap();
+        guard.install_remote_snapshot(&[Node {
+            id: "root".into(), parent: None, name: "root".into(),
+            version: "2".into(), directory: true, metadata: None,
+        }], "2", "server")?;
+        Err(Error::State("later diagnostic failed".into()))
+    })();
+    assert!(result.is_err());
+    n.try_recv().unwrap();
+    assert_eq!(n.state(), CommitState { revision: 1, verified: true });
+    quiet(&n);
+    let after = shared.lock().unwrap().status_change_watermark().unwrap();
+    assert_eq!(after.snapshot_resets, before.snapshot_resets + 1);
+    assert_eq!(after.cursor.sequence, before.cursor.sequence + 1);
+    assert_eq!((after.entries, after.bytes), (0, 0));
+}
+
+#[test]
 fn readonly_noop_rollback_and_savepoint_rollback_do_not_wake() {
     let (_dir, shared, n) = fixture();
     for _ in 0..3 {
