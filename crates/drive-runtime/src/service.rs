@@ -622,6 +622,10 @@ impl Service {
                     if c.generation != generation {
                         return Ok(());
                     }
+                    stage = Stage::ConfigureTransfers;
+                    self.bridge
+                        .initialization
+                        .phase(crate::initialization::Phase::Configuring);
                     let limits = self
                         .bridge
                         .store
@@ -629,10 +633,6 @@ impl Service {
                         .unwrap()
                         .transfer_limits()
                         .map_err(io::Error::other)?;
-                    stage = Stage::ConfigureTransfers;
-                    self.bridge
-                        .initialization
-                        .phase(crate::initialization::Phase::Configuring);
                     Self::configure_transfers(&worker.rpc, limits)?;
                     self.bridge.initialization.activity();
                     stage = Stage::BindScope;

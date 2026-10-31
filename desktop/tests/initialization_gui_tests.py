@@ -89,6 +89,77 @@ class ProgressTests(unittest.TestCase):
                 manager.close(); manager.deleteLater()
                 QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
+    def test_overview_failure_keeps_confirmed_controls_and_reports_error(self):
+        with patch.object(MainWindow, 'start', lambda _: None), patch('drive_native_gui.window.ClientBus', Bus):
+            window = MainWindow()
+            window.profile = {'task_id': 'synthetic'}
+            try:
+                window.show(); app.processEvents(); window.refresh_timer.stop()
+                window.overview = {'connection': 'online', 'mounted': True}
+                window.open_folder.setEnabled(True)
+                window.pause.setEnabled(True)
+                window.up.setEnabled(True)
+                for error in ('org.freedesktop.DBus.Error.NoReply',
+                              'org.freedesktop.DBus.Error.Timeout',
+                              'org.freedesktop.DBus.Error.Failed',
+                              'invalid_service_response'):
+                    window.received_overview(None, error)
+                    self.assertIn(error, window.banner.text())
+                    self.assertTrue(window.banner.isVisible())
+                    self.assertTrue(window.open_folder.isEnabled())
+                    self.assertTrue(window.pause.isEnabled())
+                    self.assertTrue(window.up.isEnabled())
+                    self.assertTrue(window.overview['mounted'])
+                    self.assertIn('枚举', window.connection_value.text())
+                # A progress response cannot override a confirmed paused state.
+                window.overview['connection'] = 'paused'
+                window.connection_value.setText('已暂停')
+                window.received_overview(None, 'org.freedesktop.DBus.Error.NoReply')
+                self.assertEqual(window.connection_value.text(), '已暂停')
+                # Owner loss, unlike a failed detail query, really is offline.
+                window.bus.owner = ''
+                window.bus.availability.emit(False)
+                self.assertFalse(window.open_folder.isEnabled())
+                self.assertFalse(window.pause.isEnabled())
+                self.assertFalse(window.up.isEnabled())
+                self.assertFalse(window.progress_label.isVisible())
+                self.assertEqual(window.connection_value.text(), '后台已停止')
+            finally:
+                window.close(); window.deleteLater()
+                QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
+    def test_first_overview_timeout_uses_live_progress_without_starting_service(self):
+        with patch.object(MainWindow, 'start', lambda _: None), patch('drive_native_gui.window.ClientBus', Bus):
+            window = MainWindow()
+            window.profile = {'task_id': 'synthetic'}
+            try:
+                window.show(); app.processEvents(); window.refresh_timer.stop()
+                window.open_folder.setEnabled(False)
+                window.pause.setEnabled(False)
+                with patch.object(window, 'start_service') as start:
+                    window.initial_overview(None, 'org.freedesktop.DBus.Error.NoReply')
+                    start.assert_not_called()
+                self.assertIn('枚举', window.connection_value.text())
+                self.assertFalse(window.overview)
+                self.assertFalse(window.open_folder.isEnabled())
+                self.assertFalse(window.pause.isEnabled())
+                self.assertIn('NoReply', window.banner.text())
+                # A later successful overview clears the query error normally.
+                window.received_overview({
+                    'connection': 'online', 'mounted': True, 'pending_operations': 0,
+                    'mount': '/tmp/synthetic', 'initialization': window.bus.progress,
+                }, None)
+                self.assertFalse(window.banner.isVisible())
+                self.assertTrue(window.open_folder.isEnabled())
+                self.assertTrue(window.pause.isEnabled())
+                window.bus.owner = ''
+                window.received_overview(None, 'org.freedesktop.DBus.Error.NameHasNoOwner')
+                self.assertEqual(window.connection_value.text(), '尚未连接')
+                self.assertFalse(window.open_folder.isEnabled())
+            finally:
+                window.close(); window.deleteLater()
+                QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
 
 if __name__ == '__main__':
     unittest.main()
