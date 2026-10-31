@@ -9,7 +9,7 @@ async def connect(front_reader,front):
  accepted+=1
  back=None
  try:
-  back_reader,back=await asyncio.open_connection('10.114.114.3',6690)
+  back_reader,back=await asyncio.open_connection('[redacted-test-host]',6690)
   active.add(front);active.add(back)
   tasks=[asyncio.create_task(forward(front_reader,back)),asyncio.create_task(forward(back_reader,front))]
   await asyncio.wait(tasks,return_when=asyncio.FIRST_COMPLETED)

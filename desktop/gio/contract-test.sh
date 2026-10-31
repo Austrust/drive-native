@@ -4,9 +4,11 @@ source_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 modules=${1:?Supply the built isolated module directory}
 output=${2:?Supply an isolated test output directory}
 mkdir -p -- "$output"
+export GIO_MODULE_DIR="$modules"
 bash "$source_dir/local-test.sh" "$modules" "$output"
 export GIO_EXTRA_MODULES="$modules"
 export GIO_USE_VFS=drive-native-probe
+G_DEBUG=fatal-criticals /usr/bin/python3 "$source_dir/enumerator_lifecycle_test.py" | tee "$output/enumerator-lifecycle.json"
 /usr/bin/python3 "$source_dir/write_test.py" | tee "$output/writes.json"
 strace -f -e trace=openat -o "$output/monitor-open.trace" /usr/bin/python3 "$source_dir/monitor_test.py" | tee "$output/monitor.json"
 /usr/bin/python3 - "$output" <<'PY'

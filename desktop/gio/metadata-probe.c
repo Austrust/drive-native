@@ -101,6 +101,10 @@ static gboolean enum_close(GFileEnumerator *e, GCancellable *c, GError **error) 
     return g_file_enumerator_close(((ProbeEnumerator *)e)->inner, c, error);
 }
 static void enum_finalize(GObject *o) {
+    /* The base finalizer closes an unfinished enumeration through close_fn.
+     * Close while the wrapped enumerator is still alive, then release it. */
+    if (!g_file_enumerator_is_closed(G_FILE_ENUMERATOR(o)))
+        g_file_enumerator_close(G_FILE_ENUMERATOR(o), NULL, NULL);
     g_clear_object(&((ProbeEnumerator *)o)->inner);
     G_OBJECT_CLASS(probe_enumerator_parent_class)->finalize(o);
 }

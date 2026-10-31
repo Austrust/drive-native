@@ -1,12 +1,12 @@
 import json,math,os,pathlib,subprocess,time
 base=pathlib.Path.home()/'.local/state/drive-native-p0';root=base/'link-001';root.mkdir(mode=0o700,exist_ok=False)
 tool=base/'link-tool-001/unpacked';env=os.environ.copy();env['LD_LIBRARY_PATH']=str(tool/'usr/lib/x86_64-linux-gnu')
-manifest={'registered_at':time.time(),'server':'10.114.114.3','port':5201,'direction':'reverse NAS to WSL','parallel_streams':1,'warmup_runs':1,'warmup_seconds':2,'planned_runs':3,'seconds_per_run':5,'process_timeout_s':12,'not_drive_protocol':True,'interference':'six native tasks, probes, idle phase clone; no controlled NAS or LAN background load','stop_rule':'first tool/protocol failure ends experiment; retain failures'}
+manifest={'registered_at':time.time(),'server':'[redacted-test-host]','port':5201,'direction':'reverse NAS to WSL','parallel_streams':1,'warmup_runs':1,'warmup_seconds':2,'planned_runs':3,'seconds_per_run':5,'process_timeout_s':12,'not_drive_protocol':True,'interference':'six native tasks, probes, idle phase clone; no controlled NAS or LAN background load','stop_rule':'first tool/protocol failure ends experiment; retain failures'}
 (root/'manifest.json').write_text(json.dumps(manifest,indent=2))
 with (base/'planned-loads.jsonl').open('a') as f:f.write(json.dumps({'start':time.time(),'run':'link-001','kind':'preregistered single-stream reverse iperf3 baseline'})+'\n')
 rows=[]
 for index in range(-1,3):
-    command=[str(tool/'usr/bin/iperf3'),'-c','10.114.114.3','-p','5201','-R','-P','1','-t',str(2 if index<0 else 5),'--connect-timeout','2000','-J']
+    command=[str(tool/'usr/bin/iperf3'),'-c','[redacted-test-host]','-p','5201','-R','-P','1','-t',str(2 if index<0 else 5),'--connect-timeout','2000','-J']
     started=time.monotonic();row={'index':index,'time':time.time()}
     try:
         p=subprocess.run(command,capture_output=True,text=True,env=env,timeout=12)

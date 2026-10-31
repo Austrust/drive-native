@@ -1,6 +1,6 @@
 {
   "registered_at": 1793383798.298738,
-  "server": "10.114.114.3",
+  "server": "[redacted-test-host]",
   "port": 5201,
   "direction": "reverse NAS to WSL",
   "parallel_streams": 1,

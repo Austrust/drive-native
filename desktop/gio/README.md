@@ -7,6 +7,7 @@
 - [backend_io_test.py](backend_io_test.py)
 - [build.sh](build.sh)
 - [contract-test.sh](contract-test.sh)
+- [enumerator_lifecycle_test.py](enumerator_lifecycle_test.py)：合成枚举器关闭、取消、释放和文件描述符回归；需隔离 test-scopes 模块与 `G_DEBUG=fatal-criticals`。
 - [gvfs-test.sh](gvfs-test.sh)
 - [gvfs_test.py](gvfs_test.py)
 - [local-test.sh](local-test.sh)
