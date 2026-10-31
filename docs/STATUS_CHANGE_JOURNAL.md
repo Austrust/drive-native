@@ -29,7 +29,7 @@ trigger 与原数据的语句、事务和 savepoint 一同提交或回滚。公�
 
 | 来源 | 原因与消费者责任 |
 | --- | --- |
-| nodes | 身份、位置、版本、内容引用、脏写、pin、删除、冲突；包含旧新位置，保守标记可能影响后代 |
+| nodes | 身份、位置、版本、内容引用、脏写、pin、删除、冲突；包含旧新位置。UPDATE 只有身份、父、名称、类型、pin 或 deleted 改变时传播后代；版本、内容和冲突改变只影响自身及祖先。INSERT/DELETE 保守传播后代 |
 | drafts | 存在、base、generation、checkpoint、dirty，含写入先置 dirty 后 IO 失败情形 |
 | transfers | 下载阶段、错误和清除错误，不能只监听 nodes |
 | operations | 上传 pending/inflight/uncertain/conflict/confirmed 对应任务状态 |

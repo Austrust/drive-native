@@ -252,6 +252,20 @@ pub(crate) fn install(db: &Connection) -> Result<()> {
             } else {
                 String::new()
             };
+            // A new version, conflict or content publication changes this
+            // node's contribution, not the inherited facts of every descendant.
+            // Preserve subtree invalidation for identity/namespace/visibility
+            // and pin changes, including mixed updates. INSERT/DELETE remain
+            // conservative because existing descendants may attach/detach.
+            let subtree = if table == "nodes" && operation == "UPDATE" {
+                ["id", "parent", "name", "directory", "pinned", "deleted"]
+                    .iter()
+                    .map(|column| format!("OLD.{column} IS NOT NEW.{column}"))
+                    .collect::<Vec<_>>()
+                    .join(" OR ")
+            } else {
+                i32::from(subtree).to_string()
+            };
             // No per-insert COUNT, SUM, sort, or unbounded retention. On overflow
             // discard the bounded buffer and the current row; the floor tells
             // every lagging consumer it must rebuild. All bookkeeping rolls
@@ -261,7 +275,7 @@ pub(crate) fn install(db: &Connection) -> Result<()> {
                 AFTER {operation} ON main.{table} {when} BEGIN
                 UPDATE dn_status_meta SET head=head+1;
                 INSERT INTO dn_status_changes
-                SELECT head,'{table}','{operation}',{subtree},{old},{new},
+                SELECT head,'{table}','{operation}',({subtree}),{old},{new},
                        {old_parent},{new_parent},{old_name},{new_name},{bytes}
                 FROM dn_status_meta
                 WHERE entries<max_entries AND bytes+({bytes})<=max_bytes;
@@ -270,8 +284,7 @@ pub(crate) fn install(db: &Connection) -> Result<()> {
                 DELETE FROM dn_status_changes WHERE seq<=(SELECT floor FROM dn_status_meta);
                 UPDATE dn_status_meta SET entries=entries+1,bytes=bytes+({bytes})
                 WHERE EXISTS(SELECT 1 FROM dn_status_changes WHERE seq=head);
-                END;",
-                subtree = i32::from(subtree)
+                END;"
             ))?;
         }
     }
