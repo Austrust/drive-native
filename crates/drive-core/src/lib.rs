@@ -38,6 +38,7 @@ pub mod directory_conflicts;
 pub mod transfer_policy;
 
 pub mod desktop_status;
+pub mod status_changes;
 
 pub mod task_control;
 pub mod snapshot_progress;

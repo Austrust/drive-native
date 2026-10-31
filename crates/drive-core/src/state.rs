@@ -255,6 +255,9 @@ impl Store {
             "UPDATE transfers SET state='pending' WHERE direction='download' AND state='inflight'",
             [],
         )?;
+        // Derived state starts after startup recovery. TEMP objects and a fresh
+        // epoch keep the durable schema and external readers unchanged.
+        crate::status_changes::install(&db)?;
         Ok(Self {
             _writer_lock: writer_lock,
             db,
