@@ -26,3 +26,4 @@ pub mod trust;
 pub mod trust_relay;
 
 pub mod flow;
+pub mod receive_activity;
