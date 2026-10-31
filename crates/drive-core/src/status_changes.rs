@@ -4,7 +4,7 @@
 //! same Store serialization boundary as the returned watermark. No UI uses this
 //! journal yet, and it does not include transient flights or external file loss.
 use crate::{Error, Result, Store};
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, Transaction, params};
 use serde::{Deserialize, Serialize};
 
 const MAX_ENTRIES: usize = 65_536;
@@ -51,6 +51,8 @@ pub struct JournalWatermark {
     pub entries: usize,
     pub bytes: usize,
     pub overflows: u64,
+    /// Intentional whole-snapshot invalidations, separate from capacity loss.
+    pub snapshot_resets: u64,
     pub budget: JournalBudget,
 }
 
@@ -189,7 +191,9 @@ pub(crate) fn install(db: &Connection) -> Result<()> {
         singleton INTEGER PRIMARY KEY CHECK(singleton=1), epoch TEXT NOT NULL,
         head INTEGER NOT NULL, floor INTEGER NOT NULL, entries INTEGER NOT NULL,
         bytes INTEGER NOT NULL, overflows INTEGER NOT NULL,
-        max_entries INTEGER NOT NULL, max_bytes INTEGER NOT NULL);
+        max_entries INTEGER NOT NULL, max_bytes INTEGER NOT NULL,
+        bulk INTEGER NOT NULL DEFAULT 0 CHECK(bulk IN (0,1)),
+        snapshot_resets INTEGER NOT NULL DEFAULT 0);
         CREATE TEMP TABLE dn_status_changes (
         seq INTEGER PRIMARY KEY, source TEXT NOT NULL, operation TEXT NOT NULL,
         subtree INTEGER NOT NULL, old_node TEXT, new_node TEXT,
@@ -198,7 +202,7 @@ pub(crate) fn install(db: &Connection) -> Result<()> {
     )?;
     let budget = JournalBudget::default();
     db.execute(
-        "INSERT INTO dn_status_meta VALUES(1,?1,0,0,0,0,0,?2,?3)",
+        "INSERT INTO dn_status_meta VALUES(1,?1,0,0,0,0,0,?2,?3,0,0)",
         params![
             uuid::Uuid::new_v4().to_string(),
             budget.entries as i64,
@@ -242,7 +246,7 @@ pub(crate) fn install(db: &Connection) -> Result<()> {
             );
             let when = if operation == "UPDATE" {
                 format!(
-                    "WHEN {}",
+                    "AND ({})",
                     columns
                         .iter()
                         .map(|c| format!("OLD.{c} IS NOT NEW.{c}"))
@@ -272,7 +276,8 @@ pub(crate) fn install(db: &Connection) -> Result<()> {
             // back with the triggering statement/transaction/savepoint.
             db.execute_batch(&format!(
                 "CREATE TEMP TRIGGER dn_status_{table}_{operation}
-                AFTER {operation} ON main.{table} {when} BEGIN
+                AFTER {operation} ON main.{table}
+                WHEN (SELECT bulk FROM dn_status_meta)=0 {when} BEGIN
                 UPDATE dn_status_meta SET head=head+1;
                 INSERT INTO dn_status_changes
                 SELECT head,'{table}','{operation}',({subtree}),{old},{new},
@@ -289,6 +294,28 @@ pub(crate) fn install(db: &Connection) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Only a complete snapshot replacement uses this path. It already invalidates
+/// the derived tree, so materializing millions of row invalidations (and then
+/// overflowing them) is unnecessary. The flag, main writes and explicit gap are
+/// ONE transaction. Errors/panics roll back everything; no trigger is dropped
+/// and there is no public begin/end pair that a caller can forget to balance.
+pub(crate) fn replace_snapshot<T>(
+    db: &mut Connection,
+    write: impl FnOnce(&Transaction<'_>) -> Result<T>,
+) -> Result<T> {
+    let tx = db.transaction()?;
+    if tx.execute("UPDATE dn_status_meta SET bulk=1 WHERE singleton=1 AND bulk=0", [])? != 1 {
+        return Err(Error::State("snapshot journal boundary is already active".into()));
+    }
+    let value = write(&tx)?;
+    tx.execute("DELETE FROM dn_status_changes", [])?;
+    if tx.execute("UPDATE dn_status_meta SET head=head+1,floor=head+1,entries=0,bytes=0,bulk=0,snapshot_resets=snapshot_resets+1 WHERE singleton=1 AND head<9223372036854775807 AND snapshot_resets<9223372036854775807", [])? != 1 {
+        return Err(Error::State("snapshot journal sequence exhausted".into()));
+    }
+    tx.commit()?;
+    Ok(value)
 }
 
 fn read_integer<T: TryFrom<i64>>(row: &rusqlite::Row<'_>, column: usize) -> rusqlite::Result<T> {
@@ -310,13 +337,18 @@ impl Store {
 
     pub fn status_change_watermark(&self) -> Result<JournalWatermark> {
         self.committed_status_boundary()?;
-        Ok(self.db.query_row("SELECT epoch,head,floor,entries,bytes,overflows,max_entries,max_bytes FROM dn_status_meta", [], |r| {
-            Ok(JournalWatermark {
+        let (watermark, bulk) = self.db.query_row("SELECT epoch,head,floor,entries,bytes,overflows,max_entries,max_bytes,snapshot_resets,bulk FROM dn_status_meta", [], |r| {
+            Ok((JournalWatermark {
                 cursor: StatusCursor { epoch: r.get(0)?, sequence: read_integer(r, 1)? },
                 retained_after: read_integer(r, 2)?, entries: read_integer(r, 3)?, bytes: read_integer(r, 4)?,
                 overflows: read_integer(r, 5)?, budget: JournalBudget { entries: read_integer(r, 6)?, bytes: read_integer(r, 7)? },
-            })
-        })?)
+                snapshot_resets: read_integer(r, 8)?,
+            }, r.get::<_, bool>(9)?))
+        })?;
+        if bulk {
+            return Err(Error::State("snapshot journal boundary is unconfirmed".into()));
+        }
+        Ok(watermark)
     }
 
     /// Returns invalidations, not complete historical atoms. Read current node
