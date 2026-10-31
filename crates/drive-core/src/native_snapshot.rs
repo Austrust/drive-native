@@ -57,8 +57,20 @@ impl NativeReadSession {
         // candidate and all intervening changes pass reconciliation/fencing.
         // `/` retains the historical path: its current-root metadata contract
         // is not yet verified. Cached retries always replay from their own S0.
-        let completed = if seed.is_none() && self.scope.path != "/" {
-            self.current_snapshot_seed(attempt).await?
+        let current = if seed.is_none() && self.scope.path != "/" {
+            match self.current_snapshot_seed(attempt).await {
+                Ok(seed) => Some(seed),
+                // A selected subtree can be accessible without parent listing.
+                // Only this known capability gap uses the legacy bootstrap;
+                // neither S0 nor unverified metadata become a checkpoint.
+                Err(Error::Unsupported(watermark_seed::PARENT_QUERY_UNAVAILABLE)) => None,
+                Err(error) => return Err(error),
+            }
+        } else {
+            None
+        };
+        let completed = if let Some(current) = current {
+            current
         } else {
             collect_snapshot_seed(
                 &self.scope,

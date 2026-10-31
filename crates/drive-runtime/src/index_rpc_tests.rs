@@ -52,6 +52,29 @@ fn index_validation_rejects_regression_and_out_of_budget_counts() {
 
 #[test]
 fn current_boundary_and_local_recheck_progress_allow_only_the_fence_cycle() {
+    assert!(valid_index_progress(
+        Some(Progress {
+            attempt: 1,
+            phase: Phase::Watermark,
+            units: 1,
+            items: 0
+        }),
+        Progress {
+            attempt: 1,
+            phase: Phase::Seed,
+            units: 0,
+            items: 0
+        }
+    ));
+    assert!(!valid_index_progress(
+        Some(progress(1)),
+        Progress {
+            attempt: 1,
+            phase: Phase::Watermark,
+            units: 1,
+            items: 0
+        }
+    ));
     let mut last = None;
     for (phase, units, items) in [
         (Phase::Watermark, 0, 0),

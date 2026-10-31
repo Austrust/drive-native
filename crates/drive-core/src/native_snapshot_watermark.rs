@@ -1,5 +1,12 @@
 //! A current event boundary is only a scan starting point, never a checkpoint.
 use super::*;
+pub(super) const PARENT_QUERY_UNAVAILABLE: &str = "selected root parent cannot be listed";
+fn root_query_error(error: sproto::Error) -> Error {
+    match error {
+        sproto::Error::Server { code: 12290, .. } => Error::Unsupported(PARENT_QUERY_UNAVAILABLE),
+        error => Error::Native(error),
+    }
+}
 
 impl NativeReadSession {
     pub(super) async fn current_snapshot_seed(&self, attempt: u8) -> Result<SnapshotSeed> {
@@ -18,7 +25,8 @@ impl NativeReadSession {
                         &self.scope.file_id,
                         self.scope.node_id,
                     )
-                    .await?
+                    .await
+                    .map_err(root_query_error)?
                     .ok_or(Error::RootUnavailable)?;
                 self.snapshot_node(&self.scope.file_id, &info)
             },
@@ -139,6 +147,26 @@ mod tests {
             node_id: 7,
             file_id: "123456789".into(),
             path: "/selected".into(),
+        }
+    }
+    #[test]
+    fn only_known_parent_access_denial_allows_legacy_metadata_bootstrap() {
+        assert!(matches!(
+            root_query_error(sproto::Error::Server {
+                code: 12290,
+                reason: "ignored".into()
+            }),
+            Error::Unsupported(PARENT_QUERY_UNAVAILABLE)
+        ));
+        for error in [
+            sproto::Error::Server {
+                code: 12291,
+                reason: "ignored".into(),
+            },
+            sproto::Error::Decode("identity changed".into()),
+            sproto::Error::Timeout("fixture"),
+        ] {
+            assert!(matches!(root_query_error(error), Error::Native(_)));
         }
     }
     fn root(scope: &Scope) -> Node {

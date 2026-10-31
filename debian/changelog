@@ -1,3 +1,14 @@
+drive-native (0.1.0~dev20261101.1) unstable; urgency=medium
+
+  * Start verified selected-directory initialization at the native current watermark.
+  * Reconcile ordinary file changes by rechecking affected directories before commit.
+  * Preserve identity, ACL, full snapshot and event continuity checks.
+  * Show watermark and local reconciliation stages; pair fsd/worker using IPC 15.
+  * Retain legacy bootstrap for top-level roots and known parent-list denial.
+  * Keep schema 18 and pending user data; progressive publication remains gated.
+
+ -- Drive Native contributors <noreply@example.invalid>  Sun, 01 Nov 2026 01:45:00 +0800
+
 drive-native (0.1.0~dev20261031.5) unstable; urgency=medium
 
   * Reuse completed native snapshot seed boundaries within one recovery session.
