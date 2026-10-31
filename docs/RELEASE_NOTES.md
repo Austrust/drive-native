@@ -1,3 +1,13 @@
+# 0.1.0~dev20261031.4：目录视图、缓存关闭与升级恢复
+
+本批源码整合[稳定目录视图](FUSE_DIRECTORY_VIEWS.md)、[完整缓存只读关闭隔离](CACHED_CLOSE_ISOLATION.md)、[初始化阶段进度](INITIALIZATION_PROGRESS.md)和[暂停与后台升级](UPGRADE_RECOVERY.md)。组件回归已完成；本快照尚待最终包构建与安装验证，可下载状态以 GitHub Releases 为准。
+
+schema 18 不变，fsd/worker 使用 IPC 14。新版 GUI 的“应用后台更新”会先持久保存暂停意图，正常停止旧任务，再确认新后台身份、挂载与暂停状态；正常升级保留数据库、缓存和未上传草稿。操作步骤和失败恢复见升级文档。
+
+目录修复的固定对比已改善单目录展开；全树状态和 48 路混合目标仍未通过。新增阶段显示不等于 Personal_Sync 初始化问题已解决。普通目录全量同步、Mint 实机、完整故障与长期验收继续开放；本包是开发构建，不是候选版。
+
+---
+
 # 0.1.0~dev20261031.3：通知诊断与已打开内容读取隔离
 
 本包已发布，389项Rust、9项显式FUSE（debug/release）、49项GUI及隔离安装生命周期通过，见[发布验证](validation/native-package-003/REPORT.md)。新增[接收进展驱动的通知期限](NOTIFICATION_IDLE.md)、[退出前连接诊断](CONNECTION_DIAGNOSTICS.md)及[已打开文件读取隔离](FUSE_READ_ISOLATION.md)。最后一项避免元数据线程全部等待Store时拖住已有缓存/草稿的读取，不代表新打开文件、大目录及48路混合性能已经达标。
