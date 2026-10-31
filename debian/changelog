@@ -1,3 +1,14 @@
+drive-native (0.1.0~dev20261031.4) unstable; urgency=medium
+
+  * Snapshot lightweight FUSE directories once per open with bounded lifetime.
+  * Isolate cached readonly flush, fsync and close from metadata contention.
+  * Persist task pause and confirm normal backend handover after installation.
+  * Show initialization phases, progress and stalled candidates in the GUI.
+  * Run isolated Qt regression modules in the package build test gate.
+  * Keep schema 18; pair fsd/worker using IPC 14. Full-sync gates remain open.
+
+ -- Drive Native contributors <noreply@example.invalid>  Sat, 31 Oct 2026 20:50:00 +0800
+
 drive-native (0.1.0~dev20261031.3) unstable; urgency=medium
 
   * Track native notification receive progress instead of a fixed total deadline.
