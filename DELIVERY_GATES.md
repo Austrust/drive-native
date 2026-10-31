@@ -20,7 +20,9 @@
 
 ## 当前整合工作
 
-最新开发包`.3`已发布：[通知诊断与读取隔离验证](docs/validation/native-package-003/REPORT.md)。389项Rust、9项debug/release显式FUSE、49项GUI，隔离升级/回退/清除重装及未上传数据保留、安装后Nemo/Nautilus缓存状态刷新通过。后续[通知补测](docs/NOTIFICATION_IDLE.md)补齐MFM/培养超过450秒合法回复；Personal频繁通知有真实推进，但初始化/FSD提交及其超过450秒覆盖仍未验证。当前整合[阶段进度](docs/INITIALIZATION_PROGRESS.md)、持久暂停/后台接管和目录修复，69项GUI合成回归通过，下一开发包的最终安装与整合验证仍待完成；不改变P0–P6状态。
+`.4`开发包已完成[整合验证](docs/validation/native-package-004/REPORT.md)：420项Rust、13项debug/release显式FUSE、71项GUI，隔离暂停后实际安装接管、回退/清除重装和待上传数据恢复、Nemo/Nautilus缓存状态刷新通过。混合负载预开缓存文件读取到关闭p95为7.064秒→24.763毫秒，独立复测25.837毫秒；全树状态、混合整体、资源仍未通过。一次停止因WSL Pro的外部命名空间副本超过105秒，保留为失败；定点正常释放副本后退出，后续新实例全负载自主退出0.120秒。首次构建的假worker夹具失败也保留。可下载状态以Releases为准，不改变P0–P6。
+
+此前`.3`[通知诊断与读取隔离](docs/validation/native-package-003/REPORT.md)已发布。后续[通知补测](docs/NOTIFICATION_IDLE.md)补齐MFM/培养超过450秒合法回复；Personal频繁通知有真实推进，但初始化/FSD提交及其超过450秒覆盖仍未验证。[阶段进度](docs/INITIALIZATION_PROGRESS.md)已实现，不等于Personal初始化问题已解决。下一批枚举错误重分类及状态聚合基础保持独立，未进入`.4`。
 
 2026-10-31用户更新目标：允许P0观察与隔离开发并行，最终门槛不降低。第一批 GIO、图标、GUI 按需加载及目录分页已发布为开发包 `.2`：Rust363项、8项显式FUSE、GUI49项通过；隔离 Ubuntu 安装生命周期及已缓存合成目录的实际 Nemo/Nautilus 集成通过。来源、范围和环境限制见[整合记录](docs/UBUNTU_INTEGRATION.md)与[安装桌面报告](docs/validation/desktop-package-002/REPORT.md)。6项远端发布资产已核验，Mint 实机等门槛未关闭。
 
