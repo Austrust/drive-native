@@ -4,6 +4,7 @@ drive-native (0.1.0~dev20261031.5) unstable; urgency=medium
   * Classify only verified enumeration collisions as retryable snapshot races.
   * Replace full-snapshot row logging with one transactional invalidation.
   * Reuse prepared statements during snapshot import; preserve incremental events.
+  * Prepare and verify downloaded bodies outside the metadata lock before publication.
   * Add bounded local state foundations without switching desktop queries yet.
   * Keep schema 18 and IPC 14; normal upgrades preserve local pending data.
   * Development build; full-sync and final safety/performance gates remain open.
