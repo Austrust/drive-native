@@ -21,16 +21,29 @@ impl WorkerProcess {
     pub fn start(executable: &Path) -> io::Result<Self> {
         let (a, b) = UnixStream::pair()?;
         let fd: OwnedFd = b.into();
-        let child = Process::new(executable)
+        let mut child = Process::new(executable)
             .arg("--ipc-stdin")
             .stdin(Stdio::from(fd))
             .stdout(Stdio::null())
             .stderr(Stdio::inherit())
             .spawn()?;
-        Ok(Self {
-            rpc: Arc::new(Rpc::new(a)?),
-            child,
-        })
+        match Rpc::new(a) {
+            Ok(rpc) => Ok(Self { rpc: Arc::new(rpc), child }),
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                Err(error)
+            }
+        }
+    }
+    pub(crate) fn before_cleanup(&mut self) -> crate::connection_diagnostics::ProcessState {
+        use crate::connection_diagnostics::ProcessState;
+        use std::os::unix::process::ExitStatusExt;
+        match self.child.try_wait() {
+            Ok(None) => ProcessState::Running,
+            Ok(Some(status)) => ProcessState::Exited { code: status.code(), signal: status.signal() },
+            Err(_) => ProcessState::QueryFailed,
+        }
     }
     pub fn stop(&mut self) {
         self.rpc.close();
@@ -376,8 +389,16 @@ impl Bridge {
         }
     }
     pub fn event_loop(&self) -> io::Result<()> {
+        self.event_loop_observed(|_| {})
+    }
+    pub(crate) fn event_loop_observed(
+        &self,
+        mut stage: impl FnMut(crate::connection_diagnostics::Stage),
+    ) -> io::Result<()> {
+        use crate::connection_diagnostics::Stage;
         let mut digest = String::new();
         loop {
+            stage(Stage::PullEvents);
             self.pull()?;
             // The persistent transfer scheduler owns hydration. Waiting for a
             // body here stalls the native event cursor while a large/limited
@@ -389,6 +410,7 @@ impl Bridge {
                 .unwrap()
                 .cursor()
                 .map_err(io::Error::other)?;
+            stage(Stage::WaitNotification);
             let response = self
                 .connection()
                 .call(Command::Wait { cursor, digest }, crate::wire::NOTIFICATION_IDLE)?;
@@ -1106,6 +1128,7 @@ pub(crate) fn capacity_error(error: &io::Error) -> Option<&'static str> {
     }
 }
 fn operation_error(body: Response) -> io::Error {
+    use crate::connection_diagnostics::Cause;
     if let Response::Failed { category } = &body {
         if matches!(category.as_str(), "native_index_capacity" | "native_response_capacity") {
             return io::Error::new(io::ErrorKind::InvalidData, category.clone());
@@ -1113,6 +1136,21 @@ fn operation_error(body: Response) -> io::Error {
     }
     if matches!(&body, Response::Failed { category } if category == "native_root_unavailable") {
         return io::Error::new(io::ErrorKind::InvalidData, RootUnavailable);
+    }
+    if let Response::Failed { category } = &body {
+        let timeout = match category.as_str() {
+            "native_receive_idle" => Some(Cause::NativeReceiveIdle),
+            "native_notification_setup_timeout" => Some(Cause::NativeSetupTimeout),
+            "native_send_timeout" => Some(Cause::NativeSendTimeout),
+            "native_response_timeout" => Some(Cause::NativeResponseTimeout),
+            _ => None,
+        };
+        if let Some(cause) = timeout { return io::Error::new(io::ErrorKind::TimedOut, cause); }
+        if let Some(code) = category.strip_prefix("native_server_code:").and_then(|code| code.parse::<u32>().ok()) {
+            return io::Error::new(io::ErrorKind::InvalidData, Cause::NativeServerRejected(code));
+        }
+        if category == "session_expired" { return io::Error::new(io::ErrorKind::NotConnected, Cause::SessionExpired); }
+        if category == "native_cursor_reset" { return io::Error::new(io::ErrorKind::InvalidData, Cause::NativeCursorReset); }
     }
     let kind = match body {
         Response::Failed { category }
@@ -1134,6 +1172,32 @@ fn unix_seconds() -> u64 {
         .unwrap_or_default()
         .as_secs()
 }
+
+#[cfg(test)]
+mod connection_diagnostic_categories {
+    use super::*;
+    use crate::connection_diagnostics::{Cause, retryable};
+    #[test]
+    fn staged_timeouts_preserve_event_and_download_retry_semantics() {
+        for (category, expected) in [
+            ("native_receive_idle", Cause::NativeReceiveIdle),
+            ("native_notification_setup_timeout", Cause::NativeSetupTimeout),
+            ("native_send_timeout", Cause::NativeSendTimeout),
+            ("native_response_timeout", Cause::NativeResponseTimeout),
+        ] {
+            let error = operation_error(Response::Failed { category: category.into() });
+            assert!(retryable(&error));
+            assert_eq!(Cause::from_io(&error), expected);
+            assert_eq!(download_failure_category(category), (DownloadFailureKind::Transport, None));
+        }
+        let error = operation_error(Response::Failed { category: "native_server_code:32772".into() });
+        assert!(!retryable(&error));
+        assert_eq!(Cause::from_io(&error), Cause::NativeServerRejected(32772));
+        let error = operation_error(Response::Failed { category: "synthetic-private-input".into() });
+        assert!(!error.to_string().contains("synthetic-private-input"));
+        assert_eq!(Cause::from_io(&error), Cause::ProtocolOrLocal);
+    }
+}
 fn download_failure_category(category: &str) -> (DownloadFailureKind, Option<u32>) {
     use DownloadFailureKind::*;
     if let Some(code) = category
@@ -1144,7 +1208,8 @@ fn download_failure_category(category: &str) -> (DownloadFailureKind, Option<u32
     }
     (
         match category {
-            "transport" => Transport,
+            "transport" | "native_receive_idle" | "native_notification_setup_timeout"
+                | "native_send_timeout" | "native_response_timeout" => Transport,
             "session_expired" => SessionExpired,
             _ => InvalidContent,
         },
