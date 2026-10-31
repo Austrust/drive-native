@@ -79,6 +79,46 @@ fn complete_snapshot_publishes_one_gap_and_incremental_writes_resume() {
 }
 
 #[test]
+fn snapshot_statements_handle_absent_metadata_rollback_and_later_incremental_upserts() {
+    let (_dir, mut s) = fixture();
+    for round in 1..=3 {
+        let mut file = node("a", Some("root"), false);
+        file.version = format!("v{round}");
+        if round == 2 { file.metadata = None; }
+        let before = s.status_change_watermark().unwrap();
+        s.install_remote_snapshot(&[node("root", None, true), file], &round.to_string(), "server").unwrap();
+        let after = s.status_change_watermark().unwrap();
+        assert_eq!(after.cursor.sequence, before.cursor.sequence + 1);
+        let count: i64 = s.db.query_row("SELECT count(*) FROM node_metadata WHERE node='a'", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, if round == 2 { 0 } else { 1 });
+    }
+    let before = s.status_change_watermark().unwrap();
+    let mut bad = node("a", Some("root"), false);
+    bad.name = "must-roll-back".into();
+    bad.metadata.as_mut().unwrap().mode = 0o7777;
+    assert!(s.install_remote_snapshot(&[node("root", None, true), bad.clone()], "4", "server").is_err());
+    assert_eq!(s.status_change_watermark().unwrap(), before);
+    assert_eq!(s.node("a").unwrap().name, "a");
+    // Retry creates new statement owners after the failed transaction; no
+    // cached bulk flag or TEMP schema survives the rollback boundary.
+    bad.metadata.as_mut().unwrap().mode = 0o644;
+    bad.name = "a".into();
+    s.install_remote_snapshot(&[node("root", None, true), bad], "4", "server").unwrap();
+    let boundary = s.status_change_watermark().unwrap().cursor;
+    let mut updated = node("a", Some("root"), false);
+    updated.version = "event-v5".into();
+    updated.metadata.as_mut().unwrap().size = 42;
+    s.receive(&Batch { from: "4".into(), to: "5".into(), events: vec![Event {
+        id: "after-snapshot".into(), change: Change::Upsert(updated),
+    }]}).unwrap();
+    s.drain().unwrap();
+    let changes = rows(&s, &boundary);
+    assert!(changes.iter().any(|c| c.source == "nodes" && c.new_node.as_deref() == Some("a")));
+    assert!(changes.iter().any(|c| c.source == "node_metadata" && c.new_node.as_deref() == Some("a")));
+    consistent(&s);
+}
+
+#[test]
 fn snapshot_error_and_panic_restore_main_rows_journal_and_trigger_gate() {
     let (_dir, mut s) = fixture();
     s.pin("a", true).unwrap();
