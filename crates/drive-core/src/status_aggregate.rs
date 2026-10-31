@@ -3,7 +3,26 @@
 //! This module does not implement publication, ACL filtering or epoch recovery.
 use crate::{Status, download_jobs::DownloadFailure};
 use serde::Serialize;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
+static NEXT_AGGREGATE: AtomicU64 = AtomicU64::new(1);
+fn next_identity() -> u64 {
+    let mut current = NEXT_AGGREGATE.load(Ordering::Relaxed);
+    loop {
+        let next = current
+            .checked_add(1)
+            .expect("aggregate identity space exhausted");
+        match NEXT_AGGREGATE.compare_exchange_weak(
+            current,
+            next,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => return current,
+            Err(value) => current = value,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -153,6 +172,8 @@ pub struct DirectoryAggregate {
     budget: AggregateBudget,
     bytes: usize,
     reserved_slots: usize,
+    revision: u64,
+    identity: u64,
 }
 impl DirectoryAggregate {
     pub fn new(budget: AggregateBudget) -> Self {
@@ -165,6 +186,8 @@ impl DirectoryAggregate {
             budget,
             bytes: 0,
             reserved_slots: 0,
+            revision: 0,
+            identity: next_identity(),
         }
     }
     pub fn len(&self) -> usize {
@@ -206,6 +229,10 @@ impl DirectoryAggregate {
         if count > self.budget.children || bytes > self.budget.bytes {
             return Err(AggregateError::Capacity);
         }
+        let next_revision = self
+            .revision
+            .checked_add(1)
+            .ok_or(AggregateError::InvalidFacts)?;
         if let Some(previous) = self.children.remove(&id) {
             self.remove_contribution(id, &previous);
         }
@@ -220,6 +247,7 @@ impl DirectoryAggregate {
             self.reserved_slots = self.reserved_slots.max(self.children.capacity());
         }
         self.bytes = bytes;
+        self.revision = next_revision;
         Ok(true)
     }
     fn remove_contribution(&mut self, id: u64, state: &ChildState) {
@@ -247,56 +275,229 @@ impl DirectoryAggregate {
         }
     }
     pub fn summary(&self, own: &Status, inherited_pin: bool) -> Result<Summary, AggregateError> {
-        if *own == Status::Deleted {
-            return Err(AggregateError::NotVisible);
+        summarize(
+            &self.counts,
+            self.offline,
+            self.unknown,
+            self.children.len(),
+            self.errors.last_key_value().map(|(_, e)| e.clone()),
+            own,
+            inherited_pin,
+        )
+    }
+
+    /// Preview a bounded set of immediate-child changes without cloning or
+    /// traversing a wide directory. All removals logically precede insertions.
+    pub fn prepare(
+        &self,
+        changes: Vec<(u64, Option<ChildState>)>,
+        own: &Status,
+        inherited_pin: bool,
+    ) -> Result<PreparedChanges, AggregateError> {
+        let mut ids = HashSet::new();
+        let mut counts = self.counts;
+        let (mut offline, mut unknown, mut count, mut bytes) =
+            (self.offline, self.unknown, self.children.len(), self.bytes);
+        let mut next_error = None;
+        for (id, next) in &changes {
+            if !ids.insert(*id) {
+                return Err(AggregateError::InvalidFacts);
+            }
+            if let Some(old) = self.children.get(id) {
+                count -= 1;
+                bytes -= charge(old);
+                match old {
+                    ChildState::Unverified => unknown -= 1,
+                    ChildState::Known(s) => {
+                        counts[s.status as usize] -= 1;
+                        offline -= usize::from(s.offline_available);
+                    }
+                }
+            }
+            if let Some(next) = next {
+                count += 1;
+                bytes = bytes
+                    .checked_add(charge(next))
+                    .ok_or(AggregateError::Capacity)?;
+                match next {
+                    ChildState::Unverified => unknown += 1,
+                    ChildState::Known(s) => {
+                        counts[s.status as usize] += 1;
+                        offline += usize::from(s.offline_available);
+                        if let Some(e) = &s.sync_error {
+                            if e.schema != 1 || e.attempts == 0 {
+                                return Err(AggregateError::InvalidFacts);
+                            }
+                            let candidate = ((e.attempts, *id), e.clone());
+                            if next_error
+                                .as_ref()
+                                .is_none_or(|(key, _)| *key < candidate.0)
+                            {
+                                next_error = Some(candidate)
+                            }
+                        }
+                    }
+                }
+            }
         }
-        if self.unknown > 0 {
-            return Err(AggregateError::UnverifiedChildren(self.unknown));
+        if count > self.budget.children || bytes > self.budget.bytes {
+            return Err(AggregateError::Capacity);
         }
-        let offline_available = self.offline == self.children.len();
-        let has = |label: Label| self.counts[label as usize] > 0;
-        let status = if *own == Status::Conflict || has(Label::Conflict) {
-            Label::Conflict
-        } else if *own == Status::PendingUpload || has(Label::PendingUpload) {
-            Label::PendingUpload
-        } else if has(Label::DownloadFailed) || has(Label::UpdateFailed) {
-            if offline_available {
-                Label::UpdateFailed
-            } else {
-                Label::DownloadFailed
-            }
-        } else if has(Label::DownloadRetry) || has(Label::UpdateRetry) {
-            if offline_available {
-                Label::UpdateRetry
-            } else {
-                Label::DownloadRetry
-            }
-        } else if has(Label::Updating) {
-            Label::Updating
-        } else if has(Label::Downloading) {
-            Label::Downloading
-        } else if has(Label::Pinning) || inherited_pin && !offline_available {
-            Label::Pinning
-        } else if offline_available {
-            if inherited_pin {
-                Label::PinnedComplete
-            } else {
-                Label::LocalComplete
-            }
-        } else if self.offline > 0 || has(Label::Mixed) {
-            Label::Mixed
-        } else {
-            Label::OnlineOnly
+        // At most changes.len() old representatives are skipped, regardless of
+        // the number of siblings in the directory.
+        let old_error = self
+            .errors
+            .iter()
+            .rev()
+            .find(|((_, id), _)| !ids.contains(id));
+        let error = match (old_error, next_error) {
+            (Some((a, e)), Some((b, n))) => Some(if *a > b { e.clone() } else { n }),
+            (Some((_, e)), None) => Some(e.clone()),
+            (None, Some((_, e))) => Some(e),
+            (None, None) => None,
         };
-        Ok(Summary {
-            status,
-            pinned: inherited_pin,
-            offline_available,
-            // Deterministic tie: greatest immediate-child identity. Clearing an
-            // error promotes its successor without searching the whole subtree.
-            sync_error: self.errors.last_key_value().map(|(_, e)| e.clone()),
+        let summary = summarize(&counts, offline, unknown, count, error, own, inherited_pin);
+        // Conservative capacity charge, including retained old hash slots.
+        // This is a logical bound, not an allocator/RSS guarantee.
+        let retained = self
+            .reserved_slots
+            .max(count.saturating_mul(2).saturating_add(4))
+            .saturating_mul(CHILD_BYTES)
+            .saturating_add(count.saturating_mul(ERROR_BYTES));
+        let changes: Vec<_> = changes
+            .into_iter()
+            .filter(|(id, next)| self.children.get(id) != next.as_ref())
+            .collect();
+        if !changes.is_empty() && self.revision == u64::MAX {
+            return Err(AggregateError::InvalidFacts);
+        }
+        Ok(PreparedChanges {
+            identity: self.identity,
+            revision: self.revision,
+            changes,
+            summary,
+            count,
+            retained,
         })
     }
+
+    /// Exclusive tree owner commits only after every directory was prepared.
+    /// A stale patch is rejected before mutation. No fallible semantic checks
+    /// remain after removal starts; allocation failure retains Rust's normal
+    /// process-failure semantics rather than claiming OOM recovery.
+    pub fn commit(&mut self, patch: PreparedChanges) -> Result<(), AggregateError> {
+        if patch.identity != self.identity || patch.revision != self.revision {
+            return Err(AggregateError::InvalidFacts);
+        }
+        if patch.changes.is_empty() {
+            return Ok(());
+        }
+        let next_revision = self
+            .revision
+            .checked_add(1)
+            .ok_or(AggregateError::InvalidFacts)?;
+        for (id, _) in &patch.changes {
+            if let Some(previous) = self.children.remove(id) {
+                self.bytes -= charge(&previous);
+                self.remove_contribution(*id, &previous);
+            }
+        }
+        for (id, next) in patch.changes {
+            if let Some(next) = next {
+                self.bytes += charge(&next);
+                self.add_contribution(id, &next);
+                self.children.insert(id, next);
+            }
+        }
+        if self.children.is_empty() {
+            self.children = HashMap::new();
+            self.reserved_slots = 0
+        } else {
+            self.reserved_slots = self.reserved_slots.max(self.children.capacity())
+        }
+        self.revision = next_revision;
+        Ok(())
+    }
+}
+
+pub struct PreparedChanges {
+    identity: u64,
+    revision: u64,
+    changes: Vec<(u64, Option<ChildState>)>,
+    summary: Result<Summary, AggregateError>,
+    count: usize,
+    retained: usize,
+}
+impl PreparedChanges {
+    pub fn summary(&self) -> &Result<Summary, AggregateError> {
+        &self.summary
+    }
+    pub fn count(&self) -> usize {
+        self.count
+    }
+    pub fn retained(&self) -> usize {
+        self.retained
+    }
+}
+
+fn summarize(
+    counts: &[usize; LABELS],
+    offline: usize,
+    unknown: usize,
+    count: usize,
+    error: Option<DownloadFailure>,
+    own: &Status,
+    inherited_pin: bool,
+) -> Result<Summary, AggregateError> {
+    if *own == Status::Deleted {
+        return Err(AggregateError::NotVisible);
+    }
+    if unknown > 0 {
+        return Err(AggregateError::UnverifiedChildren(unknown));
+    }
+    let offline_available = offline == count;
+    let has = |label: Label| counts[label as usize] > 0;
+    let status = if *own == Status::Conflict || has(Label::Conflict) {
+        Label::Conflict
+    } else if *own == Status::PendingUpload || has(Label::PendingUpload) {
+        Label::PendingUpload
+    } else if has(Label::DownloadFailed) || has(Label::UpdateFailed) {
+        if offline_available {
+            Label::UpdateFailed
+        } else {
+            Label::DownloadFailed
+        }
+    } else if has(Label::DownloadRetry) || has(Label::UpdateRetry) {
+        if offline_available {
+            Label::UpdateRetry
+        } else {
+            Label::DownloadRetry
+        }
+    } else if has(Label::Updating) {
+        Label::Updating
+    } else if has(Label::Downloading) {
+        Label::Downloading
+    } else if has(Label::Pinning) || inherited_pin && !offline_available {
+        Label::Pinning
+    } else if offline_available {
+        if inherited_pin {
+            Label::PinnedComplete
+        } else {
+            Label::LocalComplete
+        }
+    } else if offline > 0 || has(Label::Mixed) {
+        Label::Mixed
+    } else {
+        Label::OnlineOnly
+    };
+    Ok(Summary {
+        status,
+        pinned: inherited_pin,
+        offline_available,
+        // Deterministic tie: greatest immediate-child identity. Clearing an
+        // error promotes its successor without searching the whole subtree.
+        sync_error: error,
+    })
 }
 
 #[cfg(test)]

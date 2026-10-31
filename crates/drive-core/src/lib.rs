@@ -43,6 +43,7 @@ pub mod desktop_status;
 pub mod status_changes;
 pub mod status_aggregate;
 pub mod status_projection;
+pub mod status_index;
 
 pub mod task_control;
 pub mod snapshot_progress;
