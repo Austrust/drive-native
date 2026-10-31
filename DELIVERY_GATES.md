@@ -20,7 +20,9 @@
 
 ## 当前整合工作
 
-本轮 `.5` 已完成[最终构建、隔离安装与发布核验](docs/validation/native-package-005/REPORT.md)：550 项 Rust、71 项 GUI、13 项 debug/release 显式 FUSE；暂停接管、实际回退读取及卸载重装保留未上传数据。批量导入回退已解除，下载正文准备移出 Store 锁。按用户要求暂停目标，原 P0 观察保持；运行时增量桌面 owner、Personal_Sync 真实 FSD 恢复、普通目录全量同步及 P0–P6 全部剩余门槛仍开放。
+2026-11-01 用户另行授权一轮初始化修复并发布新开发包：[当前水位](docs/SNAPSHOT_WATERMARK.md)与[局部收敛](docs/SNAPSHOT_CONVERGENCE.md)进入隔离整合验证；Personal 子目录水位与根查询的只读协议核验通过，完整初始化和新包安装状态见发行资产验证记录。逐目录发布及持久续扫尚未实现，原长期基线不替换。本轮不降低以下最终门槛。
+
+上一轮 `.5` 已完成[最终构建、隔离安装与发布核验](docs/validation/native-package-005/REPORT.md)：550 项 Rust、71 项 GUI、13 项 debug/release 显式 FUSE；暂停接管、实际回退读取及卸载重装保留未上传数据。批量导入回退已解除，下载正文准备移出 Store 锁。该轮交付后按用户要求暂停目标，原 P0 观察保持；运行时增量桌面 owner、Personal_Sync 真实 FSD 恢复、普通目录全量同步及 P0–P6 全部剩余门槛仍开放。
 
 后续源码[恢复与增量状态基础整合](docs/validation/incremental-status-001/REPORT.md)加入 seed 重用、精确失效、提交通知、投影、纯树、分页 WAL 与瞬态证明；`95face9` 整合回归 542 项 Rust、13 项显式 FUSE 通过。实际 desktop 路径未切换，运行层双源发布屏障尚待接入。[三轮成本验证](docs/validation/status-write-cost-003/REPORT.md)保留前两失败，并确认事务内语句复用解除批量导入回退；本轮安装门禁结果见上方 `.5` 报告。P1、Personal、普通目录全量同步及原数据安全/长期门槛仍开放。
 
