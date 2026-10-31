@@ -1,4 +1,5 @@
 pub mod bridge;
+mod connection_diagnostics;
 pub mod desktop;
 pub mod mount_registry;
 pub mod rpc;

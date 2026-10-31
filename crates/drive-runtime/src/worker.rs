@@ -402,6 +402,10 @@ fn login_error_category(error: &sproto::Error) -> &'static str {
 
 fn worker_error_category(error: &drive_core::Error) -> String {
     match error {
+        drive_core::Error::Native(sproto::Error::Timeout("native receive idle")) => "native_receive_idle".into(),
+        drive_core::Error::Native(sproto::Error::Timeout("notification channel acquisition")) => "native_notification_setup_timeout".into(),
+        drive_core::Error::Native(sproto::Error::Timeout("native request send")) => "native_send_timeout".into(),
+        drive_core::Error::Native(sproto::Error::Timeout("native response")) => "native_response_timeout".into(),
         drive_core::Error::RootUnavailable => "native_root_unavailable".into(),
         drive_core::Error::Native(sproto::Error::CursorReset { .. }) => {
             "native_cursor_reset".into()
@@ -426,6 +430,19 @@ fn worker_error_category(error: &drive_core::Error) -> String {
 }
 #[cfg(test)]
 mod download_diagnostics_tests {
+    #[test]
+    fn timeout_stages_have_fixed_content_free_categories() {
+        for (stage, category) in [
+            ("native receive idle", "native_receive_idle"),
+            ("notification channel acquisition", "native_notification_setup_timeout"),
+            ("native request send", "native_send_timeout"),
+            ("native response", "native_response_timeout"),
+            ("synthetic-private-input", "transport"),
+        ] {
+            let error = drive_core::Error::Native(sproto::Error::Timeout(stage));
+            assert_eq!(super::worker_error_category(&error), category);
+        }
+    }
     #[test]
     fn numeric_server_code_never_includes_reason() {
         assert_eq!(

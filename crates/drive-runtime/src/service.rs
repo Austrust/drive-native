@@ -189,6 +189,7 @@ pub struct Service {
     pub stop: AtomicBool,
     pub mounted: AtomicBool,
     worker: PathBuf,
+    pub(crate) diagnostics: crate::connection_diagnostics::Recorder,
 }
 pub struct Tasks {
     supervisor: std::thread::JoinHandle<()>,
@@ -224,6 +225,7 @@ impl Service {
             &profile.trusted_ca_pem,
         )?;
         let trust_pending_durability = sync(store.storage_directory()).is_err();
+        let diagnostics = crate::connection_diagnostics::Recorder::open(store.storage_directory());
         Ok(Arc::new(Self {
             profile,
             bridge: Arc::new(Bridge::offline(Arc::new(Mutex::new(store)))?),
@@ -247,6 +249,7 @@ impl Service {
             stop: AtomicBool::new(false),
             mounted: AtomicBool::new(false),
             worker,
+            diagnostics,
         }))
     }
     fn configure_transfers(
@@ -549,6 +552,7 @@ impl Service {
         Ok(Some(session))
     }
     fn supervise(&self) {
+        use crate::connection_diagnostics::{ProcessState, Record, Stage};
         let mut delay = 1;
         // Explicit unlock/resume/trust changes create a new generation and
         // refresh quarantined permissions. A transport reconnect in the same
@@ -574,10 +578,14 @@ impl Service {
                     c.trust.trusted_ca_pem.clone(),
                 )
             };
+            let mut worker = None;
+            let mut stage = Stage::StartWorker;
+            let started = std::time::Instant::now();
             let result = (|| -> io::Result<()> {
-                let mut worker = WorkerProcess::start(&self.worker).map_err(|_| {
+                worker = Some(WorkerProcess::start(&self.worker).map_err(|_| {
                     io::Error::new(io::ErrorKind::InvalidInput, "worker executable unavailable")
-                })?;
+                })?);
+                let worker = worker.as_ref().unwrap();
                 {
                     let mut c = self.control.lock().unwrap();
                     if c.generation != generation {
@@ -585,6 +593,7 @@ impl Service {
                     }
                     c.active = Some(worker.rpc.clone());
                 }
+                stage = Stage::Authenticate;
                 let restore = Bridge::authenticate(
                     &worker.rpc,
                     self.profile.login(password, trusted_ca_pem),
@@ -601,7 +610,9 @@ impl Service {
                         .unwrap()
                         .transfer_limits()
                         .map_err(io::Error::other)?;
+                    stage = Stage::ConfigureTransfers;
                     Self::configure_transfers(&worker.rpc, limits)?;
+                    stage = Stage::BindScope;
                     self.bridge.attach(
                         worker.rpc.clone(),
                         &restore,
@@ -609,8 +620,10 @@ impl Service {
                     )?;
                 }
                 if permissions_generation == Some(generation) {
+                    stage = Stage::ResumeEvents;
                     self.bridge.pull()?;
                 } else {
+                    stage = Stage::InitialIndex;
                     self.bridge.initial_pull()?;
                     permissions_generation = Some(generation);
                 }
@@ -624,10 +637,28 @@ impl Service {
                     c.revision += 1;
                 }
                 delay = 1;
-                let result = self.bridge.event_loop();
-                worker.stop();
-                result
+                self.bridge.event_loop_observed(|current| stage = current)
             })();
+            let requested = self.stop.load(Ordering::Acquire)
+                || self.control.lock().unwrap().generation != generation;
+            let worker_pid = worker.as_ref().map(WorkerProcess::pid);
+            let before_cleanup = worker
+                .as_mut()
+                .map(WorkerProcess::before_cleanup)
+                .unwrap_or(ProcessState::NotStarted);
+            // Save the reason and child state before close/kill/wait can obscure
+            // the original failure. No control or Store lock spans diagnostic IO.
+            self.diagnostics.record(Record::new(
+                stage,
+                &result,
+                requested,
+                started.elapsed(),
+                worker_pid,
+                before_cleanup,
+            ));
+            if let Some(mut worker) = worker {
+                worker.stop();
+            }
             let mut c = self.control.lock().unwrap();
             if c.generation != generation {
                 continue;
@@ -635,35 +666,30 @@ impl Service {
             c.active = None;
             self.bridge.disconnect();
             if let Err(error) = result {
-                let retry = matches!(
-                    error.kind(),
-                    io::ErrorKind::NotConnected
-                        | io::ErrorKind::TimedOut
-                        | io::ErrorKind::ConnectionAborted
-                        | io::ErrorKind::ConnectionRefused
-                        | io::ErrorKind::ConnectionReset
-                        | io::ErrorKind::BrokenPipe
-                        | io::ErrorKind::UnexpectedEof
-                );
+                let retry = crate::connection_diagnostics::retryable(&error);
                 c.attention = !retry;
                 c.state = if retry {
                     ConnectionState::Offline
                 } else {
                     ConnectionState::NeedsAttention
                 };
-                c.error = Some(if let Some(category) = crate::bridge::capacity_error(&error) {
-                    category
-                } else if crate::bridge::is_root_unavailable(&error) {
-                    "native_root_unavailable"
-                } else {
-                    match error.kind() {
-                        io::ErrorKind::PermissionDenied => "authentication_or_protocol_rejected",
-                        io::ErrorKind::InvalidInput => "certificate_or_configuration",
-                        io::ErrorKind::InvalidData => "native_state_recovery_required",
-                        _ if retry => "network_unavailable",
-                        _ => "local_or_protocol_error",
-                    }
-                });
+                c.error = Some(
+                    if let Some(category) = crate::bridge::capacity_error(&error) {
+                        category
+                    } else if crate::bridge::is_root_unavailable(&error) {
+                        "native_root_unavailable"
+                    } else {
+                        match error.kind() {
+                            io::ErrorKind::PermissionDenied => {
+                                "authentication_or_protocol_rejected"
+                            }
+                            io::ErrorKind::InvalidInput => "certificate_or_configuration",
+                            io::ErrorKind::InvalidData => "native_state_recovery_required",
+                            _ if retry => "network_unavailable",
+                            _ => "local_or_protocol_error",
+                        }
+                    },
+                );
                 c.revision += 1;
             }
             if !c.attention {

@@ -29,7 +29,10 @@ pub struct Rpc {
     shutdown: UnixStream,
 }
 fn disconnected() -> io::Error {
-    io::Error::new(io::ErrorKind::NotConnected, "native worker disconnected")
+    io::Error::new(
+        io::ErrorKind::NotConnected,
+        crate::connection_diagnostics::Cause::WorkerDisconnected,
+    )
 }
 fn fail_all(pending: &Pending) {
     for (_, tx) in pending.lock().unwrap().drain() {
@@ -172,21 +175,23 @@ impl Rpc {
                 wait: wait_clock.clone(),
             },
         );
-        if self
-            .sender
-            .try_send((
-                Envelope {
-                    version: VERSION,
-                    id,
-                    body,
-                },
-                descriptor,
-            ))
-            .is_err()
-        {
+        if let Err(error) = self.sender.try_send((
+            Envelope {
+                version: VERSION,
+                id,
+                body,
+            },
+            descriptor,
+        )) {
             self.pending.lock().unwrap().remove(&id);
             self.transfers.remove(id);
-            return Err(disconnected());
+            return Err(match error {
+                mpsc::TrySendError::Full(_) => io::Error::new(
+                    io::ErrorKind::NotConnected,
+                    crate::connection_diagnostics::Cause::IpcQueueUnavailable,
+                ),
+                mpsc::TrySendError::Disconnected(_) => disconnected(),
+            });
         }
         let started = std::time::Instant::now();
         let remaining_budget = || {
@@ -251,7 +256,10 @@ impl Rpc {
                     return Err(if matches!(error, mpsc::RecvTimeoutError::Disconnected) {
                         disconnected()
                     } else {
-                        io::Error::new(io::ErrorKind::TimedOut, "native request stalled")
+                        io::Error::new(
+                            io::ErrorKind::TimedOut,
+                            crate::connection_diagnostics::Cause::IpcIdle,
+                        )
                     });
                 }
             }

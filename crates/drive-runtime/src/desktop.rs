@@ -357,6 +357,7 @@ pub fn overview(service: &Service) -> io::Result<String> {
         "download_errors":store.download_failure_count().map_err(|_|other())?,
         "download_diagnostics":{"failures_seen":service.bridge.download_failures_seen.load(Ordering::Relaxed),
             "last_failure":service.bridge.last_download_failure.lock().unwrap().as_ref().map(|(kind,code)|serde_json::json!({"kind":kind,"server_code":code}))},
+        "connection_diagnostics":service.diagnostics.snapshot(),
         "host":service.profile.host,"username":service.profile.username,"scope_path":service.profile.scope.path}).to_string())
 }
 fn pin(service: &Service, path: &str, value: bool) -> io::Result<()> {
