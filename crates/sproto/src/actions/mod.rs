@@ -4,6 +4,7 @@ pub mod mutations;
 pub mod namespace;
 pub mod native;
 pub mod transfer;
+pub mod watermark;
 
 #[cfg(feature = "protocol-research")]
 pub mod list_observer;
