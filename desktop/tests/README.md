@@ -7,6 +7,7 @@
 - [conflict_gui_live.py](conflict_gui_live.py)
 - [conflict_gui_tests.py](conflict_gui_tests.py)
 - [gui_unit_tests.py](gui_unit_tests.py)
+- [hidden_dialog_tests.py](hidden_dialog_tests.py)：隐藏设置页的重连、在途分页和已排队定时器回归。
 - [lazy_gui_tests.py](lazy_gui_tests.py)：按需展开、关闭/隐藏窗口及在途分页停止，使用合成本地状态。
 - [filemanager_provider_tests.py](filemanager_provider_tests.py)：模拟D-Bus、真实GI；分别用 `DRIVE_NATIVE_TEST_FILEMANAGER=nemo` 或 `nautilus` 运行。
 - [installed_package_desktop.py](installed_package_desktop.py)

@@ -93,8 +93,6 @@ class TransfersDialog(QDialog):
         self.timer.timeout.connect(self.refresh)
         self.bus.changed.connect(self.refresh_visible)
         self.bus.availability.connect(self.availability)
-        self.load_settings()
-        self.refresh()
 
     def rate_field(self):
         field = QSpinBox()
@@ -107,6 +105,7 @@ class TransfersDialog(QDialog):
     def showEvent(self, event):
         super().showEvent(event)
         self.timer.start()
+        self.load_settings()
         self.refresh()
 
     def hideEvent(self, event):
@@ -122,7 +121,7 @@ class TransfersDialog(QDialog):
         self.controls()
         self.table.setEnabled(False)
         self.summary.setText("服务已变化，请重新读取设置和进度。")
-        if available:
+        if available and self.isVisible():
             self.load_settings()
             self.refresh()
 
@@ -196,6 +195,8 @@ class TransfersDialog(QDialog):
             self.message.setText("带宽设置已保存；暂停的任务仍保持暂停。")
 
     def refresh(self):
+        if not self.isVisible():
+            return
         if self.loading:
             return
         self.loading = True
