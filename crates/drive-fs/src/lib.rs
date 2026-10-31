@@ -2,6 +2,7 @@
 //! cached reads, injected native hydration, durable writes and file creation.
 //! Rename, replacement, unlink and mkdir use durable local journals.
 //! No callback waits for the NAS, and unsupported writes are never acknowledged.
+mod directory;
 #[cfg(test)]
 mod isolation_tests;
 mod namespace;
@@ -110,6 +111,7 @@ pub struct CacheFilesystem {
     // Serializes registration/promotion/namespace barriers, never held by reads.
     // Inside this gate, Store and the handle table are acquired separately.
     handle_updates: Arc<Mutex<()>>,
+    directories: Arc<directory::Views>,
     queue: LocalQueue,
     read_queue: LocalQueue,
     reads: ReadRequests,
@@ -147,6 +149,7 @@ impl CacheFilesystem {
                 next: 1,
                 entries: HashMap::new(),
             })),
+            directories: Arc::new(directory::Views::default()),
             queue: LocalQueue::new(),
             read_queue: LocalQueue::new(),
             handle_updates: Arc::new(Mutex::new(())),
@@ -402,48 +405,28 @@ impl Filesystem for CacheFilesystem {
             }
         }));
     }
+    fn opendir(&mut self, _req: &Request<'_>, ino: u64, flags: i32, reply: ReplyOpen) {
+        directory::open(self, ino, flags, reply)
+    }
     fn readdir(
         &mut self,
         _req: &Request<'_>,
         ino: u64,
-        _fh: u64,
+        fh: u64,
         offset: i64,
-        mut reply: ReplyDirectory,
+        reply: ReplyDirectory,
     ) {
-        if offset < 0 {
-            reply.error(libc::EINVAL);
-            return;
-        }
-        let store = self.store.clone();
-        self.queue.submit(Box::new(move || {
-            let store = store.lock().unwrap();
-            let result = (|| -> drive_core::Result<Vec<(u64, FileType, String)>> {
-                let p = store.record_by_inode(ino)?;
-                let parent = match p.node.parent.as_deref() {
-                    Some(id) => store.record(id)?.ino,
-                    None => 1,
-                };
-                let mut entries = vec![
-                    (ino, FileType::Directory, ".".into()),
-                    (parent, FileType::Directory, "..".into()),
-                ];
-                for c in store.children(&p.node.id)? {
-                    entries.push((c.ino, filetype(&c), c.node.name));
-                }
-                Ok(entries)
-            })();
-            match result {
-                Ok(entries) => {
-                    for (i, (n, t, name)) in entries.iter().enumerate().skip(offset as usize) {
-                        if reply.add(*n, (i + 1) as i64, *t, name) {
-                            break;
-                        }
-                    }
-                    reply.ok()
-                }
-                Err(e) => reply.error(errno(&e)),
-            }
-        }));
+        directory::read(self, ino, fh, offset, reply)
+    }
+    fn releasedir(
+        &mut self,
+        _req: &Request<'_>,
+        ino: u64,
+        fh: u64,
+        _flags: i32,
+        reply: ReplyEmpty,
+    ) {
+        directory::release(self, ino, fh, reply)
     }
     fn open(&mut self, _req: &Request<'_>, ino: u64, flags: i32, reply: ReplyOpen) {
         writable::open(self, ino, flags, reply)
