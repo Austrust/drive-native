@@ -5,6 +5,8 @@
 mod directory;
 #[cfg(test)]
 mod isolation_tests;
+#[cfg(test)]
+mod cached_close_tests;
 mod namespace;
 mod read_requests;
 mod writable;
