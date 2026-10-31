@@ -18,6 +18,8 @@
 
 最新诊断结论见 [2026-10-31 性能与同步问题摘要](docs/PERFORMANCE_FINDINGS_20261031.md)。本次仅公开结论，详细证据保留本地；这些诊断不代表产品修复或候选验收完成。
 
+当前正在独立开发分支整合 Ubuntu 更新包；[采用决定与回归记录](docs/UBUNTU_INTEGRATION.md)。既有 P0 观察继续运行，不代表新代码已通过长期验收。
+
 ## 构建和测试
 
 在 Ubuntu 24.04 / Linux 文件系统中构建。准备 Rust 1.89+、Debian control 中列出的构建依赖和独立 Python 虚拟环境；历史包构建使用 Rust 1.99.1。
