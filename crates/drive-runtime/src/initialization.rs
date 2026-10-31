@@ -77,7 +77,12 @@ mod tests {
             (IndexPhase::Watermark, Phase::Watermark),
             (IndexPhase::Reconcile, Phase::Reconciling),
         ] {
-            tracker.index(Progress { attempt: 1, phase: index, units: 2, items: 3 });
+            tracker.index(Progress {
+                attempt: 1,
+                phase: index,
+                units: 2,
+                items: 3,
+            });
             assert_eq!(tracker.snapshot().phase, phase);
             assert_eq!(tracker.snapshot().units, 2);
             assert!(tracker.snapshot().active);
