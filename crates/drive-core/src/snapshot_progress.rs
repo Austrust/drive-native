@@ -18,9 +18,9 @@ pub enum Phase {
 pub struct Progress {
     pub attempt: u8,
     pub phase: Phase,
-    /// Completed event pages (seed/fence) or directories (enumeration).
+    /// Completed seed/fence pages, listed directories, or watermark/root steps.
     pub units: u64,
-    /// Events inspected (seed/fence) or nodes collected (enumeration).
+    /// Events inspected or nodes collected (enumeration/local reconciliation).
     pub items: u64,
 }
 pub type Observer = Arc<dyn Fn(Progress) + Send + Sync>;

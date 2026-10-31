@@ -392,6 +392,12 @@ where
                     ));
                 }
                 let path = candidate.path(&parent)?;
+                emit(Progress {
+                    attempt,
+                    phase: Phase::Reconcile,
+                    units: lists as u64 - 1,
+                    items: reply_nodes as u64,
+                });
                 let nodes = match timeout_at(deadline, list(parent.clone(), path))
                     .await
                     .map_err(|_| Error::State("snapshot convergence time budget exceeded".into()))?
@@ -416,6 +422,12 @@ where
                         "snapshot convergence listing budget exceeded".into(),
                     ));
                 }
+                emit(Progress {
+                    attempt,
+                    phase: Phase::Reconcile,
+                    units: lists as u64,
+                    items: reply_nodes as u64,
+                });
                 replies.push((parent, nodes));
             }
             if !candidate.replace_files(replies)? {

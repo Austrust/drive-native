@@ -7,6 +7,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 #[path = "native_snapshot_reconcile.rs"]
 mod reconcile;
+#[path = "native_snapshot_watermark.rs"]
+mod watermark_seed;
 
 pub const SNAPSHOT_NODE_LIMIT: usize = 500_000;
 #[derive(Clone, Serialize, Deserialize)]
@@ -50,18 +52,27 @@ impl NativeReadSession {
         Fut: std::future::Future<Output = Result<()>>,
     {
         let watch_template = self.watch("")?;
-        let completed = collect_snapshot_seed(
-            &self.scope,
-            self.client.restore_identity(),
-            seed.as_ref(),
-            attempt,
-            |cursor| {
-                let mut watch = watch_template.clone();
-                watch.cursor = cursor;
-                async move { self.scoped_events(&watch).await }
-            },
-        )
-        .await?;
+        // A non-root selected directory has a verified current metadata query.
+        // Capture S0 first; it remains an uncommitted scan start until the full
+        // candidate and all intervening changes pass reconciliation/fencing.
+        // `/` retains the historical path: its current-root metadata contract
+        // is not yet verified. Cached retries always replay from their own S0.
+        let completed = if seed.is_none() && self.scope.path != "/" {
+            self.current_snapshot_seed(attempt).await?
+        } else {
+            collect_snapshot_seed(
+                &self.scope,
+                self.client.restore_identity(),
+                seed.as_ref(),
+                attempt,
+                |cursor| {
+                    let mut watch = watch_template.clone();
+                    watch.cursor = cursor;
+                    async move { self.scoped_events(&watch).await }
+                },
+            )
+            .await?
+        };
         // Publish root and boundary together. Neither enumeration failures nor
         // a failed fence may advance this cached seed independently of the root.
         let mut watch = watch_template;
@@ -217,7 +228,11 @@ impl NativeReadSession {
         };
         let node = Node {
             id: n.file_id.clone(),
-            parent: Some(parent.into()),
+            parent: if n.file_id == self.scope.file_id {
+                None
+            } else {
+                Some(parent.into())
+            },
             name: n.name.clone(),
             version: serde_json::to_string(&version)?,
             directory: version.directory,
@@ -419,7 +434,7 @@ impl Store {
     }
 }
 
-/// An observed stationary boundary and its selected root, inseparable. This is
+/// A captured or observed event boundary and its selected current root. This is
 /// not a directory snapshot and must never be installed or persisted by itself.
 #[derive(Clone, Debug)]
 struct SnapshotSeed {
