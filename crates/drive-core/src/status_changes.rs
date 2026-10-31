@@ -394,7 +394,9 @@ impl Store {
 
     pub fn set_status_journal_budget(&mut self, budget: JournalBudget) -> Result<()> {
         budget.validate()?;
-        self.committed_status_boundary()?;
+        if self.status_change_watermark()?.budget == budget {
+            return Ok(());
+        }
         let tx = self.db.transaction()?;
         tx.execute(
             "UPDATE dn_status_meta SET max_entries=?1,max_bytes=?2",
