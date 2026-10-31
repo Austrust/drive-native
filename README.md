@@ -2,7 +2,7 @@
 
 面向 Linux Mint Cinnamon / Nemo 的 Synology Drive 原生协议按需同步客户端。使用 Rust、FUSE、SQLite、PySide6 和 Nemo 扩展；独立连接 Drive Server，不依赖 WebDAV 或官方客户端进程。
 
-**开发测试版本，尚未完成日常使用验收。** `0.1.0~dev20261031.4` 整合目录视图、缓存只读关闭、初始化进度和升级恢复，见[本包验证](docs/validation/native-package-004/REPORT.md)和[发布说明](docs/RELEASE_NOTES.md)。保留此前[桌面整合与目录分页](docs/UBUNTU_INTEGRATION.md)。实际可下载包见 [GitHub Releases](https://github.com/Austrust/drive-native/releases)。全部断连、Personal_Sync、大目录/混合性能与真正全量同步仍未完成；官方 Linux 适配冻结为协议参照及备用分支，不包含在此产品中。
+**开发测试版本，尚未完成日常使用验收。** `0.1.0~dev20261031.5` 加入原生恢复和快照导入修复，保留 `.4` 的目录视图、缓存只读关闭、初始化进度和升级恢复，见[发布说明](docs/RELEASE_NOTES.md)。本次安装与最终构建结果以随发行包提供的 `VALIDATION.json` 为准；实际可下载包见 [GitHub Releases](https://github.com/Austrust/drive-native/releases)。全部断连、Personal_Sync、大目录/混合性能与真正全量同步仍未完成；官方 Linux 适配冻结为协议参照及备用分支，不包含在此产品中。
 
 ## 已实现
 
@@ -20,7 +20,7 @@
 
 Ubuntu更新包已逐项整合，继续在独立分支修复原生恢复及按需性能；[采用决定](docs/UBUNTU_INTEGRATION.md)。既有P0观察继续运行，不代表新代码已通过长期验收。
 
-[下一批恢复及增量状态基础](docs/validation/incremental-status-001/REPORT.md)已完成源码整合和 503 项 Rust、13 项显式 FUSE 回归。运行时增量桌面状态尚未接入，写入成本与新 deb 门禁继续验证；不将这些基础模块算作 Personal 或整体性能问题已经解决。
+[恢复及增量状态基础](docs/validation/incremental-status-001/REPORT.md)已完成组件整合；[批量导入成本回退已修复](docs/validation/status-write-cost-003/REPORT.md)。运行时增量桌面状态尚未接入；不将这些基础模块算作 Personal 或整体性能问题已经解决。
 
 ## 构建和测试
 
