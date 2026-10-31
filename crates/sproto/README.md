@@ -1,5 +1,7 @@
 # sproto：本地审查分支
 
+[当前事件水位](src/actions/watermark.rs)恢复官方客户端的 `get_max_sync_id` 请求及严格响应解析，并提供通过父目录列表核对选定子目录身份的只读方法。它不会推进持久游标，也未自动替换正常初始化。请求依据、探针入口与适用边界见 [水位验证](WATERMARK_PROBE.md)。
+
 [身份删除](src/actions/namespace.rs)已接入正常同步核心，保留源版本条件，事件核对支持 watch 内父目录移动；路径删除保留供研究对照。独立改名身份语法被当前 NAS 拒绝；九场景、未读回执及静态依据见报告（历史研究记录，未随仓库发布）。
 
 [目录身份请求](src/actions/namespace.rs)复用已有 upload 字段及严格身份路径校验；[命名空间实验屏障](src/actions/namespace_observer.rs)用于预检后竞态，普通请求不安装。该阶段未改正常删除／改名；当前身份删除见上方入口。Windows 拆解、真实 FUSE 和未读目录回执结果见报告（历史研究记录，未随仓库发布）。
