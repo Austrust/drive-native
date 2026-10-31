@@ -19,6 +19,7 @@ def stage(project, destination):
     shipped = {
         'README.md', 'DELIVERY_GATES.md', 'docs/P0.md', 'docs/DURABILITY.md',
         'docs/REFERENCES.md', 'docs/PERFORMANCE.md', 'docs/RELEASE_NOTES.md',
+        'docs/UBUNTU_INTEGRATION.md',
     }
     for name in sorted(shipped):
         source = project / name
