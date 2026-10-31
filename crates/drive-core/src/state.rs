@@ -173,6 +173,7 @@ impl Store {
         if version > STATE_SCHEMA_VERSION {
             return Err(Error::State("database is newer than this build".into()));
         }
+        crate::download_publication::cleanup_staging(&root)?;
         if version > 0 && version < STATE_SCHEMA_VERSION {
             // SQLite writes a coherent snapshot including committed WAL contents.
             let backup = root.join(format!(
@@ -572,28 +573,8 @@ impl Store {
         size: u64,
         expected_sha256: &str,
     ) -> Result<()> {
-        if self.dirty_draft(&ticket.id)? {
-            return Err(Error::State(
-                "download cannot replace a local working copy".into(),
-            ));
-        }
-
-        let blob = self.write_blob_reader(source, Some((size, expected_sha256)))?;
-        let tx = self.db.transaction()?;
-        let changed=tx.execute("UPDATE nodes SET blob=?3,local_version=?2 WHERE id=?1 AND remote_version=?2 AND dirty_blob IS NULL AND deleted=0 AND directory=0",params![ticket.id,ticket.version,blob])?;
-        if changed != 1 {
-            return Err(Error::State(
-                "download belongs to obsolete identity/version or locally modified file".into(),
-            ));
-        }
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
-            .min(i64::MAX as u64) as i64;
-        tx.execute("INSERT INTO cache_published(node,at) VALUES(?1,?2) ON CONFLICT(node) DO UPDATE SET at=excluded.at",params![ticket.id,now])?;
-        tx.commit()?;
-        Ok(())
+        let body = self.prepare_download(ticket)?.prepare(source, size, expected_sha256, || false)?;
+        self.publish_prepared_download(body)
     }
     pub(crate) fn write_blob(&self, bytes: &[u8]) -> Result<String> {
         self.write_blob_reader(&mut std::io::Cursor::new(bytes), None)

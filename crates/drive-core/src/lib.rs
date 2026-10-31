@@ -23,6 +23,7 @@ pub mod removals;
 pub mod replacements;
 
 pub mod download_jobs;
+pub mod download_publication;
 
 pub mod conflicts;
 

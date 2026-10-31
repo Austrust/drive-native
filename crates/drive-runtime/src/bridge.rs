@@ -561,25 +561,43 @@ impl Bridge {
             .descriptor
             .ok_or((libc::EIO, InvalidContent, None))?;
         let mut file = std::fs::File::from(fd);
-        let mut store = self.store.lock().unwrap();
-        store
-            .publish_download_reader(
-                &DownloadTicket {
-                    id: identity.clone(),
-                    version,
-                },
-                &mut file,
-                size,
-                &sha256,
-            )
+        self.publish_content(node, flight, &rpc, &mut file, size, &sha256)
+    }
+    fn publish_content<R: io::Read>(
+        &self, node: &Node, flight: &Flight, rpc: &Arc<Rpc>, file: &mut R,
+        size: u64, sha256: &str,
+    ) -> Result<(), (i32, DownloadFailureKind, Option<u32>)> {
+        use DownloadFailureKind::*;
+        let ticket = DownloadTicket { id: node.id.clone(), version: node.version.clone() };
+        let preparation = self.store.lock().unwrap()
+            .prepare_download(&ticket)
+            .map_err(download_publication_error)?;
+        // Body copying, hash validation and all body/directory fsyncs happen
+        // without Store. The preparation's reservation protects it from GC.
+        let prepared = preparation.prepare(file, size, sha256, || {
+            !Arc::ptr_eq(rpc, &self.connection()) || self.download_abandoned(node, flight)
+        })
             .map_err(|error| match error {
+                drive_core::Error::Io(ref e) if e.kind() == io::ErrorKind::Interrupted => {
+                    (libc::EINTR, Transport, None)
+                }
                 drive_core::Error::Io(_) | drive_core::Error::Db(_) => {
                     (libc::EIO, LocalStorage, None)
                 }
                 _ => (libc::EIO, InvalidContent, None),
             })?;
+        // Demand inspection takes Store itself; keep it outside the commit
+        // guard. Old-session responses cannot publish through a new RPC.
+        if self.download_abandoned(node, flight) {
+            return Err((libc::EINTR, Transport, None));
+        }
+        let mut store = self.store.lock().unwrap();
+        if !Arc::ptr_eq(rpc, &self.connection()) {
+            return Err((libc::ENETDOWN, Transport, None));
+        }
+        store.publish_prepared_download(prepared).map_err(download_publication_error)?;
         let ino = store
-            .record(&identity)
+            .record(&node.id)
             .map_err(|_| (libc::EIO, LocalStorage, None))?
             .ino;
         drop(store);
@@ -845,6 +863,15 @@ impl Bridge {
                 done.unwrap()
             }
         }
+    }
+}
+fn download_publication_error(error: drive_core::Error) -> (i32, DownloadFailureKind, Option<u32>) {
+    match error {
+        drive_core::Error::Db(_) if error.is_not_found() =>
+            (libc::ESTALE, DownloadFailureKind::InvalidContent, None),
+        drive_core::Error::Io(_) | drive_core::Error::Db(_) =>
+            (libc::EIO, DownloadFailureKind::LocalStorage, None),
+        _ => (libc::ESTALE, DownloadFailureKind::InvalidContent, None),
     }
 }
 impl drive_fs::Hydrator for Bridge {
@@ -1151,6 +1178,10 @@ impl Bridge {
 #[cfg(test)]
 #[path = "upload_tests.rs"]
 mod upload_tests;
+
+#[cfg(test)]
+#[path = "download_publication_tests.rs"]
+mod download_publication_tests;
 
 #[path = "namespace.rs"]
 mod namespace;
