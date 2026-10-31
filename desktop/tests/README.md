@@ -11,6 +11,7 @@
 - [lazy_gui_tests.py](lazy_gui_tests.py)：按需展开、关闭/隐藏窗口及在途分页停止，使用合成本地状态。
 - [filemanager_provider_tests.py](filemanager_provider_tests.py)：模拟D-Bus、真实GI；分别用 `DRIVE_NATIVE_TEST_FILEMANAGER=nemo` 或 `nautilus` 运行。
 - [installed_package_desktop.py](installed_package_desktop.py)
+- [installed_host_smoke.py](installed_host_smoke.py)：安装包的真实 Nemo/Nautilus 窗口与本地后台状态刷新测试；仅接受 `multi_mount_fixture` 的无网络合成身份，在独立 D-Bus/Xvfb 中运行，不操作当前用户桌面。
 - [keyring_control.py](keyring_control.py)
 - [live_gui_test.py](live_gui_test.py)
 - [managed_service_test.py](managed_service_test.py)

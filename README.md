@@ -2,7 +2,7 @@
 
 面向 Linux Mint Cinnamon / Nemo 的 Synology Drive 原生协议按需同步客户端。使用 Rust、FUSE、SQLite、PySide6 和 Nemo 扩展；独立连接 Drive Server，不依赖 WebDAV 或官方客户端进程。
 
-**开发测试版本，尚未完成日常使用验收。** 当前分支含尚未打包的桌面与目录改进，见[整合记录](docs/UBUNTU_INTEGRATION.md)。已发布版本 `0.1.0~dev20261031.1` 仅补齐文档与源码身份，运行行为与 `.6` 一致，详见[发布说明](docs/RELEASE_NOTES.md)与[构建验证](docs/validation/p0-package-001/REPORT.md)。已发布安装包以 [GitHub Releases](https://github.com/Austrust/drive-native/releases) 为准。官方 Linux 适配冻结为协议参照及备用分支，不包含在此产品中。
+**开发测试版本，尚未完成日常使用验收。** `0.1.0~dev20261031.2` 已完成桌面整合、目录分页及隔离安装验证，见[构建验证](docs/validation/desktop-package-002/REPORT.md)、[整合记录](docs/UBUNTU_INTEGRATION.md)和[发布说明](docs/RELEASE_NOTES.md)。安装包发布状态以 [GitHub Releases](https://github.com/Austrust/drive-native/releases) 为准。MFM断连、Personal_Sync恢复、FUSE性能与真正全量同步仍待后续开发；官方 Linux 适配冻结为协议参照及备用分支，不包含在此产品中。
 
 ## 已实现
 
