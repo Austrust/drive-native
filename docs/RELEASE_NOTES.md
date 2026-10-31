@@ -1,6 +1,6 @@
 # 0.1.0~dev20261031.4：目录视图、缓存关闭与升级恢复
 
-本批源码整合[稳定目录视图](FUSE_DIRECTORY_VIEWS.md)、[完整缓存只读关闭隔离](CACHED_CLOSE_ISOLATION.md)、[初始化阶段进度](INITIALIZATION_PROGRESS.md)和[暂停与后台升级](UPGRADE_RECOVERY.md)。组件回归已完成；本快照尚待最终包构建与安装验证，可下载状态以 GitHub Releases 为准。
+本批整合[稳定目录视图](FUSE_DIRECTORY_VIEWS.md)、[完整缓存只读关闭隔离](CACHED_CLOSE_ISOLATION.md)、[初始化阶段进度](INITIALIZATION_PROGRESS.md)和[暂停与后台升级](UPGRADE_RECOVERY.md)。420项Rust、71项GUI、13项debug/release显式FUSE、安装升级与桌面验证完成，见[包验证及保留失败](validation/native-package-004/REPORT.md)；可下载状态以GitHub Releases为准。
 
 schema 18 不变，fsd/worker 使用 IPC 14。新版 GUI 的“应用后台更新”会先持久保存暂停意图，正常停止旧任务，再确认新后台身份、挂载与暂停状态；正常升级保留数据库、缓存和未上传草稿。操作步骤和失败恢复见升级文档。
 

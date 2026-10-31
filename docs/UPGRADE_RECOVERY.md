@@ -1,6 +1,6 @@
 # 暂停、升级与恢复
 
-本文说明源码中的升级机制及已完成的组件验证。最终 `.deb` 的安装与 managed systemd 接管验收尚未完成；发布状态以 [DELIVERY_GATES.md](../DELIVERY_GATES.md) 为准。这里没有把组件置换测试当成安装包验收。
+本文说明源码中的升级机制及已完成的组件验证。`.4`已完成隔离安装文件与managed systemd接管验证，具体范围见[包验证](validation/native-package-004/REPORT.md)；最终发布状态以 [DELIVERY_GATES.md](../DELIVERY_GATES.md) 为准。
 
 ## 正常升级
 
@@ -42,6 +42,6 @@
 
 合成、隔离的 Qt/D-Bus/FUSE 测试已经验证旧 `.3` 到修复组件、修复组件再次接管时的暂停、游标、完整缓存、待上传操作和草稿正文保留；旧进程正常退出、新进程身份与安装 inode 匹配。实际 Qt 控制器在完成回调前自行确认接管条件。单元测试覆盖持久化拒绝、错误任务、FIFO、pidfd 生命周期及错误状态不得报告成功。
 
-仍需对最终包完成实际安装文件与 managed systemd 服务的组合验证、安装失败恢复及正在执行本地 fsync 时的退出故障测试。Mint 桌面与长期稳定性验收继续由统一发布门禁跟踪。
+`.4`已完成实际安装文件与自定义managed systemd服务的组合验证、包回退/清除重装和草稿保留；该接管使用同版源码控制器，另行验证已安装GUI启动。仍需安装失败恢复、生产钥匙环启动链路及正在执行本地fsync时的退出故障测试。WSL的外部挂载命名空间可延迟FUSE退出，本次失败及独立复测见包验证。Mint桌面与长期验收继续开放。
 
 可复用工具：[组件接管探针](../scripts/validation/upgrade_pause_probe.py)、[managed 安装接管探针](../scripts/validation/managed_upgrade_probe.py)、[GUI 实际控制器测试](../desktop/tests/backend_upgrade_live.py)。详细机器日志和实验状态留在本地，不纳入公开仓库。
