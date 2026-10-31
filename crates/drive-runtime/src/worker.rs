@@ -331,7 +331,10 @@ pub async fn serve(socket: UnixStream) -> io::Result<()> {
                             Ok((Response::Events(session.pull(&cursor).await?), None))
                         }
                         Command::Wait { cursor, digest } => {
-                            let n = session.wait(&cursor, &digest).await?;
+                            let n = sproto::receive_activity::scope(
+                                crate::wait_activity::observer(env.id, output.clone()),
+                                session.wait(&cursor, &digest),
+                            ).await?;
                             Ok((
                                 Response::Notification {
                                     changed: n.changed_views.contains(&view),

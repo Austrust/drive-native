@@ -2,6 +2,7 @@ pub mod bridge;
 pub mod desktop;
 pub mod mount_registry;
 pub mod rpc;
+mod wait_activity;
 pub mod service;
 pub mod transport;
 pub mod wire;

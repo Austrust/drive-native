@@ -1,4 +1,7 @@
 use rustls::pki_types::ServerName;
+#[cfg(test)]
+#[path = "channel_idle_tests.rs"]
+mod idle_tests;
 use std::{
     io,
     pin::Pin,
@@ -68,7 +71,7 @@ pub struct Channel {
     writer: WriteHalf<DynStream>,
     pub alive_interval: Option<u64>,
     last_active: std::time::Instant,
-    reader: BufReader<ReadHalf<DynStream>>,
+    reader: BufReader<crate::receive_activity::Reader<ReadHalf<DynStream>>>,
 }
 
 impl Channel {
@@ -181,7 +184,7 @@ impl Channel {
             writer: write_half,
             alive_interval: None,
             last_active: Instant::now(),
-            reader: BufReader::new(read_half),
+            reader: BufReader::new(crate::receive_activity::Reader::new(read_half)),
         }
     }
 
@@ -266,6 +269,25 @@ impl Channel {
         let response = self.recv().await?;
         error::check_server_error(&response)?;
         Ok(response)
+    }
+
+    /// Long notifications have a receive-idle budget, not a total lifetime.
+    /// Positive transport reads (including keep-alives and partial frames) renew
+    /// it. Cancellation/error still requires the caller to discard this channel.
+    pub(crate) async fn request_with_read_idle(
+        &mut self,
+        scmd: u8,
+        obj: &PObject,
+        idle: Duration,
+    ) -> Result<PObject> {
+        tokio::time::timeout(Duration::from_secs(30), self.send(scmd, obj))
+            .await
+            .map_err(|_| Error::Timeout("native request send"))??;
+        let clock = self.reader.get_ref().clock();
+        clock
+            .timeout(idle, self.recv())
+            .await
+            .map_err(|_| Error::Timeout("native receive idle"))?
     }
 
     /// Receive a download response, streaming any inline file data to `dest`.

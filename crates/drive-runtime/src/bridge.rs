@@ -391,7 +391,7 @@ impl Bridge {
                 .map_err(io::Error::other)?;
             let response = self
                 .connection()
-                .call(Command::Wait { cursor, digest }, Duration::from_secs(450))?;
+                .call(Command::Wait { cursor, digest }, crate::wire::NOTIFICATION_IDLE)?;
             digest = match response.body {
                 Response::Notification { digest, .. } => digest,
                 body => return Err(operation_error(body)),

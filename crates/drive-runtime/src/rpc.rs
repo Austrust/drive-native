@@ -15,7 +15,11 @@ pub struct Reply {
     pub body: Response,
     pub descriptor: Option<OwnedFd>,
 }
-type Pending = Arc<Mutex<HashMap<u64, mpsc::Sender<io::Result<Reply>>>>>;
+struct PendingRequest {
+    reply: mpsc::Sender<io::Result<Reply>>,
+    wait: Option<Arc<Mutex<crate::wait_activity::WaitClock>>>,
+}
+type Pending = Arc<Mutex<HashMap<u64, PendingRequest>>>;
 pub struct Rpc {
     sender: SyncSender<(Envelope<Command>, Option<OwnedFd>)>,
     pending: Pending,
@@ -29,7 +33,7 @@ fn disconnected() -> io::Error {
 }
 fn fail_all(pending: &Pending) {
     for (_, tx) in pending.lock().unwrap().drain() {
-        let _ = tx.send(Err(disconnected()));
+        let _ = tx.reply.send(Err(disconnected()));
     }
 }
 impl Rpc {
@@ -62,8 +66,23 @@ impl Rpc {
                             }
                             continue;
                         }
+                        if let Response::WaitProgress {
+                            bytes,
+                            received_at_ns,
+                        } = env.body
+                        {
+                            let requests = p.lock().unwrap();
+                            if let Some(request) = requests.get(&env.id) {
+                                let Some(clock) = &request.wait else { break };
+                                if clock.lock().unwrap().update(bytes, received_at_ns).is_err() {
+                                    break;
+                                }
+                            }
+                            // Late progress after timeout/cancellation cannot revive a request.
+                            continue;
+                        }
                         if let Some(tx) = p.lock().unwrap().remove(&env.id) {
-                            let _ = tx.send(Ok(Reply {
+                            let _ = tx.reply.send(Ok(Reply {
                                 body: env.body,
                                 descriptor: fd,
                             }));
@@ -137,9 +156,22 @@ impl Rpc {
         if id == u64::MAX {
             return Err(io::Error::other("IPC request ID exhausted"));
         }
+        let wait_clock = if matches!(&body, Command::Wait { .. }) {
+            Some(Arc::new(
+                Mutex::new(crate::wait_activity::WaitClock::new()?),
+            ))
+        } else {
+            None
+        };
         self.transfers.register(id, &body);
         let (tx, rx) = mpsc::channel();
-        self.pending.lock().unwrap().insert(id, tx);
+        self.pending.lock().unwrap().insert(
+            id,
+            PendingRequest {
+                reply: tx,
+                wait: wait_clock.clone(),
+            },
+        );
         if self
             .sender
             .try_send((
@@ -157,6 +189,13 @@ impl Rpc {
             return Err(disconnected());
         }
         let started = std::time::Instant::now();
+        let remaining_budget = || {
+            wait_clock
+                .as_ref()
+                .map(|clock| clock.lock().unwrap().remaining(timeout))
+                .or_else(|| self.transfers.remaining(id, timeout))
+                .unwrap_or_else(|| timeout.saturating_sub(started.elapsed()))
+        };
         loop {
             if cancelled.is_some_and(|f| f()) {
                 self.pending.lock().unwrap().remove(&id);
@@ -177,10 +216,7 @@ impl Rpc {
                 }
                 return Err(io::ErrorKind::Interrupted.into());
             }
-            let remaining = self
-                .transfers
-                .remaining(id, timeout)
-                .unwrap_or_else(|| timeout.saturating_sub(started.elapsed()));
+            let remaining = remaining_budget();
             let wait = if cancelled.is_some() {
                 remaining.min(Duration::from_millis(25))
             } else {
@@ -192,25 +228,26 @@ impl Rpc {
                     return result;
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) if wait < remaining => continue,
-                Err(mpsc::RecvTimeoutError::Timeout)
-                    if self
-                        .transfers
-                        .remaining(id, timeout)
-                        .is_some_and(|left| !left.is_zero()) =>
-                {
+                Err(mpsc::RecvTimeoutError::Timeout) if !remaining_budget().is_zero() => {
                     continue;
                 }
                 Err(error) => {
                     self.pending.lock().unwrap().remove(&id);
                     self.transfers.remove(id);
-                    let _ = self.sender.try_send((
-                        Envelope {
-                            version: VERSION,
-                            id: 0,
-                            body: Command::Cancel { request: id },
-                        },
-                        None,
-                    ));
+                    if self
+                        .sender
+                        .try_send((
+                            Envelope {
+                                version: VERSION,
+                                id: 0,
+                                body: Command::Cancel { request: id },
+                            },
+                            None,
+                        ))
+                        .is_err()
+                    {
+                        self.close();
+                    }
                     return Err(if matches!(error, mpsc::RecvTimeoutError::Disconnected) {
                         disconnected()
                     } else {
@@ -369,3 +406,7 @@ mod tests {
 #[cfg(test)]
 #[path = "transfer_rpc_tests.rs"]
 mod transfer_rpc_tests;
+
+#[cfg(test)]
+#[path = "wait_rpc_tests.rs"]
+mod wait_rpc_tests;
