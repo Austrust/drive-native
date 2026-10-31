@@ -12,6 +12,11 @@ fn install(s:&mut Store,snap:&RemoteSnapshot){let c=s.cursor().unwrap();s.bind_n
  let d=tempfile::tempdir().unwrap();let mut s=Store::open(d.path()).unwrap();install(&mut s,&snapshot("native-v1:1",true));
  assert_eq!(s.children("100").unwrap().iter().map(|r|r.node.id.as_str()).collect::<Vec<_>>(),vec!["300"]);
  assert!(s.lookup("100","restricted").is_err());assert_eq!(s.child_nodes("300").unwrap().len(),1);assert_eq!(s.inaccessible_count().unwrap(),1);
+ assert_eq!(s.child_node_count("100").unwrap(),1);
+ assert_eq!(s.child_nodes_page("100",0,1).unwrap()[0].id,"300");
+ assert!(s.child_nodes_page("100",1,1).unwrap().is_empty());
+ assert!(s.child_nodes_page("200",0,1).is_err());
+ assert!(s.child_node_count("200").is_err());
 }
 #[test]fn revocation_preserves_cache_draft_and_pin_across_restart_and_restoration(){
  let d=tempfile::tempdir().unwrap();let mut s=Store::open(d.path()).unwrap();install(&mut s,&snapshot("native-v1:1",false));

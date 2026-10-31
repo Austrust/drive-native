@@ -1,6 +1,60 @@
 use drive_core::*;
 use std::io::{Cursor, Read};
 
+#[test]
+fn desktop_pages_preserve_order_boundaries_and_do_not_allocate_inodes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open(dir.path()).unwrap();
+    let mut nodes = vec![node("root", "1", 0)];
+    for i in (0..513).rev() {
+        nodes.push(node(&format!("item-{i:04}"), "1", 3));
+    }
+    store.install_remote_snapshot(&nodes, "1", "server").unwrap();
+    store.ensure_fs_root("root").unwrap();
+    let db = rusqlite::Connection::open(dir.path().join("state.sqlite")).unwrap();
+    let inode_count = || db.query_row("SELECT count(*) FROM fs_inodes", [], |r| r.get::<_, i64>(0)).unwrap();
+    let before = inode_count();
+    let revision = store.local_revision();
+    let mut actual = Vec::new();
+    for offset in [0, 256, 512, 768] {
+        actual.extend(store.child_nodes_page("root", offset, 256).unwrap().into_iter().map(|n| n.name));
+    }
+    assert_eq!(actual, (0..513).map(|i| format!("item-{i:04}")).collect::<Vec<_>>());
+    assert_eq!(store.child_node_count("root").unwrap(), 513);
+    assert_eq!(store.child_nodes("root").unwrap().len(), 513);
+    assert!(store.child_nodes_page("root", 0, 0).unwrap().is_empty());
+    assert!(store.child_nodes_page("root", usize::MAX, 256).unwrap().is_empty());
+    assert!(store.child_nodes_page("missing", 0, 1).is_err());
+    assert!(store.child_node_count("missing").is_err());
+    assert!(store.child_nodes_page("item-0000", 0, 1).is_err());
+    assert!(store.child_node_count("item-0000").is_err());
+    assert_eq!(store.local_revision(), revision);
+    assert_eq!(inode_count(), before);
+    assert!(store.downloads_needed().unwrap().is_empty());
+    assert_eq!(std::fs::read_dir(dir.path().join("blobs")).unwrap().count(), 0);
+}
+
+#[test]
+fn desktop_pages_match_local_creation_shadow_and_deleted_visibility() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open(dir.path()).unwrap();
+    setup(&mut store);
+    let local = store.create_local_file("root", "duplicate", 0o644).unwrap();
+    let mut remote = node("server-new", "2", 3);
+    remote.name = "duplicate".into();
+    event(&mut store, "1", "2", remote);
+    let children = store.child_nodes_page("root", 0, 256).unwrap();
+    assert_eq!(children.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), vec!["a", &local.id]);
+    assert_eq!(store.child_node_count("root").unwrap(), 2);
+    assert_eq!(store.child_nodes_page("root", 1, 1).unwrap()[0].id, local.id);
+    store.receive(&Batch { from: "2".into(), to: "3".into(), events: vec![Event {
+        id: "deleted-a".into(), change: Change::Delete { id: "a".into() },
+    }] }).unwrap();
+    store.drain().unwrap();
+    assert_eq!(store.child_node_count("root").unwrap(), 1);
+    assert_eq!(store.child_nodes_page("root", 0, 256).unwrap()[0].id, local.id);
+}
+
 fn node(id: &str, version: &str, size: u64) -> Node {
     Node {
         id: id.into(),
