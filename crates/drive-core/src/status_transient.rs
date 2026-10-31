@@ -9,11 +9,11 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ContentKey {
     Blob {
-        hash: String,
+        blob_id: String,
         version: Option<String>,
     },
     DirtyBlob {
-        hash: String,
+        blob_id: String,
     },
     Draft {
         token: String,
@@ -31,28 +31,28 @@ impl ContentKey {
                 base: d.base.clone(),
                 generation: d.generation,
             })
-        } else if let Some(hash) = &c.dirty_blob {
-            Some(Self::DirtyBlob { hash: hash.clone() })
+        } else if let Some(blob_id) = &c.dirty_blob {
+            Some(Self::DirtyBlob { blob_id: blob_id.clone() })
         } else {
-            c.blob.as_ref().map(|hash| Self::Blob {
-                hash: hash.clone(),
+            c.blob.as_ref().map(|blob_id| Self::Blob {
+                blob_id: blob_id.clone(),
                 version: c.local_version.clone(),
             })
         }
     }
     fn bytes(&self) -> usize {
         match self {
-            Self::Blob { hash, version } => hash.len() + version.as_ref().map_or(0, String::len),
-            Self::DirtyBlob { hash } => hash.len(),
+            Self::Blob { blob_id, version } => blob_id.len() + version.as_ref().map_or(0, String::len),
+            Self::DirtyBlob { blob_id } => blob_id.len(),
             Self::Draft { token, base, .. } => token.len() + base.len(),
         }
     }
     fn valid(&self) -> bool {
         match self {
-            Self::Blob { hash, version } => {
-                valid(hash) && version.as_ref().is_none_or(|v| valid(v))
+            Self::Blob { blob_id, version } => {
+                valid(blob_id) && version.as_ref().is_none_or(|v| valid(v))
             }
-            Self::DirtyBlob { hash } => valid(hash),
+            Self::DirtyBlob { blob_id } => valid(blob_id),
             Self::Draft { token, base, .. } => valid(token) && valid(base),
         }
     }
