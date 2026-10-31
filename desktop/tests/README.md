@@ -4,7 +4,7 @@
 
 - [cache_gui_live.py](cache_gui_live.py)
 - [cache_gui_tests.py](cache_gui_tests.py)
-- [backend_upgrade_test.py](backend_upgrade_test.py)：暂停失败、后台身份变化、等待旧进程正常退出及超时不强杀的离线接管测试。
+- [backend_upgrade_test.py](backend_upgrade_test.py)：暂停失败、后台身份变化、等待旧进程正常退出、pidfd 生命周期及新后台身份/暂停/挂载确认；超时不强杀。
 - [backend_upgrade_live.py](backend_upgrade_live.py)：私有 D-Bus 中实际 Qt 控制器识别旧进程、正常退出/启动新 FUSE、保持暂停及未上传编辑的合成联调；不访问 NAS。
 - [pause_handover_test.py](pause_handover_test.py)：首次旧版升级所用任务暂停标记的原子持久化、属主/权限与符号链接校验。
 - [conflict_gui_live.py](conflict_gui_live.py)

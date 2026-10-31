@@ -11,7 +11,7 @@ impl Store {
         let path = self.storage_directory().join("startup-pause-v1.json");
         let file = match std::fs::OpenOptions::new()
             .read(true)
-            .custom_flags(libc::O_NOFOLLOW)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
             .open(&path)
         {
             Ok(file) => file,
@@ -74,6 +74,51 @@ impl Store {
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+    #[test]
+    fn fifo_startup_intent_is_rejected_without_waiting_for_writer() {
+        const CHILD_ROOT: &str = "DRIVE_NATIVE_PAUSE_FIFO_TEST_ROOT";
+        if let Some(root) = std::env::var_os(CHILD_ROOT) {
+            let mut store = Store::open(&root).unwrap();
+            assert!(store.consume_startup_pause("test-task").is_err());
+            assert!(!store.sync_paused().unwrap());
+            assert!(
+                std::path::Path::new(&root)
+                    .join("startup-pause-v1.json")
+                    .exists()
+            );
+            return;
+        }
+        use std::os::unix::ffi::OsStrExt;
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("startup-pause-v1.json");
+        let path = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
+        // A regression must fail within a bounded time, not hang the test suite.
+        // Only this synthetic child is terminated if FIFO open waits for a writer.
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "task_control::tests::fifo_startup_intent_is_rejected_without_waiting_for_writer",
+            ])
+            .env(CHILD_ROOT, root.path())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                assert!(status.success(), "FIFO rejection child failed");
+                break;
+            }
+            if std::time::Instant::now() >= deadline {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                panic!("startup intent FIFO blocked without a writer");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
     fn intent(d: &std::path::Path, task: &str) -> std::path::PathBuf {
         let path = d.join("startup-pause-v1.json");
         std::fs::write(
