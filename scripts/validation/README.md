@@ -59,3 +59,15 @@ python3 scripts/validation/test_byte_relay.py
 `cargo run --release --locked -p drive-core --example durability_fixture -- /absolute/new-fixture` 仅生成三节点合成SQLite状态及确定性内容，拒绝覆盖已有目录，不启动网络或挂载。与210k性能夹具分开使用。
 
 使用`.6`服务启动本地可写挂载、保持网络锁定，检查write/fsync、普通保存和正常卸载/重启的实际脚本、预先登记的期望及独立校验结果见[边界报告](../../docs/validation/p0-durability-001/REPORT.md)。该流程1轮通过；6项既有mounted内核测试也显式执行通过。它不替代故障注入、真正磁盘满/EIO或独立断电测试。
+
+## 独立D-Bus诊断探针
+
+[watch_probe.py](watch_probe.py)读取显式测试目录中的catalog.json（数组，每项含instance、bus、name、mount），监听服务归属与StatusChanged，200ms合并后每任务至多一个由信号触发的本地GetOverview查询；不会在信号回调遍历FUSE或访问NAS。保留既有10秒诊断检查，不把它当产品同步机制。日志8MiB轮换，保留三份历史；只记录选定状态字段，不记录正文或认证数据。该工具不随普通客户端自动运行。
+
+[test_watch_probe_signals.py](test_watch_probe_signals.py)在当前用户会话总线上创建独立模拟服务，验证离线/恢复信号、1000次突发合并及字段过滤，无NAS或真实挂载。Linux需python3-gi、gdbus、stdbuf及会话D-Bus。必须指定不存在的输出目录，保留既有证据：
+
+```sh
+python3 scripts/validation/test_watch_probe_signals.py --probe scripts/validation/watch_probe.py --output-dir /tmp/drive-probe-signals-test-new
+```
+
+实际监测通过`python3 scripts/validation/watch_probe.py --state-dir <隔离测试目录>`显式启动。合并查询可能看不到短于通知/查询延迟的状态，不等于持久错误事件历史；worker退出原因应在清理前记录，不能从探针未报错反推零重连。
