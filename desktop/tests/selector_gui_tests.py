@@ -66,4 +66,30 @@ class SelectorTests(unittest.TestCase):
             self.assertEqual(config.load_profile(),original)
             with self.assertRaises(FileExistsError):config.restore_profile(backup)
 
+    def test_setup_error_transport_keeps_categories_distinct_without_raw_reason(self):
+        import json
+        from drive_native_gui.setup_client import SetupClient
+        client = SetupClient()
+        results = []
+        class Response:
+            data = b""
+            def readAllStandardOutput(self):
+                data, self.data = self.data, b""
+                return data
+        fake = Response()
+        client.process = fake
+        categories = ['login_rejected', 'download_permission', 'certificate', 'network', 'protocol', 'session_expired']
+        try:
+            for category in categories:
+                fake.data = (json.dumps({'schema':1,'ok':False,'error':category,'reason':'untrusted-sensitive-reason'})+'\n').encode()
+                client.callbacks.append(lambda data,error: results.append((data,error)))
+                client._read()
+            self.assertEqual(len(results), len(categories))
+            self.assertEqual(len({error for _,error in results}), len(categories))
+            self.assertTrue(all(data is None and 'untrusted-sensitive-reason' not in error for data,error in results))
+            self.assertFalse(client.timeout.isActive())
+            self.assertFalse(client.callbacks)
+        finally:
+            client.deleteLater()
+
 if __name__=='__main__':unittest.main()

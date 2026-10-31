@@ -4,6 +4,12 @@ from PySide6.QtCore import QObject, QProcess, QTimer
 from .config import binary
 
 ERRORS = {
+    "login_rejected": "NAS 拒绝了本次登录。请核对账号密码、账号状态和 Drive 应用权限，避免连续重试。",
+    "configuration": "连接配置无效，请检查地址、证书设置和所选目录。",
+    "session_expired": "登录会话已失效，请重新登录；已保存的本地文件会保留。",
+    "protocol": "服务器响应或协议版本无法处理，请检查兼容性与诊断信息，无需反复输入密码。",
+    "server_rejected": "服务器拒绝了本次请求，请检查账号权限、服务器状态和诊断信息。",
+    "login_required": "请先完成登录，再选择同步目录。",
     "certificate": "服务器证书验证失败，请检查证书域名和“可信证书”设置。",
     "network": "无法连接 NAS，请检查地址、网络和 Drive 服务。",
     "configuration_or_permission": "账号设置或 Drive 应用权限需要检查。",

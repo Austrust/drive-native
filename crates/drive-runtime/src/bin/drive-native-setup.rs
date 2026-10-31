@@ -44,8 +44,21 @@ fn category(error: &sproto::Error) -> &'static str {
         sproto::Error::Io(_) | sproto::Error::Timeout(_) | sproto::Error::ConnectionClosed => {
             "network"
         }
-        sproto::Error::InvalidConfig(_) => "configuration_or_permission",
-        _ => "authentication_or_protocol",
+        sproto::Error::InvalidConfig(_) => "configuration",
+        sproto::Error::SessionInvalid => "session_expired",
+        sproto::Error::BadMagic | sproto::Error::VersionMismatch { .. }
+        | sproto::Error::Decode(_) | sproto::Error::UnsupportedServer { .. }
+        | sproto::Error::CursorReset { .. } => "protocol",
+        sproto::Error::Server { .. } => "server_rejected",
+    }
+}
+// The reviewed Ubuntu branch observed 4100 on rejected credentials. Scope this
+// hint to connection/login; do not claim the server proved a wrong password,
+// and do not classify an unrelated directory response as a login failure.
+fn login_category(error: &sproto::Error) -> &'static str {
+    match error {
+        sproto::Error::Server { code: 4100, .. } => "login_rejected",
+        _ => category(error),
     }
 }
 #[derive(Clone)]
@@ -178,7 +191,7 @@ async fn run() -> io::Result<()> {
                     )
                     .await
                     {
-                        Err(error) => Err(category(&error)),
+                        Err(error) => Err(login_category(&error)),
                         Ok(client) => match roots(&client).await {
                             Err(error)=>Err(category(&error)),
                             Ok((spaces,warnings))=>{
@@ -194,6 +207,7 @@ async fn run() -> io::Result<()> {
                 Some((client,spaces)) => {
                     let selected=view_id.or_else(||spaces.values().find(|r|r.personal).map(|r|r.view));
                     match selected.and_then(|id|spaces.get_mut(&id)) {
+                        Some(root) if !root.allowed => Err("download_permission"),
                         Some(root)=>folders(client,root,&path).await.map_err(|e|category(&e)),
                         None=>Err("configuration_or_permission"),
                     }
@@ -211,4 +225,25 @@ async fn run() -> io::Result<()> {
         output.flush()?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod classification_tests {
+    use super::*;
+    #[test]
+    fn rejected_login_is_phase_scoped_and_does_not_echo_server_reason() {
+        let e = sproto::Error::Server {code:4100,reason:"untrusted server detail".into()};
+        assert_eq!(login_category(&e), "login_rejected");
+        assert_eq!(category(&e), "server_rejected");
+        assert_eq!(login_category(&sproto::Error::Server {code:99999,reason:"unknown".into()}), "server_rejected");
+    }
+    #[test]
+    fn distinct_failure_classes_do_not_suggest_password_retries_for_protocol_errors() {
+        assert_eq!(login_category(&sproto::Error::Timeout("connect")), "network");
+        assert_eq!(category(&sproto::Error::Io(io::Error::new(io::ErrorKind::ConnectionRefused,"synthetic"))), "network");
+        assert_eq!(category(&sproto::Error::Io(io::Error::new(io::ErrorKind::InvalidData,"synthetic TLS failure"))), "certificate");
+        assert_eq!(category(&sproto::Error::Decode("bad frame".into())), "protocol");
+        assert_eq!(category(&sproto::Error::SessionInvalid), "session_expired");
+        assert_eq!(category(&sproto::Error::InvalidConfig("bad config".into())), "configuration");
+    }
 }
