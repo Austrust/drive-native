@@ -50,6 +50,7 @@ dpkg-buildpackage -b -us -uc
 | [vendor](vendor/README.md) | 固定的 fuser 补丁及上游许可 |
 | [docs/P1_ARCHITECTURE.md](docs/P1_ARCHITECTURE.md) | P1修改契约；通知诊断与部分读取隔离已实现，完整性能验收仍开放 |
 | [docs/FUSE_READ_ISOLATION.md](docs/FUSE_READ_ISOLATION.md) | 已打开内容读取隔离的实现、回归与未完成范围 |
+| [docs/CACHED_CLOSE_ISOLATION.md](docs/CACHED_CLOSE_ISOLATION.md) | 只读缓存同步与关闭绕开元数据阻塞的路由、持久化边界和内核回归 |
 | [docs/FUSE_DIRECTORY_VIEWS.md](docs/FUSE_DIRECTORY_VIEWS.md) | 目录轻量投影、稳定续读句柄与独立验证范围 |
 | [docs/INITIALIZATION_PROGRESS.md](docs/INITIALIZATION_PROGRESS.md) | 初始化阶段、真实计数、轻量进度接口与 IPC 配对边界 |
 | [docs/UPGRADE_RECOVERY.md](docs/UPGRADE_RECOVERY.md) | 暂停、正常升级接管、失败保留数据与尚未完成的安装包验证 |

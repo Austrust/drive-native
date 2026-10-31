@@ -214,10 +214,89 @@ pub(super) fn write(
         if missing { network.submit(job) } else { job() }
     }));
 }
+enum SyncRoute {
+    // A removed handle is owned by the queued release, including queue rejection.
+    Immutable(Option<Handle>),
+    Metadata,
+    Invalid,
+}
+fn sync_route(handles: &mut Handles, ino: u64, fh: u64, release: bool) -> SyncRoute {
+    match handles.entries.get(&fh) {
+        Some(handle) if handle.ino == ino => {
+            if handle.flags & libc::O_ACCMODE == libc::O_RDONLY
+                && matches!(handle.content, OpenContent::Cached(_))
+            {
+                // Classification and ownership transfer share the handle-table
+                // lock used by promotion. Never re-read it on the read queue.
+                SyncRoute::Immutable(if release {
+                    handles.entries.remove(&fh)
+                } else {
+                    None
+                })
+            } else {
+                SyncRoute::Metadata
+            }
+        }
+        _ => SyncRoute::Invalid,
+    }
+}
+
+struct ReleaseCleanup {
+    handles: Arc<Mutex<Handles>>,
+    ino: u64,
+    fh: u64,
+}
+impl Drop for ReleaseCleanup {
+    fn drop(&mut self) {
+        let removed = {
+            let mut handles = self.handles.lock().unwrap();
+            if handles
+                .entries
+                .get(&self.fh)
+                .is_some_and(|h| h.ino == self.ino)
+            {
+                handles.entries.remove(&self.fh)
+            } else {
+                None
+            }
+        };
+        // Drop local content references outside the table lock; never take Store.
+        drop(removed);
+    }
+}
+
 pub(super) fn sync(fs: &mut CacheFilesystem, ino: u64, fh: u64, release: bool, reply: ReplyEmpty) {
+    let route = sync_route(&mut fs.handles.lock().unwrap(), ino, fh, release);
+    match route {
+        SyncRoute::Immutable(None) => {
+            // This read-only handle has no local writes to checkpoint. A later
+            // promotion cannot retroactively change the captured flush/fsync.
+            reply.ok();
+            return;
+        }
+        SyncRoute::Immutable(Some(handle)) => {
+            fs.read_queue.submit(Box::new(move || {
+                drop(handle);
+                reply.ok();
+            }));
+            return;
+        }
+        SyncRoute::Invalid => {
+            reply.error(libc::EBADF);
+            return;
+        }
+        SyncRoute::Metadata => {}
+    }
     let store = fs.store.clone();
     let handles = fs.handles.clone();
     let hydrator = fs.hydrator.clone();
+    // The slow path must observe any promotion when it actually executes.
+    // Its cleanup also runs if the metadata queue rejects the release job.
+    let cleanup = release.then(|| ReleaseCleanup {
+        handles: handles.clone(),
+        ino,
+        fh,
+    });
     fs.queue.submit(Box::new(move || {
         let snapshot = {
             let h = handles.lock().unwrap();
@@ -241,9 +320,7 @@ pub(super) fn sync(fs: &mut CacheFilesystem, ino: u64, fh: u64, release: bool, r
             Some(_) => Ok(()),
             None => Err(libc::EBADF),
         };
-        if release {
-            handles.lock().unwrap().entries.remove(&fh);
-        }
+        drop(cleanup);
         match result {
             Ok(()) => {
                 if let Some(h) = hydrator {
@@ -255,6 +332,10 @@ pub(super) fn sync(fs: &mut CacheFilesystem, ino: u64, fh: u64, release: bool, r
         }
     }));
 }
+
+#[cfg(test)]
+#[path = "sync_routing_tests.rs"]
+mod sync_routing_tests;
 #[allow(clippy::too_many_arguments)]
 pub(super) fn setattr(
     fs: &mut CacheFilesystem,
