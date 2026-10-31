@@ -18,8 +18,39 @@ pub struct Reply {
 struct PendingRequest {
     reply: mpsc::Sender<io::Result<Reply>>,
     wait: Option<Arc<Mutex<crate::wait_activity::WaitClock>>>,
+    index: Option<(
+        drive_core::snapshot_progress::Observer,
+        Option<drive_core::snapshot_progress::Progress>,
+    )>,
 }
 type Pending = Arc<Mutex<HashMap<u64, PendingRequest>>>;
+fn valid_index_progress(
+    previous: Option<drive_core::snapshot_progress::Progress>,
+    next: drive_core::snapshot_progress::Progress,
+) -> bool {
+    use drive_core::snapshot_progress::Phase;
+    let rank = |p| match p {
+        Phase::Seed => 0,
+        Phase::Enumerate => 1,
+        Phase::Fence => 2,
+    };
+    let (units, items) = if next.phase == Phase::Enumerate {
+        (500_000, 500_000)
+    } else {
+        (4096, 2_000_000)
+    };
+    (1..=3).contains(&next.attempt)
+        && next.units <= units
+        && next.items <= items
+        && previous.is_none_or(|old| {
+            next.attempt > old.attempt
+                || (next.attempt == old.attempt
+                    && (rank(next.phase) > rank(old.phase)
+                        || (next.phase == old.phase
+                            && next.units >= old.units
+                            && next.items >= old.items)))
+        })
+}
 pub struct Rpc {
     sender: SyncSender<(Envelope<Command>, Option<OwnedFd>)>,
     pending: Pending,
@@ -62,6 +93,29 @@ impl Rpc {
                         );
                         if expect_fd != fd.is_some() {
                             break;
+                        }
+                        if let Response::IndexProgress(progress) = env.body {
+                            let observer = {
+                                let mut requests = p.lock().unwrap();
+                                if let Some(request) = requests.get_mut(&env.id) {
+                                    let Some((observer, last)) = &mut request.index else {
+                                        break;
+                                    };
+                                    if !valid_index_progress(*last, progress) {
+                                        break;
+                                    }
+                                    *last = Some(progress);
+                                    Some(observer.clone())
+                                } else {
+                                    None
+                                }
+                            };
+                            // The callback only updates local bounded state; it
+                            // runs after releasing the pending-request lock.
+                            if let Some(observer) = observer {
+                                observer(progress);
+                            }
+                            continue;
                         }
                         if let Response::TransferProgress(progress) = env.body {
                             if t.update(env.id, progress).is_err() {
@@ -132,7 +186,7 @@ impl Rpc {
         timeout: Duration,
         descriptor: Option<OwnedFd>,
     ) -> io::Result<Reply> {
-        self.call_controlled(body, timeout, descriptor, None)
+        self.call_controlled(body, timeout, descriptor, None, None)
     }
     pub fn call_cancellable(
         &self,
@@ -140,7 +194,20 @@ impl Rpc {
         timeout: Duration,
         cancelled: &dyn Fn() -> bool,
     ) -> io::Result<Reply> {
-        self.call_controlled(body, timeout, None, Some(cancelled))
+        self.call_controlled(body, timeout, None, Some(cancelled), None)
+    }
+    pub fn call_index(
+        &self,
+        timeout: Duration,
+        observer: drive_core::snapshot_progress::Observer,
+    ) -> io::Result<Reply> {
+        self.call_controlled(
+            Command::RecoverySnapshot,
+            timeout,
+            None,
+            None,
+            Some(observer),
+        )
     }
     fn call_controlled(
         &self,
@@ -148,6 +215,7 @@ impl Rpc {
         timeout: Duration,
         descriptor: Option<OwnedFd>,
         cancelled: Option<&dyn Fn() -> bool>,
+        index: Option<drive_core::snapshot_progress::Observer>,
     ) -> io::Result<Reply> {
         if cancelled.is_some_and(|f| f()) {
             return Err(io::ErrorKind::Interrupted.into());
@@ -167,12 +235,19 @@ impl Rpc {
             None
         };
         self.transfers.register(id, &body);
+        // A caller may request the snapshot without displaying progress. The
+        // response still belongs to that command and must be validated/drained.
+        let index = index.or_else(|| {
+            matches!(&body, Command::RecoverySnapshot)
+                .then(|| Arc::new(|_| {}) as drive_core::snapshot_progress::Observer)
+        });
         let (tx, rx) = mpsc::channel();
         self.pending.lock().unwrap().insert(
             id,
             PendingRequest {
                 reply: tx,
                 wait: wait_clock.clone(),
+                index: index.map(|observer| (observer, None)),
             },
         );
         if let Err(error) = self.sender.try_send((
@@ -418,3 +493,7 @@ mod transfer_rpc_tests;
 #[cfg(test)]
 #[path = "wait_rpc_tests.rs"]
 mod wait_rpc_tests;
+
+#[cfg(test)]
+#[path = "index_rpc_tests.rs"]
+mod index_rpc_tests;

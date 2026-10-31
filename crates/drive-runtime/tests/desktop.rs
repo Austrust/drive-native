@@ -65,6 +65,26 @@ fn get(s: &Service, path: &str) -> serde_json::Value {
 }
 
 #[test]
+fn initialization_remains_available_while_store_and_control_are_held() {
+    let (_root, service) = fixture();
+    service.bridge.initialization.begin();
+    service.bridge.initialization.phase(drive_runtime::initialization::Phase::Importing);
+    let store = service.bridge.store.lock().unwrap();
+    let control = service.control.lock().unwrap();
+    let (send, receive) = std::sync::mpsc::channel();
+    let reader = service.clone();
+    let thread = std::thread::spawn(move || send.send(desktop::initialization(&reader)).unwrap());
+    let result = receive.recv_timeout(std::time::Duration::from_secs(1));
+    drop(control);
+    drop(store);
+    thread.join().unwrap();
+    let data: serde_json::Value = serde_json::from_str(&result.expect("progress must not wait for Store/control")).unwrap();
+    assert_eq!(data["schema"], 1);
+    assert_eq!(data["task_id"], service.profile.task_id);
+    assert_eq!(data["initialization"]["phase"], "importing");
+}
+
+#[test]
 fn directory_pages_are_complete_without_inode_allocation_or_downloads() {
     let d = tempfile::tempdir().unwrap();
     let mut store = Store::open(d.path()).unwrap();

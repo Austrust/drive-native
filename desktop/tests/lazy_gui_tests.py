@@ -11,6 +11,7 @@ app = QApplication.instance() or QApplication([])
 
 class Bus(QObject):
     changed = Signal()
+    progress_changed = Signal()
     availability = Signal(bool)
     owner = ':1.synthetic'
 
@@ -24,6 +25,8 @@ class Bus(QObject):
         if method == 'GetOverview':
             callback({'connection': 'online', 'pending_operations': 0,
                       'mount': '/tmp/synthetic-lazy-mount', 'mounted': True}, None)
+        elif method == 'GetInitialization':
+            callback({'task_id': 'synthetic', 'initialization': {'active': False}}, None)
         elif method == 'GetDirectory':
             self.directory_callbacks.append(callback)
 
@@ -49,7 +52,7 @@ class LazyGuiTests(unittest.TestCase):
 
     def test_start_shows_overview_without_querying_directory_or_settings(self):
         self.window.refresh()
-        self.assertEqual(self.window.bus.calls, ['GetOverview'])
+        self.assertEqual(self.window.bus.calls, ['GetInitialization', 'GetOverview'])
         for name in ('transfers_dialog', 'issues_dialog', 'cache_dialog', 'trust_dialog'):
             self.assertIsNone(getattr(self.window, name))
         self.assertFalse(self.window.file_details.isVisible())
@@ -58,7 +61,7 @@ class LazyGuiTests(unittest.TestCase):
         self.window.files_button.setChecked(True)
         self.window.refresh_timer.stop()
         self.window.refresh()
-        self.assertEqual(self.window.bus.calls, ['GetOverview', 'GetDirectory'])
+        self.assertEqual(self.window.bus.calls, ['GetInitialization', 'GetOverview', 'GetDirectory'])
         self.assertTrue(self.window.file_details.isVisible())
         self.window.files_button.setChecked(False)
         self.window.bus.directory_callbacks[0](
@@ -75,9 +78,10 @@ class LazyGuiTests(unittest.TestCase):
         self.assertFalse(self.window.refresh_timer.isActive())
         self.window.show()
         self.assertTrue(self.window.refresh_timer.isActive())
+        self.window.bus.calls.clear()
         self.window.refresh_timer.stop()
         self.window.refresh()
-        self.assertEqual(self.window.bus.calls, ['GetOverview'])
+        self.assertEqual(self.window.bus.calls, ['GetInitialization', 'GetOverview'])
 
     def test_no_query_after_close_and_no_stop_service_action(self):
         self.window.close()

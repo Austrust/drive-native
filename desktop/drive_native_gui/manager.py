@@ -11,6 +11,7 @@ from .config import profile_records
 from .bus import ClientBus
 from .lifecycle import ServiceLauncher
 from .config import service_unit
+from .initialization import progress_text
 
 LABELS = {"locked":"等待解锁", "connecting":"连接中", "online":"已连接", "offline":"离线", "paused":"已暂停", "needs_attention":"需要处理", "stopping":"正在停止"}
 
@@ -26,6 +27,8 @@ class MountManager(QMainWindow):
         self.items = {}
         self.launchers = []
         self.signature = None
+        self.progress_pending = set()
+        self.progress_again = set()
         root = QWidget(); self.setCentralWidget(root)
         layout = QVBoxLayout(root)
         title = QLabel("我的挂载"); title.setStyleSheet("font-size: 25px; font-weight: 600; padding: 12px 0;")
@@ -64,6 +67,7 @@ class MountManager(QMainWindow):
             if slot not in self.buses:
                 bus = ClientBus(self, instance=slot); self.buses[slot] = bus
                 bus.changed.connect(lambda key=slot: self.refresh_status(key))
+                bus.progress_changed.connect(lambda key=slot: self.refresh_progress(key))
                 bus.availability.connect(lambda _up, key=slot: self.refresh_status(key))
             self.refresh_status(slot)
         if not records: self.message.setText("点击“添加挂载”，为第一个目录设置名称和本地位置。")
@@ -81,7 +85,35 @@ class MountManager(QMainWindow):
                 self.items[slot].setText(1, "任务不匹配"); return
             self.items[slot].setText(1, LABELS.get(data.get("connection"), "状态未知"))
             self.items[slot].setData(1, Qt.UserRole, data.get("connection"))
+            self.render_progress(slot, data.get("initialization"))
         self.buses[slot].call("GetOverview", callback=received)
+
+    def render_progress(self, slot, progress):
+        title, detail = progress_text(progress)
+        item = self.items[slot]
+        if title:
+            item.setToolTip(1, detail)
+            if item.data(1, Qt.UserRole) in (None, "connecting", "online"):
+                item.setText(1, title)
+        else:
+            item.setToolTip(1, "")
+
+    def refresh_progress(self, slot):
+        if not self.isVisible() or slot not in self.items:
+            return
+        if slot in self.progress_pending:
+            self.progress_again.add(slot)
+            return
+        self.progress_pending.add(slot)
+        def received(data, error):
+            self.progress_pending.discard(slot)
+            if slot in self.progress_again:
+                self.progress_again.discard(slot)
+                QTimer.singleShot(100, lambda: self.refresh_progress(slot))
+            if error or slot not in self.items or data.get("task_id") != self.records[slot]["task_id"]:
+                return
+            self.render_progress(slot, data.get("initialization"))
+        self.buses[slot].call("GetInitialization", callback=received)
 
     def spawn(self, slot, name=None):
         args = ["--task", slot or "legacy"]

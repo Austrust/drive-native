@@ -1,0 +1,40 @@
+# 初始化与事件追赶进度
+
+本模块将已有原生操作的实际阶段、完成计数和耗时显示到桌面。它不更改协议恢复条件、事件游标、退避、权限或 NAS 内容；Personal_Sync 初始化性能是否改善仍需独立实测。
+
+## 数据来源
+
+- 服务记录进程启动、认证、传输配置、目录绑定、事件追赶、索引恢复、索引提交和等待通知。
+- 原生快照记录历史种子读取的完成批次／事件、已完成目录／发现条目、围栏核对批次／事件。只在相应操作完成后增加计数；没有总量预测或百分比。
+- 每个会话记录阶段累计耗时和最近 16 次阶段转换，另记录最后实际进展距今时长；尚未完成任何工作时该时长为 null。会话退出后耗时冻结，下一次连接另计 attempt。记录保存在进程内，不取代持久连接失败诊断。
+- 事件追赶只在成功提交事件批次后增加游标推进和事件计数。`changed_without_advance` 专门计数“变更通知后的 Pull 未推进”；正常无变更长等待不算停滞，频繁但确实推进的通知不触发额外退避或恢复。
+- 恢复原因区分初始索引、会话边界权限复核、原生游标失效和文件类型变化。普通传输重连沿用已有事件续接策略。
+
+## 进程与桌面接口
+
+新增内部 IPC `IndexProgress`，版本从 13 升至 **14**。FSD 和 worker 必须成对构建、升级；不能把 `.3` 的 IPC13 worker 与新 FSD 混用。旧进程安全接管由升级模块负责。
+
+进度仅包含闭合阶段枚举、尝试次数和数量，不含路径、文件身份、游标、服务器报文或凭据。worker 使用有界队列和 `try_send`，250 ms 合并实际进展，阶段切换与请求结束时尝试补发最后计数。队列饱和时允许遗漏中间观察，不能阻塞网络任务；这些消息不延长请求总超时。RPC 校验计数范围与阶段顺序，取消后的迟到观察不能复活请求，也不能影响下一请求。
+
+会话 D-Bus 保持 `org.drivenative.Client1`：
+
+- `GetOverview` 增加 `initialization` 对象。
+- `GetInitialization` 返回 `schema:1`、`task_id` 与同一 `initialization` 对象，仅取有界进度锁；不获取 Store 或 Control 锁，也不访问 NAS。
+- `ProgressChanged(revision)` 是独立信号，250 ms 内合并真实状态变化。其发送任务独立于原有 Store 状态查询，GUI 不会为进度重新查询文件目录。
+
+主窗口显示当前阶段、实际计数、阶段耗时和上次进展时间；挂载管理器显示阶段并以提示文字显示计数。可见的主窗口在活动初始化阶段每 2 秒读取本地时钟快照，以便长请求期间也能看到已等待多久；这不增加实际完成计数，不访问 NAS。隐藏窗口和等待通知状态不执行此定时读取。
+
+## 验证与边界
+
+合成回归覆盖任务局部观察隔离、有界阶段历史、阶段累计耗时、正常等待与无推进通知区别、IPC 错序／超预算／误路由／超时后迟到消息、IPC 回调释放请求锁、有界发送合并和饱和队列，以及 Store/Control 均被占用时的本地进度读取。
+
+GUI 回归覆盖实际计数呈现、等待状态不误报、GetOverview 悬挂时独立更新、进度不触发目录查询及隐藏窗口停止读取。测试命令：
+
+```bash
+cargo test -p drive-core --all-features --lib snapshot_progress
+cargo test -p drive-runtime --all-features
+QT_QPA_PLATFORM=offscreen PYTHONPATH=desktop python desktop/tests/initialization_gui_tests.py
+QT_QPA_PLATFORM=offscreen PYTHONPATH=desktop python desktop/tests/lazy_gui_tests.py
+```
+
+本分支不连接 NAS，不替换 P0 基线，不关闭性能、完整恢复、Mint 桌面、统一全量同步或候选包验收门槛。实际执行结果由主分支整合报告记录。

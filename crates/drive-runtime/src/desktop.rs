@@ -9,7 +9,7 @@ use std::{
     collections::{HashMap, HashSet},
     io,
     path::{Component, Path},
-    sync::{atomic::Ordering, Arc},
+    sync::{Arc, atomic::Ordering},
 };
 pub const BUS_NAME: &str = "org.drivenative.Client1";
 pub const OBJECT_PATH: &str = "/org/drivenative/Client1";
@@ -339,6 +339,11 @@ pub fn set_transfer_settings(service: &Service, body: &str) -> io::Result<String
     service.set_transfer_limits(&request.expected_version, request.limits)?;
     transfer_settings(service)
 }
+pub fn initialization(service: &Service) -> String {
+    serde_json::json!({"schema":1,"task_id":service.profile.task_id,
+        "initialization":service.bridge.initialization.snapshot()})
+    .to_string()
+}
 pub fn overview(service: &Service) -> io::Result<String> {
     let (state, error, revision) = {
         let c = service.control.lock().unwrap();
@@ -358,6 +363,7 @@ pub fn overview(service: &Service) -> io::Result<String> {
         "download_diagnostics":{"failures_seen":service.bridge.download_failures_seen.load(Ordering::Relaxed),
             "last_failure":service.bridge.last_download_failure.lock().unwrap().as_ref().map(|(kind,code)|serde_json::json!({"kind":kind,"server_code":code}))},
         "connection_diagnostics":service.diagnostics.snapshot(),
+        "initialization":service.bridge.initialization.snapshot(),
         "host":service.profile.host,"username":service.profile.username,"scope_path":service.profile.scope.path}).to_string())
 }
 fn pin(service: &Service, path: &str, value: bool) -> io::Result<()> {
@@ -436,8 +442,11 @@ pub fn directory(service: &Service, path: &str, offset: u32) -> io::Result<Strin
             path,
         )?;
         let total = store.child_node_count(&node.id).map_err(|_| other())?;
-        let entries = store.child_nodes_page(&node.id, offset as usize, 256).map_err(|_| other())?;
-        let paths = entries.into_iter()
+        let entries = store
+            .child_nodes_page(&node.id, offset as usize, 256)
+            .map_err(|_| other())?;
+        let paths = entries
+            .into_iter()
             .map(|r| {
                 if path.is_empty() {
                     r.name
@@ -649,6 +658,10 @@ impl Desktop {
         let s = self.0.clone();
         local(move || overview(&s)).await
     }
+    // Intentionally independent of Store/control: snapshot import can hold Store.
+    fn get_initialization(&self) -> String {
+        initialization(&self.0)
+    }
     async fn get_states(&self, paths: Vec<String>) -> zbus::fdo::Result<String> {
         let s = self.0.clone();
         local(move || states(&s, paths)).await
@@ -679,6 +692,11 @@ impl Desktop {
     }
     #[zbus(signal)]
     pub async fn status_changed(
+        emitter: &zbus::object_server::SignalEmitter<'_>,
+        revision: u64,
+    ) -> zbus::Result<()>;
+    #[zbus(signal)]
+    pub async fn progress_changed(
         emitter: &zbus::object_server::SignalEmitter<'_>,
         revision: u64,
     ) -> zbus::Result<()>;

@@ -308,7 +308,10 @@ pub async fn serve(socket: UnixStream) -> io::Result<()> {
                         }
                         Command::RecoverySnapshot => {
                             use std::io::{Seek, Write};
-                            let snapshot = session.recovery_snapshot().await?;
+                            let progress = crate::index_progress::Reporter::new(request_id, output.clone());
+                            let snapshot = drive_core::snapshot_progress::scope(progress.observer(), session.recovery_snapshot()).await;
+                            progress.flush();
+                            let snapshot = snapshot?;
                             let bytes = serde_json::to_vec(&snapshot)?;
                             if bytes.len() > 512 * 1024 * 1024 {
                                 return Err(drive_core::Error::State(

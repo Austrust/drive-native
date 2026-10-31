@@ -31,6 +31,7 @@ from .wizard import SetupWizard
 from .credentials import secret_job
 from .lifecycle import ServiceLauncher, same_task
 from .upgrade import BackendUpgrade
+from .initialization import progress_text
 
 STATUS = {
     "download_retry": ("下载失败 · 将重试", "#bc8425"),
@@ -111,6 +112,8 @@ class MainWindow(QMainWindow):
         self.view_generation = 0
         self.rows = []
         self.loading = False
+        self.progress_loading = False
+        self.progress_again = False
         self.refresh_again = False
         self.pending_password = None
         self.auto_unlock_attempted = False
@@ -200,6 +203,10 @@ class MainWindow(QMainWindow):
         self.pending_value = self.card(cards, "待处理操作", "—")
         self.availability_value = self.card(cards, "当前目录本地可用", "按需查询")
         content.addLayout(cards)
+        self.progress_label = QLabel()
+        self.progress_label.setWordWrap(True)
+        self.progress_label.hide()
+        content.addWidget(self.progress_label)
         self.banner = QLabel()
         self.banner.setWordWrap(True)
         self.banner.setObjectName("message")
@@ -255,6 +262,12 @@ class MainWindow(QMainWindow):
         self.refresh_timer.setInterval(100)
         self.refresh_timer.timeout.connect(self.refresh)
         self.bus.changed.connect(self.schedule_refresh)
+        self.bus.progress_changed.connect(self.refresh_progress)
+        # This reads only the local monotonic clocks while a phase is active.
+        # It never increments completed work or starts a NAS request.
+        self.progress_timer = QTimer(self)
+        self.progress_timer.setInterval(2000)
+        self.progress_timer.timeout.connect(self.refresh_progress)
         self.bus.availability.connect(self.service_availability)
         for label in self.findChildren(QLabel):
             label.setTextFormat(Qt.PlainText)
@@ -274,9 +287,11 @@ class MainWindow(QMainWindow):
     def showEvent(self, event):
         super().showEvent(event)
         self.schedule_refresh()
+        self.refresh_progress()
 
     def hideEvent(self, event):
         self.refresh_timer.stop()
+        self.progress_timer.stop()
         self.refresh_again = False
         self.view_generation += 1
         super().hideEvent(event)
@@ -478,7 +493,39 @@ class MainWindow(QMainWindow):
             self.refresh_again = True
             return
         self.loading = True
+        self.refresh_progress()
         self.bus.call("GetOverview", callback=self.received_overview)
+
+    def refresh_progress(self):
+        if not self.isVisible():
+            return
+        if self.progress_loading:
+            self.progress_again = True
+            return
+        self.progress_loading = True
+
+        def received(data, error):
+            self.progress_loading = False
+            if (not error and self.isVisible() and self.profile
+                    and data.get("task_id") == self.profile.get("task_id")):
+                self.render_progress(data.get("initialization"))
+            if self.progress_again:
+                self.progress_again = False
+                QTimer.singleShot(100, self.refresh_progress)
+
+        self.bus.call("GetInitialization", callback=received)
+
+    def render_progress(self, progress):
+        title, detail = progress_text(progress)
+        self.progress_label.setText(f"{title}\n{detail}" if title else "")
+        self.progress_label.setVisible(bool(title))
+        if title and progress.get("phase") != "waiting" and self.isVisible():
+            if not self.progress_timer.isActive():
+                self.progress_timer.start()
+        else:
+            self.progress_timer.stop()
+        if title and self.overview.get("connection") in ("connecting", "online"):
+            self.connection_value.setText(title)
 
     def received_overview(self, data, error):
         if error:
@@ -488,6 +535,7 @@ class MainWindow(QMainWindow):
         self.overview = data
         state = data["connection"]
         self.connection_value.setText(CONNECTION.get(state, "需要检查"))
+        self.render_progress(data.get("initialization"))
         self.pending_value.setText(str(data["pending_operations"]))
         self.account.setText(f"{data.get('username','')}\n{data.get('host','')}")
         self.configure.setText("解锁 / 重新登录")
