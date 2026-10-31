@@ -5,7 +5,7 @@ use drive_runtime::{
 };
 use std::{
     fs,
-    os::unix::fs::PermissionsExt,
+    os::unix::fs::{MetadataExt, PermissionsExt},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -34,7 +34,28 @@ fn fixture(mode: &str) -> (tempfile::TempDir, Arc<Service>) {
     let peer = root.path().join("peer");
     fs::create_dir(&peer).unwrap();
     let worker = peer.join("worker");
-    fs::write(&worker, include_str!("fixtures/diagnostic_worker.py")).unwrap();
+    // Exercise the actual Service -> pinned ELF -> WorkerProcess path. A
+    // shebang script cannot reopen its image fd after CLOEXEC has closed it.
+    let loader = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/diagnostic_worker_loader.c");
+    let compiled = std::process::Command::new("cc")
+        .args(["-std=c11", "-Wall", "-Wextra", "-Werror", "-O2"])
+        .arg(loader)
+        .arg("-o")
+        .arg(&worker)
+        .output()
+        .expect("the test-only ELF loader requires the existing C linker toolchain");
+    assert!(
+        compiled.status.success(),
+        "test-only ELF loader compilation failed: {}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+    assert!(fs::read(&worker).unwrap().starts_with(b"\x7fELF"));
+    fs::write(
+        peer.join("diagnostic_worker.py"),
+        include_str!("fixtures/diagnostic_worker.py"),
+    )
+    .unwrap();
     fs::set_permissions(&worker, fs::Permissions::from_mode(0o700)).unwrap();
     fs::write(peer.join("mode"), mode).unwrap();
     let state = root.path().join("state");
@@ -91,6 +112,39 @@ fn fixture(mode: &str) -> (tempfile::TempDir, Arc<Service>) {
         writable: false,
     };
     (root, Service::new(profile, store, worker).unwrap())
+}
+
+#[test]
+fn supervisor_uses_original_pinned_elf_after_install_path_is_replaced() {
+    let (root, service) = fixture("auth");
+    let worker = root.path().join("peer/worker");
+    let original = fs::metadata(&worker).unwrap();
+    let replacement = root.path().join("peer/replacement");
+    fs::copy("/bin/false", &replacement).unwrap();
+    fs::rename(replacement, &worker).unwrap();
+    assert_ne!(fs::metadata(&worker).unwrap().ino(), original.ino());
+    let running = Running::start(&service);
+    service.unlock("synthetic-private-input".into()).unwrap();
+    let file = root.path().join("state/connection-diagnostics.json");
+    wait_for(|| file.exists());
+    service.pause().unwrap();
+    let saved: serde_json::Value = serde_json::from_slice(&fs::read(file).unwrap()).unwrap();
+    assert_eq!(saved["last_failure"]["stage"], "authenticate");
+    assert_eq!(
+        saved["last_failure"]["cause"]["kind"],
+        "authentication_or_protocol"
+    );
+    // /bin/false cannot produce Connect/Failed. This proves execution reached
+    // the original ELF through the real supervisor, not a fallback script path.
+    assert!(
+        fs::read_to_string(root.path().join("peer/commands.jsonl"))
+            .unwrap()
+            .contains("Connect")
+    );
+    let audit: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.path().join("peer/startup.json")).unwrap()).unwrap();
+    assert_eq!(audit["inherited_image_fd"], false);
+    drop(running);
 }
 
 fn wait_for(mut check: impl FnMut() -> bool) {

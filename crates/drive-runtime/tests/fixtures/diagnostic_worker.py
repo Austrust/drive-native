@@ -1,12 +1,23 @@
 #!/usr/bin/python3
 """Synthetic local IPC peer. No network connections and no request logging."""
 import json
+import os
 import pathlib
 import socket
 import struct
 import time
 
 root = pathlib.Path(__file__).resolve().parent
+# The ELF launcher must not weaken the production image's CLOEXEC boundary.
+targets = {str(root / "worker"), str(root / "worker") + " (deleted)"}
+inherited_image_fd = False
+for descriptor in pathlib.Path("/proc/self/fd").iterdir():
+    try:
+        inherited_image_fd |= os.readlink(descriptor) in targets
+    except FileNotFoundError:
+        pass
+assert not inherited_image_fd, "pinned worker image leaked into the interpreter"
+(root / "startup.json").write_text(json.dumps({"inherited_image_fd": inherited_image_fd}))
 mode = (root / "mode").read_text().strip()
 peer = socket.socket(fileno=0)
 
