@@ -1,3 +1,13 @@
+# 0.1.0~dev20261031.5：原生恢复与快照导入修复
+
+同一次原生恢复复用已完成的事件 seed 边界，继续枚举并核对事件，不跨重连冒用旧边界。完整快照采用事务内一次失效与 prepared statements 复用；[固定配对测试](validation/status-write-cost-003/REPORT.md)确认 21 万节点导入耗时改善，保留前两失败窗口和增量写入开销。
+
+本批还包含有界 WAL 读取和带核验票据的瞬态状态基础，**没有切换当前桌面状态查询路径**。这些模块不等于 Nemo 全树性能或 Personal 初始化已经验收。MFM 真实连接、普通目录全同步、Mint 实机和最终数据安全/长期关卡继续开放。最终包构建与安装验证见发行附件 `VALIDATION.json`。
+
+schema 18、IPC 14 不变。保存并关闭挂载中的文件，暂停任务后安装新包；在新版 GUI 中使用“应用后台更新”，确认挂载与暂停状态后再恢复。正常升级保留配置、数据库、缓存和未上传草稿，不要求清缓存。完整步骤见[升级恢复](UPGRADE_RECOVERY.md)。本包为开发版，不是 rc1。
+
+---
+
 # 0.1.0~dev20261031.4：目录视图、缓存关闭与升级恢复
 
 本批整合[稳定目录视图](FUSE_DIRECTORY_VIEWS.md)、[完整缓存只读关闭隔离](CACHED_CLOSE_ISOLATION.md)、[初始化阶段进度](INITIALIZATION_PROGRESS.md)和[暂停与后台升级](UPGRADE_RECOVERY.md)。420项Rust、71项GUI、13项debug/release显式FUSE、安装升级与桌面验证完成，见[包验证及保留失败](validation/native-package-004/REPORT.md)；可下载状态以GitHub Releases为准。
