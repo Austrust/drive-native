@@ -17,8 +17,10 @@
 `ContentKey::from_content` 从实际本地正文提取身份，按以下优先级选择：
 
 - dirty draft：`token + base + generation`；checkpoint 与远端期望版本不属于正文身份。
-- dirty blob：内容存储 hash。
-- 完整 blob：内容存储 hash 与本地版本 `local_version`。
+- dirty blob：不透明的 blob 存储标识（`blob_id`）。
+- 完整 blob：不透明的 blob 存储标识与本地版本 `local_version`。
+
+Store 写入时计算摘要，并在调用方提供 expected 时核对长度与摘要；blob 文件名始终是随机 UUID，并非正文 SHA-256。这里比较存储对象身份，不按内容摘要合并对象；字段名称也使用 `blob_id`，避免运行层把摘要误当缓存文件标识。
 
 仅远端版本推进时，旧完整 blob 仍可离线使用。数据库重新投影同一实际 key 保留已有可用性；实际 key 改变则需要新证据。真实 `create_local_file` 使用非空的 `local-create-v1`，零字节 dirty blob 与该文件后续 draft 均能产生有效 key。
 

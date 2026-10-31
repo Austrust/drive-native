@@ -333,7 +333,7 @@ fn stale_inbound_body_observation_cannot_overwrite_current_verified_content() {
     let mut through = from.clone();
     through.sequence += 1;
     let obsolete = ContentKey::Blob {
-        hash: "obsolete-body".into(),
+        blob_id: "obsolete-body".into(),
         version: Some("obsolete-version".into()),
     };
     i.apply_transient(TransientBatch {
@@ -584,7 +584,7 @@ fn folded_unbind_then_different_body_cannot_hide_explicit_proof_revocation() {
     assert!(i.query("file").unwrap().offline_available);
     s.bind_content("f", None).unwrap();
     let different = ContentKey::DirtyBlob {
-        hash: "other".into(),
+        blob_id: "other".into(),
     };
     s.bind_content("f", Some(different.clone())).unwrap();
     record(&mut s, "f", &different, ContentResult::Complete).unwrap();
@@ -611,7 +611,7 @@ fn gap_snapshot_revokes_unproven_old_body_when_unbind_history_is_gone() {
     let after = i.stamp().transient.clone().unwrap();
     s.bind_content("f", None).unwrap();
     let different = ContentKey::DirtyBlob {
-        hash: "different".into(),
+        blob_id: "different".into(),
     };
     s.bind_content("f", Some(different.clone())).unwrap();
     record(&mut s, "f", &different, ContentResult::Complete).unwrap();
