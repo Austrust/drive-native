@@ -47,7 +47,7 @@ trigger 与原数据的语句、事务和 savepoint 一同提交或回滚。公�
 
 本日志记录**失效事实，不是完整历史节点状态**。读取后在同一 Store 串行边界内投影当前 atom，合并所有旧新位置；处理至选定水位后才发布派生索引。页面边界不代表事务边界，不能发布半个事务的树。未知/丢弃历史必须重建，不能跳到最新 cursor 冒充补齐。
 
-本批尚未实现 Store 释放前的变化发布、单消费者聚合、重建与差分追赶、实际内容存在核验、同代路径索引或 flights epoch/seq。SQLite trigger 不能捕捉运行中下载生命周期或外部删除缓存文件。现有 desktop batch 保留作后续 oracle，不能仅因新增日志就删除旧计算或宣布 P1 完成。
+后续已补[Store guard 的提交失效及唤醒](STORE_COMMIT_NOTIFICATIONS.md)、[同边界投影](STATUS_PROJECTION.md)和[纯树同代路径/摘要](INCREMENTAL_STATUS_INDEX.md)。后台调度、重建与差分追赶、实际内容核验、跨线程发布及 flights epoch/seq 尚未闭环。SQLite trigger 不能捕捉运行中下载生命周期或外部删除缓存文件；现有 desktop batch 继续运行并作为对照，不能仅因新增基础模块就宣布 P1 完成。
 
 ## 验证
 
