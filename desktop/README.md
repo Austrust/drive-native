@@ -10,4 +10,6 @@
 - [drive_native_gui](drive_native_gui/)
 - [gio](gio/)
 - [nemo](nemo/)
+- [nautilus](nautilus/)：Nautilus 4入口，桌面验收待做。
+- [filemanager](filemanager/)：两个桌面共用的异步状态与菜单。
 - [tests](tests/)

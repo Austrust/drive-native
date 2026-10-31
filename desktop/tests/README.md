@@ -7,6 +7,7 @@
 - [conflict_gui_live.py](conflict_gui_live.py)
 - [conflict_gui_tests.py](conflict_gui_tests.py)
 - [gui_unit_tests.py](gui_unit_tests.py)
+- [filemanager_provider_tests.py](filemanager_provider_tests.py)：模拟D-Bus、真实GI；分别用 `DRIVE_NATIVE_TEST_FILEMANAGER=nemo` 或 `nautilus` 运行。
 - [installed_package_desktop.py](installed_package_desktop.py)
 - [keyring_control.py](keyring_control.py)
 - [live_gui_test.py](live_gui_test.py)

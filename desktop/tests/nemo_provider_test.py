@@ -124,9 +124,20 @@ items[2].emit("activate")
 wait(lambda: "drive-native-online" in folder.emblems, "release menu and online emblem")
 stage("release complete")
 before_retry = overview()["downloads_started"]
-before_refresh = folder.invalidations
+retry_completed = []
+# Observe the actual menu D-Bus completion without requiring icon churn.
+for task in provider.tasks.values():
+    original_call = task._call
+    def observe(method, arguments, callback, original=original_call):
+        def done(data, failed):
+            if method == "RetryDownloads":
+                retry_completed.append(not failed)
+            callback(data, failed)
+        original(method, arguments, done)
+    task._call = observe
 items[3].emit("activate")
-wait(lambda: folder.invalidations > before_refresh, "retry menu local response")
+wait(lambda: bool(retry_completed), "retry menu local response")
+assert all(retry_completed)
 assert overview()["downloads_started"] == before_retry
 assert folder.invalidations >= 3
 assert overview()["pending_operations"] == before["pending_operations"]

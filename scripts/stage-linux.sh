@@ -17,6 +17,8 @@ gio_dir=$(pkg-config --variable=giomoduledir gio-2.0)
 test "$gio_dir" = /usr/lib/x86_64-linux-gnu/gio/modules
 install -Dm755 "$build/gio/libdrive-native-probe.so" "$stage$gio_dir/libdrive-native-probe.so"
 install -Dm644 desktop/nemo/drive_native_nemo.py "$stage/usr/share/nemo-python/extensions/drive_native_nemo.py"
+install -Dm644 desktop/nautilus/drive_native_nautilus.py "$stage/usr/share/nautilus-python/extensions/drive_native_nautilus.py"
+install -Dm644 desktop/filemanager/drive_native_provider.py "$stage/usr/share/drive-native/filemanager/drive_native_provider.py"
 install -d "$stage/usr/share/icons/hicolor/scalable/emblems"
 install -m644 desktop/nemo/icons/*.svg "$stage/usr/share/icons/hicolor/scalable/emblems/"
 install -Dm644 desktop/nemo/icons/drive-native-sync.svg "$stage/usr/share/icons/hicolor/scalable/apps/drive-native.svg"
