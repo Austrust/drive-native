@@ -2,7 +2,7 @@
 import os
 import subprocess
 import unittest
-from PySide6.QtCore import QCoreApplication, QObject, Signal
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, Signal
 from drive_native_gui.upgrade import BackendUpgrade
 
 app = QCoreApplication([])
@@ -44,9 +44,26 @@ class UpgradeTest(unittest.TestCase):
     def tearDown(self):
         self.upgrade.timer.stop()
         self.upgrade.detect_timer.stop()
-        if self.upgrade.pidfd is not None:
-            os.close(self.upgrade.pidfd)
+        self.upgrade.pidfd = None
         self.upgrade.deleteLater()
+
+    def test_parent_destruction_closes_controller_pidfd(self):
+        parent = QObject()
+        controller = BackendUpgrade(self.bus, self.launcher, parent, save_pause=lambda: None)
+        fd = os.pidfd_open(os.getpid())
+        controller.pidfd = fd
+        parent.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        with self.assertRaises(OSError):
+            os.fstat(fd)
+
+    def test_replacing_pidfd_releases_previous_handle(self):
+        first, second = os.pidfd_open(os.getpid()), os.pidfd_open(os.getpid())
+        self.upgrade.pidfd = first
+        self.upgrade.pidfd = second
+        with self.assertRaises(OSError):
+            os.fstat(first)
+        os.fstat(second)
 
     def test_failed_pause_never_stops_or_starts(self):
         self.upgrade.begin()
@@ -92,7 +109,7 @@ class UpgradeTest(unittest.TestCase):
         process = subprocess.Popen(["/bin/sleep", "30"])
         try:
             self.upgrade.pidfd = os.pidfd_open(process.pid)
-            self.upgrade.begin()
+            self.upgrade.begin({"task_id": "synthetic"})
             self.bus.calls[0][1](None, None)
             self.upgrade._wait_exit()
             self.assertEqual(self.launcher.starts, 0)
@@ -101,11 +118,60 @@ class UpgradeTest(unittest.TestCase):
             self.upgrade._wait_exit()
             self.assertEqual(self.launcher.starts, 1)
             self.launcher.completed.emit(None)
+            self.assertEqual(self.results, [])
+            self.bus.owner = ":synthetic.2"
+            self.upgrade._verify_installed_owner = lambda owner, callback: callback(owner, True)
+            self.upgrade._confirm_started()
+            self.assertEqual(self.bus.calls[-1][0], "GetOverview")
+            self.bus.calls[-1][1]({"task_id": "synthetic", "connection": "paused", "mounted": True}, None)
             self.assertEqual(self.results, [None])
         finally:
             if process.poll() is None:
                 process.terminate()
                 process.wait()
+
+    def confirmation(self):
+        self.upgrade.active = True
+        self.upgrade.intent_profile = {"task_id": "synthetic"}
+        self.launcher.completed.emit(None)
+        self.assertEqual(self.results, [])
+        self.bus.owner = ":synthetic.2"
+        self.upgrade._confirm_started()
+        self.assertEqual(self.bus.calls[-1][0], "GetOverview")
+        return self.bus.calls[-1][1]
+
+    def test_spawn_success_does_not_confirm_missing_backend(self):
+        self.upgrade.active = True
+        self.launcher.completed.emit(None)
+        self.assertEqual(self.results, [])
+        self.upgrade.elapsed = 239
+        self.upgrade._wait_exit()
+        self.assertTrue(self.results[0])
+
+    def test_new_owner_with_wrong_task_is_not_confirmed(self):
+        self.confirmation()({"task_id": "other", "connection": "paused", "mounted": True}, None)
+        self.assertTrue(self.results[0])
+
+    def test_new_owner_must_be_paused_and_mounted(self):
+        for state, mounted in [("online", True), ("paused", False)]:
+            with self.subTest(state=state, mounted=mounted):
+                self.upgrade.confirm_pending = False
+                self.bus.owner = ":synthetic.1"
+                self.confirmation()({"task_id": "synthetic", "connection": state, "mounted": mounted}, None)
+                self.assertEqual(self.results, [])
+
+    def test_unmatched_binary_or_replaced_owner_does_not_confirm(self):
+        received = self.confirmation()
+        checks = []
+        self.upgrade._verify_installed_owner = lambda owner, callback: checks.append((owner, callback))
+        received({"task_id": "synthetic", "connection": "paused", "mounted": True}, None)
+        self.assertEqual(self.results, [])
+        owner, callback = checks[0]
+        callback(owner, False)
+        self.assertEqual(self.results, [])
+        self.bus.owner = ":synthetic.3"
+        callback(owner, True)
+        self.assertEqual(self.results, [])
 
 
 if __name__ == "__main__":

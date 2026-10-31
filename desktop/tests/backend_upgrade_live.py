@@ -78,8 +78,9 @@ try:
     assert upgrade.begin(profile)
     wait(lambda: outcomes, 40)
     assert outcomes == [None], outcomes
-    wait(lambda: bus.owner and bus.owner != previous_owner)
-    wait(lambda: Path(profile["mount"]).is_mount())
+    # The controller must establish these conditions before reporting completion.
+    assert bus.owner and bus.owner != previous_owner
+    assert Path(profile["mount"]).is_mount()
     overview = call("GetOverview")
     assert overview["connection"] == "paused"
     assert overview["pending_operations"] == 1
