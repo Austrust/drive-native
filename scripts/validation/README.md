@@ -4,6 +4,39 @@
 
 [upgrade_pause_probe.py](upgrade_pause_probe.py) 在私有 `dbus-run-session` 与全新目录运行两个安装包的合成 FUSE 接管探针；不使用 NAS 或钥匙环。`--fixed-handover --new-binaries <dir>` 可用隔离开发二进制覆盖新包组件，验证旧版暂停标记迁移与再次升级；该模式导入 GUI 的暂停标记函数，应设置 `PYTHONPATH=desktop`。组件覆盖测试不等于最终安装包验收。
 
+## 实际安装文件与 managed 用户服务接管
+
+[managed_upgrade_probe.py](managed_upgrade_probe.py) 已准备，当前仅完成静态检查，尚未执行服务或安装验证。它要求宿主有可用的 systemd 用户总线、FUSE 和 PySide6；使用与新包对应的公开 GUI 源码、公开 `multi_mount_fixture` 构建器，以及一个已安装旧 `.3` 的独立 chroot 根。测试用户需要读取和执行 chroot 中的安装文件。不要使用 `dbus-run-session`，因为本测试使用宿主用户 manager 的总线。
+
+工具只操作新建的合成夹具及唯一 `drive-native-upgrade-test-<随机ID>.service`，不 enable，不修改宿主安装包或全局 D-Bus 环境，不访问 NAS/钥匙环。服务的配置、状态、挂载、运行时目录和 D-Bus 名称单独隔离。`--load-log` 可追加带数字时间的负载记录。
+
+```sh
+PYTHONPATH="$PWD/desktop" .venv-build/bin/python scripts/validation/managed_upgrade_probe.py run \
+  --root /absolute/new-test-run \
+  --fixture-builder "$PWD/target/release/examples/multi_mount_fixture" \
+  --installation-root /absolute/isolated-chroot
+```
+
+旧后台写入并持久保存一份合成编辑、暂停后，脚本发布 `ready-for-upgrade.json`，等待父调度在该 chroot 中安装新 `.deb`。安装完成后，由**同一个非 root 测试用户**在另一个终端发布继续标记：
+
+```sh
+python3 scripts/validation/managed_upgrade_probe.py continue \
+  --root /absolute/new-test-run --expected-version '<新包完整版本>'
+```
+
+工具核对 dpkg 版本及文件校验，再通过实际 `BackendUpgrade` 和 `ServiceLauncher(managed=True)` 正常接管，检查 owner、进程 inode、任务、暂停、挂载、游标、待上传操作和正文。成功后正常停止自有服务，仅移除指向本次定义的自有 unit 链接；数据库、草稿和报告保留。
+
+失败或超时写入 `failure.json`，保留现场，不强杀后台。确认现场后可由同一用户使用以下命令尝试正常清理；仍无法正常退出时继续保留，不删除 unit 或状态：
+
+```sh
+PYTHONPATH="$PWD/desktop" .venv-build/bin/python scripts/validation/managed_upgrade_probe.py cleanup \
+  --root /absolute/new-test-run
+```
+
+`result.json` 的成功只表示本次合成 managed 安装接管通过，不替代 NAS、Mint、故障注入或长期验收。
+
+## 内容与状态判定
+
 ```sh
 python3 scripts/validation/test_verify_fixture.py
 python3 scripts/validation/verify_fixture.py --root /path/to/quiescent-fixture --manifest expected.json --state /path/to/captured-state
