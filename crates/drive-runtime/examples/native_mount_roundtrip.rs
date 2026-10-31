@@ -11,7 +11,7 @@ use sproto::{
 };
 use std::{
     io::Read,
-    sync::{Arc, Mutex, atomic::Ordering},
+    sync::{Arc, atomic::Ordering},
     time::{Duration, Instant},
 };
 #[tokio::main]
@@ -99,7 +99,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap()
         .join("drive-native-worker");
     let mut worker = WorkerProcess::start(&worker_path)?;
-    let store = Arc::new(Mutex::new(Store::open(scratch.path().join("state"))?));
+    let store = Arc::new(drive_core::SharedStore::new(Store::open(scratch.path().join("state"))?));
     let password_for_restart = password.clone();
     let device_id = uuid::Uuid::new_v4().to_string();
     let bridge = Arc::new(Bridge::connect(

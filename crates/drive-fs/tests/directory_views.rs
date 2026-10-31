@@ -3,7 +3,7 @@ use drive_core::{Node, NodeMetadata, Store};
 use std::{
     fs::{File, OpenOptions},
     os::{fd::AsRawFd, unix::fs::OpenOptionsExt},
-    sync::{Arc, Mutex, mpsc},
+    sync::{Arc, mpsc},
     time::Duration,
 };
 
@@ -84,7 +84,7 @@ fn directory_continuation_and_seek_keep_one_view_without_waiting_for_store() {
     let mut nodes = vec![make("root")];
     nodes.extend((0..2000).map(|n| make(&format!("item-{n:04}"))));
     s.install_remote_snapshot(&nodes, "1", "s").unwrap();
-    let store = Arc::new(Mutex::new(s));
+    let store = Arc::new(drive_core::SharedStore::new(s));
     let fs = drive_fs::CacheFilesystem::new(store.clone(), "root", uid, gid).unwrap();
     let session = fuser::spawn_mount2(
         fs,

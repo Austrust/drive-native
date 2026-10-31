@@ -1,6 +1,8 @@
 use crate::{rpc::Rpc, wire::*};
 use drive_core::download_jobs::DownloadFailureKind;
-use drive_core::{Change, DownloadTicket, Node, ReadHandle, Store};
+use drive_core::{Change, DownloadTicket, Node, ReadHandle};
+#[cfg(test)]
+use drive_core::Store;
 use std::{
     collections::HashMap,
     io,
@@ -76,7 +78,7 @@ struct Flight {
     changed: Condvar,
 }
 pub struct Bridge {
-    pub store: Arc<Mutex<Store>>,
+    pub store: Arc<drive_core::SharedStore>,
     recovery_gate: std::sync::RwLock<()>,
     event_gate: Mutex<()>,
     connection: Mutex<Arc<Rpc>>,
@@ -124,7 +126,7 @@ impl Bridge {
         Ok(())
     }
 
-    pub fn connect(store: Arc<Mutex<Store>>, rpc: Arc<Rpc>, login: Login) -> io::Result<Self> {
+    pub fn connect(store: Arc<drive_core::SharedStore>, rpc: Arc<Rpc>, login: Login) -> io::Result<Self> {
         let scope = serde_json::to_string(&login.scope)?;
         let restore = Self::authenticate(&rpc, login)?;
         store
@@ -153,7 +155,7 @@ impl Bridge {
         }
     }
     /// Cached files remain mountable before credentials or a network exist.
-    pub fn offline(store: Arc<Mutex<Store>>) -> io::Result<Self> {
+    pub fn offline(store: Arc<drive_core::SharedStore>) -> io::Result<Self> {
         let (a, b) = UnixStream::pair()?;
         let rpc = Arc::new(Rpc::new(a)?);
         rpc.close();
@@ -213,7 +215,7 @@ impl Bridge {
         let _ = self.notifications.try_send(Invalidation::Inode(ino));
         Ok(())
     }
-    fn from_connection(store: Arc<Mutex<Store>>, rpc: Arc<Rpc>) -> io::Result<Self> {
+    fn from_connection(store: Arc<drive_core::SharedStore>, rpc: Arc<Rpc>) -> io::Result<Self> {
         let notifier: Arc<Mutex<Option<fuser::Notifier>>> = Arc::new(Mutex::new(None));
         let target = notifier.clone();
         let (notifications, rx) = std::sync::mpsc::sync_channel(1024);
@@ -1318,7 +1320,7 @@ mod download_scheduler_tests {
                     )
                     .unwrap();
             }
-            let store = Arc::new(Mutex::new(store));
+            let store = Arc::new(drive_core::SharedStore::new(store));
             let (socket, peer) = UnixStream::pair().unwrap();
             let bridge =
                 Bridge::from_connection(store.clone(), Arc::new(Rpc::new(socket).unwrap()))
@@ -1383,7 +1385,7 @@ mod download_scheduler_tests {
         if !foreground {
             store.pin("file", true).unwrap();
         }
-        let store = Arc::new(Mutex::new(store));
+        let store = Arc::new(drive_core::SharedStore::new(store));
         let (a, mut b) = UnixStream::pair().unwrap();
         b.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
         let bridge = Arc::new(

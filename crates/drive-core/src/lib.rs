@@ -6,6 +6,8 @@ pub mod filesystem;
 pub mod native;
 pub mod state;
 pub use state::*;
+pub mod shared_store;
+pub use shared_store::SharedStore;
 
 pub mod drafts;
 

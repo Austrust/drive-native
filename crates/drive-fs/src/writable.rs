@@ -19,7 +19,7 @@ fn content(store: &Store, ino: u64) -> drive_core::Result<(String, OpenContent)>
     Ok((record.node.id, body))
 }
 fn draft(
-    store: &Arc<Mutex<Store>>,
+    store: &Arc<drive_core::SharedStore>,
     handles: &Arc<Mutex<Handles>>,
     updates: &Arc<Mutex<()>>,
     hydrator: &Option<Arc<dyn Hydrator>>,

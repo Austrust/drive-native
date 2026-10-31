@@ -109,7 +109,7 @@ impl Default for Views {
     }
 }
 impl Views {
-    fn open(&self, store: &Mutex<Store>, ino: u64) -> Result<u64, i32> {
+    fn open(&self, store: &drive_core::SharedStore, ino: u64) -> Result<u64, i32> {
         let _building = self.builder.lock().unwrap();
         {
             let table = self.table.lock().unwrap();
@@ -260,7 +260,7 @@ mod tests {
             .install_remote_snapshot(&[node("root"), node("a")], "1", "s")
             .unwrap();
         store.ensure_fs_root("root").unwrap();
-        let store = Mutex::new(store);
+        let store = drive_core::SharedStore::new(store);
         let views = Views::default();
         let first = views.open(&store, 1).unwrap();
         let second = views.open(&store, 1).unwrap();
@@ -313,7 +313,7 @@ mod tests {
             )
             .unwrap();
         store.ensure_fs_root("root").unwrap();
-        let store = Mutex::new(store);
+        let store = drive_core::SharedStore::new(store);
         let views = Views::default();
         views.charged.store(MAX_BYTES, Ordering::Release);
         let revision = store.lock().unwrap().local_revision();
@@ -400,7 +400,7 @@ mod tests {
             .unwrap();
         store.ensure_fs_root("root").unwrap();
         let views = Views::default();
-        let fh = views.open(&Mutex::new(store), 1).unwrap();
+        let fh = views.open(&drive_core::SharedStore::new(store), 1).unwrap();
         let reader = views.get(1, fh).unwrap();
         let charged = views.charged.clone();
         let allocated = views.allocated.clone();

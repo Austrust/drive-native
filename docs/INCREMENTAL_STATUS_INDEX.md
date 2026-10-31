@@ -40,6 +40,8 @@
 
 所有 Store 调用边界都需要提交后唤醒，包括返回 `Err` 的边界：草稿方法可能先提交 dirty 再发生文件 IO 错误，快照安装可能先提交再在后续更新失败，逐个缓存释放也可能中途失败。触发器已保留这些提交；消费者应比较调用前后的**已提交语义水位**并在释放写入边界前标记待处理/唤醒，不以最外层 `Ok` 为条件。回滚后水位不变，不产生语义变更。必须明确覆盖所有 Store 锁入口，采用统一 guard/执行包装；不能只在 GUI/RPC 成功响应处通知。
 
+统一边界已由 [SharedStore guard](STORE_COMMIT_NOTIFICATIONS.md) 实现并覆盖 runtime/FUSE 共享入口：锁内原子失效，解锁后合并唤醒。投影批次、瞬态订阅、IndexOwner 与桌面发布仍按以下门禁继续实现。
+
 TEMP journal 插入、真实 prune、预算元数据写入仍计入 SQLite `total_changes`。本批同预算 setter 与重复 prune 都在写入前早退；改变预算或真正回收仍可影响旧 `local_revision`。新消费者不得以 `local_revision` 作为提交 stamp，也不得“查询→清理日志→旧粗通知→重建”形成反馈。唤醒依据 journal epoch/sequence/gap，桌面信号依据发布后的 generation；消费到同水位且没有瞬态变化应完全不写、不发信号。
 
 ## 重建、一致性与锁顺序

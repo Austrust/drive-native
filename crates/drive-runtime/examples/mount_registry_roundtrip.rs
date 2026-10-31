@@ -7,7 +7,7 @@ use std::{
     os::unix::fs::{PermissionsExt, symlink},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 struct OwnedChild(Child);
@@ -73,7 +73,7 @@ fn mount(path: &Path, state: &Path) -> Result<fuser::BackgroundSession> {
         &sha256(b"body"),
     )?;
     let fs = drive_fs::CacheFilesystem::new(
-        Arc::new(Mutex::new(store)),
+        Arc::new(drive_core::SharedStore::new(store)),
         "root",
         unsafe { libc::geteuid() },
         unsafe { libc::getegid() },

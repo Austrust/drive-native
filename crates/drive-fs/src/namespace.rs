@@ -118,7 +118,7 @@ pub(super) fn remove(
 }
 
 fn replace_prepared(
-    store: Arc<Mutex<Store>>,
+    store: Arc<drive_core::SharedStore>,
     handles: Arc<Mutex<Handles>>,
     updates: Arc<Mutex<()>>,
     hydrator: Option<Arc<dyn Hydrator>>,

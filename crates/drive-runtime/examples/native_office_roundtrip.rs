@@ -12,13 +12,13 @@ use sproto::{
 use std::{path::Path, process::Command};
 use std::{
     sync::{
-        Arc, Mutex,
+        Arc,
         atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant},
 };
 async fn wait(
-    store: &Arc<Mutex<Store>>,
+    store: &Arc<drive_core::SharedStore>,
     id: &str,
     bridge: &Bridge,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -182,7 +182,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         scope: scope.clone(),
     };
     let mut worker = WorkerProcess::start(&executable)?;
-    let store = Arc::new(Mutex::new(Store::open(scratch.as_path().join("state"))?));
+    let store = Arc::new(drive_core::SharedStore::new(Store::open(scratch.as_path().join("state"))?));
     let bridge = Arc::new(Bridge::connect(store.clone(), worker.rpc.clone(), login())?);
     bridge.pull()?;
     let fs = drive_fs::CacheFilesystem::new(store.clone(), &scope.file_id, uid, gid)?
@@ -358,7 +358,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 async fn wait_queue(
-    store: &Arc<Mutex<Store>>,
+    store: &Arc<drive_core::SharedStore>,
     bridge: &Bridge,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let deadline = Instant::now() + Duration::from_secs(75);

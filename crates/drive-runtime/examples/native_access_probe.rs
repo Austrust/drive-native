@@ -1,7 +1,7 @@
 //! Authorized read-only team-directory regression; never downloads file bodies.
 use drive_core::{Store,native::{NativeReadSession,Scope}};
 use sproto::{Client,client::{Config,Credentials}};
-use std::sync::{Arc,Mutex};
+use std::sync::Arc;
 #[tokio::main]async fn main(){if let Err(e)=run().await {let category=match e{drive_core::Error::Native(sproto::Error::Server{code,..})=>format!("server_{code}"),drive_core::Error::Native(_)=>"native_transport_or_decode".into(),drive_core::Error::State(s)=>s,_=>"local_validation_error".into()};eprintln!("{}",serde_json::json!({"passed":false,"category":category}));std::process::exit(1);}}
 async fn run()->drive_core::Result<()> {
  let password=rpassword::prompt_password("Test account password (not saved): ")?;
@@ -15,7 +15,7 @@ async fn run()->drive_core::Result<()> {
  store.bind_native_scope(&snapshot.restore,&serde_json::to_string(&scope)?)?;store.install_native_snapshot(&snapshot,"")?;store.ensure_fs_root(&scope.file_id)?;
  let visible=store.children(&scope.file_id)?;for entry in &visible {assert!(!snapshot.inaccessible.contains(&entry.node.id));}
  let root_count=visible.len();assert!(root_count>0);
- let mount=tempfile::tempdir()?;let fs=drive_fs::CacheFilesystem::new(Arc::new(Mutex::new(store)),&scope.file_id,unsafe{libc::getuid()},unsafe{libc::getgid()})?;
+ let mount=tempfile::tempdir()?;let fs=drive_fs::CacheFilesystem::new(Arc::new(drive_core::SharedStore::new(store)),&scope.file_id,unsafe{libc::getuid()},unsafe{libc::getgid()})?;
  let mounted=fuser::spawn_mount2(fs,mount.path(),&[fuser::MountOption::RO,fuser::MountOption::FSName("drive-native-access-test".into())])?;
  let entries=std::fs::read_dir(mount.path())?.collect::<std::io::Result<Vec<_>>>()?;assert_eq!(entries.len(),root_count);
  drop(mounted);

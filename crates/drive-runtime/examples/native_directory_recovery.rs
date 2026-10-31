@@ -13,7 +13,7 @@ use sproto::{
     client::{Config, Credentials},
 };
 use std::{
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::{Duration, Instant},
 };
 async fn connect(password: &str) -> Result<Client, Box<dyn std::error::Error>> {
@@ -160,7 +160,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     drop(session);
     drop(a);
     drop(store);
-    let store = Arc::new(Mutex::new(Store::open(&state)?));
+    let store = Arc::new(drive_core::SharedStore::new(Store::open(&state)?));
     assert_eq!(
         store.lock().unwrap().next_directory()?.unwrap().job.origin,
         Some(origin)

@@ -6,7 +6,7 @@ use std::sync::{
     mpsc,
 };
 
-fn fixture(flags: i32) -> (tempfile::TempDir, Arc<Mutex<Store>>, Arc<Mutex<Handles>>) {
+fn fixture(flags: i32) -> (tempfile::TempDir, Arc<drive_core::SharedStore>, Arc<Mutex<Handles>>) {
     let temp = tempfile::tempdir().unwrap();
     let mut store = Store::open(temp.path()).unwrap();
     let root = Node {
@@ -53,7 +53,7 @@ fn fixture(flags: i32) -> (tempfile::TempDir, Arc<Mutex<Store>>, Arc<Mutex<Handl
     };
     (
         temp,
-        Arc::new(Mutex::new(store)),
+        Arc::new(drive_core::SharedStore::new(store)),
         Arc::new(Mutex::new(handles)),
     )
 }

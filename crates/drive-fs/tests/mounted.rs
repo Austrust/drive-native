@@ -2,7 +2,7 @@
 use drive_core::*;
 use std::{
     io::{Read, Seek, SeekFrom},
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 fn node(id: &str, size: u64, version: &str) -> Node {
     Node {
@@ -51,7 +51,7 @@ fn kernel_cache_mount_metadata_reads_version_switch_and_offline_error() {
         &sha256(b"old"),
     )
     .unwrap();
-    let s = Arc::new(Mutex::new(s));
+    let s = Arc::new(drive_core::SharedStore::new(s));
     let fs = drive_fs::CacheFilesystem::new(s.clone(), "root", uid, gid).unwrap();
     let session = fuser::spawn_mount2(
         fs,
@@ -154,7 +154,7 @@ fn kernel_random_write_shared_handles_truncate_fsync_and_recovery() {
         &sha256(b"abcdef"),
     )
     .unwrap();
-    let s = Arc::new(Mutex::new(s));
+    let s = Arc::new(drive_core::SharedStore::new(s));
     let fs = drive_fs::CacheFilesystem::new(s.clone(), "root", uid, gid)
         .unwrap()
         .with_writes_enabled();
@@ -255,7 +255,7 @@ fn kernel_unlink_open_handles_same_name_recreate_and_offline_missing_guard() {
         &sha256(b"old"),
     )
     .unwrap();
-    let s = Arc::new(Mutex::new(s));
+    let s = Arc::new(drive_core::SharedStore::new(s));
     let fs = drive_fs::CacheFilesystem::new(s.clone(), "root", uid, gid)
         .unwrap()
         .with_writes_enabled();
@@ -345,7 +345,7 @@ fn kernel_atomic_replace_keeps_source_inode_and_old_target_handle() {
         &sha256(b"old"),
     )
     .unwrap();
-    let s = Arc::new(Mutex::new(s));
+    let s = Arc::new(drive_core::SharedStore::new(s));
     let fs = drive_fs::CacheFilesystem::new(s.clone(), "root", uid, gid)
         .unwrap()
         .with_writes_enabled();
@@ -414,7 +414,7 @@ fn kernel_permissions_owner_restore_and_local_capacity_are_real() {
     let mut s = Store::open(d.path().join("state")).unwrap();
     s.install_remote_snapshot(&[node("root", 0, "1"), node("a", 3, "1")], "1", "test")
         .unwrap();
-    let s = Arc::new(Mutex::new(s));
+    let s = Arc::new(drive_core::SharedStore::new(s));
     let fs = drive_fs::CacheFilesystem::new(s.clone(), "root", uid, gid)
         .unwrap()
         .with_writes_enabled();
@@ -469,7 +469,7 @@ fn kernel_offline_nested_mkdir_moves_and_restart_preserve_tree_and_child_bytes()
     s.install_remote_snapshot(&[node("root", 0, "1")], "1", "test")
         .unwrap();
     s.pin("root", true).unwrap();
-    let s = Arc::new(Mutex::new(s));
+    let s = Arc::new(drive_core::SharedStore::new(s));
     let fs = drive_fs::CacheFilesystem::new(s.clone(), "root", uid, gid)
         .unwrap()
         .with_writes_enabled();

@@ -158,7 +158,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .join("drive-native-worker");
     let mut worker = drive_runtime::bridge::WorkerProcess::start(&worker_path)?;
     let state_dir = tmp.path().join("runtime");
-    let shared = std::sync::Arc::new(std::sync::Mutex::new(Store::open(&state_dir)?));
+    let shared = std::sync::Arc::new(drive_core::SharedStore::new(Store::open(&state_dir)?));
     let bridge = std::sync::Arc::new(drive_runtime::bridge::Bridge::connect(
         shared.clone(),
         worker.rpc.clone(),

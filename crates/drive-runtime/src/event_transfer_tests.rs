@@ -29,7 +29,7 @@ fn event_subscription_is_not_blocked_by_pending_hydration() {
     let (socket, mut peer) = UnixStream::pair().unwrap();
     peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
     let bridge = Bridge::from_connection(
-        Arc::new(Mutex::new(store)),
+        Arc::new(drive_core::SharedStore::new(store)),
         Arc::new(Rpc::new(socket).unwrap()),
     )
     .unwrap();
