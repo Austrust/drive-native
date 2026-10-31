@@ -1,3 +1,14 @@
+drive-native (0.1.0~dev20261031.3) unstable; urgency=medium
+
+  * Track native notification receive progress instead of a fixed total deadline.
+  * Persist classified connection diagnostics before worker cleanup.
+  * Isolate held cached and draft reads from metadata queue contention.
+  * Keep handle-table locks out of Store and file IO; preserve draft registration.
+  * Keep schema 18; require paired fsd/worker IPC 13 upgrade.
+  * Development build: full sync and final reliability/performance gates remain open.
+
+ -- Drive Native contributors <noreply@example.invalid>  Sat, 31 Oct 2026 19:05:00 +0800
+
 drive-native (0.1.0~dev20261031.2) unstable; urgency=medium
 
   * Close wrapped GIO enumerators before releasing the underlying object.

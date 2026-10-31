@@ -111,6 +111,13 @@ impl Store {
     pub fn open_dirty_draft(&self, id: &str) -> Result<Option<DraftHandle>> {
         self.draft_handle(id, true)
     }
+    /// Register a newly opened handle with an already promoted working copy,
+    /// including the interval before its first write. Older opened versions
+    /// must not be rebound to a draft based on newer remote content.
+    pub fn open_draft_for_version(&self, id: &str, base: &str) -> Result<Option<DraftHandle>> {
+        let base = crate::namespace::normalized_version(&self.db, id, base)?;
+        Ok(self.draft_handle(id, false)?.filter(|d| d.version == base))
+    }
     /// Source is an immutable handle captured when the application opened the file.
     /// None is permitted only for an explicit O_TRUNC, never a missing download.
     pub fn begin_draft(
