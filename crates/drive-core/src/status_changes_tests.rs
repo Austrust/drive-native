@@ -536,3 +536,28 @@ fn schema_inventory_requires_an_explicit_decision_for_new_tables_and_columns() {
         assert_eq!(actual, expected, "classify new columns in {table}");
     }
 }
+
+#[test]
+fn repeated_budget_and_acknowledgement_do_not_create_coarse_notifications() {
+    let (_dir, mut s) = fixture();
+    s.pin("a", true).unwrap();
+    let watermark = s.status_change_watermark().unwrap();
+    let revision = s.local_revision();
+    s.set_status_journal_budget(watermark.budget).unwrap();
+    assert_eq!(s.local_revision(), revision);
+    assert_eq!(s.status_change_watermark().unwrap(), watermark);
+    s.prune_status_changes(&watermark.cursor).unwrap();
+    let revision = s.local_revision();
+    s.prune_status_changes(&watermark.cursor).unwrap();
+    s.set_status_journal_budget(watermark.budget).unwrap();
+    assert_eq!(s.local_revision(), revision);
+    // A real budget change still occurs, but is not a new semantic row change.
+    let mut changed = watermark.budget;
+    changed.entries -= 1;
+    s.set_status_journal_budget(changed).unwrap();
+    assert!(s.local_revision() > revision);
+    assert_eq!(
+        s.status_change_watermark().unwrap().cursor,
+        watermark.cursor
+    );
+}
