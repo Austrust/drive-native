@@ -1,6 +1,26 @@
 use super::*;
 use crate::download_jobs::DownloadFailureKind;
 
+#[test]
+fn aggregate_revision_exhaustion_rejects_changes_before_mutation() {
+    let mut d = directory();
+    d.revision = u64::MAX;
+    assert_eq!(
+        d.set_child(1, Some(ChildState::Unverified)),
+        Err(AggregateError::InvalidFacts)
+    );
+    assert!(
+        d.prepare(
+            vec![(1, Some(ChildState::Unverified))],
+            &Status::OnlineOnly,
+            false
+        )
+        .is_err()
+    );
+    assert!(d.is_empty());
+    assert_eq!(d.revision, u64::MAX);
+}
+
 fn failure(attempts: u32, retry: bool) -> DownloadFailure {
     DownloadFailure {
         schema: 1,
