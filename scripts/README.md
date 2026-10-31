@@ -25,6 +25,7 @@
 - [stage-linux.sh](stage-linux.sh)
 - [stage-docs.py](stage-docs.py)：安装可离线阅读的说明，并将外部证据链接固定到构建提交。
 - [test_prepare_debian_source.py](test_prepare_debian_source.py)
+- [test-gui.sh](test-gui.sh)：私有配置下逐进程运行合成 GUI 回归，纳入 debhelper 测试门禁；真实桌面与 NAS 验证仍单独执行。
 - [verify-runtime.sh](verify-runtime.sh)
 - [verify.sh](verify.sh)
 
