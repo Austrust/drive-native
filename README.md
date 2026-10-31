@@ -63,6 +63,7 @@ dpkg-buildpackage -b -us -uc
 | [docs/STATUS_TRANSIENT.md](docs/STATUS_TRANSIENT.md) | 独立瞬态水位、多版本下载与正文核验票据；真实生命周期接入待完成 |
 | [docs/STATUS_PROJECTION.md](docs/STATUS_PROJECTION.md) | 同一 Store 边界的提交投影与有界快照；尚未接入桌面 |
 | [docs/INITIALIZATION_PROGRESS.md](docs/INITIALIZATION_PROGRESS.md) | 初始化阶段、真实计数、轻量进度接口与 IPC 配对边界 |
+| [docs/SNAPSHOT_CONVERGENCE.md](docs/SNAPSHOT_CONVERGENCE.md) | 扫描期间普通文件变化的局部重查、完整 fence 与保守回退；真实 NAS 性能待验证 |
 | [docs/SNAPSHOT_ERROR_CLASSIFICATION.md](docs/SNAPSHOT_ERROR_CLASSIFICATION.md) | 枚举失败的相关竞态验证；保留原一致性围栏 |
 | [docs/UPGRADE_RECOVERY.md](docs/UPGRADE_RECOVERY.md) | 暂停、正常升级接管、失败保留数据与尚未完成的安装包验证 |
 | [docs/STATUS.md](docs/STATUS.md) | 验证范围、已知问题及后续工作 |
