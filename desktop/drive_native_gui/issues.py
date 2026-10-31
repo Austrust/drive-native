@@ -84,13 +84,22 @@ class IssuesDialog(QDialog):
         self.timer.timeout.connect(self.refresh)
         self.bus.changed.connect(self.schedule_refresh)
         self.selection_changed()
-        QTimer.singleShot(0, self.refresh)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.refresh()
+
+    def hideEvent(self, event):
+        self.timer.stop()
+        super().hideEvent(event)
 
     def schedule_refresh(self):
         if self.isVisible():
             self.timer.start()
 
     def refresh(self):
+        if not self.isVisible():
+            return
         if self.busy or self.loading:
             self.refresh_again = True
             return
@@ -120,7 +129,7 @@ class IssuesDialog(QDialog):
             self.rows = {}
         self.rows.update({row["id"]: row for row in data["entries"]})
         self.cursor = data.get("next") or ""
-        if self.cursor and len(self.rows) < self.display_limit:
+        if self.isVisible() and self.cursor and len(self.rows) < self.display_limit:
             self.request_page(self.cursor, generation)
             return
         selected = self.selected_id
@@ -139,7 +148,7 @@ class IssuesDialog(QDialog):
         self.selection_changed()
         if self.refresh_again:
             self.refresh_again = False
-            self.timer.start()
+            self.schedule_refresh()
 
     def selection_changed(self):
         item = self.table.currentItem()

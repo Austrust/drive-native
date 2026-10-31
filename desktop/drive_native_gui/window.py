@@ -189,13 +189,18 @@ class MainWindow(QMainWindow):
         cards.setSpacing(14)
         self.connection_value = self.card(cards, "连接状态", "尚未启动")
         self.pending_value = self.card(cards, "待处理操作", "—")
-        self.availability_value = self.card(cards, "当前目录本地可用", "—")
+        self.availability_value = self.card(cards, "当前目录本地可用", "按需查询")
         content.addLayout(cards)
         self.banner = QLabel()
         self.banner.setWordWrap(True)
         self.banner.setObjectName("message")
         self.banner.hide()
         content.addWidget(self.banner)
+        self.overview_hint = QLabel("文件可直接从文件管理器打开。\n点击左侧“查看文件状态”，按需载入当前目录的状态列表。")
+        self.overview_hint.setObjectName("muted")
+        self.overview_hint.setAlignment(Qt.AlignCenter)
+        self.overview_hint.setWordWrap(True)
+        content.addWidget(self.overview_hint, 1)
         self.file_details = QWidget()
         details = QVBoxLayout(self.file_details)
         details.setContentsMargins(0, 0, 0, 0)
@@ -249,12 +254,13 @@ class MainWindow(QMainWindow):
 
     def toggle_files(self, visible):
         self.file_details.setVisible(visible)
+        self.overview_hint.setVisible(not visible)
         self.files_button.setText("收起文件状态" if visible else "查看文件状态")
         self.view_generation += 1
         if visible:
             self.schedule_refresh()
         else:
-            self.availability_value.setText("—")
+            self.availability_value.setText("按需查询")
 
     def showEvent(self, event):
         super().showEvent(event)

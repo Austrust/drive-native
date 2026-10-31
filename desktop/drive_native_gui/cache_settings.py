@@ -92,7 +92,6 @@ class CacheSettingsDialog(QDialog):
         self.timer.setInterval(300)
         self.timer.timeout.connect(self.refresh)
         self.update_controls()
-        QTimer.singleShot(0, self.refresh)
 
     def edited(self, *_):
         self.dirty = True
@@ -113,11 +112,21 @@ class CacheSettingsDialog(QDialog):
         else:
             self.schedule_refresh()
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.refresh()
+
+    def hideEvent(self, event):
+        self.timer.stop()
+        super().hideEvent(event)
+
     def schedule_refresh(self):
         if self.isVisible():
             self.timer.start()
 
     def refresh(self):
+        if not self.isVisible():
+            return
         if self.loading or self.saving:
             return
         self.loading = True
