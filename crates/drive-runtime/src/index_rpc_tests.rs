@@ -51,6 +51,103 @@ fn index_validation_rejects_regression_and_out_of_budget_counts() {
 }
 
 #[test]
+fn current_boundary_and_local_recheck_progress_allow_only_the_fence_cycle() {
+    let mut last = None;
+    for (phase, units, items) in [
+        (Phase::Watermark, 0, 0),
+        (Phase::Watermark, 2, 1),
+        (Phase::Enumerate, 1, 3),
+        (Phase::Fence, 1, 1),
+        (Phase::Reconcile, 1, 1),
+        (Phase::Fence, 2, 3),
+        (Phase::Reconcile, 2, 3),
+        (Phase::Fence, 3, 3),
+    ] {
+        let next = Progress {
+            attempt: 1,
+            phase,
+            units,
+            items,
+        };
+        assert!(valid_index_progress(last, next));
+        last = Some(next);
+    }
+    assert!(!valid_index_progress(
+        last,
+        Progress {
+            phase: Phase::Enumerate,
+            ..progress(1)
+        }
+    ));
+    assert!(!valid_index_progress(
+        None,
+        Progress {
+            phase: Phase::Watermark,
+            units: 3,
+            items: 1,
+            attempt: 1
+        }
+    ));
+    assert!(!valid_index_progress(
+        Some(Progress {
+            phase: Phase::Reconcile,
+            ..progress(4)
+        }),
+        Progress {
+            phase: Phase::Reconcile,
+            ..progress(3)
+        }
+    ));
+}
+
+#[test]
+fn alternating_reconciliation_progress_keeps_the_real_rpc_connected() {
+    let (a, mut peer) = UnixStream::pair().unwrap();
+    let rpc = Rpc::new(a).unwrap();
+    let server = std::thread::spawn(move || {
+        let (req, _) = transport::receive::<Envelope<Command>>(&mut peer).unwrap();
+        for (phase, units, items) in [
+            (Phase::Watermark, 2, 1),
+            (Phase::Enumerate, 1, 3),
+            (Phase::Fence, 1, 1),
+            (Phase::Reconcile, 1, 1),
+            (Phase::Fence, 2, 1),
+        ] {
+            send(
+                &mut peer,
+                req.id,
+                Response::IndexProgress(Progress {
+                    attempt: 1,
+                    phase,
+                    units,
+                    items,
+                }),
+            );
+        }
+        send(
+            &mut peer,
+            req.id,
+            Response::Failed {
+                category: "synthetic-final".into(),
+            },
+        );
+    });
+    let count = Arc::new(AtomicU64::new(0));
+    let observed = count.clone();
+    let reply = rpc
+        .call_index(
+            Duration::from_secs(2),
+            Arc::new(move |_| {
+                observed.fetch_add(1, Ordering::Relaxed);
+            }),
+        )
+        .unwrap();
+    assert!(matches!(reply.body, Response::Failed { category } if category == "synthetic-final"));
+    assert_eq!(count.load(Ordering::Relaxed), 5);
+    server.join().unwrap();
+}
+
+#[test]
 fn index_progress_does_not_complete_request_and_callback_can_query_pending() {
     let (a, mut peer) = UnixStream::pair().unwrap();
     let rpc = Arc::new(Rpc::new(a).unwrap());
@@ -171,9 +268,12 @@ fn index_progress_does_not_renew_the_total_request_budget() {
         std::thread::sleep(Duration::from_millis(200));
         send(&mut peer, request.id, Response::Events(None));
     });
-    let result = rpc.call_index(Duration::from_millis(250), Arc::new(move |_| {
-        count.fetch_add(1, Ordering::Relaxed);
-    }));
+    let result = rpc.call_index(
+        Duration::from_millis(250),
+        Arc::new(move |_| {
+            count.fetch_add(1, Ordering::Relaxed);
+        }),
+    );
     assert_eq!(result.err().unwrap().kind(), io::ErrorKind::TimedOut);
     assert_eq!(observed.load(Ordering::Relaxed), 1);
     server.join().unwrap();
