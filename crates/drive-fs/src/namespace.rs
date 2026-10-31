@@ -28,6 +28,7 @@ pub(super) fn rename(
     let store = fs.store.clone();
     let hydrator = fs.hydrator.clone();
     let handles = fs.handles.clone();
+    let updates = fs.handle_updates.clone();
     let network = fs.network_queue.clone();
     fs.queue.submit(Box::new(move || {
         let result = (|| -> drive_core::Result<Option<(String, String, String, String)>> {
@@ -47,7 +48,8 @@ pub(super) fn rename(
         })();
         match result {
             Ok(Some((p, np, source, target))) => replace_prepared(
-                store, handles, hydrator, network, p, name, np, new_name, source, target, reply,
+                store, handles, updates, hydrator, network, p, name, np, new_name, source, target,
+                reply,
             ),
             Ok(None) => {
                 if let Some(h) = hydrator {
@@ -77,6 +79,7 @@ pub(super) fn remove(
     };
     let store = fs.store.clone();
     let handles = fs.handles.clone();
+    let updates = fs.handle_updates.clone();
     let hydrator = fs.hydrator.clone();
     let network = fs.network_queue.clone();
     fs.queue.submit(Box::new(move|| {
@@ -87,16 +90,17 @@ pub(super) fn remove(
         network.submit(Box::new(move|| {
             let result=(||->Result<(),i32>{
                 loop {
-                    // Same lock order as open registration and draft promotion.
-                    let h=handles.lock().unwrap();let mut s=store.lock().unwrap();
-                    let current=s.lookup(&parent,&name).map_err(|e|errno(&e))?;
+                    // Freeze handle registration/promotion without obstructing
+                    // cached reads. Never hold the table while entering Store.
+                    let update=updates.lock().unwrap();
+                    let current=store.lock().unwrap().lookup(&parent,&name).map_err(|e|errno(&e))?;
                     if current.node.id!=id {return Err(libc::EAGAIN);}
-                    let missing=h.entries.values().filter(|h|h.node==id).find_map(|h|match &h.content{OpenContent::Missing(n)=>Some(n.clone()),_=>None});
+                    let missing=handles.lock().unwrap().entries.values().filter(|h|h.node==id).find_map(|h|match &h.content{OpenContent::Missing(n)=>Some(n.clone()),_=>None});
                     let Some(missing)=missing else {
-                        s.unlink_local(&parent,&name,&id,directory).map_err(|e|errno(&e))?;
+                        store.lock().unwrap().unlink_local(&parent,&name,&id,directory).map_err(|e|errno(&e))?;
                         return Ok(());
                     };
-                    drop(s);drop(h);
+                    drop(update);
                     // Only an already-open missing handle needs hydration before
                     // deletion. Removing an unopened file downloads no body.
                     let content=hydrator.as_ref().ok_or(libc::ENETDOWN)?.hydrate(&missing)?;
@@ -116,6 +120,7 @@ pub(super) fn remove(
 fn replace_prepared(
     store: Arc<Mutex<Store>>,
     handles: Arc<Mutex<Handles>>,
+    updates: Arc<Mutex<()>>,
     hydrator: Option<Arc<dyn Hydrator>>,
     network: Arc<LocalQueue>,
     parent: String,
@@ -128,11 +133,12 @@ fn replace_prepared(
 ) {
     network.submit(Box::new(move||{
         let result=(||->Result<(),i32>{loop{
-            let h=handles.lock().unwrap();let mut s=store.lock().unwrap();
-            let src=s.lookup(&parent,&name).map_err(|e|errno(&e))?;let dst=s.lookup(&new_parent,&new_name).map_err(|e|errno(&e))?;
+            let update=updates.lock().unwrap();
+            let (src,dst)={let s=store.lock().unwrap();(s.lookup(&parent,&name).map_err(|e|errno(&e))?,s.lookup(&new_parent,&new_name).map_err(|e|errno(&e))?)};
             if src.node.id!=source || dst.node.id!=target{return Err(libc::EAGAIN);}
             if src.node.directory || dst.node.directory{return Err(if src.node.directory&&!dst.node.directory{libc::ENOTDIR}else if !src.node.directory&&dst.node.directory{libc::EISDIR}else{libc::EOPNOTSUPP});}
-            let missing=h.entries.values().filter(|h|h.node==source||h.node==target).find_map(|h|match &h.content{OpenContent::Missing(n)=>Some(n.clone()),_=>None});
+            let missing=handles.lock().unwrap().entries.values().filter(|h|h.node==source||h.node==target).find_map(|h|match &h.content{OpenContent::Missing(n)=>Some(n.clone()),_=>None});
+            let mut s=store.lock().unwrap();
             let missing=match missing {
                 Some(n)=>Some(n),
                 None if s.open_dirty_draft(&source).map_err(|e|errno(&e))?.is_some()=>None,
@@ -141,7 +147,7 @@ fn replace_prepared(
             let Some(missing)=missing else {
                 s.replace_local(&parent,&name,&new_parent,&new_name,&source,&target).map_err(|e|errno(&e))?;return Ok(());
             };
-            drop(s);drop(h);
+            drop(s);drop(update);
             let body=hydrator.as_ref().ok_or(libc::ENETDOWN)?.hydrate(&missing)?;
             for entry in handles.lock().unwrap().entries.values_mut(){
                 if entry.node==missing.id && matches!(&entry.content,OpenContent::Missing(n) if n.version==missing.version){entry.content=OpenContent::Cached(body.clone());}

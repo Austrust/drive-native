@@ -2,6 +2,8 @@
 //! cached reads, injected native hydration, durable writes and file creation.
 //! Rename, replacement, unlink and mkdir use durable local journals.
 //! No callback waits for the NAS, and unsupported writes are never acknowledged.
+#[cfg(test)]
+mod isolation_tests;
 mod namespace;
 mod read_requests;
 mod writable;
@@ -26,7 +28,7 @@ use std::{
 const TTL: Duration = Duration::ZERO;
 type Job = Box<dyn FnOnce() + Send + 'static>;
 /// Bounded pools keep work off the FUSE dispatcher. Metadata/file I/O use the
-/// local pool; waits for native hydration use a separate pool and worker.
+/// metadata pool; held-file reads and native hydration each use separate pools.
 struct LocalQueue {
     sender: Option<SyncSender<Job>>,
     threads: Vec<std::thread::JoinHandle<()>>,
@@ -105,7 +107,11 @@ pub struct CacheFilesystem {
     writable: bool,
     store: Arc<Mutex<Store>>,
     handles: Arc<Mutex<Handles>>,
+    // Serializes registration/promotion/namespace barriers, never held by reads.
+    // Inside this gate, Store and the handle table are acquired separately.
+    handle_updates: Arc<Mutex<()>>,
     queue: LocalQueue,
+    read_queue: LocalQueue,
     reads: ReadRequests,
     network_queue: Arc<LocalQueue>,
     hydrator: Option<Arc<dyn Hydrator>>,
@@ -142,6 +148,8 @@ impl CacheFilesystem {
                 entries: HashMap::new(),
             })),
             queue: LocalQueue::new(),
+            read_queue: LocalQueue::new(),
+            handle_updates: Arc::new(Mutex::new(())),
             reads: ReadRequests::default(),
             network_queue: Arc::new(LocalQueue::new()),
             hydrator: None,
@@ -347,10 +355,16 @@ impl Filesystem for CacheFilesystem {
                 Ok(record) => {
                     let mut a = attr(&record, uid, gid);
                     if let Some(fh) = fh {
-                        let h = handles.lock().unwrap();
-                        match h.entries.get(&fh) {
-                            Some(h) if h.ino == ino => {
-                                if let OpenContent::Draft(d) = &h.content {
+                        let content = {
+                            let h = handles.lock().unwrap();
+                            h.entries
+                                .get(&fh)
+                                .filter(|h| h.ino == ino)
+                                .map(|h| h.content.clone())
+                        };
+                        match content {
+                            Some(content) => {
+                                if let OpenContent::Draft(d) = &content {
                                     match d.size() {
                                         Ok(size) => {
                                             a.size = size;
@@ -363,7 +377,7 @@ impl Filesystem for CacheFilesystem {
                                     }
                                 }
 
-                                if let OpenContent::Cached(content) = &h.content {
+                                if let OpenContent::Cached(content) = &content {
                                     match content.size() {
                                         Ok(s) => {
                                             a.size = s;
@@ -504,7 +518,7 @@ impl Filesystem for CacheFilesystem {
         let handles = self.handles.clone();
         let network_queue = self.network_queue.clone();
         let hydrator = self.hydrator.clone();
-        self.queue.submit(Box::new(move || {
+        self.read_queue.submit(Box::new(move || {
             let (cached, missing) = {
                 let table = handles.lock().unwrap();
                 match table.entries.get(&fh) {

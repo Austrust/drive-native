@@ -39,6 +39,28 @@ fn draft(s: &mut Store) -> drafts::DraftHandle {
     s.begin_draft("a", "1", Some(&mut read)).unwrap()
 }
 #[test]
+fn a_new_handle_joins_only_the_matching_clean_or_dirty_draft() {
+    let (_dir, mut s) = setup();
+    assert!(s.open_draft_for_version("a", "1").unwrap().is_none());
+    let working = draft(&mut s);
+    assert!(!s.dirty_draft("a").unwrap());
+    let reader = s.open_draft_for_version("a", "1").unwrap().unwrap();
+    assert_eq!(reader.token, working.token);
+    assert!(
+        s.open_draft_for_version("a", "different")
+            .unwrap()
+            .is_none()
+    );
+    s.draft_write(&working, 0, b"new", false).unwrap();
+    let mut bytes = [0; 6];
+    assert_eq!(reader.read_at(&mut bytes, 0).unwrap(), 6);
+    assert_eq!(&bytes, b"newdef");
+    assert_eq!(
+        s.open_draft_for_version("a", "1").unwrap().unwrap().token,
+        working.token
+    );
+}
+#[test]
 fn random_writes_and_truncate_survive_reopen_and_checkpoint() {
     let (d, mut s) = setup();
     let h = draft(&mut s);

@@ -21,6 +21,7 @@ fn content(store: &Store, ino: u64) -> drive_core::Result<(String, OpenContent)>
 fn draft(
     store: &Arc<Mutex<Store>>,
     handles: &Arc<Mutex<Handles>>,
+    updates: &Arc<Mutex<()>>,
     hydrator: &Option<Arc<dyn Hydrator>>,
     id: &str,
     body: OpenContent,
@@ -38,6 +39,7 @@ fn draft(
         }
         OpenContent::Draft(_) => unreachable!(),
     };
+    let _update = updates.lock().unwrap();
     let d = Arc::new(
         store
             .lock()
@@ -45,22 +47,36 @@ fn draft(
             .begin_draft(id, &base, if empty { None } else { source.as_deref() })
             .map_err(|e| errno(&e))?,
     );
+    let candidates: Vec<_> = {
+        let h = handles.lock().unwrap();
+        h.entries
+            .iter()
+            .filter(|(_, h)| h.node == id)
+            .map(|(fh, h)| (*fh, h.content.clone()))
+            .collect()
+    };
+    let matching: Vec<_> = {
+        let s = store.lock().unwrap();
+        candidates
+            .iter()
+            .filter_map(|(fh, content)| {
+                let matches = match content {
+                    OpenContent::Cached(c) => s
+                        .equivalent_content_version(id, c.version())
+                        .is_ok_and(|v| v == d.version),
+                    OpenContent::Missing(n) => s
+                        .equivalent_content_version(id, &n.version)
+                        .is_ok_and(|v| v == d.version),
+                    OpenContent::Draft(old) => old.token == d.token,
+                };
+                matches.then_some(*fh)
+            })
+            .collect()
+    };
     let mut h = handles.lock().unwrap();
-    let s = store.lock().unwrap();
-    for entry in h.entries.values_mut() {
-        if entry.node == id {
-            let matches = match &entry.content {
-                OpenContent::Cached(c) => s
-                    .equivalent_content_version(id, c.version())
-                    .is_ok_and(|v| v == d.version),
-                OpenContent::Missing(n) => s
-                    .equivalent_content_version(id, &n.version)
-                    .is_ok_and(|v| v == d.version),
-                OpenContent::Draft(old) => old.token == d.token,
-            };
-            if matches {
-                entry.content = OpenContent::Draft(d.clone())
-            }
+    for fh in matching {
+        if let Some(entry) = h.entries.get_mut(&fh) {
+            entry.content = OpenContent::Draft(d.clone());
         }
     }
     Ok(d)
@@ -77,6 +93,7 @@ pub(super) fn open(fs: &mut CacheFilesystem, ino: u64, flags: i32, reply: ReplyO
     }
     let store = fs.store.clone();
     let handles = fs.handles.clone();
+    let updates = fs.handle_updates.clone();
     let hydrator = fs.hydrator.clone();
     fs.queue.submit(Box::new(move || {
         let result = content(&store.lock().unwrap(), ino);
@@ -88,7 +105,7 @@ pub(super) fn open(fs: &mut CacheFilesystem, ino: u64, flags: i32, reply: ReplyO
             }
         };
         if flags & libc::O_TRUNC != 0 {
-            match draft(&store, &handles, &hydrator, &id, body, true) {
+            match draft(&store, &handles, &updates, &hydrator, &id, body, true) {
                 Ok(d) => {
                     if let Err(e) = store.lock().unwrap().draft_truncate(&d, 0) {
                         reply.error(errno(&e));
@@ -102,12 +119,28 @@ pub(super) fn open(fs: &mut CacheFilesystem, ino: u64, flags: i32, reply: ReplyO
                 }
             }
         }
-        let _ = store.lock().unwrap().note_cache_use(&id);
-        let mut h = handles.lock().unwrap();
-        if store.lock().unwrap().node(&id).is_err() {
-            reply.error(libc::ENOENT);
+        let _update = updates.lock().unwrap();
+        let refreshed = (|| -> drive_core::Result<()> {
+            let s = store.lock().unwrap();
+            s.node(&id)?;
+            let base = match &body {
+                OpenContent::Cached(c) => Some(c.version()),
+                OpenContent::Missing(n) => Some(n.version.as_str()),
+                OpenContent::Draft(_) => None,
+            };
+            if let Some(base) = base {
+                if let Some(d) = s.open_draft_for_version(&id, base)? {
+                    body = OpenContent::Draft(Arc::new(d));
+                }
+            }
+            let _ = s.note_cache_use(&id);
+            Ok(())
+        })();
+        if let Err(e) = refreshed {
+            reply.error(errno(&e));
             return;
         }
+        let mut h = handles.lock().unwrap();
         if h.entries.len() >= 65536 || h.next == u64::MAX {
             reply.error(libc::EMFILE);
             return;
@@ -144,6 +177,7 @@ pub(super) fn write(
     }
     let store = fs.store.clone();
     let handles = fs.handles.clone();
+    let updates = fs.handle_updates.clone();
     let hydrator = fs.hydrator.clone();
     let network = fs.network_queue.clone();
     let data = bytes.to_vec();
@@ -164,13 +198,14 @@ pub(super) fn write(
         }
         let missing = matches!(body, OpenContent::Missing(_));
         let job: Job = Box::new(move || {
-            let result = draft(&store, &handles, &hydrator, &id, body, false).and_then(|d| {
-                store
-                    .lock()
-                    .unwrap()
-                    .draft_write(&d, offset as u64, &data, flags & libc::O_APPEND != 0)
-                    .map_err(|e| errno(&e))
-            });
+            let result =
+                draft(&store, &handles, &updates, &hydrator, &id, body, false).and_then(|d| {
+                    store
+                        .lock()
+                        .unwrap()
+                        .draft_write(&d, offset as u64, &data, flags & libc::O_APPEND != 0)
+                        .map_err(|e| errno(&e))
+                });
             match result {
                 Ok(n) => reply.written(n as u32),
                 Err(e) => reply.error(e),
@@ -299,6 +334,7 @@ pub(super) fn setattr(
     let hydrator = fs.hydrator.clone();
     let network = fs.network_queue.clone();
     let (uid, gid) = (fs.uid, fs.gid);
+    let updates = fs.handle_updates.clone();
     fs.queue.submit(Box::new(move || {
         let resolved = if let Some(fh) = fh {
             let h = handles.lock().unwrap();
@@ -320,16 +356,17 @@ pub(super) fn setattr(
         };
         let missing = matches!(body, OpenContent::Missing(_)) && size != 0;
         let job: Job = Box::new(move || {
-            let result = draft(&store, &handles, &hydrator, &id, body, size == 0).and_then(|d| {
-                let mut s = store.lock().unwrap();
-                s.draft_truncate(&d, size).map_err(|e| errno(&e))?;
-                // Path-based truncate has no later file-handle fsync/release callback.
-                if fh.is_none() {
-                    s.checkpoint_draft(&d).map_err(|e| errno(&e))?;
-                    s.creation_saved(&d.node).map_err(|e| errno(&e))?;
-                }
-                s.record_for_handle(&id).map_err(|e| errno(&e))
-            });
+            let result = draft(&store, &handles, &updates, &hydrator, &id, body, size == 0)
+                .and_then(|d| {
+                    let mut s = store.lock().unwrap();
+                    s.draft_truncate(&d, size).map_err(|e| errno(&e))?;
+                    // Path-based truncate has no later file-handle fsync/release callback.
+                    if fh.is_none() {
+                        s.checkpoint_draft(&d).map_err(|e| errno(&e))?;
+                        s.creation_saved(&d.node).map_err(|e| errno(&e))?;
+                    }
+                    s.record_for_handle(&id).map_err(|e| errno(&e))
+                });
             match result {
                 Ok(record) => {
                     if let Some(h) = hydrator {
@@ -364,11 +401,15 @@ pub(super) fn create(
     let store = fs.store.clone();
     let handles = fs.handles.clone();
     let (uid, gid) = (fs.uid, fs.gid);
+    let updates = fs.handle_updates.clone();
     fs.queue.submit(Box::new(move || {
-        let mut h = handles.lock().unwrap();
-        if h.entries.len() >= 65536 || h.next == u64::MAX {
-            reply.error(libc::EMFILE);
-            return;
+        let _update = updates.lock().unwrap();
+        {
+            let h = handles.lock().unwrap();
+            if h.entries.len() >= 65536 || h.next == u64::MAX {
+                reply.error(libc::EMFILE);
+                return;
+            }
         }
         let result = (|| -> drive_core::Result<_> {
             let mut s = store.lock().unwrap();
@@ -381,6 +422,7 @@ pub(super) fn create(
         })();
         match result {
             Ok((record, draft)) => {
+                let mut h = handles.lock().unwrap();
                 let fh = h.next;
                 h.next += 1;
                 h.entries.insert(

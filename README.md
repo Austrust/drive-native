@@ -48,7 +48,8 @@ dpkg-buildpackage -b -us -uc
 | [scripts](scripts/) | 构建、测试及显式运行的研究工具 |
 | [debian](debian/) | Debian 打包定义 |
 | [vendor](vendor/README.md) | 固定的 fuser 补丁及上游许可 |
-| [docs/P1_ARCHITECTURE.md](docs/P1_ARCHITECTURE.md) | 已完成源码核对的P1修改契约；未实施，进入条件见验收门槛 |
+| [docs/P1_ARCHITECTURE.md](docs/P1_ARCHITECTURE.md) | P1修改契约；通知诊断与部分读取隔离已实现，完整性能验收仍开放 |
+| [docs/FUSE_READ_ISOLATION.md](docs/FUSE_READ_ISOLATION.md) | 已打开内容读取隔离的实现、回归与未完成范围 |
 | [docs/STATUS.md](docs/STATUS.md) | 验证范围、已知问题及后续工作 |
 | [docs/PROVENANCE.md](docs/PROVENANCE.md) | 源码归档来源和版本关系 |
 
