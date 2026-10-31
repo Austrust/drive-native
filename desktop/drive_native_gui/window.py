@@ -131,9 +131,11 @@ class MainWindow(QMainWindow):
         caption.setObjectName("muted")
         left.addWidget(caption)
         left.addSpacing(26)
-        files = QPushButton("所有文件")
+        files = QPushButton("查看文件状态")
+        self.files_button = files
+        files.setCheckable(True)
         files.setObjectName("navigation")
-        files.clicked.connect(lambda: self.navigate(""))
+        files.toggled.connect(self.toggle_files)
         left.addWidget(files)
         self.transfers_dialog = None
         self.transfers_button = QPushButton("传输与带宽")
@@ -194,6 +196,11 @@ class MainWindow(QMainWindow):
         self.banner.setObjectName("message")
         self.banner.hide()
         content.addWidget(self.banner)
+        self.file_details = QWidget()
+        details = QVBoxLayout(self.file_details)
+        details.setContentsMargins(0, 0, 0, 0)
+        content.addWidget(self.file_details, 1)
+        self.file_details.hide()
         toolbar = QHBoxLayout()
         self.up = QPushButton("↑ 上一级")
         self.up.clicked.connect(self.parent_folder)
@@ -207,7 +214,7 @@ class MainWindow(QMainWindow):
         self.filter.setMaximumWidth(220)
         self.filter.textChanged.connect(self.apply_filter)
         toolbar.addWidget(self.filter)
-        content.addLayout(toolbar)
+        details.addLayout(toolbar)
         self.table = QTreeWidget()
         self.table.setHeaderLabels(["名称", "同步状态", "离线使用"])
         self.table.setRootIsDecorated(False)
@@ -219,7 +226,7 @@ class MainWindow(QMainWindow):
         self.table.itemDoubleClicked.connect(self.activate)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self.context_menu)
-        content.addWidget(self.table, 1)
+        details.addWidget(self.table, 1)
         footer = QHBoxLayout()
         self.detail = QLabel("文件状态来自本地同步服务")
         self.detail.setObjectName("muted")
@@ -228,7 +235,7 @@ class MainWindow(QMainWindow):
         self.more.clicked.connect(self.load_more)
         self.more.hide()
         footer.addWidget(self.more)
-        content.addLayout(footer)
+        details.addLayout(footer)
         self.refresh_timer = QTimer(self)
         self.refresh_timer.setSingleShot(True)
         self.refresh_timer.setInterval(100)
@@ -239,6 +246,25 @@ class MainWindow(QMainWindow):
             label.setTextFormat(Qt.PlainText)
         self.apply_theme()
         QTimer.singleShot(0, self.start)
+
+    def toggle_files(self, visible):
+        self.file_details.setVisible(visible)
+        self.files_button.setText("收起文件状态" if visible else "查看文件状态")
+        self.view_generation += 1
+        if visible:
+            self.schedule_refresh()
+        else:
+            self.availability_value.setText("—")
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.schedule_refresh()
+
+    def hideEvent(self, event):
+        self.refresh_timer.stop()
+        self.refresh_again = False
+        self.view_generation += 1
+        super().hideEvent(event)
 
     def show_transfers(self):
         if self.transfers_dialog is None:
@@ -423,12 +449,16 @@ class MainWindow(QMainWindow):
         self.schedule_refresh()
 
     def schedule_refresh(self):
+        if not self.isVisible():
+            return
         if self.loading:
             self.refresh_again = True
         elif not self.refresh_timer.isActive():
             self.refresh_timer.start()
 
     def refresh(self):
+        if not self.isVisible():
+            return
         if self.loading:
             self.refresh_again = True
             return
@@ -472,7 +502,7 @@ class MainWindow(QMainWindow):
         elif state == "locked" and self.profile and not self.auto_unlock_attempted:
             self.auto_unlock_attempted = True
             self.keyring_job = secret_job(self.profile["task_id"], self.keyring_loaded)
-        if data["mounted"]:
+        if data["mounted"] and self.isVisible() and self.files_button.isChecked():
             self.page_rows = []
             self.request_page(self.folder, self.view_generation, 0)
         else:
@@ -505,6 +535,10 @@ class MainWindow(QMainWindow):
         )
 
     def received_directory(self, path, generation, data, error):
+        if not self.isVisible() or not self.files_button.isChecked():
+            self.loading = False
+            self.followup_refresh()
+            return
         if path != self.folder or generation != self.view_generation:
             self.loading = False
             self.schedule_refresh()
