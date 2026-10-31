@@ -58,7 +58,8 @@ dpkg-buildpackage -b -us -uc
 | [docs/FUSE_DIRECTORY_VIEWS.md](docs/FUSE_DIRECTORY_VIEWS.md) | 目录轻量投影、稳定续读句柄与独立验证范围 |
 | [docs/STATUS_CHANGE_JOURNAL.md](docs/STATUS_CHANGE_JOURNAL.md) | 事务性状态变化日志基础层；尚未接入增量桌面聚合 |
 | [docs/STORE_COMMIT_NOTIFICATIONS.md](docs/STORE_COMMIT_NOTIFICATIONS.md) | 统一 Store guard、已提交语义失效与非阻塞合并唤醒 |
-| [docs/INCREMENTAL_STATUS_INDEX.md](docs/INCREMENTAL_STATUS_INDEX.md) | 纯增量聚合与事务性树拥有者；瞬态状态、发布屏障和桌面接入待实现 |
+| [docs/INCREMENTAL_STATUS_INDEX.md](docs/INCREMENTAL_STATUS_INDEX.md) | 纯增量聚合与事务性树拥有者；运行订阅、发布屏障和桌面接入待实现 |
+| [docs/STATUS_TRANSIENT.md](docs/STATUS_TRANSIENT.md) | 独立瞬态水位、多版本下载与正文核验票据；真实生命周期接入待完成 |
 | [docs/STATUS_PROJECTION.md](docs/STATUS_PROJECTION.md) | 同一 Store 边界的提交投影与有界快照；尚未接入桌面 |
 | [docs/INITIALIZATION_PROGRESS.md](docs/INITIALIZATION_PROGRESS.md) | 初始化阶段、真实计数、轻量进度接口与 IPC 配对边界 |
 | [docs/SNAPSHOT_ERROR_CLASSIFICATION.md](docs/SNAPSHOT_ERROR_CLASSIFICATION.md) | 枚举失败的相关竞态验证；保留原一致性围栏 |

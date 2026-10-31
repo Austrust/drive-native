@@ -93,6 +93,9 @@ fn single_leaf_updates_only_its_ancestors_and_unknown_never_completes() {
     .unwrap();
     let mut f = s.nodes["f"].atom.clone();
     f.availability = Availability::Unverified;
+    // Reprojecting the same body retains its verified availability. A new
+    // content token, not merely an Unverified field, invalidates the proof.
+    f.content.blob = Some("new-unverified-body".into());
     let result = s.apply(batch(10, 11, vec![("f", Some(f))])).unwrap();
     assert_eq!(result.touched_nodes, 3);
     assert_eq!(s.query("a/file"), Err(IndexError::UnknownContent));
@@ -285,6 +288,11 @@ fn randomized_leaf_changes_and_moves_match_fresh_aggregation() {
                 a.availability = Availability::Unverified;
             }
         }
+        // A fresh rebuild has no prior verification history. Give each body
+        // transition a real identity; LocalComplete without a blob was an
+        // inconsistent old fixture, not a model for invalidating valid caches.
+        a.content.blob = (a.own != Status::OnlineOnly).then(|| format!("body-{seq}"));
+        a.content.local_version = a.content.blob.as_ref().map(|_| "v1".into());
         s.apply(batch(seq, seq + 1, vec![(&id, Some(a))])).unwrap();
         let fresh = IndexOwner::build(
             "r".into(),
@@ -422,4 +430,56 @@ fn publication_generation_cannot_wrap_after_preflight() {
     assert_eq!(s.stamp.generation, u64::MAX);
     assert!(s.query("a/file").is_ok());
     assert!(s.query("a/renamed").is_err());
+}
+
+#[test]
+fn generation_exhaustion_does_not_half_commit_transient_cursor_or_flights() {
+    use crate::status_transient::{
+        ContentKey, ContentResult, TransientBudget, TransientRead, TransientSource,
+    };
+    let mut s = owner();
+    let mut source = TransientSource::new("source".into(), TransientBudget::default()).unwrap();
+    let db = s.stamp.database.clone();
+    s.install_transient_snapshot(&db, source.snapshot())
+        .unwrap();
+    let key = ContentKey::from_content(&s.nodes["f"].atom.content).unwrap();
+    source.bind_content("f", Some(key.clone())).unwrap();
+    let ticket = source.begin_verification("f", &key).unwrap().unwrap();
+    source
+        .record_availability(&ticket, ContentResult::Complete)
+        .unwrap();
+    let TransientRead::Batch(verified) = source
+        .read(s.stamp.transient.as_ref().unwrap(), 8192)
+        .unwrap()
+    else {
+        panic!()
+    };
+    s.apply_transient(verified).unwrap();
+    s.stamp.generation = u64::MAX;
+    let before = s.stamp.clone();
+    source.start("f", "v1", "one").unwrap();
+    let TransientRead::Batch(batch) = source
+        .read(s.stamp.transient.as_ref().unwrap(), 8192)
+        .unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(s.apply_transient(batch), Err(IndexError::Budget));
+    assert_eq!(s.stamp(), &before);
+    assert_eq!(s.query("a/file").unwrap().status, Label::LocalComplete);
+}
+
+#[test]
+fn shrinking_batch_must_budget_old_live_generation_plus_preparation() {
+    let mut s = owner();
+    let before = s.stamp.clone();
+    let bytes = s.accounted_bytes();
+    s.budget.bytes = bytes + 2000;
+    assert_eq!(
+        s.apply(batch(10, 11, vec![("f", None)])),
+        Err(IndexError::Budget)
+    );
+    assert_eq!(s.stamp(), &before);
+    assert_eq!(s.accounted_bytes(), bytes);
+    assert!(s.query("a/file").is_ok());
 }

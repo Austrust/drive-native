@@ -8,7 +8,11 @@ use crate::{
         LeafFacts, PreparedChanges, Summary,
     },
     status_changes::StatusCursor,
-    status_projection::{NameBucket, ProjectionBatch, StatusAtom, StatusSnapshot},
+    status_projection::{NameBucket, ProjectedNode, ProjectionBatch, StatusAtom, StatusSnapshot},
+    status_transient::{
+        ContentKey, ContentResult, NodeTransient, PreparedTransient, TransientBatch,
+        TransientBudget, TransientCursor, TransientError, TransientSnapshot, TransientView,
+    },
 };
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -22,6 +26,7 @@ pub struct IndexBudget {
     pub batch_bytes: usize,
     pub depth: usize,
     pub prepare_time: Duration,
+    pub transient: TransientBudget,
 }
 impl Default for IndexBudget {
     fn default() -> Self {
@@ -32,6 +37,7 @@ impl Default for IndexBudget {
             batch_bytes: 128 * 1024 * 1024,
             depth: 128,
             prepare_time: Duration::from_secs(5),
+            transient: TransientBudget::default(),
         }
     }
 }
@@ -46,10 +52,12 @@ pub enum IndexError {
     UnknownContent,
     InvalidPath,
     StaleContent,
+    Transient(TransientError),
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Stamp {
     pub database: StatusCursor,
+    pub transient: Option<TransientCursor>,
     pub generation: u64,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -79,6 +87,7 @@ pub struct IndexOwner {
     next_uid: u64,
     bytes: usize,
     receipts: VecDeque<Receipt>,
+    transients: TransientView,
 }
 fn bucket(atom: &StatusAtom) -> NameBucket {
     NameBucket {
@@ -109,12 +118,12 @@ fn known(result: Result<Summary, AggregateError>) -> Result<ChildState, IndexErr
         Err(_) => Err(IndexError::InvalidGraph),
     }
 }
-fn leaf(atom: &StatusAtom) -> Result<ChildState, IndexError> {
+fn leaf(atom: &StatusAtom, active_downloads: u32) -> Result<ChildState, IndexError> {
     known(aggregate::leaf(&LeafFacts {
         own: atom.own.clone(),
         inherited_pin: atom.inherited_pin,
         availability: atom.availability,
-        active_downloads: 0,
+        active_downloads,
         failure: atom.failure.clone(),
     }))
 }
@@ -135,6 +144,7 @@ impl IndexOwner {
         snapshot: StatusSnapshot,
         budget: IndexBudget,
     ) -> Result<Self, IndexError> {
+        budget.transient.validate().map_err(IndexError::Transient)?;
         if budget.depth == 0
             || budget.depth > 128
             || budget.nodes == 0
@@ -168,6 +178,7 @@ impl IndexOwner {
                     epoch: snapshot.through.epoch.clone(),
                     sequence: 0,
                 },
+                transient: None,
                 generation: 0,
             },
             budget,
@@ -177,6 +188,7 @@ impl IndexOwner {
             // Fixed receipt history, root/stamp and empty owner containers.
             bytes: 32 * 1024,
             receipts: VecDeque::new(),
+            transients: TransientView::new(budget.transient),
         };
         // Initialization is the one whole-tree operation. Its separate limits
         // permit a large snapshot without enlarging everyday batch limits.
@@ -205,7 +217,7 @@ impl IndexOwner {
         &self.stamp
     }
     pub fn accounted_bytes(&self) -> usize {
-        self.bytes
+        self.bytes.saturating_add(self.transients.bytes())
     }
     pub fn len(&self) -> usize {
         self.nodes.len()
@@ -221,6 +233,128 @@ impl IndexOwner {
     }
     pub fn apply(&mut self, batch: ProjectionBatch) -> Result<ApplyStats, IndexError> {
         self.apply_internal(batch, false)
+    }
+    /// A second, independent stream. Database cursors never stand in for flight
+    /// or availability changes. First use and gaps require an explicit snapshot.
+    pub fn apply_transient(&mut self, batch: TransientBatch) -> Result<ApplyStats, IndexError> {
+        let plan = self
+            .transients
+            .batch(batch)
+            .map_err(IndexError::Transient)?;
+        self.apply_transient_plan(plan)
+    }
+    /// The caller must keep pending queries masked while capturing DB and
+    /// transient snapshots consistently. Cursor equality checks association,
+    /// not whether the caller really held the required capture locks.
+    pub fn install_transient_snapshot(
+        &mut self,
+        expected_database: &StatusCursor,
+        snapshot: TransientSnapshot,
+    ) -> Result<ApplyStats, IndexError> {
+        if expected_database != &self.stamp.database {
+            return Err(IndexError::Discontinuous);
+        }
+        let plan = self
+            .transients
+            .snapshot(snapshot)
+            .map_err(IndexError::Transient)?;
+        self.apply_transient_plan(plan)
+    }
+    fn apply_transient_plan(&mut self, plan: PreparedTransient) -> Result<ApplyStats, IndexError> {
+        if plan.duplicate {
+            return Ok(ApplyStats {
+                changed: false,
+                touched_nodes: 0,
+                generation: self.stamp.generation,
+            });
+        }
+        let mut ids: BTreeSet<_> = plan.ids().cloned().collect();
+        // Snapshot replacement may invalidate previously verified facts even
+        // if the new source no longer has an entry for that body.
+        if plan.reset {
+            ids.extend(
+                self.nodes
+                    .iter()
+                    .filter(|(_, r)| {
+                        !r.atom.directory
+                            && r.atom.availability == aggregate::Availability::Complete
+                    })
+                    .map(|(id, _)| id.clone()),
+            );
+        }
+        let mut work_bytes = plan.work_bytes;
+        let mut nodes = Vec::new();
+        for id in ids {
+            if let Some(record) = self.nodes.get(&id) {
+                work_bytes = work_bytes.saturating_add(atom_charge(&record.atom));
+                if work_bytes > self.budget.bytes {
+                    return Err(IndexError::Budget);
+                }
+                nodes.push(ProjectedNode {
+                    id,
+                    atom: Some(record.atom.clone()),
+                });
+            }
+        }
+        let wide = plan.reset;
+        self.apply_tree(nodes, work_bytes, None, Some(plan), wide)
+    }
+    fn transient_state<'a>(
+        &'a self,
+        plan: Option<&'a PreparedTransient>,
+        id: &str,
+    ) -> Option<&'a NodeTransient> {
+        match plan {
+            Some(plan) => plan.state(&self.transients, id),
+            None => self.transients.state(id),
+        }
+    }
+    fn materialize(&self, atom: &mut StatusAtom, plan: Option<&PreparedTransient>) {
+        if atom.directory {
+            return;
+        }
+        let key = ContentKey::from_content(&atom.content);
+        let state = self.transient_state(plan, &atom.id);
+        if let Some(state) = state.filter(|s| s.content == key && key.is_some()) {
+            atom.availability = match state.availability {
+                Some(ContentResult::Complete) => aggregate::Availability::Complete,
+                Some(ContentResult::Missing) | None => aggregate::Availability::Unverified,
+            };
+            return;
+        }
+        // Explicit unbind revokes its proof even if a later different binding
+        // shares this folded batch. A mismatched old-body result, by contrast,
+        // cannot revoke this body. A fresh matching proof above supersedes it.
+        if key
+            .as_ref()
+            .is_some_and(|key| plan.is_some_and(|p| p.revoked(&atom.id, key)))
+        {
+            atom.availability = aggregate::Availability::Unverified;
+            return;
+        }
+        if plan.is_some_and(|p| p.reset) && key.is_some() {
+            atom.availability = aggregate::Availability::Unverified;
+            return;
+        }
+        if atom.availability == aggregate::Availability::Unverified {
+            if let Some(old) = self
+                .nodes
+                .get(&atom.id)
+                .filter(|old| ContentKey::from_content(&old.atom.content) == key)
+            {
+                atom.availability = old.atom.availability;
+            }
+        }
+    }
+    fn leaf(
+        &self,
+        atom: &StatusAtom,
+        plan: Option<&PreparedTransient>,
+    ) -> Result<ChildState, IndexError> {
+        let active = self
+            .transient_state(plan, &atom.id)
+            .map_or(0, |n| n.flights.len());
+        leaf(atom, u32::try_from(active).map_err(|_| IndexError::Budget)?)
     }
     fn final_atom<'a>(
         &'a self,
@@ -259,7 +393,6 @@ impl IndexOwner {
         batch: ProjectionBatch,
         building: bool,
     ) -> Result<ApplyStats, IndexError> {
-        let started = Instant::now();
         if batch.from.epoch != self.stamp.database.epoch
             || batch.through.epoch != self.stamp.database.epoch
         {
@@ -270,7 +403,7 @@ impl IndexOwner {
         {
             return Err(IndexError::Budget);
         }
-        let mut work_bytes = batch
+        let work_bytes = batch
             .nodes
             .iter()
             .fold(0usize, |sum, n| {
@@ -311,10 +444,42 @@ impl IndexOwner {
         {
             return Err(IndexError::Discontinuous);
         }
-        let from = batch.from.clone();
-        let through = batch.through.clone();
+        let receipt = Receipt {
+            from: batch.from,
+            through: batch.through,
+            digest: fingerprint,
+        };
+        self.apply_tree(batch.nodes, work_bytes, Some(receipt), None, false)
+    }
+    fn apply_tree(
+        &mut self,
+        nodes: Vec<ProjectedNode>,
+        mut work_bytes: usize,
+        receipt: Option<Receipt>,
+        transient: Option<PreparedTransient>,
+        wide: bool,
+    ) -> Result<ApplyStats, IndexError> {
+        let started = Instant::now();
+        let work_limit = if wide {
+            self.budget.bytes
+        } else {
+            self.budget.batch_bytes
+        };
+        if nodes.len()
+            > if wide {
+                self.budget.nodes
+            } else {
+                self.budget.batch_nodes
+            }
+            || work_bytes > work_limit
+        {
+            return Err(IndexError::Budget);
+        }
+        let transient_bytes = transient
+            .as_ref()
+            .map_or(self.transients.bytes(), |p| p.bytes);
         let mut changes = BTreeMap::new();
-        for n in batch.nodes {
+        for mut n in nodes {
             if started.elapsed() > self.budget.prepare_time {
                 return Err(IndexError::Budget);
             }
@@ -332,6 +497,9 @@ impl IndexOwner {
                     return Err(IndexError::InvalidGraph);
                 }
             }
+            if let Some(atom) = &mut n.atom {
+                self.materialize(atom, transient.as_ref());
+            }
             changes.insert(n.id, n.atom);
         }
         // No complete tree copy. Only input rows and their old/new ancestor
@@ -348,7 +516,7 @@ impl IndexOwner {
             if !set.contains(&id) {
                 work_bytes =
                     work_bytes.saturating_add(id.len().saturating_mul(12).saturating_add(1024));
-                if work_bytes > self.budget.batch_bytes {
+                if work_bytes > work_limit {
                     return Err(IndexError::Budget);
                 }
                 set.insert(id);
@@ -455,6 +623,8 @@ impl IndexOwner {
         }
         if count > self.budget.nodes
             || bytes
+                .max(self.bytes)
+                .saturating_add(transient_bytes.max(self.transients.bytes()))
                 .checked_add(work_bytes)
                 .is_none_or(|n| n > self.budget.bytes)
         {
@@ -544,7 +714,7 @@ impl IndexOwner {
                     if a.directory {
                         summaries.insert(id.clone(), known(patch.summary().clone())?);
                     } else {
-                        summaries.insert(id.clone(), leaf(a)?);
+                        summaries.insert(id.clone(), self.leaf(a, transient.as_ref())?);
                     }
                 }
                 bytes -= old.map_or(0, |r| r.aggregate_charge);
@@ -560,18 +730,21 @@ impl IndexOwner {
                 if !edits.is_empty() {
                     return Err(IndexError::InvalidGraph);
                 }
-                summaries.insert(id.clone(), leaf(a)?);
+                summaries.insert(id.clone(), self.leaf(a, transient.as_ref())?);
             }
         }
         if bytes
+            .max(self.bytes)
+            .saturating_add(transient_bytes.max(self.transients.bytes()))
             .checked_add(work_bytes)
             .is_none_or(|n| n > self.budget.bytes)
         {
             return Err(IndexError::Budget);
         }
-        let changed = changes
-            .iter()
-            .any(|(id, next)| self.nodes.get(id).map(|r| &r.atom) != next.as_ref())
+        let changed = transient.as_ref().is_some_and(|p| p.reset)
+            || changes
+                .iter()
+                .any(|(id, next)| self.nodes.get(id).map(|r| &r.atom) != next.as_ref())
             || summaries
                 .iter()
                 .any(|(id, next)| self.nodes.get(id).map(|r| &r.summary) != Some(next));
@@ -641,15 +814,17 @@ impl IndexOwner {
         }
         self.bytes = bytes;
         self.next_uid = next_uid;
-        self.stamp.database = through.clone();
         self.stamp.generation = generation;
-        self.receipts.push_back(Receipt {
-            from,
-            through,
-            digest: fingerprint,
-        });
-        if self.receipts.len() > 32 {
-            self.receipts.pop_front();
+        if let Some(receipt) = receipt {
+            self.stamp.database = receipt.through.clone();
+            self.receipts.push_back(receipt);
+            if self.receipts.len() > 32 {
+                self.receipts.pop_front();
+            }
+        }
+        if let Some(plan) = transient {
+            self.stamp.transient = Some(plan.through.clone());
+            self.transients.commit(plan);
         }
         Ok(ApplyStats {
             changed,
