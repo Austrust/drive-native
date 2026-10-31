@@ -20,6 +20,8 @@
 
 ## 当前整合工作
 
+最新开发包`.3`已发布：[通知诊断与读取隔离验证](docs/validation/native-package-003/REPORT.md)。389项Rust、9项debug/release显式FUSE、49项GUI，隔离升级/回退/清除重装及未上传数据保留、安装后Nemo/Nautilus缓存状态刷新通过。大目录/混合性能、Personal通知推进与跨450秒实网覆盖仍开放，不改变P0–P6状态。
+
 2026-10-31用户更新目标：允许P0观察与隔离开发并行，最终门槛不降低。第一批 GIO、图标、GUI 按需加载及目录分页已发布为开发包 `.2`：Rust363项、8项显式FUSE、GUI49项通过；隔离 Ubuntu 安装生命周期及已缓存合成目录的实际 Nemo/Nautilus 集成通过。来源、范围和环境限制见[整合记录](docs/UBUNTU_INTEGRATION.md)与[安装桌面报告](docs/validation/desktop-package-002/REPORT.md)。6项远端发布资产已核验，Mint 实机等门槛未关闭。
 
 后续隔离分支已接入[原生通知接收空闲期限](docs/NOTIFICATION_IDLE.md)，IPC 13；模拟协议与 IPC 首轮回归通过，完整回归和真实 NAS 验证状态由该报告维护。原 `.6` 基线及 `.2` 发布包未替换，不计为连接中断已经实测解决。后续以本节和阶段表判断当前状态，下方保留此前基线核验历史。
