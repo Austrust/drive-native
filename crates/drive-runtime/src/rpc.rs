@@ -30,14 +30,14 @@ fn valid_index_progress(
 ) -> bool {
     use drive_core::snapshot_progress::Phase;
     let rank = |p| match p {
-        Phase::Seed => 0,
+        Phase::Watermark | Phase::Seed => 0,
         Phase::Enumerate => 1,
-        Phase::Fence => 2,
+        Phase::Fence | Phase::Reconcile => 2,
     };
-    let (units, items) = if next.phase == Phase::Enumerate {
-        (500_000, 500_000)
-    } else {
-        (4096, 2_000_000)
+    let (units, items) = match next.phase {
+        Phase::Watermark => (2, 1),
+        Phase::Enumerate => (500_000, 500_000),
+        _ => (4096, 2_000_000),
     };
     (1..=3).contains(&next.attempt)
         && next.units <= units
@@ -46,6 +46,10 @@ fn valid_index_progress(
             next.attempt > old.attempt
                 || (next.attempt == old.attempt
                     && (rank(next.phase) > rank(old.phase)
+                        // Reconciliation and its subsequent fence can alternate;
+                        // these observations neither commit a cursor nor extend
+                        // the fixed overall RPC deadline.
+                        || (rank(next.phase) == 2 && rank(old.phase) == 2 && next.phase != old.phase)
                         || (next.phase == old.phase
                             && next.units >= old.units
                             && next.items >= old.items)))

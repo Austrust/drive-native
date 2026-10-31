@@ -396,7 +396,7 @@ where
                     attempt,
                     phase: Phase::Reconcile,
                     units: lists as u64 - 1,
-                    items: reply_nodes as u64,
+                    items: events as u64,
                 });
                 let nodes = match timeout_at(deadline, list(parent.clone(), path))
                     .await
@@ -426,7 +426,7 @@ where
                     attempt,
                     phase: Phase::Reconcile,
                     units: lists as u64,
-                    items: reply_nodes as u64,
+                    items: events as u64,
                 });
                 replies.push((parent, nodes));
             }
