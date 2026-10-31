@@ -95,6 +95,56 @@ fn committed_write_survives_a_later_outer_error_and_unchanged_updates_are_ignore
 }
 
 #[test]
+fn directory_content_and_conflict_updates_do_not_invalidate_descendants() {
+    for update in [
+        "remote_version='v2'",
+        "local_version='v1'",
+        "blob='content-token'",
+        "dirty_blob='dirty-token'",
+        "base_version='v1'",
+        "dirty_generation=dirty_generation+1",
+        "conflict=1",
+    ] {
+        let (_dir, s) = fixture();
+        let start = s.status_change_watermark().unwrap().cursor;
+        s.db.execute(&format!("UPDATE nodes SET {update} WHERE id='p'"), [])
+            .unwrap();
+        let changes = rows(&s, &start);
+        assert_eq!(changes.len(), 1, "{update}");
+        assert_eq!(changes[0].scope, ChangeScope::NodeAndAncestors, "{update}");
+        assert_eq!(changes[0].new_node.as_deref(), Some("p"));
+    }
+}
+
+#[test]
+fn inherited_namespace_and_visibility_updates_still_invalidate_subtrees() {
+    for update in [
+        "id='renamed-id'",
+        "parent='q'",
+        "name='new-name'",
+        "directory=0",
+        "pinned=1",
+        "deleted=1",
+        "remote_version='v2', pinned=1",
+    ] {
+        let (_dir, s) = fixture();
+        let start = s.status_change_watermark().unwrap().cursor;
+        s.db.execute(&format!("UPDATE nodes SET {update} WHERE id='p'"), [])
+            .unwrap();
+        let changes = rows(&s, &start);
+        assert_eq!(changes.len(), 1, "{update}");
+        assert_eq!(changes[0].scope, ChangeScope::SubtreeAndAncestors, "{update}");
+    }
+    let (_dir, s) = fixture();
+    let start = s.status_change_watermark().unwrap().cursor;
+    s.db.execute("DELETE FROM nodes WHERE id='p'", []).unwrap();
+    let changes = rows(&s, &start);
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].scope, ChangeScope::SubtreeAndAncestors);
+    assert_eq!(changes[0].old_parent.as_deref(), Some("root"));
+}
+
+#[test]
 fn rename_and_atomic_replace_keep_both_identities_and_old_new_locations() {
     let (_dir, mut s) = fixture();
     let start = s.status_change_watermark().unwrap().cursor;
