@@ -1,6 +1,6 @@
 # Drive Native
 
-当前实验分支增加[持久事件证据与已知目录局部重查](docs/INITIALIZATION_EVENT_EVIDENCE.md)，267项core、112项runtime及全目标检查通过。基于冻结`.5`，实验使用schema21／IPC18，尚未打包或进行新的NAS实测；未知位置的局部协调和逐目录提前显示仍待实现。
+当前实验分支整合[持久事件证据与已知目录局部重查](docs/INITIALIZATION_EVENT_EVIDENCE.md)和[目录视图缓存修复](docs/DIRECTORY_VIEW_STAMP.md)。前者独立回归267项core／112项runtime，后者235项core／12项filesystem及各自全目标检查通过；合并后的验证另行记录。实验使用schema21／IPC18，尚未打包或进行新的NAS实测；未知位置的局部协调和逐目录提前显示仍待实现。
 
 当前开发包 `.4` 修复候选递归查询的重复扫描，已[发布](https://github.com/Austrust/drive-native/releases/tag/dev20261101.4)；[真实失败、局部SQL复放及修复版复测](docs/CANDIDATE_QUERY_ORDER.md)。修复版真实只读初始化本次仍未通过：受控重启续扫已完成，状态查询异常0次，最终0.216秒正常退出且无遗留挂载。它不等于同负载端到端配对性能、断网故障或长期验收；本次未写NAS。
 
