@@ -1,6 +1,6 @@
 # Drive Native
 
-当前实验分支整合[持久事件证据与已知目录局部重查](docs/INITIALIZATION_EVENT_EVIDENCE.md)和[目录视图缓存修复](docs/DIRECTORY_VIEW_STAMP.md)。前者独立回归267项core／112项runtime，后者235项core／12项filesystem及各自全目标检查通过；合并后的验证另行记录。实验使用schema21／IPC18，尚未打包或进行新的NAS实测；未知位置的局部协调和逐目录提前显示仍待实现。
+当前实验分支整合[持久事件证据与已知目录局部重查](docs/INITIALIZATION_EVENT_EVIDENCE.md)和[目录视图缓存修复](docs/DIRECTORY_VIEW_STAMP.md)。合并后的隔离回归273项core、112项runtime、12项filesystem及全目标检查通过。实验使用schema21／IPC18，尚未打包或进行新的NAS实测；未知位置的局部协调和逐目录提前显示仍待实现。
 
 当前开发包 `.5` 的[初始化事件依赖等待与有界恢复](docs/CANDIDATE_EVENT_COVERAGE.md)已[发布](https://github.com/Austrust/drive-native/releases/tag/dev20261101.5)。本包本次真实只读初始化未通过；受控重启续扫完成=True，状态查询异常0次。最终0.266秒正常停止且无遗留挂载；未写NAS。实测期间宿主仍有开发活动，远端变更负载未控制，不作与旧版配对性能或长期验收结论。
 
