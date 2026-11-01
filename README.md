@@ -2,11 +2,13 @@
 
 当前实验分支整合[持久事件证据与已知目录局部重查](docs/INITIALIZATION_EVENT_EVIDENCE.md)和[目录视图缓存修复](docs/DIRECTORY_VIEW_STAMP.md)。前者独立回归267项core／112项runtime，后者235项core／12项filesystem及各自全目标检查通过；合并后的验证另行记录。实验使用schema21／IPC18，尚未打包或进行新的NAS实测；未知位置的局部协调和逐目录提前显示仍待实现。
 
-当前开发包 `.4` 修复候选递归查询的重复扫描，已[发布](https://github.com/Austrust/drive-native/releases/tag/dev20261101.4)；[真实失败、局部SQL复放及修复版复测](docs/CANDIDATE_QUERY_ORDER.md)。修复版真实只读初始化本次仍未通过：受控重启续扫已完成，状态查询异常0次，最终0.216秒正常退出且无遗留挂载。它不等于同负载端到端配对性能、断网故障或长期验收；本次未写NAS。
+当前开发包 `.5` 的[初始化事件依赖等待与有界恢复](docs/CANDIDATE_EVENT_COVERAGE.md)已[发布](https://github.com/Austrust/drive-native/releases/tag/dev20261101.5)。本包本次真实只读初始化未通过；受控重启续扫完成=True，状态查询异常0次。最终0.266秒正常停止且无遗留挂载；未写NAS。实测期间宿主仍有开发活动，远端变更负载未控制，不作与旧版配对性能或长期验收结论。
+
+历史 `.4` SQL修复及真实失败见[原报告](docs/CANDIDATE_QUERY_ORDER.md)与[包验证009](docs/validation/native-package-009/REPORT.md)，不与本轮结果混计。
 
 面向 Linux Mint Cinnamon / Nemo 的 Synology Drive 原生协议按需同步客户端。使用 Rust、FUSE、SQLite、PySide6 和 Nemo 扩展；独立连接 Drive Server，不依赖 WebDAV 或官方客户端进程。
 
-**开发测试版本，尚未完成日常使用验收。** `0.1.0~dev20261101.4` 已发布，[本轮验证](docs/validation/native-package-009/REPORT.md)记录656项Rust、73项GUI，debug/release各13项显式FUSE及 `.3 → .4` 同schema20暂停接管、旧ELF实际读取和未上传数据保留。schema20／IPC17不变。逐目录提前显示、候选权限拒绝可见性、保守整树失效及最终整树提交成本、普通目录全量同步、运行时增量桌面状态、Mint与最终数据安全／7×24门槛仍开放。完整goal保持活动，本包不是rc1。 下载见[GitHub Releases](https://github.com/Austrust/drive-native/releases/tag/dev20261101.4)。
+**开发测试版本，尚未完成日常使用验收。** `0.1.0~dev20261101.5` 已发布，[本轮验证](docs/validation/native-package-010/REPORT.md)记录671项Rust、73项GUI，debug/release各13项显式FUSE及 `.4 → .5` 同schema20暂停接管、旧ELF读取和未上传数据保留。schema20／IPC17不变。未知父完成覆盖后及目录事件仍可能整树回退；等待期间后页根／权限事件会延后获知，写回门禁不等于本地ACL即时撤权。逐目录提前显示、普通目录全量同步、运行时增量桌面状态、配对性能、Mint及最终数据安全／7×24验收仍开放。完整goal保持活动，本包不是rc1。P0原窗口满足23小时时长，异常条件未通过，不拼接或重计。
 
 ## 已实现
 
@@ -26,7 +28,7 @@ Ubuntu更新包已逐项整合，继续在独立分支修复原生恢复及按�
 
 [恢复及增量状态基础](docs/validation/incremental-status-001/REPORT.md)已完成组件整合；[批量导入成本回退已修复](docs/validation/status-write-cost-003/REPORT.md)。运行时增量桌面状态尚未接入；不将这些基础模块算作 Personal 或整体性能问题已经解决。
 
-当前生产接线和可靠FD分步接口见[持久初始化](docs/INITIALIZATION_PERSISTENCE.md)。修复版真实只读初始化本次仍未通过：受控重启续扫已完成，状态查询异常0次，最终0.216秒正常退出且无遗留挂载。它不等于同负载端到端配对性能、断网故障或长期验收；本次未写NAS。 历史 `.2` 候选基础与 `.3` owner交付见[包验证007](docs/validation/native-package-007/REPORT.md)、[包验证008](docs/validation/native-package-008/REPORT.md)，不与本轮混计。
+当前生产接线和可靠FD分步接口见[持久初始化](docs/INITIALIZATION_PERSISTENCE.md)。本包本次真实只读初始化未通过；受控重启续扫完成=True，状态查询异常0次。最终0.266秒正常停止且无遗留挂载；未写NAS。实测期间宿主仍有开发活动，远端变更负载未控制，不作与旧版配对性能或长期验收结论。 历史基础、owner和SQL修复保留各自验证范围。
 
 ## 构建和测试
 
