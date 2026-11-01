@@ -26,6 +26,16 @@ def state():
 
 
 class PureTests(unittest.TestCase):
+    def test_retry_reason_allowlist_accepts_categories_and_rejects_arbitrary_text(self):
+        document = state()
+        document['initialization'].update(last_retry_reason='parent_unavailable', retry_count=1)
+        result = probe.sanitize_progress(document)
+        self.assertEqual(result['last_retry_reason'], 'parent_unavailable')
+        self.assertEqual(result['retry_count'], 1)
+        document['initialization']['last_retry_reason'] = 'CANARY_PRIVATE_PATH'
+        with self.assertRaises(ValueError):
+            probe.sanitize_progress(document)
+
     def test_allowlist_drops_untrusted_text_at_every_level(self):
         document = state()
         document['secret'] = 'CANARY'

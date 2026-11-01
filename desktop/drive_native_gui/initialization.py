@@ -7,7 +7,21 @@ PHASES = {
     "seeding": "正在读取目录历史", "enumerating": "正在枚举目录",
     "fencing": "正在核对枚举期间的变更", "importing": "正在提交本地索引",
     "reconciling": "正在协调扫描期间变化的目录",
+    "retrying": "本次候选需要重新核对",
     "waiting": "已连接 · 等待远端变更",
+}
+
+RETRY_REASONS = {
+    "enumeration_collision": "枚举期间名称或身份发生冲突",
+    "root_event": "同步根发生变化",
+    "directory_event": "目录发生变化，需重新核对范围",
+    "filtered_type_event": "发生尚不能局部协调的文件类型变化",
+    "type_identity_mismatch": "文件类型与已有身份不一致",
+    "parent_unavailable": "变化涉及尚未确认或不可访问的父目录",
+    "parent_path_mismatch": "父目录身份与事件路径未能对应",
+    "local_listing_denied": "重查目录时访问被拒绝",
+    "local_listing_filtered_type": "重查目录时遇到过滤类型",
+    "local_listing_changed": "重查列表的目录结构或身份发生变化",
 }
 
 
@@ -40,4 +54,7 @@ def progress_text(progress):
         detail += f" · 距上次完成实际工作 {quiet} 秒"
     if progress.get("consecutive_changed_without_advance", 0):
         detail += f" · 连续 {progress['consecutive_changed_without_advance']} 次变更通知后游标未推进"
+    reason = RETRY_REASONS.get(progress.get("last_retry_reason"))
+    if reason:
+        detail += f" · 已重试 {progress.get('retry_count', 0)} 次：{reason}"
     return title, detail

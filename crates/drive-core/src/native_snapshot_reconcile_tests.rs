@@ -70,6 +70,49 @@ fn empty(next: u64) -> EventBatch {
 }
 
 #[tokio::test]
+async fn unsafe_event_fallback_emits_exact_redacted_reason_before_any_local_query() {
+    for expected in [
+        RetryReason::DirectoryEvent,
+        RetryReason::ParentUnavailable,
+        RetryReason::ParentPathMismatch,
+        RetryReason::TypeIdentityMismatch,
+    ] {
+        let mut event = changed();
+        match expected {
+            RetryReason::DirectoryEvent => event.file_type = FileType::Dir,
+            RetryReason::ParentUnavailable => event.parent_id = "unknown".into(),
+            RetryReason::ParentPathMismatch => event.path = "/lab/run/other/A.doc".into(),
+            RetryReason::TypeIdentityMismatch => event.file_id = "left".into(),
+            _ => unreachable!(),
+        }
+        let observed = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let capture = observed.clone();
+        let mut page = Some(batch(event, 11));
+        let result = crate::snapshot_progress::scope(
+            std::sync::Arc::new(move |p| {
+                capture.lock().unwrap().push(p);
+            }),
+            converge(
+                initial(),
+                1,
+                |_| std::future::ready(Ok(page.take().unwrap())),
+                |_, _| std::future::ready(Err(Error::State("must not query".into()))),
+            ),
+        )
+        .await
+        .unwrap();
+        assert!(result.is_none());
+        let messages = observed.lock().unwrap();
+        let last = messages.last().unwrap();
+        assert_eq!(last.phase, Phase::Retry);
+        assert_eq!(last.retry_reason, Some(expected));
+        assert_eq!((last.units, last.items), (0, 0));
+        let encoded = serde_json::to_string(last).unwrap();
+        assert!(!encoded.contains("/lab/") && !encoded.contains("A.doc"));
+    }
+}
+
+#[tokio::test]
 async fn changing_file_rechecks_only_its_parent_and_fences_after_every_recheck() {
     let mut pages = VecDeque::from([
         batch(changed(), 11),

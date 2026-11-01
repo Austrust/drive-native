@@ -83,6 +83,7 @@ where
         ));
     }
     emit(Progress {
+        retry_reason: None,
         attempt,
         phase: Phase::Watermark,
         units: 0,
@@ -92,6 +93,7 @@ where
         .await
         .map_err(|_| Error::Native(sproto::Error::Timeout("current snapshot seed deadline")))??;
     emit(Progress {
+        retry_reason: None,
         attempt,
         phase: Phase::Watermark,
         units: 1,
@@ -120,6 +122,7 @@ where
     }
     crate::state::valid_node(&node)?;
     emit(Progress {
+        retry_reason: None,
         attempt,
         phase: Phase::Watermark,
         units: 2,

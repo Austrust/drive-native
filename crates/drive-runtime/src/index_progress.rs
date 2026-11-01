@@ -83,6 +83,7 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::sync_channel(8);
         let reporter = Reporter::new(7, tx);
         let first = Progress {
+            retry_reason: None,
             attempt: 1,
             phase: Phase::Seed,
             units: 0,
@@ -90,16 +91,19 @@ mod tests {
         };
         reporter.observe(first);
         reporter.observe(Progress {
+            retry_reason: None,
             units: 3,
             items: 9,
             ..first
         });
         let next = Progress {
+            retry_reason: None,
             phase: Phase::Enumerate,
             ..first
         };
         reporter.observe(next);
         reporter.observe(Progress {
+            retry_reason: None,
             units: 2,
             items: 12,
             ..next
@@ -126,6 +130,7 @@ mod tests {
         let reporter = Reporter::new(1, tx);
         for units in 0..500 {
             reporter.observe(Progress {
+                retry_reason: None,
                 attempt: 1,
                 phase: Phase::Seed,
                 units,

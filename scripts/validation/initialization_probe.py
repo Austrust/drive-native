@@ -17,7 +17,10 @@ import time
 IFACE = 'org.drivenative.Client1'
 PATH = '/org/drivenative/Client1'
 PHASES = {'starting', 'authenticating', 'configuring', 'binding', 'catching_up',
-          'recovering', 'watermark', 'seeding', 'enumerating', 'fencing', 'reconciling', 'importing', 'waiting'}
+          'recovering', 'watermark', 'seeding', 'enumerating', 'fencing', 'reconciling', 'retrying', 'importing', 'waiting'}
+RETRIES = {'enumeration_collision', 'root_event', 'directory_event', 'filtered_type_event',
+           'type_identity_mismatch', 'parent_unavailable', 'parent_path_mismatch',
+           'local_listing_denied', 'local_listing_filtered_type', 'local_listing_changed'}
 RECOVERY = {'initial_index', 'permission_recheck', 'cursor_invalidated', 'filtered_type_changed'}
 COUNTERS = ('attempt', 'started_unix_ms', 'elapsed_ms', 'phase_started_unix_ms',
             'phase_elapsed_ms', 'units', 'items', 'snapshot_attempt', 'cursor_advances',
@@ -44,6 +47,10 @@ def sanitize_progress(document):
         raise ValueError('invalid stage')
     result = {key: integer(value.get(key)) for key in COUNTERS}
     result.update(active=value['active'], phase=value['phase'], recovery_reason=value.get('recovery_reason'))
+    reason = value.get('last_retry_reason')
+    if reason not in RETRIES | {None}:
+        raise ValueError('invalid retry category')
+    result.update(retry_count=integer(value.get('retry_count', 0)), last_retry_reason=reason)
     since = value.get('since_progress_ms')
     result['since_progress_ms'] = None if since is None else integer(since)
     spans = value.get('recent_stages')
@@ -56,6 +63,10 @@ def sanitize_progress(document):
             raise ValueError('invalid history phase')
         result['recent_stages'].append({'phase': span['phase'], **{
             key: integer(span.get(key)) for key in ('started_unix_ms', 'elapsed_ms', 'units', 'items')}})
+        reason = span.get('retry_reason')
+        if reason not in RETRIES | {None}:
+            raise ValueError('invalid retry history')
+        result['recent_stages'][-1]['retry_reason'] = reason
     result['phase_totals_ms'] = []
     for pair in totals:
         if not isinstance(pair, list) or len(pair) != 2 or pair[0] not in PHASES:

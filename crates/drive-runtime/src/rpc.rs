@@ -34,13 +34,16 @@ fn valid_index_progress(
         Phase::Seed => 1,
         Phase::Enumerate => 2,
         Phase::Fence | Phase::Reconcile => 3,
+        Phase::Retry => 4,
     };
     let (units, items) = match next.phase {
         Phase::Watermark => (2, 1),
         Phase::Enumerate => (500_000, 500_000),
+        Phase::Retry => (0, 0),
         _ => (4096, 2_000_000),
     };
     (1..=3).contains(&next.attempt)
+        && (next.phase == Phase::Retry) == next.retry_reason.is_some()
         && next.units <= units
         && next.items <= items
         && previous.is_none_or(|old| {
@@ -52,6 +55,7 @@ fn valid_index_progress(
                         // the fixed overall RPC deadline.
                         || (rank(next.phase) == 3 && rank(old.phase) == 3 && next.phase != old.phase)
                         || (next.phase == old.phase
+                            && (next.phase != Phase::Retry || next.retry_reason == old.retry_reason)
                             && next.units >= old.units
                             && next.items >= old.items)))
         })

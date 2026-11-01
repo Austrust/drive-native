@@ -98,6 +98,7 @@ impl NativeReadSession {
             VecDeque::from([(self.scope.file_id.clone(), self.scope.path.clone(), 0usize)]);
         let mut directories = 0;
         emit(Progress {
+            retry_reason: None,
             attempt,
             phase: Phase::Enumerate,
             units: 0,
@@ -139,6 +140,7 @@ impl NativeReadSession {
                         inaccessible.push(parent);
                         directories += 1;
                         emit(Progress {
+                            retry_reason: None,
                             attempt,
                             phase: Phase::Enumerate,
                             units: directories,
@@ -181,6 +183,7 @@ impl NativeReadSession {
                 }
                 directories += 1;
                 emit(Progress {
+                    retry_reason: None,
                     attempt,
                     phase: Phase::Enumerate,
                     units: directories,
@@ -278,6 +281,7 @@ impl NativeReadSession {
         let started = std::time::Instant::now();
         let mut events = 0;
         emit(Progress {
+            retry_reason: None,
             attempt,
             phase: Phase::Fence,
             units: 0,
@@ -293,6 +297,7 @@ impl NativeReadSession {
             }
             events += batch.events.len() as u64;
             emit(Progress {
+                retry_reason: None,
                 attempt,
                 phase: Phase::Fence,
                 units: page + 1,
@@ -336,7 +341,13 @@ impl NativeReadSession {
                 .await
             {
                 Ok(snapshot) => snapshot,
-                Err(Error::SnapshotChanged) => continue,
+                Err(Error::SnapshotChanged) => {
+                    crate::snapshot_progress::retry(
+                        attempt,
+                        crate::snapshot_progress::RetryReason::EnumerationCollision,
+                    );
+                    continue;
+                }
                 Err(error) => return Err(error),
             };
             let watch = self.watch(&snapshot.cursor)?;
@@ -379,6 +390,22 @@ impl Store {
         snapshot: &RemoteSnapshot,
         expected_cursor: &str,
     ) -> Result<()> {
+        self.install_native_snapshot_checked(snapshot, expected_cursor, None)
+    }
+    pub(crate) fn install_native_snapshot_for_initialization(
+        &mut self,
+        snapshot: &RemoteSnapshot,
+        expected_cursor: &str,
+        initialization: &crate::initialization_store::InitializationCommit,
+    ) -> Result<()> {
+        self.install_native_snapshot_checked(snapshot, expected_cursor, Some(initialization))
+    }
+    fn install_native_snapshot_checked(
+        &mut self,
+        snapshot: &RemoteSnapshot,
+        expected_cursor: &str,
+        initialization: Option<&crate::initialization_store::InitializationCommit>,
+    ) -> Result<()> {
         if self.cursor()? != expected_cursor || snapshot.nodes.len() > SNAPSHOT_NODE_LIMIT {
             return Err(Error::State(
                 "snapshot base changed or exceeds budget".into(),
@@ -395,6 +422,10 @@ impl Store {
             [],
             |r| r.get(0),
         )?;
+        let restore = match initialization {
+            Some(commit) => crate::initialization_store::installation_restore(&self.db, commit)?,
+            None => restore,
+        };
         if scope != snapshot.scope
             || restore != snapshot.restore
             || snapshot
@@ -419,11 +450,12 @@ impl Store {
                 return Err(Error::State("snapshot node token mismatch".into()));
             }
         }
-        self.install_remote_snapshot_with_access(
+        self.install_remote_snapshot_with_initialization(
             &snapshot.nodes,
             &snapshot.cursor,
             &snapshot.restore,
             &snapshot.inaccessible,
+            initialization,
         )?;
         // Informational only; content/cursor commit remains transactional above.
         self.db.execute(
@@ -475,6 +507,7 @@ where
     let mut event_count = 0usize;
     let started = std::time::Instant::now();
     emit(Progress {
+        retry_reason: None,
         attempt,
         phase: Phase::Seed,
         units: 0,
@@ -505,6 +538,7 @@ where
             return Err(Error::State("snapshot seed budget exceeded".into()));
         }
         emit(Progress {
+            retry_reason: None,
             attempt,
             phase: Phase::Seed,
             units: page + 1,

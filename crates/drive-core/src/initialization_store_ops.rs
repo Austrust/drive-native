@@ -1,0 +1,605 @@
+use super::*;
+
+impl Store {
+    pub fn begin_initialization_directory(
+        &mut self,
+        run: &InitializationRun,
+        id: &str,
+    ) -> Result<InitializationDirectoryTicket> {
+        let tx = self.db.transaction()?;
+        checked(&tx, run, false)?;
+        let generation: u64 = tx.query_row(
+            "SELECT r.directory_clock FROM initialization_run r JOIN initialization_directories d ON d.run=r.run_id WHERE r.run_id=?1 AND d.id=?2",
+            params![run.run_id, id],
+            |r| read_counter(r,0),
+        )?;
+        let generation = generation
+            .checked_add(1)
+            .ok_or_else(|| invalid("directory generation exhausted"))?;
+        number(generation)?;
+        // Run-wide allocation prevents ABA after a parent replacement deletes
+        // and recreates the same directory ID/row within the same run epoch.
+        tx.execute(
+            "UPDATE initialization_run SET directory_clock=?2 WHERE run_id=?1",
+            params![run.run_id, number(generation)?],
+        )?;
+        tx.execute("UPDATE initialization_directories SET generation=?3,state='loading',receipt_seq=NULL,receipt_hash=NULL WHERE run=?1 AND id=?2",params![run.run_id,id,number(generation)?])?;
+        clear_fence(&tx, &run.run_id)?;
+        tx.commit()?;
+        Ok(InitializationDirectoryTicket {
+            run: run.clone(),
+            directory: id.into(),
+            generation,
+        })
+    }
+    /// Accept only a complete, checked direct listing. No offset/partial page is
+    /// persisted as completed coverage. False is an exact idempotent duplicate.
+    pub fn store_initialization_directory(
+        &mut self,
+        ticket: &InitializationDirectoryTicket,
+        sequence: u64,
+        children: &[Node],
+    ) -> Result<bool> {
+        self.store_initialization_listing(ticket, sequence, Some(children))
+    }
+    pub fn store_initialization_denied(
+        &mut self,
+        ticket: &InitializationDirectoryTicket,
+        sequence: u64,
+    ) -> Result<bool> {
+        self.store_initialization_listing(ticket, sequence, None)
+    }
+    fn store_initialization_listing(
+        &mut self,
+        ticket: &InitializationDirectoryTicket,
+        sequence: u64,
+        listing: Option<&[Node]>,
+    ) -> Result<bool> {
+        if sequence == 0 {
+            return Err(invalid("zero receipt sequence"));
+        }
+        number(sequence)?;
+        let children = listing.unwrap_or(&[]);
+        if children.len() > 500_000 {
+            return Err(invalid("listing count budget exceeded"));
+        }
+        let tx = self.db.transaction()?;
+        let s = checked(&tx, &ticket.run, false)?;
+        if listing.is_none() && ticket.directory == root_id(&s.binding)? {
+            return Err(invalid("selected root inaccessible"));
+        }
+        let (generation,state,seq,hash):(u64,String,Option<u64>,Option<String>)=tx.query_row("SELECT generation,state,receipt_seq,receipt_hash FROM initialization_directories WHERE run=?1 AND id=?2",params![ticket.run.run_id,ticket.directory],|r|Ok((read_counter(r,0)?,r.get(1)?,read_optional_counter(r,2)?,r.get(3)?)))?;
+        if generation != ticket.generation {
+            return Err(invalid("stale directory generation"));
+        }
+        let mut ids = HashMap::new();
+        let mut names = HashSet::new();
+        let mut bytes = 0usize;
+        let limits = budget(&tx, &ticket.run.run_id)?;
+        for child in children {
+            crate::state::valid_node(child)?;
+            if child.parent.as_deref() != Some(ticket.directory.as_str())
+                || child.id == root_id(&s.binding)?
+                || ids.insert(child.id.as_str(), child).is_some()
+                || !names.insert(&child.name)
+            {
+                return Err(invalid("ambiguous directory listing"));
+            }
+            bytes = bytes
+                .checked_add(serde_json::to_vec(child)?.len())
+                .ok_or_else(|| invalid("listing byte overflow"))?;
+            if bytes as u64 > limits.node_bytes {
+                return Err(invalid("listing byte budget exceeded"));
+            }
+        }
+        let digest = crate::sha256(&serde_json::to_vec(&(listing.is_none(), children))?);
+        if matches!(state.as_str(), "received" | "denied") {
+            if seq == Some(sequence) && hash.as_deref() == Some(&digest) {
+                return Ok(false);
+            }
+            return Err(invalid("receipt identity reused with different contents"));
+        }
+        if state != "loading" {
+            return Err(invalid("directory not loading"));
+        }
+        let old = tx
+            .prepare("SELECT body FROM initialization_entries WHERE run=?1 AND parent=?2")?
+            .query_map(params![ticket.run.run_id, ticket.directory], |r| {
+                r.get::<_, String>(0)
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let mut retained = HashSet::new();
+        for body in old {
+            let old: Node = serde_json::from_str(&body)?;
+            if ids.get(old.id.as_str()).is_some_and(|new| **new == old) {
+                retained.insert(old.id);
+            } else {
+                delete_subtree(&tx, &ticket.run.run_id, &old.id)?;
+            }
+        }
+        for child in children {
+            if !retained.contains(&child.id) {
+                insert_node(&tx, &ticket.run.run_id, child)?;
+            }
+        }
+        check_node_budget(&tx, &ticket.run.run_id)?;
+        tx.execute("UPDATE initialization_directories SET state=?3,receipt_seq=?4,receipt_hash=?5 WHERE run=?1 AND id=?2",params![ticket.run.run_id,ticket.directory,if listing.is_some(){"received"}else{"denied"},number(sequence)?,digest])?;
+        clear_fence(&tx, &ticket.run.run_id)?;
+        tx.commit()?;
+        Ok(true)
+    }
+
+    /// Issue immediately before a current-root request. New probes and applied
+    /// root changes invalidate older replies; no caller may fabricate completion.
+    pub fn begin_initialization_root_refresh(
+        &mut self,
+        run: &InitializationRun,
+    ) -> Result<InitializationRootTicket> {
+        let tx = self.db.transaction()?;
+        checked(&tx, run, false)?;
+        let old = tx.query_row(
+            "SELECT root_clock FROM initialization_run WHERE slot=1",
+            [],
+            |r| read_counter(r, 0),
+        )?;
+        let generation = old
+            .checked_add(1)
+            .ok_or_else(|| invalid("root generation exhausted"))?;
+        tx.execute("UPDATE initialization_run SET root_clock=?1,root_ticket=?1,root_refresh=1,fenced=NULL,fence_ticket=NULL WHERE slot=1",[number(generation)?])?;
+        tx.commit()?;
+        Ok(InitializationRootTicket {
+            run: run.clone(),
+            generation,
+        })
+    }
+    pub fn refresh_initialization_root(
+        &mut self,
+        ticket: &InitializationRootTicket,
+        root: &Node,
+    ) -> Result<()> {
+        let run = &ticket.run;
+        let tx = self.db.transaction()?;
+        let s = checked(&tx, run, false)?;
+        let current = tx.query_row(
+            "SELECT root_ticket FROM initialization_run WHERE slot=1",
+            [],
+            |r| read_optional_counter(r, 0),
+        )?;
+        if current != Some(ticket.generation) {
+            return Err(invalid("stale root response"));
+        }
+        validate_root(&s.binding, root)?;
+        let body = serde_json::to_string(root)?;
+        if body.len() > 1_048_576 {
+            return Err(invalid("node budget exceeded"));
+        }
+        let previous: i64 = tx.query_row(
+            "SELECT bytes FROM initialization_entries WHERE run=?1 AND id=?2",
+            params![run.run_id, root.id],
+            |r| r.get(0),
+        )?;
+        tx.execute(
+            "UPDATE initialization_entries SET body=?3,bytes=?4,name=?5 WHERE run=?1 AND id=?2",
+            params![run.run_id, root.id, body, body.len() as i64, root.name],
+        )?;
+        tx.execute("UPDATE initialization_run SET node_bytes=node_bytes+?2-?3,root_refresh=0,root_ticket=NULL,fenced=NULL,fence_ticket=NULL WHERE run_id=?1",params![run.run_id,body.len() as i64,previous])?;
+        check_node_budget(&tx, &run.run_id)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Store translated native events before acknowledging their receipt. The
+    /// durable product inbox/cursor is deliberately untouched.
+    pub fn record_initialization_events(
+        &mut self,
+        run: &InitializationRun,
+        sequence: u64,
+        batch: &Batch,
+    ) -> Result<bool> {
+        number(sequence)?;
+        let from = cursor(&batch.from)?;
+        let to = cursor(&batch.to)?;
+        if sequence == 0 || to <= from || batch.events.len() > 500_000 {
+            return Err(invalid("invalid candidate event batch"));
+        }
+        let tx = self.db.transaction()?;
+        let s = checked(&tx, run, false)?;
+        let limits = budget(&tx, &run.run_id)?;
+        let mut event_bytes = 0usize;
+        for event in &batch.events {
+            if event.id.is_empty() || event.id.len() > 4096 {
+                return Err(invalid("invalid event identity"));
+            }
+            if let Change::Upsert(node) = &event.change {
+                crate::state::valid_node(node)?;
+            }
+            event_bytes = event_bytes
+                .checked_add(serde_json::to_vec(event)?.len())
+                .ok_or_else(|| invalid("event byte overflow"))?;
+            if event_bytes as u64 > limits.event_bytes {
+                return Err(invalid("candidate event budget exceeded"));
+            }
+        }
+        let body = serde_json::to_string(batch)?;
+        let digest = crate::sha256(body.as_bytes());
+        if let Some(old) = tx
+            .query_row(
+                "SELECT digest FROM initialization_events WHERE run=?1 AND seq=?2",
+                params![run.run_id, number(sequence)?],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?
+        {
+            if old == digest {
+                return Ok(false);
+            }
+            return Err(invalid("event sequence reused with different contents"));
+        }
+        if sequence
+            != s.received_sequence
+                .checked_add(1)
+                .ok_or_else(|| invalid("event sequence exhausted"))?
+            || batch.from != s.received_cursor
+        {
+            return Err(invalid("candidate event gap"));
+        }
+        let old_bytes: u64 = tx.query_row(
+            "SELECT event_bytes FROM initialization_run WHERE slot=1",
+            [],
+            |r| read_counter(r, 0),
+        )?;
+        let total = old_bytes
+            .checked_add(body.len() as u64)
+            .ok_or_else(|| invalid("event byte overflow"))?;
+        if sequence > limits.event_batches || total > limits.event_bytes {
+            return Err(invalid("candidate event budget exceeded"));
+        }
+        tx.execute("INSERT INTO initialization_events(run,seq,from_cursor,to_cursor,body,digest,bytes) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![run.run_id,number(sequence)?,batch.from,batch.to,body,digest,body.len() as i64])?;
+        tx.execute("UPDATE initialization_run SET received=?2,received_seq=?3,event_bytes=?4,fenced=NULL,fence_ticket=NULL WHERE run_id=?1",params![run.run_id,batch.to,number(sequence)?,number(total)?])?;
+        tx.commit()?;
+        Ok(true)
+    }
+    pub fn pending_initialization_events(
+        &self,
+        run: &InitializationRun,
+        limit: usize,
+    ) -> Result<Vec<(u64, Batch)>> {
+        let s = checked(&self.db, run, false)?;
+        if limit == 0 || limit > 64 {
+            return Err(invalid("invalid event page limit"));
+        }
+        let rows=self.db.prepare("SELECT seq,body FROM initialization_events WHERE run=?1 AND seq>?2 ORDER BY seq LIMIT ?3")?.query_map(params![run.run_id,number(s.applied_sequence)?,limit as i64],|r|Ok((read_counter(r,0)?,r.get::<_,String>(1)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
+        rows.into_iter()
+            .map(|(seq, body)| Ok((seq, serde_json::from_str(&body)?)))
+            .collect()
+    }
+    /// Apply means that the event's required rechecks are durably scheduled,
+    /// not that old event metadata was copied over a newer directory listing.
+    pub fn apply_initialization_events(
+        &mut self,
+        run: &InitializationRun,
+        sequence: u64,
+    ) -> Result<bool> {
+        let tx = self.db.transaction()?;
+        let s = checked(&tx, run, false)?;
+        if sequence == 0 || sequence > s.received_sequence {
+            return Err(invalid("event not received"));
+        }
+        if sequence <= s.applied_sequence {
+            return Ok(false);
+        }
+        if sequence != s.applied_sequence + 1 {
+            return Err(invalid("event application gap"));
+        }
+        let body: String = tx.query_row(
+            "SELECT body FROM initialization_events WHERE run=?1 AND seq=?2",
+            params![run.run_id, number(sequence)?],
+            |r| r.get(0),
+        )?;
+        let batch: Batch = serde_json::from_str(&body)?;
+        if batch.from != s.applied_cursor {
+            return Err(invalid("candidate applied cursor mismatch"));
+        }
+        let root = root_id(&s.binding)?;
+        let mut all = false;
+        let mut root_refresh = false;
+        let mut parents = HashSet::new();
+        for event in &batch.events {
+            let id = match &event.change {
+                Change::Upsert(node) => &node.id,
+                Change::Delete { id } => id,
+            };
+            let old = match load_node(&tx, &run.run_id, id) {
+                Ok(n) => Some(n),
+                Err(e) if e.is_not_found() => None,
+                Err(e) => return Err(e),
+            };
+            if id == root {
+                match &event.change {
+                    Change::Upsert(node) => validate_root(&s.binding, node)?,
+                    _ => return Err(invalid("selected root removed")),
+                }
+                all = true;
+                root_refresh = true;
+                continue;
+            }
+            if old.as_ref().is_some_and(|node| node.directory) {
+                all = true;
+            }
+            if let Some(parent) = old.as_ref().and_then(|node| node.parent.as_ref()) {
+                parents.insert(parent.clone());
+            }
+            match &event.change {
+                Change::Upsert(node) => {
+                    crate::state::valid_node(node)?;
+                    if node.directory {
+                        all = true;
+                    }
+                    let parent = node
+                        .parent
+                        .as_ref()
+                        .ok_or_else(|| invalid("replacement root event"))?;
+                    match load_node(&tx, &run.run_id, parent) {
+                        Ok(node) if node.directory => {
+                            parents.insert(parent.clone());
+                        }
+                        Ok(_) => all = true,
+                        Err(error) if error.is_not_found() => all = true,
+                        Err(error) => return Err(error),
+                    }
+                }
+                Change::Delete { .. } if old.is_none() => all = true,
+                _ => {}
+            }
+        }
+        if all {
+            invalidate(&tx, &run.run_id, root, true)?;
+        } else {
+            for parent in parents {
+                invalidate(&tx, &run.run_id, &parent, false)?;
+            }
+        }
+        tx.execute("UPDATE initialization_run SET applied=?2,applied_seq=?3,root_refresh=max(root_refresh,?4),root_ticket=CASE WHEN ?4 THEN NULL ELSE root_ticket END,fenced=NULL,fence_ticket=NULL WHERE run_id=?1",params![run.run_id,batch.to,number(sequence)?,root_refresh])?;
+        tx.commit()?;
+        Ok(true)
+    }
+    /// Capture the candidate boundary immediately before the native stationary
+    /// fence request. Every subsequent mutation invalidates this one-use ticket.
+    pub fn begin_initialization_fence(
+        &mut self,
+        run: &InitializationRun,
+    ) -> Result<InitializationFenceTicket> {
+        let tx = self.db.transaction()?;
+        let state = checked(&tx, run, false)?;
+        let old = tx.query_row(
+            "SELECT fence_clock FROM initialization_run WHERE slot=1",
+            [],
+            |r| read_counter(r, 0),
+        )?;
+        let generation = old
+            .checked_add(1)
+            .ok_or_else(|| invalid("fence generation exhausted"))?;
+        tx.execute(
+            "UPDATE initialization_run SET fence_clock=?1,fence_ticket=?1,fenced=NULL WHERE slot=1",
+            [number(generation)?],
+        )?;
+        tx.commit()?;
+        Ok(InitializationFenceTicket {
+            run: run.clone(),
+            generation,
+            cursor: state.applied_cursor,
+        })
+    }
+    /// Confirm only an independently validated stationary response to this exact
+    /// request. A reply crossing re-listing, events or another probe is stale.
+    pub fn confirm_initialization_fence(
+        &mut self,
+        ticket: &InitializationFenceTicket,
+        at: &str,
+    ) -> Result<()> {
+        cursor(at)?;
+        let tx = self.db.transaction()?;
+        let s = checked(&tx, &ticket.run, false)?;
+        let current = tx.query_row(
+            "SELECT fence_ticket FROM initialization_run WHERE slot=1",
+            [],
+            |r| read_optional_counter(r, 0),
+        )?;
+        if current != Some(ticket.generation) || at != ticket.cursor {
+            return Err(invalid("stale fence response"));
+        }
+        validate_complete(&tx, &s, at)?;
+        tx.execute(
+            "UPDATE initialization_run SET fenced=?1,fence_ticket=NULL WHERE slot=1",
+            [at],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+    #[cfg(feature = "native")]
+    pub fn complete_initialization(&mut self, run: &InitializationRun) -> Result<()> {
+        let s = checked(&self.db, run, false)?;
+        let at: Option<String> = self.db.query_row(
+            "SELECT fenced FROM initialization_run WHERE slot=1",
+            [],
+            |r| r.get(0),
+        )?;
+        let at = at.ok_or_else(|| invalid("independent fence missing"))?;
+        validate_complete(&self.db, &s, &at)?;
+        let nodes = all_nodes(&self.db, &run.run_id)?;
+        let denied=self.db.prepare("SELECT id FROM initialization_directories WHERE run=?1 AND state='denied' ORDER BY id")?.query_map([&run.run_id],|r|r.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?;
+        let snapshot = crate::native::RemoteSnapshot {
+            scope: serde_json::from_value(s.binding.scope.clone())?,
+            restore: s.binding.restore.clone(),
+            cursor: at.clone(),
+            nodes,
+            inaccessible: denied,
+            skipped_symlinks: 0,
+        };
+        let commit = InitializationCommit {
+            run: run.clone(),
+            cursor: at,
+        };
+        self.install_native_snapshot_for_initialization(
+            &snapshot,
+            &s.binding.expected_cursor,
+            &commit,
+        )
+    }
+}
+
+fn all_nodes(db: &Connection, run: &str) -> Result<Vec<Node>> {
+    let bodies = db
+        .prepare("SELECT body FROM initialization_entries WHERE run=?1 ORDER BY id")?
+        .query_map([run], |r| r.get::<_, String>(0))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    bodies
+        .into_iter()
+        .map(|body| Ok(serde_json::from_str(&body)?))
+        .collect()
+}
+fn validate_complete(db: &Connection, s: &InitializationStatus, at: &str) -> Result<()> {
+    validate_completion_state(db, s, at)?;
+    let nodes = all_nodes(db, &s.run.run_id)?;
+    let mut children: HashMap<&str, Vec<&Node>> = HashMap::new();
+    let root = root_id(&s.binding)?;
+    let mut roots = 0;
+    let mut names = HashSet::new();
+    for node in &nodes {
+        crate::state::valid_node(node)?;
+        if !names.insert((node.parent.as_deref(), node.name.as_str())) {
+            return Err(invalid("ambiguous candidate names"));
+        }
+        if let Some(parent) = &node.parent {
+            children.entry(parent).or_default().push(node);
+        } else {
+            validate_root(&s.binding, node)?;
+            roots += 1;
+        }
+    }
+    if roots != 1 || nodes.len() as u64 != s.node_count {
+        return Err(invalid("candidate root or count mismatch"));
+    }
+    let mut pending = vec![(root, 0usize)];
+    let mut visited = HashSet::new();
+    while let Some((id, depth)) = pending.pop() {
+        if !visited.insert(id) {
+            return Err(invalid("candidate cycle"));
+        }
+        for node in children.get(id).into_iter().flatten() {
+            if depth + 1 > if node.directory { 128 } else { 129 } {
+                return Err(invalid("candidate depth exceeded"));
+            }
+            if !node.directory && children.contains_key(node.id.as_str()) {
+                return Err(invalid("candidate file has children"));
+            }
+            pending.push((&node.id, depth + 1));
+        }
+    }
+    if visited.len() != nodes.len() {
+        return Err(invalid("candidate parent missing or cycle"));
+    }
+    Ok(())
+}
+fn validate_completion_state(db: &Connection, s: &InitializationStatus, at: &str) -> Result<()> {
+    let base_restore: String = db.query_row(
+        "SELECT base_restore FROM initialization_run WHERE run_id=?1",
+        [&s.run.run_id],
+        |r| r.get(0),
+    )?;
+    // A candidate may start behind the committed boundary and catch up. It may
+    // not silently reset that boundary within the same server restore domain.
+    // Verified same-restore cursor reset is deliberately not exposed by this API.
+    if base_restore == s.binding.restore
+        && !s.binding.expected_cursor.is_empty()
+        && cursor(at)? < cursor(&s.binding.expected_cursor)?
+    {
+        return Err(invalid("candidate cursor precedes committed boundary"));
+    }
+    if s.root_needs_refresh
+        || s.received_cursor != at
+        || s.applied_cursor != at
+        || s.received_sequence != s.applied_sequence
+    {
+        return Err(invalid("events or root refresh incomplete"));
+    }
+    let incomplete:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM initialization_entries n LEFT JOIN initialization_directories d ON d.run=n.run AND d.id=n.id WHERE n.run=?1 AND n.directory=1 AND (d.id IS NULL OR d.state NOT IN ('received','denied'))) OR EXISTS(SELECT 1 FROM initialization_directories d LEFT JOIN initialization_entries n ON n.run=d.run AND n.id=d.id WHERE d.run=?1 AND (n.id IS NULL OR n.directory!=1)) OR EXISTS(SELECT 1 FROM initialization_directories d JOIN initialization_entries n ON n.run=d.run AND n.parent=d.id WHERE d.run=?1 AND d.state='denied')",[&s.run.run_id],|r|r.get(0))?;
+    if incomplete {
+        return Err(invalid("directory coverage incomplete"));
+    }
+    check_node_budget(db, &s.run.run_id)?;
+    Ok(())
+}
+
+/// Constructible only by complete_initialization after reading the candidate.
+/// The installer repeats identity validation and consumes this within its own
+/// authoritative snapshot transaction; no public raw gate-clear operation exists.
+pub(crate) struct InitializationCommit {
+    run: InitializationRun,
+    cursor: String,
+}
+pub(crate) fn installation_restore(
+    db: &Connection,
+    commit: &InitializationCommit,
+) -> Result<String> {
+    Ok(checked(db, &commit.run, false)?.binding.restore)
+}
+pub(crate) fn check_install_gate(
+    db: &Connection,
+    commit: Option<&InitializationCommit>,
+) -> Result<()> {
+    match commit {
+        Some(commit) => {
+            let s = checked(db, &commit.run, false)?;
+            validate_completion_state(db, &s, &commit.cursor)?;
+            let fenced: Option<String> = db.query_row(
+                "SELECT fenced FROM initialization_run WHERE slot=1",
+                [],
+                |r| r.get(0),
+            )?;
+            if fenced.as_deref() != Some(&commit.cursor) {
+                return Err(invalid("final fence changed"));
+            }
+            Ok(())
+        }
+        None => {
+            if db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM initialization_run WHERE state!='ready')",
+                [],
+                |r| r.get::<_, bool>(0),
+            )? {
+                Err(invalid("active candidate requires atomic final install"))
+            } else {
+                Ok(())
+            }
+        }
+    }
+}
+pub(crate) fn finish_in_transaction(
+    db: &Connection,
+    commit: &InitializationCommit,
+    at: &str,
+) -> Result<()> {
+    // Called after authoritative cursor updates; checked() would intentionally
+    // reject that new cursor against the old expected cursor here.
+    let s = status(db)?.ok_or_else(|| invalid("run disappeared during install"))?;
+    let fenced: Option<String> = db.query_row(
+        "SELECT fenced FROM initialization_run WHERE slot=1",
+        [],
+        |r| r.get(0),
+    )?;
+    if s.run != commit.run
+        || s.state != "active"
+        || at != commit.cursor
+        || fenced.as_deref() != Some(at)
+        || s.applied_cursor != at
+        || s.received_cursor != at
+    {
+        return Err(invalid("final run changed"));
+    }
+    db.execute(
+        "UPDATE initialization_run SET state='ready',error=NULL WHERE slot=1",
+        [],
+    )?;
+    Ok(())
+}

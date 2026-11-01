@@ -18,9 +18,11 @@
 
 最新诊断结论见 [2026-10-31 性能与同步问题摘要](docs/PERFORMANCE_FINDINGS_20261031.md)。本次仅公开结论，详细证据保留本地；这些诊断不代表产品修复或候选验收完成。
 
-Ubuntu更新包已逐项整合，继续在独立分支修复原生恢复及按需性能；[采用决定](docs/UBUNTU_INTEGRATION.md)。既有P0观察继续运行，不代表新代码已通过长期验收。
+Ubuntu更新包已逐项整合，继续在独立分支修复原生恢复及按需性能；[采用决定](docs/UBUNTU_INTEGRATION.md)。原P0窗口已结束；用户认可的23小时时长已满足，连接异常仍待归因，见[窗口终审](docs/validation/p0-window2-final/REPORT.md)。这不代表新代码已通过长期验收。
 
 [恢复及增量状态基础](docs/validation/incremental-status-001/REPORT.md)已完成组件整合；[批量导入成本回退已修复](docs/validation/status-write-cost-003/REPORT.md)。运行时增量桌面状态尚未接入；不将这些基础模块算作 Personal 或整体性能问题已经解决。
+
+本开发分支新增[持久初始化候选基础](docs/INITIALIZATION_PERSISTENCE.md)及类型化重试原因，SQLite schema 为19、内部 IPC 为16。候选API和写回门禁已进入源码，生产初始化调度器尚未接入；逐目录提前显示与跨重启自动续扫仍不可用。本轮变更待统一验证，尚无新安装包交付。
 
 ## 构建和测试
 
@@ -62,10 +64,11 @@ dpkg-buildpackage -b -us -uc
 | [docs/INCREMENTAL_STATUS_INDEX.md](docs/INCREMENTAL_STATUS_INDEX.md) | 纯增量聚合与事务性树拥有者；运行订阅、发布屏障和桌面接入待实现 |
 | [docs/STATUS_TRANSIENT.md](docs/STATUS_TRANSIENT.md) | 独立瞬态水位、多版本下载与正文核验票据；真实生命周期接入待完成 |
 | [docs/STATUS_PROJECTION.md](docs/STATUS_PROJECTION.md) | 同一 Store 边界的提交投影与有界快照；尚未接入桌面 |
-| [docs/INITIALIZATION_PROGRESS.md](docs/INITIALIZATION_PROGRESS.md) | 初始化阶段、真实计数、轻量进度接口与 IPC 配对边界 |
+| [docs/INITIALIZATION_PROGRESS.md](docs/INITIALIZATION_PROGRESS.md) | 初始化阶段、真实计数、类型化重试原因与 IPC 配对边界 |
+| [docs/INITIALIZATION_PERSISTENCE.md](docs/INITIALIZATION_PERSISTENCE.md) | 私有候选事务、票据、写回门禁与尚未接入的生产调度器 |
 | [docs/SNAPSHOT_CONVERGENCE.md](docs/SNAPSHOT_CONVERGENCE.md) | 扫描期间普通文件变化的局部重查、完整 fence 与保守回退；真实 NAS 性能待验证 |
 | [docs/SNAPSHOT_ERROR_CLASSIFICATION.md](docs/SNAPSHOT_ERROR_CLASSIFICATION.md) | 枚举失败的相关竞态验证；保留原一致性围栏 |
-| [docs/UPGRADE_RECOVERY.md](docs/UPGRADE_RECOVERY.md) | 暂停、正常升级接管、失败保留数据与尚未完成的安装包验证 |
+| [docs/UPGRADE_RECOVERY.md](docs/UPGRADE_RECOVERY.md) | 暂停、正常升级接管、已发布包验证与schema19迁移待验边界 |
 | [docs/STATUS.md](docs/STATUS.md) | 验证范围、已知问题及后续工作 |
 | [docs/PROVENANCE.md](docs/PROVENANCE.md) | 源码归档来源和版本关系 |
 

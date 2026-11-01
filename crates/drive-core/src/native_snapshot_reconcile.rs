@@ -2,6 +2,7 @@
 //! replaced locally; directory/ACL ambiguity retains the original full retry.
 //! No intermediate candidate or advanced cursor is exposed to the state owner.
 use super::*;
+use crate::snapshot_progress::{RetryReason, retry};
 use sproto::actions::native::NativeEvent;
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -134,15 +135,20 @@ impl Candidate {
         self.nodes.get(id).is_some_and(|node| node.directory) && !self.inaccessible.contains(id)
     }
 
-    fn event_parent(&self, id: &str, path: &str, parents: &mut BTreeSet<String>) -> Result<bool> {
+    fn event_parent(
+        &self,
+        id: &str,
+        path: &str,
+        parents: &mut BTreeSet<String>,
+    ) -> Result<Option<RetryReason>> {
         if !self.snapshot.scope.contains(path) {
-            return Ok(true);
+            return Ok(None);
         }
         let Some((parent_path, _)) = path.rsplit_once('/') else {
-            return Ok(false);
+            return Ok(Some(RetryReason::ParentPathMismatch));
         };
         if !self.accessible_parent(id) {
-            return Ok(false);
+            return Ok(Some(RetryReason::ParentUnavailable));
         }
         let expected = if parent_path.is_empty() {
             "/"
@@ -150,45 +156,56 @@ impl Candidate {
             parent_path
         };
         if self.path(id)? != expected {
-            return Ok(false);
+            return Ok(Some(RetryReason::ParentPathMismatch));
         }
         parents.insert(id.into());
-        Ok(true)
+        Ok(None)
     }
 
-    fn affected(&self, events: &[NativeEvent]) -> Result<Option<BTreeSet<String>>> {
+    fn affected(
+        &self,
+        events: &[NativeEvent],
+    ) -> Result<std::result::Result<BTreeSet<String>, RetryReason>> {
         let mut parents = BTreeSet::new();
         for event in events {
             root_guard::root_event(&self.snapshot.scope, event)?;
             // Directory metadata can encode visibility changes. Do not treat
             // Modify as proof that descendants or access are unchanged.
-            if event.file_type != FileType::File
-                || event.file_id == self.snapshot.scope.file_id
-                || self
-                    .nodes
-                    .get(&event.file_id)
-                    .is_some_and(|node| node.directory)
-            {
-                return Ok(None);
+            if event.file_id == self.snapshot.scope.file_id {
+                return Ok(Err(RetryReason::RootEvent));
             }
-            if !self.event_parent(&event.parent_id, &event.path, &mut parents)? {
-                return Ok(None);
+            if event.file_type != FileType::File {
+                return Ok(Err(if event.file_type == FileType::Dir {
+                    RetryReason::DirectoryEvent
+                } else {
+                    RetryReason::FilteredTypeEvent
+                }));
+            }
+            if self
+                .nodes
+                .get(&event.file_id)
+                .is_some_and(|node| node.directory)
+            {
+                return Ok(Err(RetryReason::TypeIdentityMismatch));
+            }
+            if let Some(reason) = self.event_parent(&event.parent_id, &event.path, &mut parents)? {
+                return Ok(Err(reason));
             }
             if let EventKind::Move {
                 destination,
                 parent_id,
             } = &event.kind
             {
-                if !self.event_parent(parent_id, destination, &mut parents)? {
-                    return Ok(None);
+                if let Some(reason) = self.event_parent(parent_id, destination, &mut parents)? {
+                    return Ok(Err(reason));
                 }
             }
             if let Some(node) = self.nodes.get(&event.file_id) {
                 let Some(parent) = &node.parent else {
-                    return Ok(None);
+                    return Ok(Err(RetryReason::ParentUnavailable));
                 };
                 if !self.accessible_parent(parent) {
-                    return Ok(None);
+                    return Ok(Err(RetryReason::ParentUnavailable));
                 }
                 parents.insert(parent.clone());
             }
@@ -204,7 +221,7 @@ impl Candidate {
                 return Err(Error::State("event outside selected native subtree".into()));
             }
         }
-        Ok(Some(parents))
+        Ok(Ok(parents))
     }
 
     /// The map is private and disposable. All replies must agree on the same
@@ -334,6 +351,7 @@ where
     let mut events = 0usize;
     let mut lists = 0usize;
     emit(Progress {
+        retry_reason: None,
         attempt,
         phase: Phase::Fence,
         units: 0,
@@ -370,6 +388,7 @@ where
             ));
         }
         emit(Progress {
+            retry_reason: None,
             attempt,
             phase: Phase::Fence,
             units: page as u64 + 1,
@@ -379,8 +398,12 @@ where
             return Ok(Some(candidate.finish(cursor)));
         }
         if !batch.events.is_empty() {
-            let Some(parents) = candidate.affected(&batch.events)? else {
-                return Ok(None);
+            let parents = match candidate.affected(&batch.events)? {
+                Ok(parents) => parents,
+                Err(reason) => {
+                    retry(attempt, reason);
+                    return Ok(None);
+                }
             };
             let mut replies = Vec::new();
             let mut reply_nodes = 0usize;
@@ -393,6 +416,7 @@ where
                 }
                 let path = candidate.path(&parent)?;
                 emit(Progress {
+                    retry_reason: None,
                     attempt,
                     phase: Phase::Reconcile,
                     units: lists as u64 - 1,
@@ -403,8 +427,12 @@ where
                     .map_err(|_| Error::State("snapshot convergence time budget exceeded".into()))?
                 {
                     Ok(nodes) => nodes,
-                    Err(Error::SnapshotChanged)
-                    | Err(Error::Native(sproto::Error::Server { code: 12290, .. })) => {
+                    Err(Error::SnapshotChanged) => {
+                        retry(attempt, RetryReason::LocalListingFilteredType);
+                        return Ok(None);
+                    }
+                    Err(Error::Native(sproto::Error::Server { code: 12290, .. })) => {
+                        retry(attempt, RetryReason::LocalListingDenied);
                         return Ok(None);
                     }
                     Err(error) => return Err(error),
@@ -423,6 +451,7 @@ where
                     ));
                 }
                 emit(Progress {
+                    retry_reason: None,
                     attempt,
                     phase: Phase::Reconcile,
                     units: lists as u64,
@@ -431,6 +460,7 @@ where
                 replies.push((parent, nodes));
             }
             if !candidate.replace_files(replies)? {
+                retry(attempt, RetryReason::LocalListingChanged);
                 return Ok(None);
             }
         }

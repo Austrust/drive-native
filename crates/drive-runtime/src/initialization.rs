@@ -1,5 +1,5 @@
 //! Local progress and timing only. Never authorizes recovery or advances cursors.
-use drive_core::snapshot_progress::{Phase as IndexPhase, Progress};
+use drive_core::snapshot_progress::{Phase as IndexPhase, Progress, RetryReason};
 use serde::Serialize;
 use std::{
     collections::VecDeque,
@@ -24,6 +24,7 @@ pub enum Phase {
     Enumerating,
     Fencing,
     Reconciling,
+    Retrying,
     Importing,
     Waiting,
 }
@@ -42,6 +43,7 @@ pub struct Span {
     pub elapsed_ms: u64,
     pub units: u64,
     pub items: u64,
+    pub retry_reason: Option<RetryReason>,
 }
 #[derive(Serialize)]
 pub struct Snapshot {
@@ -56,6 +58,8 @@ pub struct Snapshot {
     pub units: u64,
     pub items: u64,
     pub snapshot_attempt: u8,
+    pub retry_count: u64,
+    pub last_retry_reason: Option<RetryReason>,
     pub recovery_reason: Option<RecoveryReason>,
     pub cursor_advances: u64,
     pub events_applied: u64,
@@ -68,6 +72,41 @@ pub struct Snapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn retry_cause_survives_next_attempt_without_counting_as_completed_work() {
+        let tracker = Tracker::default();
+        tracker.begin();
+        let retry = Progress {
+            attempt: 1,
+            phase: IndexPhase::Retry,
+            units: 0,
+            items: 0,
+            retry_reason: Some(RetryReason::ParentUnavailable),
+        };
+        tracker.index(retry);
+        tracker.index(retry);
+        assert_eq!(tracker.snapshot().retry_count, 1);
+        assert!(tracker.snapshot().since_progress_ms.is_none());
+        tracker.index(Progress {
+            attempt: 2,
+            phase: IndexPhase::Seed,
+            units: 0,
+            items: 0,
+            retry_reason: None,
+        });
+        let state = tracker.snapshot();
+        assert_eq!(
+            state.last_retry_reason,
+            Some(RetryReason::ParentUnavailable)
+        );
+        assert_eq!(
+            state.recent_stages.last().unwrap().retry_reason,
+            state.last_retry_reason
+        );
+        tracker.begin();
+        assert_eq!(tracker.snapshot().retry_count, 0);
+        assert!(tracker.snapshot().last_retry_reason.is_none());
+    }
 
     #[test]
     fn watermark_and_local_reconciliation_have_distinct_observed_stages() {
@@ -78,6 +117,7 @@ mod tests {
             (IndexPhase::Reconcile, Phase::Reconciling),
         ] {
             tracker.index(Progress {
+                retry_reason: None,
                 attempt: 1,
                 phase: index,
                 units: 2,
@@ -114,6 +154,7 @@ mod tests {
         tracker.activity();
         tracker.phase(Phase::Enumerating);
         tracker.index(Progress {
+            retry_reason: None,
             attempt: 1,
             phase: IndexPhase::Enumerate,
             units: 3,
@@ -122,6 +163,7 @@ mod tests {
         assert_eq!(tracker.snapshot().items, 42);
         // A coalesced retry may first arrive in the same phase as the old one.
         tracker.index(Progress {
+            retry_reason: None,
             attempt: 2,
             phase: IndexPhase::Enumerate,
             units: 0,
@@ -177,6 +219,8 @@ struct State {
     units: u64,
     items: u64,
     snapshot_attempt: u8,
+    retry_count: u64,
+    last_retry_reason: Option<RetryReason>,
     reason: Option<RecoveryReason>,
     cursor_advances: u64,
     events_applied: u64,
@@ -212,6 +256,8 @@ impl State {
             units: 0,
             items: 0,
             snapshot_attempt: 0,
+            retry_count: 0,
+            last_retry_reason: None,
             reason: None,
             cursor_advances: 0,
             events_applied: 0,
@@ -237,6 +283,11 @@ impl State {
             elapsed_ms: ms(self.phase_started.elapsed()),
             units: self.units,
             items: self.items,
+            retry_reason: if self.phase == Phase::Retrying {
+                self.last_retry_reason
+            } else {
+                None
+            },
         });
         if self.history.len() > 16 {
             self.history.pop_front();
@@ -294,6 +345,8 @@ impl Tracker {
         let mut s = self.state.lock().unwrap();
         s.reason = Some(reason);
         s.snapshot_attempt = 0;
+        s.retry_count = 0;
+        s.last_retry_reason = None;
         s.phase(Phase::Recovering, false);
         self.changed();
     }
@@ -305,16 +358,24 @@ impl Tracker {
             IndexPhase::Enumerate => Phase::Enumerating,
             IndexPhase::Fence => Phase::Fencing,
             IndexPhase::Reconcile => Phase::Reconciling,
+            IndexPhase::Retry => Phase::Retrying,
         };
         let advanced = s.snapshot_attempt != p.attempt
             || s.phase != phase
             || p.units > s.units
             || p.items > s.items;
         let retry = s.snapshot_attempt != p.attempt;
+        let diagnosed_retry = p.retry_reason.is_some() && (retry || s.phase != Phase::Retrying);
         s.snapshot_attempt = p.attempt;
         s.phase(phase, retry);
         s.units = p.units;
         s.items = p.items;
+        if let Some(reason) = p.retry_reason {
+            s.last_retry_reason = Some(reason);
+            if diagnosed_retry {
+                s.retry_count = s.retry_count.saturating_add(1);
+            }
+        }
         // A phase boundary alone is not proof of completed network work.
         if advanced && p.units > 0 {
             s.last_progress = Some(Instant::now());
@@ -364,6 +425,8 @@ impl Tracker {
             units: s.units,
             items: s.items,
             snapshot_attempt: s.snapshot_attempt,
+            retry_count: s.retry_count,
+            last_retry_reason: s.last_retry_reason,
             recovery_reason: s.reason,
             cursor_advances: s.cursor_advances,
             events_applied: s.events_applied,

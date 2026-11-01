@@ -50,3 +50,4 @@ pub mod status_transient;
 
 pub mod task_control;
 pub mod snapshot_progress;
+pub mod initialization_store;
