@@ -1,6 +1,6 @@
 # 按目录发布与持久初始化：后续实施边界
 
-2026-11-01更新。持久候选与生产owner已实现，见[持久初始化](INITIALIZATION_PERSISTENCE.md)；当前开发分支进一步接入[冷启动只读目录预览](INITIALIZATION_PREVIEW.md)，拟构建dev20261101.6，schema22／IPC18，尚未构建或发布。[隔离回归002](validation/progressive-preview-002/REPORT.md)的core 293项、runtime 115项、filesystem 12项与全目标检查通过；显式内核19项与runtime内核1项通过。GUI 75项、Nemo 10项、Nautilus 10项通过。001真实失败保留，不与002混计。
+2026-11-01更新。持久候选与生产owner已实现，见[持久初始化](INITIALIZATION_PERSISTENCE.md)；[冷启动只读目录预览](INITIALIZATION_PREVIEW.md)已纳入发布的dev20261101.6，schema22／IPC18。[包验证011](validation/native-package-011/REPORT.md)记录743项Rust、75项GUI、debug/release各20项显式内核及隔离安装升级通过；本轮未做NAS或性能实测。[隔离回归002](validation/progressive-preview-002/REPORT.md)保留之前的组件验证和001真实失败，不与包总数混计。
 
 预览仅展示完整接收的直接列表，不提前授权正文读取、本地修改或远端写回。warm任务仍使用原权威树和缓存；最终完整候选经过fence后同事务安装并转换匹配inode，无需重挂载。普通目录全同步、真实NAS首屏、完整收敛与最终数据安全门禁仍开放。
 
