@@ -1,7 +1,7 @@
 //! Stable directory cookies. Only opendir projects SQLite; continuation and
 //! release use local immutable views and never wait for Store or network work.
 use super::*;
-use drive_core::filesystem::DirectorySnapshot;
+use drive_core::filesystem::{DirectorySnapshot, DirectoryViewStamp};
 use std::sync::{
     Weak,
     atomic::{AtomicUsize, Ordering},
@@ -82,9 +82,9 @@ struct Table {
 }
 pub(super) struct Views {
     table: Mutex<Table>,
-    // Conservative key: local_revision can invalidate more than one directory,
-    // but never exposes a new open to a known old namespace. Held views survive.
-    cached: Mutex<HashMap<u64, (u64, Weak<View>)>>,
+    // Semantic commits conservatively invalidate all directories. Candidate
+    // receipts and pure inode allocation leave reusable views alone.
+    cached: Mutex<HashMap<u64, (DirectoryViewStamp, Weak<View>)>>,
     builder: Mutex<()>,
     charged: Arc<AtomicUsize>,
     allocated: Arc<AtomicUsize>,
@@ -117,41 +117,44 @@ impl Views {
                 return Err(libc::EMFILE);
             }
         }
-        let revision = store.lock().unwrap().local_revision();
-        let cached = self
-            .cached
-            .lock()
-            .unwrap()
-            .get(&ino)
-            .and_then(|(rev, view)| (*rev == revision).then(|| view.upgrade()).flatten());
-        let view = match cached {
-            Some(view) => view,
-            None => {
-                // The builder lock reserves the remaining slot/bytes across
-                // projection: no other builder can consume them. Failed builds
-                // roll back without publishing either a view or its charge.
-                if self.allocated.load(Ordering::Acquire) >= MAX_HANDLES {
-                    return Err(libc::ENOMEM);
-                }
-                let remaining = MAX_BYTES.saturating_sub(self.charged.load(Ordering::Acquire));
-                let (snapshot, revision) = {
-                    let store = store.lock().unwrap();
+        let view = {
+            // The stamp and cache selection must share one Store guard. Reading
+            // an atomic stamp after dropping Store could race an ACL/namespace
+            // commit whose publication has not reached that atomic yet.
+            let store = store.lock().unwrap();
+            let revision = store.directory_view_stamp().map_err(|e| errno(&e))?;
+            let cached = self
+                .cached
+                .lock()
+                .unwrap()
+                .get(&ino)
+                .and_then(|(rev, view)| (rev == &revision).then(|| view.upgrade()).flatten());
+            match cached {
+                Some(view) => view,
+                None => {
+                    // The builder lock reserves the remaining slot/bytes across
+                    // projection: no other builder can consume them. Failed builds
+                    // roll back without publishing either a view or its charge.
+                    if self.allocated.load(Ordering::Acquire) >= MAX_HANDLES {
+                        return Err(libc::ENOMEM);
+                    }
+                    let remaining = MAX_BYTES.saturating_sub(self.charged.load(Ordering::Acquire));
                     let snapshot = store
                         .directory_snapshot(ino, remaining)
                         .map_err(|e| errno(&e))?;
-                    (snapshot, store.local_revision())
-                };
-                self.charged.fetch_add(snapshot.bytes, Ordering::AcqRel);
-                self.allocated.fetch_add(1, Ordering::AcqRel);
-                let view = Arc::new(View {
-                    ino,
-                    snapshot: Some(snapshot),
-                    reclaimer: self.reclaimer.clone(),
-                });
-                let mut cache = self.cached.lock().unwrap();
-                cache.retain(|_, (_, view)| view.strong_count() != 0);
-                cache.insert(ino, (revision, Arc::downgrade(&view)));
-                view
+                    let revision = store.directory_view_stamp().map_err(|e| errno(&e))?;
+                    self.charged.fetch_add(snapshot.bytes, Ordering::AcqRel);
+                    self.allocated.fetch_add(1, Ordering::AcqRel);
+                    let view = Arc::new(View {
+                        ino,
+                        snapshot: Some(snapshot),
+                        reclaimer: self.reclaimer.clone(),
+                    });
+                    let mut cache = self.cached.lock().unwrap();
+                    cache.retain(|_, (_, view)| view.strong_count() != 0);
+                    cache.insert(ino, (revision, Arc::downgrade(&view)));
+                    view
+                }
             }
         };
         let mut table = self.table.lock().unwrap();
@@ -240,6 +243,10 @@ pub(super) fn release(fs: &mut CacheFilesystem, ino: u64, fh: u64, reply: ReplyE
         Err(e) => reply.error(e),
     }
 }
+
+#[cfg(test)]
+#[path = "directory_view_stamp_tests.rs"]
+mod stamp_tests;
 
 #[cfg(test)]
 mod tests {
