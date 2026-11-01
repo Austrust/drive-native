@@ -660,6 +660,12 @@ fn schema_inventory_requires_an_explicit_decision_for_new_tables_and_columns() {
         "cache_access",
         "cache_published",
         "engine_upload_stages",
+        // Private candidates are not the published tree or an icon source.
+        // Atomic final install uses the existing snapshot reset transaction.
+        "initialization_run",
+        "initialization_entries",
+        "initialization_directories",
+        "initialization_events",
         "sqlite_sequence",
     ];
     let expected: BTreeSet<String> = SOURCES

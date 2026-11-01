@@ -29,6 +29,14 @@ class Bus(QObject):
 
 
 class ProgressTests(unittest.TestCase):
+    def test_retry_reason_remains_visible_during_next_scan(self):
+        title, detail = progress_text({'active': True, 'phase': 'enumerating',
+            'last_retry_reason': 'parent_unavailable', 'retry_count': 1})
+        self.assertIn('枚举', title)
+        self.assertIn('1 次', detail)
+        self.assertIn('父目录', detail)
+        self.assertNotIn('已同步', detail)
+
     def test_watermark_and_reconciliation_are_not_history_or_completed_sync(self):
         title, detail = progress_text({'active': True, 'phase': 'watermark', 'units': 2})
         self.assertIn('当前事件水位', title)

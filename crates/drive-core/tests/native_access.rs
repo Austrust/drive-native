@@ -44,7 +44,7 @@ fn install(s:&mut Store,snap:&RemoteSnapshot){let c=s.cursor().unwrap();s.bind_n
  let d=tempfile::tempdir().unwrap();let mut s=Store::open(d.path()).unwrap();install(&mut s,&snapshot("native-v1:1",false));s.save_local("201",b"pending").unwrap();drop(s);
  let db=rusqlite::Connection::open(d.path().join("state.sqlite")).unwrap();db.execute_batch("DROP VIEW access_blocked_operations;DROP VIEW access_blocked;DROP TABLE access_denied;PRAGMA user_version=17;").unwrap();drop(db);
  let mut s=Store::open(d.path()).unwrap();assert_eq!(s.inaccessible_count().unwrap(),0);install(&mut s,&snapshot("native-v1:2",true));drop(s);
- let backup=std::fs::read_dir(d.path()).unwrap().map(|e|e.unwrap().path()).find(|p|p.file_name().unwrap().to_string_lossy().starts_with("state-before-v18-")).unwrap();let db=rusqlite::Connection::open(backup).unwrap();assert_eq!(db.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0)).unwrap(),17);assert_eq!(db.query_row("PRAGMA integrity_check",[],|r|r.get::<_,String>(0)).unwrap(),"ok");
+ let backup=std::fs::read_dir(d.path()).unwrap().map(|e|e.unwrap().path()).find(|p|p.file_name().unwrap().to_string_lossy().starts_with(&format!("state-before-v{}-",drive_core::STATE_SCHEMA_VERSION))).unwrap();let db=rusqlite::Connection::open(backup).unwrap();assert_eq!(db.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0)).unwrap(),17);assert_eq!(db.query_row("PRAGMA integrity_check",[],|r|r.get::<_,String>(0)).unwrap(),"ok");
  let mut s=Store::open(d.path()).unwrap();install(&mut s,&snapshot("native-v1:3",false));let mut bytes=Vec::new();s.open_cached("201").unwrap().read_to_end(&mut bytes).unwrap();assert_eq!(bytes,b"pending");
 }
 

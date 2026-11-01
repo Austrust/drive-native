@@ -3,11 +3,51 @@ use drive_core::snapshot_progress::{Phase, Progress};
 
 fn progress(units: u64) -> Progress {
     Progress {
+        retry_reason: None,
         attempt: 1,
         phase: Phase::Seed,
         units,
         items: units * 2,
     }
+}
+#[test]
+fn retry_progress_requires_a_bounded_reason_and_new_attempt_to_resume() {
+    use drive_core::snapshot_progress::RetryReason;
+    let retry = Progress {
+        phase: Phase::Retry,
+        retry_reason: Some(RetryReason::DirectoryEvent),
+        ..progress(0)
+    };
+    assert!(valid_index_progress(Some(progress(3)), retry));
+    assert!(!valid_index_progress(
+        None,
+        Progress {
+            retry_reason: None,
+            ..retry
+        }
+    ));
+    assert!(!valid_index_progress(
+        None,
+        Progress {
+            phase: Phase::Fence,
+            ..retry
+        }
+    ));
+    assert!(!valid_index_progress(Some(retry), progress(0)));
+    assert!(valid_index_progress(
+        Some(retry),
+        Progress {
+            attempt: 2,
+            ..progress(0)
+        }
+    ));
+    assert!(!valid_index_progress(
+        Some(retry),
+        Progress {
+            retry_reason: Some(RetryReason::RootEvent),
+            ..retry
+        }
+    ));
 }
 fn send(peer: &mut UnixStream, id: u64, body: Response) {
     transport::send(
@@ -30,6 +70,7 @@ fn index_validation_rejects_regression_and_out_of_budget_counts() {
     assert!(!valid_index_progress(
         None,
         Progress {
+            retry_reason: None,
             attempt: 4,
             ..progress(0)
         }
@@ -37,12 +78,14 @@ fn index_validation_rejects_regression_and_out_of_budget_counts() {
     assert!(valid_index_progress(
         Some(progress(4)),
         Progress {
+            retry_reason: None,
             attempt: 2,
             ..progress(0)
         }
     ));
     assert!(!valid_index_progress(
         Some(Progress {
+            retry_reason: None,
             phase: Phase::Fence,
             ..progress(0)
         }),
@@ -54,12 +97,14 @@ fn index_validation_rejects_regression_and_out_of_budget_counts() {
 fn current_boundary_and_local_recheck_progress_allow_only_the_fence_cycle() {
     assert!(valid_index_progress(
         Some(Progress {
+            retry_reason: None,
             attempt: 1,
             phase: Phase::Watermark,
             units: 1,
             items: 0
         }),
         Progress {
+            retry_reason: None,
             attempt: 1,
             phase: Phase::Seed,
             units: 0,
@@ -69,6 +114,7 @@ fn current_boundary_and_local_recheck_progress_allow_only_the_fence_cycle() {
     assert!(!valid_index_progress(
         Some(progress(1)),
         Progress {
+            retry_reason: None,
             attempt: 1,
             phase: Phase::Watermark,
             units: 1,
@@ -87,6 +133,7 @@ fn current_boundary_and_local_recheck_progress_allow_only_the_fence_cycle() {
         (Phase::Fence, 3, 3),
     ] {
         let next = Progress {
+            retry_reason: None,
             attempt: 1,
             phase,
             units,
@@ -98,6 +145,7 @@ fn current_boundary_and_local_recheck_progress_allow_only_the_fence_cycle() {
     assert!(!valid_index_progress(
         last,
         Progress {
+            retry_reason: None,
             phase: Phase::Enumerate,
             ..progress(1)
         }
@@ -105,6 +153,7 @@ fn current_boundary_and_local_recheck_progress_allow_only_the_fence_cycle() {
     assert!(!valid_index_progress(
         None,
         Progress {
+            retry_reason: None,
             phase: Phase::Watermark,
             units: 3,
             items: 1,
@@ -113,10 +162,12 @@ fn current_boundary_and_local_recheck_progress_allow_only_the_fence_cycle() {
     ));
     assert!(!valid_index_progress(
         Some(Progress {
+            retry_reason: None,
             phase: Phase::Reconcile,
             ..progress(4)
         }),
         Progress {
+            retry_reason: None,
             phase: Phase::Reconcile,
             ..progress(3)
         }
@@ -140,6 +191,7 @@ fn alternating_reconciliation_progress_keeps_the_real_rpc_connected() {
                 &mut peer,
                 req.id,
                 Response::IndexProgress(Progress {
+                    retry_reason: None,
                     attempt: 1,
                     phase,
                     units,

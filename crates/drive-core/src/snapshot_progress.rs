@@ -11,6 +11,23 @@ pub enum Phase {
     Enumerate,
     Fence,
     Reconcile,
+    Retry,
+}
+
+/// Bounded classification only: no paths, object IDs, or event bodies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RetryReason {
+    EnumerationCollision,
+    RootEvent,
+    DirectoryEvent,
+    FilteredTypeEvent,
+    TypeIdentityMismatch,
+    ParentUnavailable,
+    ParentPathMismatch,
+    LocalListingDenied,
+    LocalListingFilteredType,
+    LocalListingChanged,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -22,6 +39,8 @@ pub struct Progress {
     pub units: u64,
     /// Events inspected or nodes collected (enumeration/local reconciliation).
     pub items: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_reason: Option<RetryReason>,
 }
 pub type Observer = Arc<dyn Fn(Progress) + Send + Sync>;
 tokio::task_local! { static OBSERVER: Observer; }
@@ -30,6 +49,15 @@ pub async fn scope<T>(observer: Observer, future: impl std::future::Future<Outpu
 }
 pub(crate) fn emit(progress: Progress) {
     let _ = OBSERVER.try_with(|observer| observer(progress));
+}
+pub(crate) fn retry(attempt: u8, reason: RetryReason) {
+    emit(Progress {
+        attempt,
+        phase: Phase::Retry,
+        units: 0,
+        items: 0,
+        retry_reason: Some(reason),
+    });
 }
 
 #[cfg(test)]
@@ -40,6 +68,7 @@ mod tests {
         let values = Arc::new(std::sync::Mutex::new(Vec::new()));
         let result = values.clone();
         let progress = Progress {
+            retry_reason: None,
             attempt: 1,
             phase: Phase::Enumerate,
             units: 2,

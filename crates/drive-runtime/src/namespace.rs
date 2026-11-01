@@ -2,6 +2,15 @@ use super::*;
 impl Bridge {
     /// Process the durable sequence. An uncertain head is queried, never resent.
     pub fn rename_pending(&self) -> io::Result<usize> {
+        let _mutation = self.recovery_gate.read().unwrap();
+        if self.store.lock().unwrap().initialization_writeback_blocked().map_err(io::Error::other)? {
+            return Ok(0);
+        }
+        self.rename_pending_under_gate()
+    }
+    // namespace_pending already holds the guard. Never recursively acquire an
+    // RwLock read guard: a queued recovery writer could otherwise deadlock us.
+    fn rename_pending_under_gate(&self) -> io::Result<usize> {
         let rpc = self.connection();
         if !rpc.is_connected() {
             return Err(io::Error::new(
@@ -102,6 +111,11 @@ impl Bridge {
     /// is retransmitted, and a conflict remains visible instead of being skipped.
     pub fn namespace_pending(&self) -> io::Result<usize> {
         let _mutation = self.recovery_gate.read().unwrap();
+        // Includes uncertain rename/remove/replace/mkdir reconciliation: its
+        // local journal effects must not race an incomplete candidate either.
+        if self.store.lock().unwrap().initialization_writeback_blocked().map_err(io::Error::other)? {
+            return Ok(0);
+        }
         let mut done = 0;
         loop {
             let kind = self
@@ -112,7 +126,7 @@ impl Bridge {
                 .map_err(io::Error::other)?;
             let count = match kind.as_deref() {
                 None => return Ok(done),
-                Some("rename") => self.rename_pending()?,
+                Some("rename") => self.rename_pending_under_gate()?,
                 Some("remove") => self.remove_pending()?,
                 Some("replace") => self.replace_pending()?,
                 Some("mkdir") => self.directory_pending()?,

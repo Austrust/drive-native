@@ -114,15 +114,21 @@ impl Bridge {
     /// The supervisor serializes this short commit with pause/stop. Network
     /// authentication happens outside that lock and can be interrupted.
     pub fn attach(&self, rpc: Arc<Rpc>, restore: &str, scope: &str) -> io::Result<()> {
-        self.store
-            .lock()
-            .unwrap()
-            .bind_native_scope(restore, scope)
-            .map_err(io::Error::other)?;
+        // Initialization owners must take the write side before beginning or
+        // completing a durable candidate. Keep the same gate -> Store ordering
+        // as mutation dispatch, including while publishing the new connection.
+        let _mutation = self.recovery_gate.read().unwrap();
+        let blocked = {
+            let mut store = self.store.lock().unwrap();
+            store.bind_native_scope(restore, scope).map_err(io::Error::other)?;
+            store.initialization_writeback_blocked().map_err(io::Error::other)?
+        };
         let old = std::mem::replace(&mut *self.connection.lock().unwrap(), rpc);
         old.close();
         *self.last_error.lock().unwrap() = None;
-        self.signal_upload();
+        if !blocked {
+            self.signal_upload();
+        }
         Ok(())
     }
 
@@ -1031,6 +1037,12 @@ impl Bridge {
     /// Reconciliation sends only read queries. Unknown outcomes never re-upload.
     pub fn upload_pending(&self, reconcile: bool) -> io::Result<usize> {
         let _mutation = self.recovery_gate.read().unwrap();
+        // A restored process has a fresh in-memory lock. Only the durable gate
+        // prevents it from reconciling or submitting against an incomplete tree.
+        // Reconciliation is read-only remotely but changes local operation state.
+        if self.store.lock().unwrap().initialization_writeback_blocked().map_err(io::Error::other)? {
+            return Ok(0);
+        }
         use sha2::Digest;
         use std::io::{Read, Seek, SeekFrom};
         let rpc = self.connection();
@@ -1514,6 +1526,10 @@ mod download_scheduler_tests {
 #[cfg(test)]
 #[path = "snapshot_bridge_tests.rs"]
 mod snapshot_bridge_tests;
+
+#[cfg(test)]
+#[path = "initialization_gate_tests.rs"]
+mod initialization_gate_tests;
 
 #[cfg(test)]
 #[path = "event_transfer_tests.rs"]

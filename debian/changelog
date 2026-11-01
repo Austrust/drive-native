@@ -1,3 +1,15 @@
+drive-native (0.1.0~dev20261101.2) unstable; urgency=medium
+
+  * Report typed initialization retry causes without advancing completed work.
+  * Add private durable initialization candidates and fail-closed writeback gates.
+  * Reject stale directory, root and fence replies across retries and restarts.
+  * Commit candidate readiness and authoritative state in one transaction.
+  * Upgrade state schema to 19 with a pre-migration backup; pair IPC 16 processes.
+  * Candidate scheduling and progressive directory visibility remain disabled.
+  * Development build; full-sync and final safety/performance gates remain open.
+
+ -- Drive Native contributors <noreply@example.invalid>  Sun, 01 Nov 2026 15:00:00 +0800
+
 drive-native (0.1.0~dev20261101.1) unstable; urgency=medium
 
   * Start verified selected-directory initialization at the native current watermark.

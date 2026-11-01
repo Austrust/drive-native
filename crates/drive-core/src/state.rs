@@ -147,7 +147,7 @@ impl Drop for ReadHandle {
 }
 
 /// Version of the durable state contract, including journal semantics.
-pub const STATE_SCHEMA_VERSION: i64 = 18;
+pub const STATE_SCHEMA_VERSION: i64 = 19;
 
 impl Store {
     /// One store per account + sync root. Independent accounts never share event IDs or cursors.
@@ -241,8 +241,10 @@ impl Store {
                 "ALTER TABLE namespace_ops ADD COLUMN kind TEXT NOT NULL DEFAULT 'rename';",
             )?;
         }
+        crate::initialization_store::migrate(&db)?;
         db.pragma_update(None, "user_version", STATE_SCHEMA_VERSION)?;
         db.execute_batch("COMMIT;")?;
+        crate::initialization_store::recover_open(&db)?;
         db.execute(
             "UPDATE namespace_ops SET state='uncertain' WHERE state='inflight'",
             [],
@@ -387,6 +389,9 @@ impl Store {
 
     /// Store the full batch before processing it. Receipt and consumption have distinct cursors.
     pub fn receive(&mut self, batch: &Batch) -> Result<()> {
+        if self.initialization_writeback_blocked()? {
+            return Err(Error::State("initialization: candidate active; ordinary inbox blocked".into()));
+        }
         if batch.to == batch.from {
             return Err(Error::State(
                 "empty cursor advancement; handle long-poll timeout outside inbox".into(),
@@ -422,6 +427,9 @@ impl Store {
     }
 
     pub fn apply_next(&mut self) -> Result<bool> {
+        if self.initialization_writeback_blocked()? {
+            return Err(Error::State("initialization: candidate active; ordinary inbox blocked".into()));
+        }
         let next: Option<(i64, String)> = self
             .db
             .query_row(
@@ -976,6 +984,13 @@ impl Store {
     pub(crate) fn install_remote_snapshot_with_access(
         &mut self, nodes: &[Node], cursor: &str, server: &str, inaccessible: &[String],
     ) -> Result<()> {
+        self.install_remote_snapshot_with_initialization(nodes,cursor,server,inaccessible,None)
+    }
+    pub(crate) fn install_remote_snapshot_with_initialization(
+        &mut self,nodes:&[Node],cursor:&str,server:&str,inaccessible:&[String],
+        initialization:Option<&crate::initialization_store::InitializationCommit>,
+    )->Result<()> {
+        crate::initialization_store::check_install_gate(&self.db,initialization)?;
         use std::collections::{HashMap, HashSet};
         let inaccessible = inaccessible.iter().map(|id| self.local_identity(id)).collect::<Result<Vec<_>>>()?;
         let mapped = self.mapped_snapshot(nodes)?;
@@ -1044,6 +1059,7 @@ impl Store {
             verified.extend(visiting);
         }
         crate::status_changes::replace_snapshot(&mut self.db, |tx| {
+        crate::initialization_store::check_install_gate(tx,initialization)?;
         tx.execute_batch("CREATE TEMP TABLE recovery_ids(id TEXT PRIMARY KEY);")?;
         {
             let mut insert = tx.prepare("INSERT INTO recovery_ids VALUES(?1)")?;
@@ -1092,6 +1108,9 @@ impl Store {
             [cursor],
         )?;
         tx.execute("INSERT INTO metadata(key,value) VALUES('server_restore_id',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[server])?;
+        if let Some(initialization)=initialization {
+            crate::initialization_store::finish_in_transaction(tx,initialization,cursor)?;
+        }
         tx.execute_batch("DROP TABLE recovery_ids;")?;
         Ok(())
         })
