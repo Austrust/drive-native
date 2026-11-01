@@ -755,6 +755,8 @@ impl Store {
 
 #[path = "initialization_store_evidence.rs"]
 mod evidence;
+#[path = "initialization_local_recheck.rs"]
+mod local_recheck;
 #[path = "initialization_store_ops.rs"]
 mod ops;
 use evidence::{

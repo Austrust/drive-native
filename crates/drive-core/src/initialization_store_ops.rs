@@ -463,7 +463,7 @@ impl Store {
         if sequence != s.applied_sequence + 1 {
             return Err(invalid("event application gap"));
         }
-        let (batch, _page) = read_event_receipt(&tx, &s, sequence)?;
+        let (batch, page) = read_event_receipt(&tx, &s, sequence)?;
         if batch.from != s.applied_cursor {
             return Err(invalid("candidate applied cursor mismatch"));
         }
@@ -472,7 +472,8 @@ impl Store {
         let mut missing_file_parent = false;
         let mut root_refresh = false;
         let mut parents = HashSet::new();
-        for event in &batch.events {
+        let mut local_subtrees = HashSet::new();
+        for (ordinal, event) in batch.events.iter().enumerate() {
             let id = match &event.change {
                 Change::Upsert(node) => &node.id,
                 Change::Delete { id } => id,
@@ -490,6 +491,21 @@ impl Store {
                 all = true;
                 root_refresh = true;
                 continue;
+            }
+            let directory_event = old.as_ref().is_some_and(|node| node.directory)
+                || matches!(&event.change, Change::Upsert(node) if node.directory);
+            if directory_event && !all {
+                if let Some(plan) = local_recheck::plan_known_directory(
+                    &tx,
+                    &s,
+                    event,
+                    page.as_ref().and_then(|p| p.hint(ordinal)),
+                    old.as_ref(),
+                )? {
+                    local_subtrees.insert(plan.directory);
+                    parents.extend(plan.parents);
+                    continue;
+                }
             }
             if old.as_ref().is_some_and(|node| node.directory) {
                 all = true;
@@ -520,11 +536,11 @@ impl Store {
                 _ => {}
             }
         }
-        // Inspect the entire batch before deferring: directory/root changes,
-        // unknown deletes and malformed parent types retain conservative
-        // invalidation. This dependency scheduling is our own policy; it is
-        // not a claim about the Windows client's unknown-parent algorithm.
-        if missing_file_parent && !all {
+        // Inspect the entire batch before changing coverage. Only verified
+        // known-directory plans are local; root/unknown/mismatch and mixed
+        // unresolved dependencies retain the conservative complete recheck.
+        // This is our scheduling policy, not an inferred Windows algorithm.
+        if missing_file_parent && !all && local_subtrees.is_empty() {
             // Use the partial pending index first. Do not put both EXISTS in a
             // SQL OR: SQLite need not short circuit the loading-row scan.
             let pending: bool = tx.query_row(
@@ -547,6 +563,7 @@ impl Store {
         if all {
             invalidate(&tx, &run.run_id, root, true)?;
         } else {
+            local_recheck::invalidate_local_subtrees(&tx, &s, &local_subtrees)?;
             for parent in parents {
                 invalidate(&tx, &run.run_id, &parent, false)?;
             }
