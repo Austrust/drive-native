@@ -37,6 +37,14 @@ pub struct InitializationRun {
     pub run_id: String,
     pub epoch: u64,
 }
+/// Receipt durability and event application are separate boundaries. A missing
+/// file parent may still be discovered by unfinished candidate enumeration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InitializationApplyResult {
+    Applied,
+    AlreadyApplied,
+    AwaitingCoverage,
+}
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InitializationDirectoryTicket {
     pub run: InitializationRun,

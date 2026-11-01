@@ -3,7 +3,9 @@
 use super::*;
 use drive_core::{
     Batch,
-    initialization_store::{InitializationBinding, InitializationBudget, InitializationRun},
+    initialization_store::{
+        InitializationApplyResult, InitializationBinding, InitializationBudget, InitializationRun,
+    },
     native::{
         InitializationBody as Body, InitializationReply, InitializationRequest as Request, Scope,
     },
@@ -237,10 +239,12 @@ impl Bridge {
         rpc: &Arc<Rpc>,
         run: &InitializationRun,
         batch: Option<Batch>,
-    ) -> io::Result<()> {
+        directory_race: bool,
+    ) -> io::Result<bool> {
         let _writes = self.recovery_gate.write().unwrap();
         self.current(rpc)?;
         let mut store = self.store.lock().unwrap();
+        let mut changed = false;
         if let Some(batch) = batch {
             let status = store
                 .initialization_status()
@@ -249,7 +253,7 @@ impl Bridge {
             if status.run != *run {
                 return Err(invalid("candidate changed"));
             }
-            store
+            changed = store
                 .record_initialization_events(
                     run,
                     status
@@ -262,20 +266,38 @@ impl Bridge {
         }
         // Crash after receipt before apply is safe: replay the saved body before
         // requesting another page, never skip to a fresh server watermark.
-        loop {
+        let awaiting = loop {
             let pending = store
-                .pending_initialization_events(run, 1)
+                .initialization_next_pending_sequence(run)
                 .map_err(io::Error::other)?;
-            let Some((sequence, _)) = pending.first() else {
-                break;
+            let Some(sequence) = pending else {
+                if directory_race && !changed {
+                    return Err(invalid("coverage race without pending receipt"));
+                }
+                break false;
             };
-            store
-                .apply_initialization_events(run, *sequence)
-                .map_err(io::Error::other)?;
-        }
+            let applied = if directory_race {
+                store.apply_initialization_events_after_directory_race(run, sequence)
+            } else {
+                store.apply_initialization_events(run, sequence)
+            };
+            match applied.map_err(io::Error::other)? {
+                InitializationApplyResult::AwaitingCoverage => {
+                    // Do not retry the same durable batch under the Store lock.
+                    // Enumerate before attempting application again.
+                    break true;
+                }
+                InitializationApplyResult::Applied => changed = true,
+                InitializationApplyResult::AlreadyApplied => {
+                    return Err(invalid("candidate pending event already applied"));
+                }
+            }
+        };
         drop(store);
-        self.initialization.activity();
-        Ok(())
+        if changed {
+            self.initialization.activity();
+        }
+        Ok(awaiting)
     }
 
     pub(super) fn run_initialization_owner(
@@ -288,8 +310,16 @@ impl Bridge {
         self.initialization.recovery(reason);
         let deadline = Instant::now() + Duration::from_secs(3600);
         let mut restart = false;
+        let mut coverage_escapes = 0usize;
         for attempt in 1..=3 {
-            let result = self.initialize_candidate(&rpc, &session, deadline, restart, attempt);
+            let result = self.initialize_candidate(
+                &rpc,
+                &session,
+                deadline,
+                restart,
+                attempt,
+                &mut coverage_escapes,
+            );
             match result {
                 Ok(()) => return Ok(true),
                 Err(error)
@@ -332,6 +362,7 @@ impl Bridge {
         deadline: Instant,
         restart: bool,
         attempt: u8,
+        coverage_escapes: &mut usize,
     ) -> io::Result<()> {
         let existing = self
             .store
@@ -460,7 +491,7 @@ impl Bridge {
         if resumed {
             self.refresh_candidate_root(rpc, session, &run, deadline)?;
         }
-        self.apply_candidate_events(rpc, &run, None)?;
+        let mut awaiting_coverage = self.apply_candidate_events(rpc, &run, None, false)?;
         let mut directories = 0u64;
         let mut pages = 0usize;
         loop {
@@ -469,6 +500,11 @@ impl Bridge {
             self.initialization
                 .phase(crate::initialization::Phase::CatchingUp);
             for _ in 0..16 {
+                // Do not accumulate more event pages while a received page
+                // depends on directories that enumeration has not reached yet.
+                if awaiting_coverage {
+                    break;
+                }
                 let state = self
                     .store
                     .lock()
@@ -490,7 +526,8 @@ impl Bridge {
                         if pages > 4096 {
                             return Err(invalid("initialization event budget exceeded"));
                         }
-                        self.apply_candidate_events(rpc, &run, Some(batch))?;
+                        awaiting_coverage =
+                            self.apply_candidate_events(rpc, &run, Some(batch), false)?;
                     }
                     _ => return Err(invalid("expected candidate events")),
                 }
@@ -505,6 +542,8 @@ impl Bridge {
             if state.root_needs_refresh {
                 self.refresh_candidate_root(rpc, session, &run, deadline)?;
             }
+            let directories_before = directories;
+            let mut coverage_race = false;
             for _ in 0..4 {
                 let jobs = {
                     let _writes = self.recovery_gate.write().unwrap();
@@ -592,7 +631,17 @@ impl Bridge {
                         {
                             continue;
                         }
-                        let (identity, children, denied) = match result? {
+                        let body = match result {
+                            Err(error)
+                                if awaiting_coverage
+                                    && matches!(recheck(&error), Some(Recheck::Directory)) =>
+                            {
+                                coverage_race = true;
+                                continue;
+                            }
+                            other => other?,
+                        };
+                        let (identity, children, denied) = match body {
                             Body::Directory {
                                 identity,
                                 children,
@@ -627,6 +676,31 @@ impl Bridge {
                         retry_reason: None,
                     });
                 }
+                if coverage_race {
+                    break;
+                }
+            }
+            if coverage_race {
+                // All reads in this group have joined. Invalidate after their
+                // receipts so none can overwrite the newly scheduled recheck.
+                if *coverage_escapes >= 16 {
+                    return Err(invalid("initialization coverage race budget exceeded"));
+                }
+                *coverage_escapes += 1;
+                awaiting_coverage = self.apply_candidate_events(rpc, &run, None, true)?;
+                continue;
+            }
+            // A newly listed parent can resolve a deferred page. If it remains
+            // missing after complete coverage, core schedules the original
+            // conservative recheck; it never silently discards the event.
+            awaiting_coverage = self.apply_candidate_events(rpc, &run, None, false)?;
+            if awaiting_coverage {
+                if directories == directories_before {
+                    return Err(invalid(
+                        "initialization coverage dependency made no progress",
+                    ));
+                }
+                continue;
             }
             if !self
                 .store
@@ -658,7 +732,8 @@ impl Bridge {
                 deadline,
             )? {
                 Body::Events(Some(batch)) => {
-                    self.apply_candidate_events(rpc, &run, Some(batch))?;
+                    awaiting_coverage =
+                        self.apply_candidate_events(rpc, &run, Some(batch), false)?;
                     continue;
                 }
                 Body::Events(None) => {}
