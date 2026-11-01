@@ -11,6 +11,7 @@ from gi.repository import GObject, Gio, GLib
 NAME = "org.drivenative.Client1"
 PATH = "/org/drivenative/Client1"
 STATES = {
+    "initializing": ("初始化预览 · 正文尚未可用", "drive-native-pending"),
     "not_summarized": ("状态尚未汇总", "drive-native-pending"),
     "download_retry": ("下载失败 · 将重试", "drive-native-pending"),
     "update_retry": ("更新失败 · 将重试", "drive-native-pending"),
@@ -35,6 +36,7 @@ def build_provider(FileManager):
             self.proxy = None
             self.root = None
             self.connection = "locked"
+            self.preview_only = False
             self.cache = {}
             self.files = OrderedDict()
             self.pending = set()
@@ -89,16 +91,17 @@ def build_provider(FileManager):
             def overview(data, failed):
                 if generation != self.generation:
                     return
-                old_root, old_connection = self.root, self.connection
+                old_root, old_connection, old_preview = self.root, self.connection, self.preview_only
                 self.root = os.path.normpath(data["mount"]) if not failed else None
                 self.connection = data.get("connection", "locked") if data else "locked"
-                if old_root != self.root:
+                self.preview_only = data.get("preview_only") is True if data else False
+                if old_root != self.root or old_preview != self.preview_only:
                     self.cache.clear()
                     self.pending.clear()
                 for path, file in list(self.files.items()):
                     if self.root and self._contains(path):
                         self.pending.add(path)
-                        if old_root != self.root or old_connection != self.connection:
+                        if old_root != self.root or old_connection != self.connection or old_preview != self.preview_only:
                             file.invalidate_extension_info()
                     elif old_root and os.path.commonpath((old_root, path)) == old_root:
                         # A changed/removed mount must also clear icons on old paths.
@@ -213,6 +216,8 @@ def build_provider(FileManager):
             return self._menus([path]) if path is not None else ()
 
         def _menus(self, paths):
+            if self.preview_only:
+                return ()
             root = FileManager.MenuItem(
                 name="DriveNative::menu",
                 label="Drive Native",
@@ -233,6 +238,9 @@ def build_provider(FileManager):
             return (root,)
 
         def _activate(self, _item, paths, method, value):
+            # A menu may outlive a mode transition; the backend also validates.
+            if self.preview_only:
+                return
             for path in paths:
                 arguments = (
                     GLib.Variant("(s)", (path,))

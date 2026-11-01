@@ -2,12 +2,13 @@
 //! cached reads, injected native hydration, durable writes and file creation.
 //! Rename, replacement, unlink and mkdir use durable local journals.
 //! No callback waits for the NAS, and unsupported writes are never acknowledged.
+#[cfg(test)]
+mod cached_close_tests;
 mod directory;
 #[cfg(test)]
 mod isolation_tests;
-#[cfg(test)]
-mod cached_close_tests;
 mod namespace;
+mod preview;
 mod read_requests;
 mod writable;
 use drive_core::filesystem::FileRecord;
@@ -139,7 +140,18 @@ impl CacheFilesystem {
         uid: u32,
         gid: u32,
     ) -> drive_core::Result<Self> {
-        store.lock().unwrap().ensure_fs_root(root)?;
+        {
+            let s = store.lock().unwrap();
+            match s.node(root) {
+                Ok(_) => s.ensure_fs_root(root)?,
+                Err(e) if e.is_not_found() => {
+                    if s.preview_mount_root(root)?.is_none() {
+                        return Err(e);
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
         let storage = Arc::new(std::fs::File::open(
             store.lock().unwrap().storage_directory(),
         )?);
@@ -253,7 +265,7 @@ impl Filesystem for CacheFilesystem {
         self.queue.submit(Box::new(move || {
             let result = (|| -> drive_core::Result<_> {
                 let mut s = store.lock().unwrap();
-                let p = s.record_by_inode(parent)?;
+                let p = preview::authoritative(&s, parent, libc::EROFS)?;
                 let node = s.create_local_directory(&p.node.id, &name, mode & !umask)?;
                 s.record(&node.id)
             })();
@@ -338,14 +350,9 @@ impl Filesystem for CacheFilesystem {
         let (uid, gid) = (self.uid, self.gid);
         self.queue.submit(Box::new(move || {
             let store = store.lock().unwrap();
-            let result = store.record_by_inode(parent).and_then(|p| {
-                if !p.node.directory {
-                    return Err(Error::Io(std::io::Error::from_raw_os_error(libc::ENOTDIR)));
-                }
-                store.lookup(&p.node.id, &name)
-            });
+            let result = preview::lookup(&store, parent, &name);
             match result {
-                Ok(record) => reply.entry(&TTL, &attr(&record, uid, gid), 0),
+                Ok(record) => reply.entry(&TTL, &record.attr(uid, gid), 0),
                 Err(e) => reply.error(errno(&e)),
             }
         }));
@@ -355,9 +362,16 @@ impl Filesystem for CacheFilesystem {
         let handles = self.handles.clone();
         let (uid, gid) = (self.uid, self.gid);
         self.queue.submit(Box::new(move || {
-            let result = store.lock().unwrap().record_by_inode(ino);
+            let result = preview::metadata(&store.lock().unwrap(), ino);
             match result {
-                Ok(record) => {
+                Ok(preview::Metadata::Preview(record)) => {
+                    if fh.is_some() {
+                        reply.error(libc::EBADF);
+                    } else {
+                        reply.attr(&TTL, &preview::preview_attr(&record, uid, gid));
+                    }
+                }
+                Ok(preview::Metadata::Authority(record)) => {
                     let mut a = attr(&record, uid, gid);
                     if let Some(fh) = fh {
                         let content = {

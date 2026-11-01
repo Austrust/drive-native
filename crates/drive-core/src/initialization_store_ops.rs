@@ -281,6 +281,7 @@ impl Store {
         )?;
         tx.execute("UPDATE initialization_run SET node_bytes=node_bytes+?2-?3,root_refresh=0,root_ticket=NULL,fenced=NULL,fence_ticket=NULL WHERE run_id=?1",params![run.run_id,body.len() as i64,previous])?;
         check_node_budget(&tx, &run.run_id)?;
+        crate::preview::verified_root_in_transaction(&tx, run)?;
         tx.commit()?;
         Ok(())
     }
@@ -468,6 +469,21 @@ impl Store {
             return Err(invalid("candidate applied cursor mismatch"));
         }
         let root = root_id(&s.binding)?;
+        // A verified durable head can prove the selected root unusable even
+        // though this batch must never be applied. Persist only revocation;
+        // returning Err must not roll that evidence back into a visible preview.
+        for event in &batch.events {
+            let rejection = match &event.change {
+                Change::Delete { id } if id == root => Some(invalid("selected root removed")),
+                Change::Upsert(node) if node.id == root => validate_root(&s.binding, node).err(),
+                _ => None,
+            };
+            if let Some(rejection) = rejection {
+                crate::preview::revoke_root_in_transaction(&tx, &s)?;
+                tx.commit()?;
+                return Err(rejection);
+            }
+        }
         let mut all = directory_race;
         let mut missing_file_parent = false;
         let mut root_refresh = false;
@@ -490,6 +506,7 @@ impl Store {
                 }
                 all = true;
                 root_refresh = true;
+                crate::preview::invalidate_root_in_transaction(&tx, &s)?;
                 continue;
             }
             let directory_event = old.as_ref().is_some_and(|node| node.directory)
@@ -814,6 +831,7 @@ pub(crate) fn finish_in_transaction(
     {
         return Err(invalid("final run changed"));
     }
+    crate::preview::promote_in_transaction(db, &s)?;
     db.execute(
         "UPDATE initialization_run SET state='ready',error=NULL WHERE slot=1",
         [],

@@ -4,6 +4,7 @@ pub mod backend;
 pub mod filesystem;
 #[cfg(feature = "native")]
 pub mod native;
+pub mod preview;
 pub mod state;
 pub use state::*;
 pub mod shared_store;

@@ -34,6 +34,7 @@ from .upgrade import BackendUpgrade
 from .initialization import progress_text
 
 STATUS = {
+    "initializing": ("初始化预览", "#bc8425"),
     "download_retry": ("下载失败 · 将重试", "#bc8425"),
     "update_retry": ("更新失败 · 将重试", "#bc8425"),
     "download_failed": ("下载失败", "#c14c58"),
@@ -207,6 +208,11 @@ class MainWindow(QMainWindow):
         self.progress_label.setWordWrap(True)
         self.progress_label.hide()
         content.addWidget(self.progress_label)
+        self.preview_label = QLabel("目录预览 · 已确认的目录可浏览，文件正文暂不可用。初始化完成后自动开放正常操作。")
+        self.preview_label.setWordWrap(True)
+        self.preview_label.setObjectName("message")
+        self.preview_label.hide()
+        content.addWidget(self.preview_label)
         self.banner = QLabel()
         self.banner.setWordWrap(True)
         self.banner.setObjectName("message")
@@ -392,6 +398,7 @@ class MainWindow(QMainWindow):
         self.progress_timer.stop()
         self.progress_label.hide()
         self.connection_value.setText("尚未连接")
+        self.preview_label.hide()
         self.pause.setEnabled(False)
         self.open_folder.setEnabled(False)
         self.up.setEnabled(False)
@@ -549,6 +556,11 @@ class MainWindow(QMainWindow):
             self.followup_refresh()
             return
         self.overview = data
+        self.preview_label.setVisible(data.get("preview_only") is True)
+        self.overview_hint.setText(
+            "已确认的目录可以从文件管理器浏览。\n初始化预览中的文件暂不能打开或编辑。"
+            if data.get("preview_only") is True else
+            "文件可直接从文件管理器打开。\n点击左侧“查看文件状态”，按需载入当前目录的状态列表。")
         state = data["connection"]
         self.connection_value.setText(CONNECTION.get(state, "需要检查"))
         self.render_progress(data.get("initialization"))
@@ -571,7 +583,9 @@ class MainWindow(QMainWindow):
         elif data.get("download_errors"):
             self.show_error("部分下载未完成。已有完整内容会保留，可查看文件状态或右键重试下载。")
         elif state in ("offline", "paused", "locked"):
-            self.show_error("当前未与 NAS 同步。本地完整文件仍可使用；远端变化将在连接恢复后核对。")
+            self.show_error("当前未与 NAS 同步，已确认的目录仍可预览，文件正文暂不可用。"
+                            if data.get("preview_only") is True else
+                            "当前未与 NAS 同步。本地完整文件仍可使用；远端变化将在连接恢复后核对。")
         else:
             self.banner.hide()
         if state == "locked" and self.pending_password:
@@ -627,6 +641,35 @@ class MainWindow(QMainWindow):
             self.show_error("无法读取本地文件列表。")
             self.followup_refresh()
             return
+        if data.get("preview_only") is True and data.get("directory_state") != "received":
+            # An incomplete listing is not an empty directory. Do not retain
+            # names from a preview whose membership/permission was revoked.
+            self.loading = False
+            self.page_rows = []
+            self.rows = []
+            self.render_rows()
+            self.more.hide()
+            self.detail.setText("该目录暂时没有访问权限。" if data.get("directory_state") == "denied"
+                                else "目录列表尚未就绪，完成核对后会自动刷新。")
+            self.availability_value.setText("尚未确认")
+            self.up.setEnabled(bool(self.folder))
+            self.ready.emit()
+            self.followup_refresh()
+            return
+        token = (data.get("preview_only") is True, data.get("preview_generation"))
+        if data["offset"] == 0:
+            self.page_view_token = token
+        elif token != getattr(self, "page_view_token", None):
+            self.loading = False
+            self.page_rows = []
+            self.rows = []
+            self.render_rows()
+            self.more.hide()
+            self.detail.setText("目录内容已变化，等待下一次状态刷新。")
+            self.availability_value.setText("尚未确认")
+            self.ready.emit()
+            self.followup_refresh()
+            return
         self.page_rows.extend(data["entries"])
         next_offset = data["offset"] + len(data["entries"])
         if data["entries"] and next_offset < min(self.display_limit, data["total"]):
@@ -640,7 +683,8 @@ class MainWindow(QMainWindow):
         suffix = f" · 已跳过 {skipped} 个无权限目录；权限恢复后重新登录可重新核对" if skipped else ""
         links = (self.overview or {}).get("skipped_symlinks", 0)
         if links: suffix += f" · 已跳过 {links} 个符号链接（暂不支持，不读取链接目标）"
-        self.detail.setText(f"{len(self.rows)} / {data['total']} 项 · 状态按最后已知远端版本显示" + suffix)
+        qualifier = "初始化预览，正文尚未可用" if data.get("preview_only") is True else "状态按最后已知远端版本显示"
+        self.detail.setText(f"{len(self.rows)} / {data['total']} 项 · {qualifier}" + suffix)
         self.availability_value.setText(
             f"{sum(bool(r.get('offline_available')) for r in self.rows)} / {len(self.rows)}"
         )
@@ -687,7 +731,8 @@ class MainWindow(QMainWindow):
                 [
                     Path(row["path"]).name,
                     label,
-                    "可用" if row.get("offline_available") else "需要联网",
+                    "尚未可用" if status == "initializing" else
+                    ("可用" if row.get("offline_available") else "需要联网"),
                 ]
             ):
                 if item.text(column) != text:
@@ -734,6 +779,8 @@ class MainWindow(QMainWindow):
         row = item.data(0, Qt.UserRole)
         if row.get("directory"):
             self.navigate(row["path"])
+        elif self.overview.get("preview_only") is True or row.get("status") == "initializing":
+            self.show_error("该文件仍处于初始化预览，正文尚未可用。")
         else:
             QDesktopServices.openUrl(
                 QUrl.fromLocalFile(str(Path(self.overview["mount"]) / row["path"]))
@@ -780,6 +827,8 @@ class MainWindow(QMainWindow):
         self.schedule_refresh()
 
     def context_menu(self, point):
+        if (self.overview or {}).get("preview_only") is True:
+            return
         selected = [item.data(0, Qt.UserRole) for item in self.table.selectedItems()]
         if not selected:
             return
@@ -797,6 +846,10 @@ class MainWindow(QMainWindow):
         menu.exec(self.table.viewport().mapToGlobal(point))
 
     def apply_action(self, rows, method, value):
+        if (self.overview or {}).get("preview_only") is True or any(
+                row.get("status") == "initializing" for row in rows):
+            self.show_error("初始化预览期间暂不能固定、释放或修改文件。")
+            return
         for row in rows:
             args = [row["path"]] if value is None else [row["path"], value]
             self.bus.call(method, args, self.action_done)

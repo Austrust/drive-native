@@ -2,6 +2,8 @@
 //! querying an icon never opens a FUSE file or performs a NAS request.
 use crate::service::Service;
 use drive_core::{Node, Status, Store};
+#[path = "desktop_preview.rs"]
+mod preview;
 #[path = "desktop_tree.rs"]
 mod status_tree;
 use serde::Serialize;
@@ -226,6 +228,14 @@ pub fn states(service: &Service, paths: Vec<String>) -> io::Result<String> {
     }
     let active = service.bridge.active_downloads().into_iter().collect();
     let store = service.bridge.store.lock().unwrap();
+    if preview::active(&store, &service.profile.scope.file_id)? {
+        return preview::states(
+            &store,
+            &service.profile.scope.file_id,
+            &service.profile.mount,
+            paths,
+        );
+    }
     store
         .ensure_fs_root(&service.profile.scope.file_id)
         .map_err(|_| other())?;
@@ -352,9 +362,11 @@ pub fn overview(service: &Service) -> io::Result<String> {
     let store = service.bridge.store.lock().unwrap();
     let pending = store.pending_operations().map_err(|_| other())?
         + store.pending_namespace_operations().map_err(|_| other())?;
+    let preview_only = preview::active(&store, &service.profile.scope.file_id)?;
     Ok(serde_json::json!({"schema":1,"task_id":service.profile.task_id,"mount":service.profile.mount,
         "connection":state,"error":error,"background_error":*service.bridge.last_error.lock().unwrap(),
-        "mounted":service.mounted.load(Ordering::Acquire),"writable":service.profile.writable,
+        "mounted":service.mounted.load(Ordering::Acquire),"writable":service.profile.writable && !preview_only,
+        "configured_writable":service.profile.writable,"preview_only":preview_only,
         "skipped_symlinks":store.skipped_symlink_count().map_err(|_|other())?,
         "skipped_permission_directories":store.inaccessible_count().map_err(|_|other())?,
         "pending_operations":pending,"revision":revision,"local_revision":store.local_revision(),
@@ -432,6 +444,15 @@ fn release(service: &Service, path: &str) -> io::Result<String> {
 pub fn directory(service: &Service, path: &str, offset: u32) -> io::Result<String> {
     let (paths, total) = {
         let store = service.bridge.store.lock().unwrap();
+        if preview::active(&store, &service.profile.scope.file_id)? {
+            return preview::directory(
+                &store,
+                &service.profile.scope.file_id,
+                &service.profile.mount,
+                path,
+                offset,
+            );
+        }
         store
             .ensure_fs_root(&service.profile.scope.file_id)
             .map_err(|_| other())?;

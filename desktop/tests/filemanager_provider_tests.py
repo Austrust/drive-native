@@ -22,6 +22,30 @@ class Tests(unittest.TestCase):
             self.task=m._TaskExtension()
         self.task.root='/tmp/synthetic-drive-mount';self.task.connection='online'
         self.task._schedule=lambda: None  # Flush deterministically; no idle GLib sources.
+    def test_preview_does_not_offer_body_actions_or_offline_emblems(self):
+        file = File(self.task.root + '/A.doc')
+        self.task.preview_only = True
+        self.task.cache[file.path] = {'status': 'initializing', 'offline_available': False}
+        self.task.update_file_info(file)
+        self.assertIn('正文尚未可用', file.attributes['drive_native_status'])
+        self.assertEqual(file.emblems, ['drive-native-pending'])
+        self.assertEqual(self.task.get_file_items([file]), ())
+        with patch.object(self.task, '_call') as call:
+            self.task._activate(None, [file.path], 'SetPinned', True)
+            call.assert_not_called()
+
+    def test_preview_transition_invalidates_previous_emblems_and_requeries(self):
+        file = File(self.task.root + '/A.doc')
+        self.task._track(file.path, file)
+        self.task.cache[file.path] = {'status': 'local_complete'}
+        self.task._call = lambda method, args, cb: cb(
+            {'mount': self.task.root, 'connection': 'connecting', 'preview_only': True}, False)
+        self.task._changed()
+        self.assertTrue(self.task.preview_only)
+        self.assertNotIn(file.path, self.task.cache)
+        self.assertIn(file.path, self.task.pending)
+        self.assertEqual(file.invalidations, 1)
+
     def test_nautilus4_menus_accept_removed_window_argument_and_keep_paths_scoped(self):
         inside=File('/tmp/synthetic-drive-mount/folder');outside=File('/tmp/synthetic-drive-mount-other/file')
         self.assertEqual(len(self.task.get_file_items([inside])),1)

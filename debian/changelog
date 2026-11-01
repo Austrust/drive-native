@@ -1,3 +1,14 @@
+drive-native (0.1.0~dev20261101.6) unstable; urgency=medium
+
+  * Show confirmed cold-start directory metadata before whole-tree readiness.
+  * Keep preview identity, permissions and inode promotion transactionally safe.
+  * Preserve confirmed directory visibility through ordinary connection recovery.
+  * Recheck known directory event scopes and reuse unchanged held directory views.
+  * Migrate state to schema 22 and pair filesystem/worker IPC version 18.
+  * Development build; preview file contents wait for full initialization.
+
+ -- Drive Native contributors <noreply@localhost>  Sun, 01 Nov 2026 20:36:43 +0800
+
 drive-native (0.1.0~dev20261101.5) unstable; urgency=medium
 
   * Preserve completed coverage while file events await undiscovered parents.

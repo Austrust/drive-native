@@ -3,8 +3,12 @@ use drive_core::drafts::DraftHandle;
 use fuser::{ReplyWrite, TimeOrNow};
 use std::time::SystemTime;
 
-fn content(store: &Store, ino: u64) -> drive_core::Result<(String, OpenContent)> {
-    let record = store.record_by_inode(ino)?;
+fn content(
+    store: &Store,
+    ino: u64,
+    preview_error: i32,
+) -> drive_core::Result<(String, OpenContent)> {
+    let record = preview::authoritative(store, ino, preview_error)?;
     if record.node.directory {
         return Err(Error::Io(std::io::Error::from_raw_os_error(libc::EISDIR)));
     }
@@ -96,7 +100,10 @@ pub(super) fn open(fs: &mut CacheFilesystem, ino: u64, flags: i32, reply: ReplyO
     let updates = fs.handle_updates.clone();
     let hydrator = fs.hydrator.clone();
     fs.queue.submit(Box::new(move || {
-        let result = content(&store.lock().unwrap(), ino);
+        let result = {
+            let s = store.lock().unwrap();
+            content(&s, ino, if writable { libc::EROFS } else { libc::EAGAIN })
+        };
         let (id, mut body) = match result {
             Ok(r) => r,
             Err(e) => {
@@ -391,7 +398,7 @@ pub(super) fn setattr(
             }
             let result = (|| -> drive_core::Result<_> {
                 let mut s = store.lock().unwrap();
-                let record = s.record_by_inode(ino)?;
+                let record = preview::authoritative(&s, ino, libc::EROFS)?;
                 if let Some(mode) = mode {
                     s.set_local_mode(&record.node.id, mode & 0o777)?;
                 }
@@ -426,7 +433,7 @@ pub(super) fn setattr(
                 _ => Err(Error::Io(std::io::Error::from_raw_os_error(libc::EBADF))),
             }
         } else {
-            content(&store.lock().unwrap(), ino)
+            content(&store.lock().unwrap(), ino, libc::EROFS)
         };
         let (id, body) = match resolved {
             Ok(v) => v,
@@ -494,7 +501,7 @@ pub(super) fn create(
         }
         let result = (|| -> drive_core::Result<_> {
             let mut s = store.lock().unwrap();
-            let parent = s.record_by_inode(parent)?;
+            let parent = preview::authoritative(&s, parent, libc::EROFS)?;
             let n = s.create_local_file(&parent.node.id, &name, mode & !umask)?;
             let source = s.open_cached(&n.id)?;
             let draft = Arc::new(s.begin_draft(&n.id, &n.version, Some(&source))?);
