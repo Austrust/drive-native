@@ -31,7 +31,7 @@
 
 ## 验证与边界
 
-类型化重试与持久候选基础属于本轮开发变更，待主分支统一验证；下列既有覆盖范围不等于新变更已经通过全部回归。持久候选事务与尚未接入的生产调度器见[初始化候选基础](INITIALIZATION_PERSISTENCE.md)。
+类型化重试与持久候选基础的本轮包内回归见[包验证007](validation/native-package-007/REPORT.md)；下列模块覆盖不替代全部最终验收。持久候选事务与尚未接入的生产调度器见[初始化候选基础](INITIALIZATION_PERSISTENCE.md)。
 
 合成回归覆盖任务局部观察隔离、有界阶段历史、阶段累计耗时、正常等待与无推进通知区别、IPC 错序／超预算／误路由／超时后迟到消息、IPC 回调释放请求锁、有界发送合并和饱和队列，以及 Store/Control 均被占用时的本地进度读取。
 
@@ -44,4 +44,4 @@ QT_QPA_PLATFORM=offscreen PYTHONPATH=desktop python desktop/tests/initialization
 QT_QPA_PLATFORM=offscreen PYTHONPATH=desktop python desktop/tests/lazy_gui_tests.py
 ```
 
-本分支不连接 NAS，不替换 P0 基线，不关闭性能、完整恢复、Mint 桌面、统一全量同步或候选包验收门槛。实际执行结果由主分支整合报告记录。
+本轮验证未连接 NAS，也未替换 P0 基线；性能、完整恢复、Mint 桌面、统一全量同步或候选包验收门槛仍开放。实际执行结果由本批整合报告记录。

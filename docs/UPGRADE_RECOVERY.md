@@ -1,6 +1,6 @@
 # 暂停、升级与恢复
 
-本文说明源码中的升级机制及已完成的组件验证。已发布 `.1` 的暂停接管、回退读取、重新升级和清除重装保留数据见[包验证006](validation/native-package-006/REPORT.md)；早期 `.4` 的验证与失败仍见[包验证004](validation/native-package-004/REPORT.md)。本开发分支 schema19／IPC16 的升级验证尚未完成；最终发布状态以 [DELIVERY_GATES.md](../DELIVERY_GATES.md) 为准。
+本文说明源码中的升级机制及已完成的组件验证。当前 `.2` 的 schema18→19 暂停升级、旧版拒绝和数据保留见[包验证007](validation/native-package-007/REPORT.md)；此前 `.1` 的同schema回退等历史见[包验证006](validation/native-package-006/REPORT.md)，早期 `.4` 的验证与失败仍见[包验证004](validation/native-package-004/REPORT.md)。最终发布状态以 [DELIVERY_GATES.md](../DELIVERY_GATES.md) 为准。
 
 ## 正常升级
 
@@ -30,7 +30,7 @@
 
 已发布 `.1` 使用 SQLite schema18；本分支持久初始化候选表使版本升至19。Store 打开旧版本数据库时先使用 SQLite `VACUUM INTO` 保存包含已提交 WAL 内容的一致备份，再迁移。新版本数据库由较旧二进制拒绝打开，不能通过手改 `user_version` 或清缓存绕过。备份恢复也不能自动涵盖升级后新增的未上传编辑，必须保留完整用户状态。
 
-此前 schema18 包之间的回退验证不证明 schema19 可回退。真实旧二进制拒绝、18→19 安装迁移及恢复路径待本轮统一验证。内部 IPC 同步升至16，须切换配套 FSD／worker；详见[进度接口](INITIALIZATION_PROGRESS.md)及[持久候选基础](INITIALIZATION_PERSISTENCE.md)。候选持久化API与写回门禁不等于生产初始化调度器已接入。
+此前 schema18 包之间的回退验证不证明 schema19 可回退。真实旧二进制拒绝、18→19暂停迁移及未上传数据保留已通过[包验证007](validation/native-package-007/REPORT.md)；未承诺任意旧版本可降级。内部 IPC 同步升至16，须切换配套 FSD／worker；详见[进度接口](INITIALIZATION_PROGRESS.md)及[持久候选基础](INITIALIZATION_PERSISTENCE.md)。候选持久化API与写回门禁不等于生产初始化调度器已接入。
 
 ## 失败时的处理
 
