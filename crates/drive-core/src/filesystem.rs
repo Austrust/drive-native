@@ -30,7 +30,36 @@ pub struct DirectorySnapshot {
     pub bytes: usize,
 }
 
+/// Conservative identity of the committed authoritative namespace. Compare it
+/// while holding the same Store serialization boundary as view selection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirectoryViewStamp {
+    cursor: crate::status_changes::StatusCursor,
+    snapshot_resets: u64,
+    overflows: u64,
+}
+
 impl Store {
+    /// Private initialization receipts and append-only inode allocation do not
+    /// change directory names, visibility, types or existing inode identities.
+    /// The journal covers nodes, local creation precedence and every dependency
+    /// of access_blocked (nodes, access_denied and namespace_overlay). Production
+    /// echo-inode deletion in creations/replacements accompanies those semantic
+    /// writes in the SAME transaction; root inode replacement is prohibited.
+    /// Any future standalone inode remap must invalidate this stamp as well.
+    ///
+    /// Uses the actual transactional journal, never a separately published
+    /// SharedStore atomic. Open transactions, unconfirmed bulk replacement and
+    /// invalid counters return an error instead of reusing old views.
+    pub fn directory_view_stamp(&self) -> Result<DirectoryViewStamp> {
+        let watermark = self.status_change_watermark()?;
+        Ok(DirectoryViewStamp {
+            cursor: watermark.cursor,
+            snapshot_resets: watermark.snapshot_resets,
+            overflows: watermark.overflows,
+        })
+    }
+
     /// Build one stable directory view in a single transaction. Inodes are
     /// allocated in one INSERT SELECT, without constructing FileRecords or
     /// touching cached bodies/drafts. The byte limit is checked before allocation.
@@ -381,7 +410,10 @@ pub(crate) struct SnapshotMetadataWriter<'db> {
 }
 impl<'db> SnapshotMetadataWriter<'db> {
     pub(crate) fn new(db: &'db rusqlite::Connection) -> Result<Self> {
-        Ok(Self { upsert: db.prepare(UPSERT_METADATA)?, delete: db.prepare(DELETE_METADATA)? })
+        Ok(Self {
+            upsert: db.prepare(UPSERT_METADATA)?,
+            delete: db.prepare(DELETE_METADATA)?,
+        })
     }
     pub(crate) fn write(&mut self, n: &Node) -> Result<()> {
         if let Some(m) = &n.metadata {
@@ -405,3 +437,7 @@ fn sql_unsigned(value: u64) -> Result<i64> {
         .try_into()
         .map_err(|_| Error::State("filesystem integer exceeds SQLite signed range".into()))
 }
+
+#[cfg(test)]
+#[path = "filesystem_directory_stamp_tests.rs"]
+mod directory_stamp_tests;
