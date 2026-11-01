@@ -1,5 +1,7 @@
 # Drive Native
 
+当前源码增加[初始化事件依赖等待与有界恢复](docs/CANDIDATE_EVENT_COVERAGE.md)，计划开发包.5，尚未构建或发布。62项核心、15项owner及全目标检查通过；新源码真实NAS收敛尚未验证。
+
 当前开发包 `.4` 修复候选递归查询的重复扫描，已[发布](https://github.com/Austrust/drive-native/releases/tag/dev20261101.4)；[真实失败、局部SQL复放及修复版复测](docs/CANDIDATE_QUERY_ORDER.md)。修复版真实只读初始化本次仍未通过：受控重启续扫已完成，状态查询异常0次，最终0.216秒正常退出且无遗留挂载。它不等于同负载端到端配对性能、断网故障或长期验收；本次未写NAS。
 
 面向 Linux Mint Cinnamon / Nemo 的 Synology Drive 原生协议按需同步客户端。使用 Rust、FUSE、SQLite、PySide6 和 Nemo 扩展；独立连接 Drive Server，不依赖 WebDAV 或官方客户端进程。

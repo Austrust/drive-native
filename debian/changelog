@@ -1,3 +1,11 @@
+drive-native (0.1.0~dev20261101.5) unstable; urgency=medium
+
+  * Preserve completed coverage while file events await undiscovered parents.
+  * Bound typed directory-race recovery and retain durable event boundaries.
+  * Avoid decoding event bodies only to retrieve their pending sequence.
+
+ -- Drive Native contributors <noreply@localhost>  Sun, 01 Nov 2026 18:21:58 +0800
+
 drive-native (0.1.0~dev20261101.4) unstable; urgency=medium
 
   * Bound recursive candidate traversal to indexed direct-child lookups.
