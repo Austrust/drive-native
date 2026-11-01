@@ -1,14 +1,14 @@
 # Drive Native
 
-当前开发分支在[持久事件证据与已知目录局部重查](docs/INITIALIZATION_EVENT_EVIDENCE.md)、[目录视图缓存修复](docs/DIRECTORY_VIEW_STAMP.md)之上实现[冷启动目录预览](docs/INITIALIZATION_PREVIEW.md)：完整接收一个目录后可提前浏览元数据，文件正文仍须等全局初始化完成。拟构建 `0.1.0~dev20261101.6`，schema22／IPC18，尚未构建或发布。[隔离回归002](docs/validation/progressive-preview-002/REPORT.md)已通过：core 293项、runtime 115项、filesystem 12项及全目标检查；显式内核19项与runtime内核1项通过，包含7项新预览场景。GUI 75项、Nemo 10项、Nautilus 10项通过。001的真实失败保留，未沿用旧包数量。
+当前开发包 `0.1.0~dev20261101.6` 已[发布](https://github.com/Austrust/drive-native/releases/tag/dev20261101.6)，冻结 `7683b36dcbce91b5e6143ef17bb8e97882f0453b`，schema22／IPC18。[冷启动目录预览](docs/INITIALIZATION_PREVIEW.md)让完整接收的目录先显示元数据，正文仍须等全局初始化完成；同时整合[已知目录局部重查](docs/INITIALIZATION_EVENT_EVIDENCE.md)与[目录视图缓存修复](docs/DIRECTORY_VIEW_STAMP.md)。[包验证011](docs/validation/native-package-011/REPORT.md)记录743项Rust、75项GUI，debug／release各20项显式内核测试，以及schema20→22迁移和未上传数据保留。新源码尚无NAS或配对性能实测。
 
-最近已发布开发包 `.5` 的[初始化事件依赖等待与有界恢复](docs/CANDIDATE_EVENT_COVERAGE.md)已[发布](https://github.com/Austrust/drive-native/releases/tag/dev20261101.5)。本包本次真实只读初始化未通过；受控重启续扫完成=True，状态查询异常0次。最终0.266秒正常停止且无遗留挂载；未写NAS。实测期间宿主仍有开发活动，远端变更负载未控制，不作与旧版配对性能或长期验收结论。
+历史开发包 `.5` 的[初始化事件依赖等待与有界恢复](docs/CANDIDATE_EVENT_COVERAGE.md)已[发布](https://github.com/Austrust/drive-native/releases/tag/dev20261101.5)。本包本次真实只读初始化未通过；受控重启续扫完成=True，状态查询异常0次。最终0.266秒正常停止且无遗留挂载；未写NAS。实测期间宿主仍有开发活动，远端变更负载未控制，不作与旧版配对性能或长期验收结论。
 
 历史 `.4` SQL修复及真实失败见[原报告](docs/CANDIDATE_QUERY_ORDER.md)与[包验证009](docs/validation/native-package-009/REPORT.md)，不与本轮结果混计。
 
 面向 Linux Mint Cinnamon / Nemo 的 Synology Drive 原生协议按需同步客户端。使用 Rust、FUSE、SQLite、PySide6 和 Nemo 扩展；独立连接 Drive Server，不依赖 WebDAV 或官方客户端进程。
 
-**开发测试版本，尚未完成日常使用验收。** `0.1.0~dev20261101.5` 已发布，[该包验证](docs/validation/native-package-010/REPORT.md)记录671项Rust、73项GUI，debug/release各13项显式FUSE及 `.4 → .5` 同schema20暂停接管、旧ELF读取和未上传数据保留。该已发布包使用schema20／IPC17。未知父完成覆盖后及目录事件仍可能整树回退；等待期间后页根／权限事件会延后获知，写回门禁不等于本地ACL即时撤权。逐目录提前显示、普通目录全量同步、运行时增量桌面状态、配对性能、Mint及最终数据安全／7×24验收仍开放。完整goal保持活动，本包不是rc1。P0原窗口满足23小时时长，异常条件未通过，不拼接或重计。
+**开发测试版本，尚未完成日常使用验收。** `.6` 已完成隔离Ubuntu安装、暂停接管、迁移备份、旧schema20 ELF拒绝及重装保留两份pending编辑与草稿；未覆盖旧初始化候选或未知提交升级。普通目录全量同步、运行时增量桌面状态、真实NAS首屏与完整收敛、配对性能、Mint及最终数据安全／7×24验收仍开放。完整goal保持活动，本包不是rc1。P0原窗口满足23小时时长，异常条件未通过，不拼接或重计。
 
 ## 已实现
 

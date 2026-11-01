@@ -1,10 +1,14 @@
-# 拟构建 0.1.0~dev20261101.6：冷启动目录预览
+# 0.1.0~dev20261101.6：冷启动目录预览
 
 当前开发源码已接入[只读目录预览](INITIALIZATION_PREVIEW.md)。选定根经过验证后可挂载；完整直接列表持久接收后可浏览元数据，未完成目录明确暂不可用。预览文件正文和本地修改仍不可用，直到全局候选通过原有fence并完成原子转正；同一挂载随后使用正常按需读取。warm任务继续原权威树、缓存和草稿路径。
 
 本批还整合[原生事件证据与已知目录局部重查](INITIALIZATION_EVENT_EVIDENCE.md)、[目录视图缓存修复](DIRECTORY_VIEW_STAMP.md)。预览包含持续权限拒绝、根撤销、孤立草稿保护、受预算约束的inode及旧句柄失效。未知位置仍可能全树回退，不等于初始化已收敛。
 
-拟使用schema22／IPC18，尚未构建或发布。[隔离回归002](validation/progressive-preview-002/REPORT.md)的core 293项、runtime 115项、filesystem 12项及全目标检查通过；显式FUSE内核19项与runtime内核1项通过。GUI 75项、Nemo 10项、Nautilus 10项通过。001普通Root复核误屏蔽预览与旧kernel mode断言失败均已修复并保留原证据，001未执行到新preview target。完整包构建、安装迁移、真实NAS首屏与性能尚未验证。不要使用旧包的通过数量代替本批结果。组件需成对升级，流程与迁移边界见[升级恢复](UPGRADE_RECOVERY.md)。
+本开发包已[发布](https://github.com/Austrust/drive-native/releases/tag/dev20261101.6)，冻结`7683b36dcbce91b5e6143ef17bb8e97882f0453b`，schema22／IPC18。[包验证011](validation/native-package-011/REPORT.md)记录743项Rust、75项GUI，debug／release各20项显式内核测试通过；隔离Ubuntu完成schema20→22迁移、暂停接管、备份、旧ELF拒绝和同版／purge重装，保留两份pending编辑及dirty草稿。独立Nemo／Nautilus各10项通过。
+
+001普通Root复核误屏蔽预览与旧kernel mode断言失败已修复，原记录保留，001未执行到新preview target。[源码002](validation/progressive-preview-002/REPORT.md)独立通过，不累加到完整包总数。构建时`dh_clean`清理了未编译的`.orig`审计清单，依据冻结归档恢复后完整源码核验通过；升级前置因该差异拒绝启动，内核前置另曾因缺commit参数拒绝启动，修正后才运行，两次均未启动相应测试。没有降低身份核验要求。
+
+本轮未进行新源码NAS或配对性能实测。升级未覆盖旧初始化候选／未知提交，也未观察或强制构造非空WAL。组件须成对更新，正常升级保留数据不清缓存，流程见[升级恢复](UPGRADE_RECOVERY.md)。
 
 普通目录全量同步、Mint完整桌面、配对性能、最终数据安全及7×24门槛保持开放；本包目标仍为开发版，不是rc1。已发布 `.5` 的失败初始化与验证见[包010](validation/native-package-010/REPORT.md)。以下保留历史版本发布说明，版本号对应各自当时状态。
 

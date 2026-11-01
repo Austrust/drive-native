@@ -1,6 +1,6 @@
 # 冷启动目录预览
 
-2026-11-01，当前开发源码已接入cold元数据预览，拟构建 `0.1.0~dev20261101.6`，schema22／IPC18，尚未构建或发布。[隔离回归002](validation/progressive-preview-002/REPORT.md)已完成：core 293项、runtime 115项、filesystem 12项及全目标检查通过，显式FUSE内核19项与runtime内核1项通过（含7项新预览场景）。GUI 75项、Nemo 10项、Nautilus 10项通过。这是本地合成与真实FUSE内核验证，不代表NAS首屏、包安装或性能验收。
+2026-11-01，冷启动元数据预览已随开发包 `0.1.0~dev20261101.6` [发布](https://github.com/Austrust/drive-native/releases/tag/dev20261101.6)，冻结`7683b36dcbce91b5e6143ef17bb8e97882f0453b`，schema22／IPC18。[包验证011](validation/native-package-011/REPORT.md)记录743项Rust、75项GUI、debug／release各20项显式内核测试通过（各含7项新预览场景），以及隔离安装和迁移验收。独立Nemo／Nautilus回归各10项通过。此前[源码002](validation/progressive-preview-002/REPORT.md)及001失败保留为历史，不累加到包总数。本轮没有NAS首屏或配对性能验收。
 
 ## 用户可见行为
 
@@ -39,7 +39,7 @@
 
 仍待验证或实现：
 
-- 本批安装迁移、暂停升级、未上传数据保留及实际旧ELF拒绝。
+- 安装已验证schema20→22、暂停接管、旧ELF拒绝及两份未上传编辑保留；旧初始化候选、未知提交升级与强制非空WAL故障夹具未覆盖。
 - 真实NAS首次根列表、首次readdir、全局ready及断线恢复时刻；分别记录，不能将早显等同完整初始化收敛。
 - 超大平面目录的锁内预览构建成本；现实现仍需逐子项核验与分配inode。
 - 正文在全局ready前按需读取、warm候选合并视图、用户触发优先枚举及单目录未收齐前的分页首屏。
