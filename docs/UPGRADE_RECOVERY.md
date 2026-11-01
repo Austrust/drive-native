@@ -1,6 +1,6 @@
 # 暂停、升级与恢复
 
-本文说明源码中的升级机制及已完成的组件验证。当前 `.2` 的 schema18→19 暂停升级、旧版拒绝和数据保留见[包验证007](validation/native-package-007/REPORT.md)；此前 `.1` 的同schema回退等历史见[包验证006](validation/native-package-006/REPORT.md)，早期 `.4` 的验证与失败仍见[包验证004](validation/native-package-004/REPORT.md)。最终发布状态以 [DELIVERY_GATES.md](../DELIVERY_GATES.md) 为准。
+本文说明源码中的升级机制及实际验证。当前 `.3` 的schema19→20暂停接管、迁移备份、旧ELF拒绝和未上传数据保留见[包验证008](validation/native-package-008/REPORT.md)。`.2` 的schema18→19属于[历史包验证007](validation/native-package-007/REPORT.md)；此前 `.1` 的同schema回退见[包验证006](validation/native-package-006/REPORT.md)，早期 `.4` 的验证与失败仍见[包验证004](validation/native-package-004/REPORT.md)。最终发布状态以 [DELIVERY_GATES.md](../DELIVERY_GATES.md) 为准。
 
 ## 正常升级
 
@@ -28,9 +28,9 @@
 
 ## 本开发分支的存储迁移边界
 
-已发布 `.1` 使用 SQLite schema18、`.2` 使用schema19；当前开发分支增加与代次绑定的游标重置许可，版本升至20。Store 打开旧版本数据库时先使用 SQLite `VACUUM INTO` 保存包含已提交 WAL 内容的一致备份，再迁移。新版本数据库由较旧二进制拒绝打开，不能通过手改 `user_version` 或清缓存绕过。备份恢复也不能自动涵盖升级后新增的未上传编辑，必须保留完整用户状态。
+已发布 `.1` 使用 SQLite schema18、`.2` 使用schema19；当前 `.3` 增加与代次绑定的游标重置许可，数据库版本为20。Store 打开旧版本数据库时先使用 SQLite `VACUUM INTO` 保存包含已提交 WAL 内容的一致备份，再迁移。新版本数据库由较旧二进制拒绝打开，不能通过手改 `user_version` 或清缓存绕过。备份恢复也不能自动涵盖升级后新增的未上传编辑，必须保留完整用户状态。
 
-此前同schema回退验证不证明 schema19 或20可降级。真实旧二进制拒绝、18→19暂停迁移及未上传数据保留已通过[包验证007](validation/native-package-007/REPORT.md)；未承诺任意旧版本可降级。当前源码内部 IPC 升至17，须切换配套 FSD／worker；详见[进度接口](INITIALIZATION_PROGRESS.md)及[持久候选基础](INITIALIZATION_PERSISTENCE.md)。当前Service已接入生产候选调度；schema19→20安装与接管尚未验证，不能沿用包007的结果。逐目录提前可见仍未实现。
+此前同schema回退验证不证明 schema19 或20可降级。真实旧二进制拒绝、18→19暂停迁移及未上传数据保留已通过[包验证007](validation/native-package-007/REPORT.md)；未承诺任意旧版本可降级。当前源码内部 IPC 升至17，须切换配套 FSD／worker；详见[进度接口](INITIALIZATION_PROGRESS.md)及[持久候选基础](INITIALIZATION_PERSISTENCE.md)。当前Service已接入生产候选调度；schema19→20暂停接管、迁移备份、旧ELF拒绝以及重装保留两份pending编辑与草稿已通过[本批包验证008](validation/native-package-008/REPORT.md)。安装夹具没有提交结果未知的操作，相关runtime回归不等于该类升级已验证。逐目录提前可见仍未实现。
 
 ## 失败时的处理
 
@@ -50,6 +50,6 @@
 
 `.4`已完成实际安装文件与自定义managed systemd服务的组合验证、包回退/清除重装和草稿保留；该接管使用同版源码控制器，另行验证已安装GUI启动。仍需安装失败恢复、生产钥匙环启动链路及正在执行本地fsync时的退出故障测试。WSL的外部挂载命名空间可延迟FUSE退出，本次失败及独立复测见包验证。Mint桌面与长期验收继续开放。
 
-上述 `.4` 结论保留为历史；后续已发布 `.1` 的隔离包生命周期还验证了暂停接管与未上传数据保留，具体数量和范围以包验证006为准。当前 schema20 新迁移不沿用旧版本测试作为通过证据。
+上述 `.4` 结论保留为历史；后续已发布 `.1` 的隔离包生命周期还验证了暂停接管与未上传数据保留，具体数量和范围以包验证006为准。当前schema20迁移采用包验证008的独立结果；已有隔离Ubuntu环境不代表干净OS或Mint安装，生产钥匙环及升级故障门槛继续保留。
 
 可复用工具：[组件接管探针](../scripts/validation/upgrade_pause_probe.py)、[managed 安装接管探针](../scripts/validation/managed_upgrade_probe.py)、[GUI 实际控制器测试](../desktop/tests/backend_upgrade_live.py)。详细机器日志和实验状态留在本地，不纳入公开仓库。

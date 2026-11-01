@@ -1,3 +1,3 @@
 # 验收状态入口
 
-唯一实时验收状态见 [DELIVERY_GATES.md](../DELIVERY_GATES.md)。历史 .6 实测范围见 [PERFORMANCE.md](PERFORMANCE.md)，P0 方法与续接见 [P0.md](P0.md)。开发包发布不改变关卡结论。已发布 `.2` 的schema19持久候选基础／IPC16重试观察见[历史包验证007](validation/native-package-007/REPORT.md)。当前schema20／IPC17源码已接生产owner、四路目录与16页交替追赶，恢复只Root并保留旧S0/received；[计划 `.3` 的开发验证](validation/native-package-008/REPORT.md)与历史发布分开记录。新包尚未构建或发布，逐目录早显未实现，真实NAS、性能及新包安装验证仍开放。
+唯一实时验收状态见 [DELIVERY_GATES.md](../DELIVERY_GATES.md)。历史 .6 实测范围见 [PERFORMANCE.md](PERFORMANCE.md)，P0方法与续接见 [P0.md](P0.md)。开发包发布不改变最终关卡。当前 `0.1.0~dev20261101.3` 的schema20／IPC17生产owner已接入并[完成本批构建与隔离安装](validation/native-package-008/REPORT.md)：651项Rust、73项GUI，debug/release各13项显式FUSE通过，schema19→20暂停升级保留两份pending编辑。四路目录、16页追赶与Root恢复已做合成验证。逐目录提前向FUSE显示仍未实现；目录事件仍可保守失效整树，最终仍须完整候选验证与整树提交。真实NAS初始化／续扫、成对性能、普通目录全量同步、Mint及最终7×24验收继续开放。 `.2` 的候选基础／IPC16属于[历史包验证007](validation/native-package-007/REPORT.md)，未冒充本批结果。
