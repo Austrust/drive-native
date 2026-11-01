@@ -2,7 +2,7 @@
 
 面向 Linux Mint Cinnamon / Nemo 的 Synology Drive 原生协议按需同步客户端。使用 Rust、FUSE、SQLite、PySide6 和 Nemo 扩展；独立连接 Drive Server，不依赖 WebDAV 或官方客户端进程。
 
-**开发测试版本，尚未完成日常使用验收。** `0.1.0~dev20261101.2` 已发布：初始化重试原因可见，加入[持久候选基础与写回保护](docs/INITIALIZATION_PERSISTENCE.md)，并验证schema18→19暂停升级与未上传数据保留。[本轮验证](docs/validation/native-package-007/REPORT.md)记录616项Rust、73项GUI和实际隔离安装范围。该发布版本未接生产初始化调度器；逐目录提前显示及普通目录全量同步仍未实现，不将其基础模块当作Personal_Sync性能验收通过。下载见[GitHub Releases](https://github.com/Austrust/drive-native/releases)。
+**开发测试版本，尚未完成日常使用验收。** `0.1.0~dev20261101.3` 已发布，生产持久初始化调度器已接入：四路目录、每轮最多16页事件追赶、恢复只查询Root并保留原S0及收到的事件。[本轮验证](docs/validation/native-package-008/REPORT.md)记录651项Rust、73项GUI，debug/release各13项显式FUSE及schema19→20暂停升级和未上传数据保留。逐目录提前向FUSE显示仍未实现；目录事件仍可保守失效整树，最终仍须完整候选验证与整树提交。真实NAS初始化／续扫、成对性能、普通目录全量同步、Mint及最终7×24验收继续开放。 下载见[GitHub Releases](https://github.com/Austrust/drive-native/releases/tag/dev20261101.3)。
 
 ## 已实现
 
@@ -22,7 +22,7 @@ Ubuntu更新包已逐项整合，继续在独立分支修复原生恢复及按�
 
 [恢复及增量状态基础](docs/validation/incremental-status-001/REPORT.md)已完成组件整合；[批量导入成本回退已修复](docs/validation/status-write-cost-003/REPORT.md)。运行时增量桌面状态尚未接入；不将这些基础模块算作 Personal 或整体性能问题已经解决。
 
-当前开发源码已接入[生产持久初始化调度器](docs/INITIALIZATION_PERSISTENCE.md)，使用SQLite schema20／IPC17：四路目录读取、每轮最多16页事件追赶，恢复已有候选只查询Root并保留旧S0及接收游标。计划版本 `0.1.0~dev20261101.3` **尚未构建或发布**；[本轮开发验证与待验项](docs/validation/native-package-008/REPORT.md)保留失败及定向复测结果。逐目录提前显示仍未实现，真实NAS、性能、新包GUI/FUSE及安装验证尚未完成。
+当前生产接线和可靠FD分步接口见[持久初始化](docs/INITIALIZATION_PERSISTENCE.md)。跨连接／重启恢复已通过合成本地RPC和持久状态回归；完整真实NAS恢复与性能仍待验证。历史 `.2` 只交付候选基础，见[包验证007](docs/validation/native-package-007/REPORT.md)，不与本轮混计。
 
 ## 构建和测试
 
@@ -68,7 +68,7 @@ dpkg-buildpackage -b -us -uc
 | [docs/INITIALIZATION_PERSISTENCE.md](docs/INITIALIZATION_PERSISTENCE.md) | 私有候选事务、票据、写回门禁与生产调度器及待验边界 |
 | [docs/SNAPSHOT_CONVERGENCE.md](docs/SNAPSHOT_CONVERGENCE.md) | 扫描期间普通文件变化的局部重查、完整 fence 与保守回退；真实 NAS 性能待验证 |
 | [docs/SNAPSHOT_ERROR_CLASSIFICATION.md](docs/SNAPSHOT_ERROR_CLASSIFICATION.md) | 枚举失败的相关竞态验证；保留原一致性围栏 |
-| [docs/UPGRADE_RECOVERY.md](docs/UPGRADE_RECOVERY.md) | 暂停、正常升级接管、历史验证与schema20迁移待验边界 |
+| [docs/UPGRADE_RECOVERY.md](docs/UPGRADE_RECOVERY.md) | 暂停、正常升级接管、schema20迁移验证与保留边界 |
 | [docs/STATUS.md](docs/STATUS.md) | 验证范围、已知问题及后续工作 |
 | [docs/PROVENANCE.md](docs/PROVENANCE.md) | 源码归档来源和版本关系 |
 

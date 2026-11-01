@@ -20,7 +20,7 @@
 
 ## 当前整合工作
 
-当前于 `codex/initialization-owner` 开发生产持久初始化调度器，源码为schema20／IPC17；四路目录、每轮最多16页追赶、恢复只Root且保留旧S0/received已接入。计划开发版 `0.1.0~dev20261101.3` 尚未构建或发布。[本轮记录](docs/validation/native-package-008/REPORT.md)：run003执行至runtime共476通过、1失败；失败是 `contains(":20")` 将 `directory:200` 误匹配的测试断言。修正后run004定向runtime为106通过、0失败、1忽略，workspace all-features/all-targets check也已通过；不能将其当作最终完整构建通过。此前run002为core213通过、1旧schema断言失败，check通过；原失败记录保留。逐目录早显未实现，真实NAS/性能、新包GUI/FUSE/安装及全部最终门槛仍开放。
+2026-11-01，`codex/initialization-owner` 的开发版 `0.1.0~dev20261101.3` 已[构建、隔离安装并发布](docs/validation/native-package-008/REPORT.md)，冻结源码 `0d28ceb752c32bc146ea42640a76503040d4a014`，schema20／IPC17。651项Rust、73项GUI，debug/release各13项显式FUSE通过；schema19→20暂停接管、迁移备份、旧ELF拒绝及两份pending编辑与草稿保留通过。生产owner、四路目录、16页追赶和Root恢复已接入，断连续扫仅有合成验证。首轮冻结360dac8构建480通过／2失败／14忽略，修正两处服务夹具绑定后run005定向3项与check通过，原失败及五轮开发记录保留，不与最终包总数相加。逐目录提前向FUSE显示仍未实现；目录事件仍可保守失效整树，最终仍须完整候选验证与整树提交。真实NAS初始化／续扫、成对性能、普通目录全量同步、Mint及最终7×24验收继续开放。 目标保持活动，本开发包不关闭P0–P6。
 
 2026-11-01 `.2` 已[构建、隔离安装并发布](docs/validation/native-package-007/REPORT.md)：616项Rust、73项GUI、debug/release各13项FUSE通过；schema18→19暂停升级、旧ELF拒绝及两份未上传修改保留通过。该发布版本新增持久候选API和运行层门禁，当时生产owner与目录提前可见尚未接入；没有新NAS/性能对比，不关闭最终门槛。
 
