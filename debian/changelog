@@ -1,3 +1,11 @@
+drive-native (0.1.0~dev20261101.4) unstable; urgency=medium
+
+  * Bound recursive candidate traversal to indexed direct-child lookups.
+  * Preserve subtree, receipt, transaction and cross-run isolation semantics.
+  * Add query-plan, VM-work and rollback regressions for recursive operations.
+
+ -- Drive Native contributors <noreply@localhost>  Sun, 01 Nov 2026 17:22:38 +0800
+
 drive-native (0.1.0~dev20261101.3) unstable; urgency=medium
 
   * Resume durable initialization candidates through session-bound native reads.

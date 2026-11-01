@@ -352,9 +352,19 @@ fn insert_node(db: &Connection, run: &str, node: &Node) -> Result<()> {
     }
     Ok(())
 }
+// Keep the recursive frontier outside the indexed child lookup. An ordinary
+// JOIN lets SQLite choose a run-wide scan for every recursive step, producing
+// quadratic work. UNION still terminates repeated identities/cycles; both the
+// recursive edge and outer mutation retain the exact run boundary.
+const SUBTREE_TOTALS_SQL: &str = "WITH RECURSIVE tree(id) AS(SELECT ?2 UNION SELECT n.id FROM tree t CROSS JOIN initialization_entries n INDEXED BY initialization_parent WHERE n.run=?1 AND n.parent=t.id) SELECT count(*),coalesce(sum(bytes),0) FROM initialization_entries WHERE run=?1 AND id IN tree";
+const DELETE_SUBTREE_SQL: &str = "WITH RECURSIVE tree(id) AS(SELECT ?2 UNION SELECT n.id FROM tree t CROSS JOIN initialization_entries n INDEXED BY initialization_parent WHERE n.run=?1 AND n.parent=t.id) DELETE FROM initialization_entries WHERE run=?1 AND id IN tree";
+const INVALIDATE_SUBTREE_SQL: &str = "WITH RECURSIVE tree(id) AS(SELECT ?2 UNION SELECT n.id FROM tree t CROSS JOIN initialization_entries n INDEXED BY initialization_parent WHERE n.run=?1 AND n.parent=t.id) UPDATE initialization_directories SET state='pending',receipt_seq=NULL,receipt_hash=NULL WHERE run=?1 AND id IN tree";
+
 fn delete_subtree(db: &Connection, run: &str, id: &str) -> Result<()> {
-    let (count,bytes):(i64,i64)=db.query_row("WITH RECURSIVE tree(id) AS(SELECT ?2 UNION SELECT n.id FROM initialization_entries n JOIN tree t ON n.parent=t.id WHERE n.run=?1) SELECT count(*),coalesce(sum(bytes),0) FROM initialization_entries WHERE run=?1 AND id IN tree",params![run,id],|r|Ok((r.get(0)?,r.get(1)?)))?;
-    db.execute("WITH RECURSIVE tree(id) AS(SELECT ?2 UNION SELECT n.id FROM initialization_entries n JOIN tree t ON n.parent=t.id WHERE n.run=?1) DELETE FROM initialization_entries WHERE run=?1 AND id IN tree",params![run,id])?;
+    let (count, bytes): (i64, i64) = db.query_row(SUBTREE_TOTALS_SQL, params![run, id], |r| {
+        Ok((r.get(0)?, r.get(1)?))
+    })?;
+    db.execute(DELETE_SUBTREE_SQL, params![run, id])?;
     db.execute("UPDATE initialization_run SET node_count=node_count-?2,node_bytes=node_bytes-?3 WHERE run_id=?1",params![run,count,bytes])?;
     Ok(())
 }
@@ -380,7 +390,7 @@ fn load_node(db: &Connection, run: &str, id: &str) -> Result<Node> {
 }
 fn invalidate(db: &Connection, run: &str, id: &str, recursive: bool) -> Result<()> {
     let changed = if recursive {
-        db.execute("WITH RECURSIVE tree(id) AS(SELECT ?2 UNION SELECT n.id FROM initialization_entries n JOIN tree t ON n.parent=t.id WHERE n.run=?1) UPDATE initialization_directories SET state='pending',receipt_seq=NULL,receipt_hash=NULL WHERE run=?1 AND id IN tree",params![run,id])?
+        db.execute(INVALIDATE_SUBTREE_SQL, params![run, id])?
     } else {
         db.execute("UPDATE initialization_directories SET state='pending',receipt_seq=NULL,receipt_hash=NULL WHERE run=?1 AND id=?2",params![run,id])?
     };
@@ -731,3 +741,7 @@ pub(crate) use ops::{
 #[cfg(test)]
 #[path = "initialization_store_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "initialization_subtree_tests.rs"]
+mod subtree_tests;
