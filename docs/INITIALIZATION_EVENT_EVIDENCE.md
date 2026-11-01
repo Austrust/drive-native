@@ -52,6 +52,12 @@ responses, permission denial, same-name and numeric identity replacement,
 restart, mixed conservative events, draft preservation and fence rejection.
 This is synthetic Store validation, not a new NAS convergence or timing result.
 
+After integrating directory view stamp source `d07e613` with attribution, the
+combined source `9204763` passed 273 core, 112 runtime and 12 filesystem library
+tests plus the workspace all-feature/all-target check in a fresh isolated run.
+The default harness ignored one core, one runtime and four filesystem tests;
+this run does not add kernel, package migration or NAS acceptance evidence.
+
 Unknown deletion and unverified locations still retain the existing conservative
 fallback. Progressive browsing, general local reconciliation and all final
 acceptance gates remain open. This experiment is not in frozen `.5` (schema 20 / IPC 17).
