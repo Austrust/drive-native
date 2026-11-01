@@ -229,9 +229,11 @@ impl Service {
         let paused = store.sync_paused().map_err(io::Error::other)?;
         let trust_pending_durability = sync(store.storage_directory()).is_err();
         let diagnostics = crate::connection_diagnostics::Recorder::open(store.storage_directory());
+        let bridge = Arc::new(Bridge::offline(Arc::new(drive_core::SharedStore::new(store)))?);
+        bridge.enable_initialization_owner(&profile.task_id)?;
         Ok(Arc::new(Self {
             profile,
-            bridge: Arc::new(Bridge::offline(Arc::new(drive_core::SharedStore::new(store)))?),
+            bridge,
             control: Mutex::new(Control {
                 state: if paused {
                     ConnectionState::Paused
@@ -639,12 +641,18 @@ impl Service {
                     self.bridge
                         .initialization
                         .phase(crate::initialization::Phase::Binding);
-                    self.bridge.attach(
-                        worker.rpc.clone(),
-                        &restore,
-                        &serde_json::to_string(&self.profile.scope)?,
-                    )?;
-                    self.bridge.initialization.activity();
+                }
+                // Acquiring the recovery writer may wait for an interrupted
+                // upload to drain. Keep Control free so Pause/Stop can close RPC.
+                self.bridge.attach(
+                    worker.rpc.clone(),
+                    &restore,
+                    &serde_json::to_string(&self.profile.scope)?,
+                )?;
+                self.bridge.initialization.activity();
+                if self.control.lock().unwrap().generation != generation {
+                    self.bridge.disconnect();
+                    return Ok(());
                 }
                 if permissions_generation == Some(generation) {
                     stage = Stage::ResumeEvents;

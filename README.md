@@ -2,7 +2,7 @@
 
 面向 Linux Mint Cinnamon / Nemo 的 Synology Drive 原生协议按需同步客户端。使用 Rust、FUSE、SQLite、PySide6 和 Nemo 扩展；独立连接 Drive Server，不依赖 WebDAV 或官方客户端进程。
 
-**开发测试版本，尚未完成日常使用验收。** `0.1.0~dev20261101.2` 已发布：初始化重试原因可见，加入[持久候选基础与写回保护](docs/INITIALIZATION_PERSISTENCE.md)，并验证schema18→19暂停升级与未上传数据保留。[本轮验证](docs/validation/native-package-007/REPORT.md)记录616项Rust、73项GUI和实际隔离安装范围。生产自动续扫、逐目录提前显示及普通目录全量同步仍未实现；不将基础模块当作Personal_Sync性能验收通过。下载见[GitHub Releases](https://github.com/Austrust/drive-native/releases)。
+**开发测试版本，尚未完成日常使用验收。** `0.1.0~dev20261101.2` 已发布：初始化重试原因可见，加入[持久候选基础与写回保护](docs/INITIALIZATION_PERSISTENCE.md)，并验证schema18→19暂停升级与未上传数据保留。[本轮验证](docs/validation/native-package-007/REPORT.md)记录616项Rust、73项GUI和实际隔离安装范围。该发布版本未接生产初始化调度器；逐目录提前显示及普通目录全量同步仍未实现，不将其基础模块当作Personal_Sync性能验收通过。下载见[GitHub Releases](https://github.com/Austrust/drive-native/releases)。
 
 ## 已实现
 
@@ -22,7 +22,7 @@ Ubuntu更新包已逐项整合，继续在独立分支修复原生恢复及按�
 
 [恢复及增量状态基础](docs/validation/incremental-status-001/REPORT.md)已完成组件整合；[批量导入成本回退已修复](docs/validation/status-write-cost-003/REPORT.md)。运行时增量桌面状态尚未接入；不将这些基础模块算作 Personal 或整体性能问题已经解决。
 
-本开发分支新增[持久初始化候选基础](docs/INITIALIZATION_PERSISTENCE.md)及类型化重试原因，SQLite schema 为19、内部 IPC 为16。本批已完成[包验证007](docs/validation/native-package-007/REPORT.md)；生产初始化调度器尚未接入，逐目录提前显示与跨重启自动续扫仍不可用。
+当前开发源码已接入[生产持久初始化调度器](docs/INITIALIZATION_PERSISTENCE.md)，使用SQLite schema20／IPC17：四路目录读取、每轮最多16页事件追赶，恢复已有候选只查询Root并保留旧S0及接收游标。计划版本 `0.1.0~dev20261101.3` **尚未构建或发布**；[本轮开发验证与待验项](docs/validation/native-package-008/REPORT.md)保留失败及定向复测结果。逐目录提前显示仍未实现，真实NAS、性能、新包GUI/FUSE及安装验证尚未完成。
 
 ## 构建和测试
 

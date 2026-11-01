@@ -3,6 +3,7 @@ impl Bridge {
     /// Process the durable sequence. An uncertain head is queried, never resent.
     pub fn rename_pending(&self) -> io::Result<usize> {
         let _mutation = self.recovery_gate.read().unwrap();
+        if self.session_pending.load(Ordering::Acquire) { return Ok(0); }
         if self.store.lock().unwrap().initialization_writeback_blocked().map_err(io::Error::other)? {
             return Ok(0);
         }
@@ -111,6 +112,7 @@ impl Bridge {
     /// is retransmitted, and a conflict remains visible instead of being skipped.
     pub fn namespace_pending(&self) -> io::Result<usize> {
         let _mutation = self.recovery_gate.read().unwrap();
+        if self.session_pending.load(Ordering::Acquire) { return Ok(0); }
         // Includes uncertain rename/remove/replace/mkdir reconciliation: its
         // local journal effects must not race an incomplete candidate either.
         if self.store.lock().unwrap().initialization_writeback_blocked().map_err(io::Error::other)? {

@@ -1,6 +1,6 @@
 use drive_core::{Batch, Node, native::Scope};
 use serde::{Deserialize, Serialize};
-pub const VERSION: u16 = 16;
+pub const VERSION: u16 = 17;
 // 30 s channel acquisition + 30 s send + 600 s receive idle + 30 s IPC margin.
 pub const NOTIFICATION_IDLE: std::time::Duration = std::time::Duration::from_secs(690);
 // Deliberately no Debug: authentication material must not enter diagnostics.
@@ -18,6 +18,7 @@ pub struct Login {
 pub enum Command {
     ConfigureTransfers(drive_core::transfer_policy::TransferLimits),
     RecoverySnapshot,
+    Initialization(drive_core::native::InitializationRequest),
     Mkdir {
         job: drive_core::directories::DirectoryJob,
         reconcile: bool,
@@ -79,6 +80,10 @@ pub enum Response {
         origin: drive_core::upload_origin::UploadOrigin,
     },
     RecoverySnapshot {
+        size: u64,
+        sha256: String,
+    },
+    Initialization {
         size: u64,
         sha256: String,
     },

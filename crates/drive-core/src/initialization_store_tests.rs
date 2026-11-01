@@ -531,7 +531,7 @@ fn migration_from_actual_v18_shape_backs_up_and_preserves_pending_content() {
             p.file_name()
                 .unwrap()
                 .to_string_lossy()
-                .starts_with("state-before-v19-")
+                .starts_with(&format!("state-before-v{}-", crate::STATE_SCHEMA_VERSION))
         })
         .collect::<Vec<_>>();
     assert_eq!(backups.len(), 1);
@@ -555,10 +555,10 @@ fn migration_from_actual_v18_shape_backs_up_and_preserves_pending_content() {
             .db
             .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
-        19
+        20
     );
     // Future schema rejection is the same guard used by the frozen schema18
-    // client's open(): 19 > 18. The actual old-binary check is a package gate.
+    // client's open(): 20 > 18. The actual old-binary check is a package gate.
     store
         .db
         .pragma_update(None, "user_version", crate::STATE_SCHEMA_VERSION + 1)
@@ -1041,4 +1041,516 @@ fn private_candidate_mutations_do_not_publish_status_changes_final_install_reset
             ..
         }
     ));
+}
+
+#[test]
+fn directory_paths_require_connected_bounded_directory_ancestry_and_canonical_scope() {
+    let (_temp, mut store, binding) = setup();
+    let run = start(&mut store, &binding);
+    list(&mut store, &run, "100", &[directory(), file()]);
+    let nested = node("201", Some("200"), "内层", true, 7, "server");
+    list(&mut store, &run, "200", &[nested]);
+    assert_eq!(
+        store.initialization_directory_path(&run, "100").unwrap(),
+        "/Lab"
+    );
+    assert_eq!(
+        store.initialization_directory_path(&run, "201").unwrap(),
+        "/Lab/Dir/内层"
+    );
+    assert!(store.initialization_directory_path(&run, "101").is_err());
+    assert!(
+        store
+            .initialization_directory_path(&run, "missing")
+            .is_err()
+    );
+    // Simulated corrupt persistent payloads must never turn into an RPC traversal.
+    let mut malformed = node("201", Some("999"), "inner", true, 7, "server");
+    for (parent, name) in [
+        ("999", "inner"),
+        ("200", ".."),
+        ("200", "a/b"),
+        ("201", "inner"),
+    ] {
+        malformed.parent = Some(parent.into());
+        malformed.name = name.into();
+        store
+            .db
+            .execute(
+                "UPDATE initialization_entries SET body=?1 WHERE id='201'",
+                [serde_json::to_string(&malformed).unwrap()],
+            )
+            .unwrap();
+        assert!(store.initialization_directory_path(&run, "201").is_err());
+    }
+    let mut bad_binding = binding.clone();
+    bad_binding.scope["path"] = "/bad/../Lab".into();
+    store
+        .db
+        .execute(
+            "UPDATE metadata SET value=?1 WHERE key='native_scope'",
+            [bad_binding.scope.to_string()],
+        )
+        .unwrap();
+    store
+        .db
+        .execute(
+            "UPDATE initialization_run SET binding=?1",
+            [serde_json::to_string(&bad_binding).unwrap()],
+        )
+        .unwrap();
+    assert!(store.initialization_directory_path(&run, "100").is_err());
+}
+
+#[test]
+fn directory_path_rejects_depth_past_128() {
+    let (_temp, mut store, binding) = setup();
+    let run = start(&mut store, &binding);
+    let mut parent = "100".to_owned();
+    for depth in 1..=129 {
+        let id = format!("deep{depth}");
+        let child = node(&id, Some(&parent), "d", true, 7, "server");
+        list(&mut store, &run, &parent, &[child]);
+        assert_eq!(
+            store.initialization_directory_path(&run, &id).is_ok(),
+            depth <= 128
+        );
+        parent = id;
+    }
+}
+
+#[test]
+fn native_binding_reader_preserves_pair_and_rejects_partial_binding() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut store = Store::open(temp.path()).unwrap();
+    assert_eq!(store.native_scope_binding().unwrap(), None);
+    let raw = serde_json::to_string(&scope()).unwrap();
+    store.bind_native_scope("server", &raw).unwrap();
+    assert_eq!(
+        store.native_scope_binding().unwrap(),
+        Some(("server".into(), raw.clone()))
+    );
+    assert!(store.bind_native_scope("other", &raw).is_err());
+    store
+        .db
+        .execute("DELETE FROM metadata WHERE key='server_restore_id'", [])
+        .unwrap();
+    assert!(store.native_scope_binding().is_err());
+}
+
+#[test]
+fn moved_file_or_directory_converges_in_both_parent_orders_without_old_receipts() {
+    for directory_move in [false, true] {
+        for new_first in [false, true] {
+            let (_temp, mut store, binding) = setup();
+            let run = start(&mut store, &binding);
+            let other = node("300", Some("100"), "Other", true, 7, "server");
+            let old = node("201", Some("200"), "item", directory_move, 7, "server");
+            list(&mut store, &run, "100", &[directory(), other]);
+            list(&mut store, &run, "200", &[old.clone()]);
+            list(&mut store, &run, "300", &[]);
+            let old_leaf = node("202", Some("201"), "old", false, 7, "server");
+            let stale_desc = if directory_move {
+                list(&mut store, &run, "201", &[old_leaf.clone()]);
+                Some(store.begin_initialization_directory(&run, "201").unwrap())
+            } else {
+                None
+            };
+            let stale_parent = store.begin_initialization_directory(&run, "200").unwrap();
+            let replacement = node("401", Some("200"), "item", false, 9, "server");
+            let moved = node("201", Some("300"), "item", directory_move, 9, "server");
+            if new_first {
+                list(&mut store, &run, "300", &[moved.clone()]);
+                assert!(
+                    store
+                        .store_initialization_directory(&stale_parent, 1, &[old.clone()])
+                        .is_err()
+                );
+                list(&mut store, &run, "200", &[replacement.clone()]);
+            } else {
+                list(&mut store, &run, "200", &[replacement.clone()]);
+                list(&mut store, &run, "300", &[moved.clone()]);
+            }
+            assert!(
+                store
+                    .store_initialization_directory(&stale_parent, 1, &[old])
+                    .is_err()
+            );
+            if let Some(stale) = stale_desc {
+                assert!(
+                    store
+                        .store_initialization_directory(&stale, 1, &[old_leaf])
+                        .is_err()
+                );
+                let fresh = node("203", Some("201"), "fresh", false, 9, "server");
+                list(&mut store, &run, "201", &[fresh]);
+                assert_eq!(
+                    store.initialization_directory_path(&run, "201").unwrap(),
+                    "/Lab/Other/item"
+                );
+            }
+            assert!(store.node("201").is_err());
+            assert_eq!(store.cursor().unwrap(), "native-v1:7");
+            store.test_fence(&run, "native-v1:100").unwrap();
+            store.complete_initialization(&run).unwrap();
+            assert_eq!(store.node("201").unwrap(), moved);
+            assert_eq!(store.node("401").unwrap(), replacement);
+            assert!(store.node("202").is_err());
+        }
+    }
+}
+
+#[test]
+fn directory_relocation_into_its_subtree_rejects_whole_receipt() {
+    let (_temp, mut store, binding) = setup();
+    let run = start(&mut store, &binding);
+    list(&mut store, &run, "100", &[directory()]);
+    let child = node("201", Some("200"), "inner", true, 7, "server");
+    list(&mut store, &run, "200", &[child]);
+    let ticket = store.begin_initialization_directory(&run, "201").unwrap();
+    let bad = node("200", Some("201"), "Dir", true, 9, "server");
+    let before = store.initialization_status().unwrap();
+    let coverage = store.initialization_coverage(&run).unwrap();
+    assert!(
+        store
+            .store_initialization_directory(&ticket, 1, &[bad])
+            .is_err()
+    );
+    assert_eq!(store.initialization_status().unwrap(), before);
+    assert_eq!(store.initialization_coverage(&run).unwrap(), coverage);
+    assert_eq!(
+        store.initialization_directory_path(&run, "201").unwrap(),
+        "/Lab/Dir/inner"
+    );
+}
+
+#[test]
+fn pending_queue_uses_partial_index_and_rediscovers_earlier_invalidated_directory() {
+    let (_temp, mut store, binding) = setup();
+    let run = start(&mut store, &binding);
+    let dirs = (0..240)
+        .map(|i| {
+            node(
+                &format!("dir{i:04}"),
+                Some("100"),
+                &format!("D{i}"),
+                true,
+                7,
+                "server",
+            )
+        })
+        .collect::<Vec<_>>();
+    list(&mut store, &run, "100", &dirs);
+    for d in &dirs[..238] {
+        list(&mut store, &run, &d.id, &[]);
+    }
+    let pending = store.initialization_pending_directories(&run, 1).unwrap();
+    assert_eq!(pending[0].id, "dir0238");
+    let child = node("new", Some("dir0000"), "new", false, 9, "server");
+    store
+        .record_initialization_events(&run, 1, &batch(100, 101, vec![Change::Upsert(child)]))
+        .unwrap();
+    store.apply_initialization_events(&run, 1).unwrap();
+    assert_eq!(
+        store.initialization_pending_directories(&run, 1).unwrap()[0].id,
+        "dir0000"
+    );
+    let plan=store.db.prepare("EXPLAIN QUERY PLAN SELECT n.body FROM initialization_directories d JOIN initialization_entries n ON n.run=d.run AND n.id=d.id WHERE d.run=?1 AND d.state IN ('pending','failed') ORDER BY d.id LIMIT ?2").unwrap().query_map(params![run.run_id,1],|r|r.get::<_,String>(3)).unwrap().collect::<std::result::Result<Vec<_>,_>>().unwrap();
+    assert!(
+        plan.iter()
+            .any(|line| line.contains("initialization_pending")),
+        "{plan:?}"
+    );
+    assert!(
+        !plan.iter().any(|line| line.contains("TEMP B-TREE")),
+        "{plan:?}"
+    );
+}
+
+#[test]
+fn verified_restore_begin_preserves_old_authority_until_final_commit() {
+    let (_temp, mut store, mut binding) = setup();
+    let old_binding = store.native_scope_binding().unwrap();
+    binding.restore = "restored".into();
+    binding.start_cursor = "native-v1:2".into();
+    let root = node("100", None, "Lab", true, 1, "restored");
+    assert!(
+        store
+            .begin_initialization(&binding, &root, InitializationBudget::default())
+            .is_err()
+    );
+    let run = store
+        .begin_initialization_verified_restore(&binding, &root, InitializationBudget::default())
+        .unwrap();
+    assert_eq!(store.native_scope_binding().unwrap(), old_binding);
+    assert_eq!(store.cursor().unwrap(), "native-v1:7");
+    assert!(
+        store
+            .authorize_initialization_cursor_reset(&run, "native-v1:7")
+            .is_err()
+    );
+    list(&mut store, &run, "100", &[]);
+    store.test_fence(&run, "native-v1:2").unwrap();
+    store.complete_initialization(&run).unwrap();
+    assert_eq!(store.native_scope_binding().unwrap().unwrap().0, "restored");
+    assert_eq!(store.cursor().unwrap(), "native-v1:2");
+}
+
+#[test]
+fn cursor_reset_requires_exact_current_epoch_authorization_and_new_fence() {
+    let (temp, mut store, mut binding) = setup();
+    binding.start_cursor = "native-v1:2".into();
+    let run = start(&mut store, &binding);
+    list(&mut store, &run, "100", &[]);
+    assert!(store.test_fence(&run, "native-v1:2").is_err());
+    assert!(
+        store
+            .authorize_initialization_cursor_reset(&run, "native-v1:6")
+            .is_err()
+    );
+    let stale = store.begin_initialization_fence(&run).unwrap();
+    store
+        .authorize_initialization_cursor_reset(&run, "native-v1:7")
+        .unwrap();
+    assert!(
+        store
+            .confirm_initialization_fence(&stale, "native-v1:2")
+            .is_err()
+    );
+    store.test_fence(&run, "native-v1:2").unwrap();
+    drop(store);
+    let mut store = Store::open(temp.path()).unwrap();
+    let reopened = store.initialization_status().unwrap().unwrap().run;
+    assert!(
+        store
+            .authorize_initialization_cursor_reset(&run, "native-v1:7")
+            .is_err()
+    );
+    assert!(store.test_fence(&reopened, "native-v1:2").is_err());
+    store
+        .authorize_initialization_cursor_reset(&reopened, "native-v1:7")
+        .unwrap();
+    let resumed = store.resume_initialization(&reopened, &binding).unwrap();
+    assert!(store.test_fence(&resumed, "native-v1:2").is_err());
+    store
+        .authorize_initialization_cursor_reset(&resumed, "native-v1:7")
+        .unwrap();
+    store.test_fence(&resumed, "native-v1:2").unwrap();
+    store.complete_initialization(&resumed).unwrap();
+    assert_eq!(store.cursor().unwrap(), "native-v1:2");
+    assert!(!store.initialization_writeback_blocked().unwrap());
+}
+
+#[test]
+fn schema19_candidate_migrates_to20_with_reset_permit_closed_and_old_data_preserved() {
+    let (temp, mut store, binding) = setup();
+    store.save_local("101", b"dirty migration").unwrap();
+    let pending = store.pending_operations().unwrap();
+    let run = start(&mut store, &binding);
+    list(&mut store, &run, "100", &[]);
+    store.db.execute_batch("ALTER TABLE initialization_run DROP COLUMN reset_epoch; ALTER TABLE initialization_run DROP COLUMN reset_expected; DROP INDEX initialization_pending; PRAGMA user_version=19;").unwrap();
+    drop(store);
+    let store = Store::open(temp.path()).unwrap();
+    let current = store.initialization_status().unwrap().unwrap();
+    assert!(current.run.epoch > run.epoch);
+    assert!(store.initialization_writeback_blocked().unwrap());
+    assert_eq!(store.pending_operations().unwrap(), pending);
+    assert_eq!(store.cursor().unwrap(), "native-v1:7");
+    assert_eq!(
+        store
+            .db
+            .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        20
+    );
+    let permit: (Option<i64>, Option<String>) = store
+        .db
+        .query_row(
+            "SELECT reset_epoch,reset_expected FROM initialization_run",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(permit, (None, None));
+    let backup = std::fs::read_dir(temp.path())
+        .unwrap()
+        .map(|p| p.unwrap().path())
+        .find(|p| {
+            p.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("state-before-v20-")
+        })
+        .unwrap();
+    let old = Connection::open(backup).unwrap();
+    assert_eq!(
+        old.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
+            .unwrap(),
+        19
+    );
+    let columns = old
+        .prepare("PRAGMA table_info(initialization_run)")
+        .unwrap()
+        .query_map([], |r| r.get::<_, String>(1))
+        .unwrap()
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .unwrap();
+    assert!(!columns.iter().any(|c| c == "reset_epoch"));
+}
+
+#[test]
+fn relocating_nested_identities_is_independent_of_incoming_child_order() {
+    for reversed in [false, true] {
+        let (_temp, mut store, binding) = setup();
+        let run = start(&mut store, &binding);
+        let other = node("300", Some("100"), "Other", true, 7, "server");
+        let outer = node("201", Some("200"), "Outer", true, 7, "server");
+        let inner = node("202", Some("201"), "inner", false, 7, "server");
+        list(&mut store, &run, "100", &[directory(), other]);
+        list(&mut store, &run, "200", &[outer]);
+        list(&mut store, &run, "201", &[inner]);
+        let outer = node("201", Some("300"), "Outer", true, 9, "server");
+        let inner = node("202", Some("300"), "inner", false, 9, "server");
+        let mut children = vec![outer.clone(), inner.clone()];
+        if reversed {
+            children.reverse();
+        }
+        list(&mut store, &run, "300", &children);
+        list(&mut store, &run, "200", &[]);
+        list(&mut store, &run, "201", &[]);
+        store.test_fence(&run, "native-v1:100").unwrap();
+        store.complete_initialization(&run).unwrap();
+        assert_eq!(store.node("201").unwrap(), outer);
+        assert_eq!(store.node("202").unwrap(), inner);
+    }
+}
+
+#[test]
+fn pending_frontier_promotes_larger_id_ancestor_and_deduplicates_overlapping_paths() {
+    let (_temp, mut store, binding) = setup();
+    let run = start(&mut store, &binding);
+    let high = node("900", Some("100"), "high", true, 7, "server");
+    let middle = node("200", Some("900"), "middle", true, 7, "server");
+    let a = node("010", Some("200"), "a", true, 7, "server");
+    let b = node("020", Some("200"), "b", true, 7, "server");
+    list(&mut store, &run, "100", &[high]);
+    list(&mut store, &run, "900", &[middle]);
+    list(&mut store, &run, "200", &[a, b]);
+    invalidate(&store.db, &run.run_id, "900", true).unwrap();
+    let pending = store.initialization_pending_directories(&run, 2).unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].id, "900");
+    store
+        .db
+        .execute(
+            "UPDATE initialization_directories SET state='failed' WHERE id='900'",
+            [],
+        )
+        .unwrap();
+    assert_eq!(
+        store.initialization_pending_directories(&run, 1).unwrap()[0].id,
+        "900"
+    );
+}
+
+#[test]
+fn pending_frontier_skips_loading_ancestor_without_claiming_completion() {
+    let (_temp, mut store, binding) = setup();
+    let run = start(&mut store, &binding);
+    let high = node("900", Some("100"), "high", true, 7, "server");
+    let middle = node("200", Some("900"), "middle", true, 7, "server");
+    let a = node("010", Some("200"), "a", true, 7, "server");
+    list(&mut store, &run, "100", &[high]);
+    list(&mut store, &run, "900", &[middle]);
+    list(&mut store, &run, "200", &[a]);
+    invalidate(&store.db, &run.run_id, "900", true).unwrap();
+    let loading = store.begin_initialization_directory(&run, "200").unwrap();
+    assert!(
+        store
+            .initialization_pending_directories(&run, 1)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(store.test_fence(&run, "native-v1:100").is_err());
+    assert!(
+        store
+            .initialization_directory_ticket_current(&loading)
+            .unwrap()
+    );
+    store
+        .store_initialization_directory(
+            &loading,
+            1,
+            &[node("010", Some("200"), "a", true, 7, "server")],
+        )
+        .unwrap();
+    assert_eq!(
+        store.initialization_pending_directories(&run, 1).unwrap()[0].id,
+        "900"
+    );
+}
+
+#[test]
+fn pending_frontier_without_pending_ancestors_returns_independent_leaves() {
+    let (_temp, mut store, binding) = setup();
+    let run = start(&mut store, &binding);
+    let high = node("900", Some("100"), "high", true, 7, "server");
+    let middle = node("200", Some("900"), "middle", true, 7, "server");
+    let a = node("010", Some("200"), "a", true, 7, "server");
+    let b = node("020", Some("200"), "b", true, 7, "server");
+    list(&mut store, &run, "100", &[high]);
+    list(&mut store, &run, "900", &[middle]);
+    list(&mut store, &run, "200", &[a, b]);
+    let ids = store
+        .initialization_pending_directories(&run, 2)
+        .unwrap()
+        .into_iter()
+        .map(|n| n.id)
+        .collect::<Vec<_>>();
+    assert_eq!(ids, vec!["010", "020"]);
+}
+
+#[test]
+fn directory_ticket_current_rejects_deleted_recreated_or_invalidated_children() {
+    let (_temp, mut store, binding) = setup();
+    let run = start(&mut store, &binding);
+    list(&mut store, &run, "100", &[directory()]);
+    let child = node("201", Some("200"), "child", true, 7, "server");
+    list(&mut store, &run, "200", &[child.clone()]);
+    let deleted = store.begin_initialization_directory(&run, "201").unwrap();
+    assert!(
+        store
+            .initialization_directory_ticket_current(&deleted)
+            .unwrap()
+    );
+    list(&mut store, &run, "200", &[]);
+    assert!(
+        !store
+            .initialization_directory_ticket_current(&deleted)
+            .unwrap()
+    );
+    list(&mut store, &run, "200", &[child]);
+    let current = store.begin_initialization_directory(&run, "201").unwrap();
+    assert!(
+        !store
+            .initialization_directory_ticket_current(&deleted)
+            .unwrap()
+    );
+    assert!(
+        store
+            .initialization_directory_ticket_current(&current)
+            .unwrap()
+    );
+    invalidate(&store.db, &run.run_id, "200", true).unwrap();
+    assert!(
+        !store
+            .initialization_directory_ticket_current(&current)
+            .unwrap()
+    );
+    assert!(
+        store
+            .store_initialization_directory(&current, 1, &[])
+            .is_err()
+    );
+    assert_eq!(store.cursor().unwrap(), "native-v1:7");
 }

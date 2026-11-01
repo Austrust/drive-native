@@ -28,9 +28,9 @@
 
 ## 本开发分支的存储迁移边界
 
-已发布 `.1` 使用 SQLite schema18；本分支持久初始化候选表使版本升至19。Store 打开旧版本数据库时先使用 SQLite `VACUUM INTO` 保存包含已提交 WAL 内容的一致备份，再迁移。新版本数据库由较旧二进制拒绝打开，不能通过手改 `user_version` 或清缓存绕过。备份恢复也不能自动涵盖升级后新增的未上传编辑，必须保留完整用户状态。
+已发布 `.1` 使用 SQLite schema18、`.2` 使用schema19；当前开发分支增加与代次绑定的游标重置许可，版本升至20。Store 打开旧版本数据库时先使用 SQLite `VACUUM INTO` 保存包含已提交 WAL 内容的一致备份，再迁移。新版本数据库由较旧二进制拒绝打开，不能通过手改 `user_version` 或清缓存绕过。备份恢复也不能自动涵盖升级后新增的未上传编辑，必须保留完整用户状态。
 
-此前 schema18 包之间的回退验证不证明 schema19 可回退。真实旧二进制拒绝、18→19暂停迁移及未上传数据保留已通过[包验证007](validation/native-package-007/REPORT.md)；未承诺任意旧版本可降级。内部 IPC 同步升至16，须切换配套 FSD／worker；详见[进度接口](INITIALIZATION_PROGRESS.md)及[持久候选基础](INITIALIZATION_PERSISTENCE.md)。候选持久化API与写回门禁不等于生产初始化调度器已接入。
+此前同schema回退验证不证明 schema19 或20可降级。真实旧二进制拒绝、18→19暂停迁移及未上传数据保留已通过[包验证007](validation/native-package-007/REPORT.md)；未承诺任意旧版本可降级。当前源码内部 IPC 升至17，须切换配套 FSD／worker；详见[进度接口](INITIALIZATION_PROGRESS.md)及[持久候选基础](INITIALIZATION_PERSISTENCE.md)。当前Service已接入生产候选调度；schema19→20安装与接管尚未验证，不能沿用包007的结果。逐目录提前可见仍未实现。
 
 ## 失败时的处理
 

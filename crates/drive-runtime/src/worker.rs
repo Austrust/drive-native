@@ -104,7 +104,7 @@ pub async fn serve(socket: UnixStream) -> io::Result<()> {
     while let Some((env, fd)) = rx.recv().await {
         jobs.retain(|_, job| !job.is_finished());
         if env.version != VERSION
-            || fd.is_some() != matches!(&env.body, Command::Upload { .. } | Command::Replace { .. })
+            || !valid_command_descriptor(&env.body, fd.is_some())
         {
             break;
         }
@@ -306,6 +306,16 @@ pub async fn serve(socket: UnixStream) -> io::Result<()> {
                             };
                             Ok((response, None))
                         }
+                        Command::Initialization(request) => {
+                            // Metadata travels as one bounded, checksummed FD
+                            // payload, never as lossy IndexProgress messages.
+                            // The common command gate rejects incoming FDs.
+                            let reply = session.initialization(request).await?;
+                            let payload = tokio::task::spawn_blocking(move || {
+                                initialization_payload(&reply, staging.path(), 512 * 1024 * 1024)
+                            }).await.map_err(|_| drive_core::Error::State("initialization payload task failed".into()))??;
+                            Ok((Response::Initialization {size:payload.0,sha256:payload.1},Some(payload.2)))
+                        }
                         Command::RecoverySnapshot => {
                             use std::io::{Seek, Write};
                             let progress = crate::index_progress::Reporter::new(request_id, output.clone());
@@ -391,6 +401,91 @@ pub async fn serve(socket: UnixStream) -> io::Result<()> {
     Ok(())
 }
 
+/// Bound serialization as it is produced, rather than allocating an unbounded
+/// JSON Vec and checking only afterwards. A failed or cancelled reply leaves no
+/// named file and cannot advance any durable initialization receipt.
+fn initialization_payload(
+    reply: &drive_core::native::InitializationReply,
+    staging: &std::path::Path,
+    limit: u64,
+) -> drive_core::Result<(u64, String, OwnedFd)> {
+    use sha2::{Digest, Sha256};
+    use std::io::{Seek, Write};
+    struct Payload {
+        file: std::fs::File,
+        hash: Sha256,
+        size: u64,
+        limit: u64,
+    }
+    impl Write for Payload {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            let next=self.size.checked_add(bytes.len() as u64)
+                .filter(|next| *next<=self.limit)
+                .ok_or_else(||io::Error::new(io::ErrorKind::InvalidData,"initialization transfer budget exceeded"))?;
+            self.file.write_all(bytes)?;
+            self.hash.update(bytes);
+            self.size=next;
+            Ok(bytes.len())
+        }
+        fn flush(&mut self)->io::Result<()> {self.file.flush()}
+    }
+    let mut payload=Payload {file:tempfile::tempfile_in(staging)?,hash:Sha256::new(),size:0,limit};
+      // Serde writes tiny JSON fragments; buffer them before file syscalls and
+      // hashing so a wide directory does not cause millions of short writes.
+      {
+          let mut buffered=std::io::BufWriter::with_capacity(64*1024,&mut payload);
+          serde_json::to_writer(&mut buffered,reply)?;
+          buffered.flush()?;
+      }
+    payload.file.sync_all()?;
+    payload.file.rewind()?;
+    Ok((payload.size,format!("{:x}",payload.hash.finalize()),payload.file.into()))
+}
+
+fn valid_command_descriptor(command: &Command, has_descriptor: bool) -> bool {
+    has_descriptor == matches!(command, Command::Upload { .. } | Command::Replace { .. })
+}
+
+#[cfg(test)]
+mod initialization_payload_tests {
+    use super::*;
+    fn reply()->drive_core::native::InitializationReply {
+        drive_core::native::InitializationReply {
+            scope:drive_core::native::Scope {view_id:5,node_id:7,file_id:"10".into(),path:"/selected".into()},
+            restore:"server".into(),body:drive_core::native::InitializationBody::Events(None),
+        }
+    }
+    #[test]
+    fn payload_fd_roundtrips_at_exact_budget_and_starts_at_zero() {
+        use std::io::Read;
+        let temp=tempfile::tempdir().unwrap();let reply=reply();
+        let expected=serde_json::to_vec(&reply).unwrap();
+        let (size,hash,fd)=initialization_payload(&reply,temp.path(),expected.len() as u64).unwrap();
+        let mut bytes=Vec::new();std::fs::File::from(fd).read_to_end(&mut bytes).unwrap();
+        assert_eq!(size,expected.len() as u64);assert_eq!(hash,drive_core::sha256(&bytes));assert_eq!(bytes,expected);
+        assert_eq!(serde_json::from_slice::<drive_core::native::InitializationReply>(&bytes).unwrap(),reply);
+        assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(),0);
+    }
+    #[test]
+    fn budget_failure_leaves_no_named_partial_payload() {
+        let temp=tempfile::tempdir().unwrap();let reply=reply();
+        let size=serde_json::to_vec(&reply).unwrap().len() as u64;
+        assert!(initialization_payload(&reply,temp.path(),size-1).is_err());
+        assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(),0);
+    }
+    #[test]
+    fn initialization_commands_never_accept_incoming_descriptors() {
+        use drive_core::native::InitializationRequest;
+        for request in [InitializationRequest::Seed,InitializationRequest::Root,InitializationRequest::Pull {cursor:"native-v1:1".into()}] {
+            let command=Command::Initialization(request);
+            assert!(valid_command_descriptor(&command,false));
+            assert!(!valid_command_descriptor(&command,true));
+        }
+        assert!(valid_command_descriptor(&Command::RecoverySnapshot,false));
+        assert!(!valid_command_descriptor(&Command::RecoverySnapshot,true));
+    }
+}
+
 /// Keep server messages (which may echo credentials) out of IPC diagnostics.
 fn login_error_category(error: &sproto::Error) -> &'static str {
     match error {
@@ -410,6 +505,7 @@ fn worker_error_category(error: &drive_core::Error) -> String {
         drive_core::Error::Native(sproto::Error::Timeout("native request send")) => "native_send_timeout".into(),
         drive_core::Error::Native(sproto::Error::Timeout("native response")) => "native_response_timeout".into(),
         drive_core::Error::RootUnavailable => "native_root_unavailable".into(),
+        drive_core::Error::SnapshotChanged => "native_snapshot_changed".into(),
         drive_core::Error::Native(sproto::Error::CursorReset { .. }) => {
             "native_cursor_reset".into()
         }
@@ -448,6 +544,10 @@ mod download_diagnostics_tests {
     }
     #[test]
     fn numeric_server_code_never_includes_reason() {
+        assert_eq!(
+            super::worker_error_category(&drive_core::Error::SnapshotChanged),
+            "native_snapshot_changed"
+        );
         assert_eq!(
             super::worker_error_category(&drive_core::Error::RootUnavailable),
             "native_root_unavailable"
