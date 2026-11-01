@@ -330,20 +330,61 @@ impl Store {
             .map(|(seq, body)| Ok((seq, serde_json::from_str(&body)?)))
             .collect()
     }
+    /// The owner needs only the next durable sequence, not another full decode
+    /// of its body. Detect missing receipts without skipping the gap.
+    pub fn initialization_next_pending_sequence(
+        &self,
+        run: &InitializationRun,
+    ) -> Result<Option<u64>> {
+        let s = checked(&self.db, run, false)?;
+        if s.applied_sequence == s.received_sequence {
+            return Ok(None);
+        }
+        let next: Option<u64> = self.db.query_row(
+            "SELECT seq FROM initialization_events WHERE run=?1 AND seq>?2 ORDER BY seq LIMIT 1",
+            params![run.run_id, number(s.applied_sequence)?], |row| read_counter(row, 0),
+        ).optional()?;
+        let expected = s
+            .applied_sequence
+            .checked_add(1)
+            .ok_or_else(|| invalid("event sequence exhausted"))?;
+        if next != Some(expected) || expected > s.received_sequence {
+            return Err(invalid("candidate pending event gap"));
+        }
+        Ok(next)
+    }
+    /// A verified directory race while waiting for coverage can depend on a
+    /// later event page. Apply the durable head with a full conservative recheck
+    /// so the owner can resume Pull. No event or fence boundary is skipped.
+    pub fn apply_initialization_events_after_directory_race(
+        &mut self,
+        run: &InitializationRun,
+        sequence: u64,
+    ) -> Result<InitializationApplyResult> {
+        self.apply_initialization_events_inner(run, sequence, true)
+    }
     /// Apply means that the event's required rechecks are durably scheduled,
     /// not that old event metadata was copied over a newer directory listing.
     pub fn apply_initialization_events(
         &mut self,
         run: &InitializationRun,
         sequence: u64,
-    ) -> Result<bool> {
+    ) -> Result<InitializationApplyResult> {
+        self.apply_initialization_events_inner(run, sequence, false)
+    }
+    fn apply_initialization_events_inner(
+        &mut self,
+        run: &InitializationRun,
+        sequence: u64,
+        directory_race: bool,
+    ) -> Result<InitializationApplyResult> {
         let tx = self.db.transaction()?;
         let s = checked(&tx, run, false)?;
         if sequence == 0 || sequence > s.received_sequence {
             return Err(invalid("event not received"));
         }
         if sequence <= s.applied_sequence {
-            return Ok(false);
+            return Ok(InitializationApplyResult::AlreadyApplied);
         }
         if sequence != s.applied_sequence + 1 {
             return Err(invalid("event application gap"));
@@ -358,7 +399,8 @@ impl Store {
             return Err(invalid("candidate applied cursor mismatch"));
         }
         let root = root_id(&s.binding)?;
-        let mut all = false;
+        let mut all = directory_race;
+        let mut missing_file_parent = false;
         let mut root_refresh = false;
         let mut parents = HashSet::new();
         for event in &batch.events {
@@ -401,7 +443,7 @@ impl Store {
                             parents.insert(parent.clone());
                         }
                         Ok(_) => all = true,
-                        Err(error) if error.is_not_found() => all = true,
+                        Err(error) if error.is_not_found() => missing_file_parent = true,
                         Err(error) => return Err(error),
                     }
                 }
@@ -409,6 +451,30 @@ impl Store {
                 _ => {}
             }
         }
+        // Inspect the entire batch before deferring: directory/root changes,
+        // unknown deletes and malformed parent types retain conservative
+        // invalidation. This dependency scheduling is our own policy; it is
+        // not a claim about the Windows client's unknown-parent algorithm.
+        if missing_file_parent && !all {
+            // Use the partial pending index first. Do not put both EXISTS in a
+            // SQL OR: SQLite need not short circuit the loading-row scan.
+            let pending: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM initialization_directories WHERE run=?1 AND state IN ('pending','failed'))",
+                [&run.run_id],
+                |row| row.get(0),
+            )?;
+            let unfinished = pending || tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM initialization_directories WHERE run=?1 AND state='loading')",
+                [&run.run_id],
+                |row| row.get::<_, bool>(0),
+            )?;
+            if unfinished {
+                // Leave this durable receipt unapplied. In particular, neither
+                // the applied cursor nor completed directory coverage changes.
+                return Ok(InitializationApplyResult::AwaitingCoverage);
+            }
+        }
+        all |= missing_file_parent;
         if all {
             invalidate(&tx, &run.run_id, root, true)?;
         } else {
@@ -418,7 +484,7 @@ impl Store {
         }
         tx.execute("UPDATE initialization_run SET applied=?2,applied_seq=?3,root_refresh=max(root_refresh,?4),root_ticket=CASE WHEN ?4 THEN NULL ELSE root_ticket END,fenced=NULL,fence_ticket=NULL WHERE run_id=?1",params![run.run_id,batch.to,number(sequence)?,root_refresh])?;
         tx.commit()?;
-        Ok(true)
+        Ok(InitializationApplyResult::Applied)
     }
     /// Capture the candidate boundary immediately before the native stationary
     /// fence request. Every subsequent mutation invalidates this one-use ticket.

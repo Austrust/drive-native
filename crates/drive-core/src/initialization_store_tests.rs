@@ -1,4 +1,6 @@
 #![cfg(feature = "native")]
+#[path = "initialization_event_coverage_tests.rs"]
+mod event_coverage;
 use super::*;
 use crate::{
     Event, NodeMetadata,
@@ -273,8 +275,14 @@ fn event_receipt_and_invalidation_survive_crash_without_advancing_product_cursor
         store.pending_initialization_events(&resumed, 10).unwrap(),
         vec![(1, event)]
     );
-    assert!(store.apply_initialization_events(&resumed, 1).unwrap());
-    assert!(!store.apply_initialization_events(&resumed, 1).unwrap());
+    assert_eq!(
+        store.apply_initialization_events(&resumed, 1).unwrap(),
+        InitializationApplyResult::Applied
+    );
+    assert_eq!(
+        store.apply_initialization_events(&resumed, 1).unwrap(),
+        InitializationApplyResult::AlreadyApplied
+    );
     assert_eq!(store.cursor().unwrap(), "native-v1:7");
     assert_eq!(store.initialization_node(&resumed, "101").unwrap(), file());
     assert!(store.test_fence(&resumed, "native-v1:101").is_err());

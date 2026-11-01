@@ -275,6 +275,349 @@ fn cold_owner_uses_reliable_steps_and_commits_only_after_separate_fence() {
 }
 
 #[test]
+fn deferred_file_parent_pauses_pull_while_multiple_directory_rounds_make_progress() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut data = snapshot("server", 7);
+    let template = data.nodes[3].clone();
+    let mut leaf = data.nodes[4].clone();
+    data.nodes.truncate(1);
+    // More than one owner directory quantum: a repeated Pull before discovering
+    // the parent would consume another page and reproduce the original churn.
+    for depth in 0..20 {
+        let mut node = template.clone();
+        node.id = (200 + depth).to_string();
+        node.parent = Some(if depth == 0 {
+            "100".into()
+        } else {
+            (199 + depth).to_string()
+        });
+        node.name = format!("D{depth}");
+        let mut token: serde_json::Value = serde_json::from_str(&node.version).unwrap();
+        token["file"] = node.id.clone().into();
+        node.version = token.to_string();
+        data.nodes.push(node);
+    }
+    leaf.id = "999".into();
+    leaf.parent = Some("219".into());
+    let mut token: serde_json::Value = serde_json::from_str(&leaf.version).unwrap();
+    token["file"] = leaf.id.clone().into();
+    token["sync"] = 9.into();
+    token["max"] = 9.into();
+    leaf.version = token.to_string();
+    data.nodes.push(leaf.clone());
+    let replies = data.clone();
+    let mut sent = false;
+    let mut final_parent_discovered = false;
+    let peer = Peer::new(data, move |request| match request {
+        Command::Initialization(Request::Pull { cursor }) if !sent => {
+            assert_eq!(cursor, "native-v1:7");
+            sent = true;
+            let mut older = replies.nodes.last().unwrap().clone();
+            let mut token: serde_json::Value = serde_json::from_str(&older.version).unwrap();
+            token["sync"] = 8.into();
+            token["max"] = 8.into();
+            older.version = token.to_string();
+            Answer::Body(Body::Events(Some(Batch {
+                from: "native-v1:7".into(),
+                to: "native-v1:8".into(),
+                events: vec![drive_core::Event {
+                    id: "missing-parent".into(),
+                    change: drive_core::Change::Upsert(older),
+                }],
+            })))
+        }
+        Command::Initialization(Request::Pull { cursor }) => {
+            assert!(
+                final_parent_discovered,
+                "Pull resumed before the dependency resolved"
+            );
+            assert_eq!(cursor, "native-v1:8");
+            Answer::Body(Body::Events(None))
+        }
+        Command::Initialization(Request::Directory { node, .. }) => {
+            final_parent_discovered |= node.id == "218";
+            Answer::Body(Body::Directory {
+                identity: node.id.clone(),
+                denied: false,
+                children: replies
+                    .nodes
+                    .iter()
+                    .filter(|child| child.parent.as_deref() == Some(node.id.as_str()))
+                    .cloned()
+                    .collect(),
+            })
+        }
+        _ => standard(&replies, request),
+    });
+    let bridge = bridge(Store::open(dir.path()).unwrap(), &peer, "server");
+    assert!(bridge.initial_pull().unwrap());
+    let store = bridge.store.lock().unwrap();
+    assert_eq!(store.node("999").unwrap(), leaf);
+    assert_eq!(store.cursor().unwrap(), "native-v1:8");
+    assert_eq!(
+        store.initialization_status().unwrap().unwrap().state,
+        "ready"
+    );
+    drop(store);
+    let log = peer.finish();
+    assert_eq!(
+        log.iter()
+            .filter(|item| item.as_str() == "directory:100")
+            .count(),
+        1
+    );
+    assert_eq!(
+        log.iter()
+            .filter(|item| item.starts_with("candidate-pull:"))
+            .count(),
+        3
+    );
+}
+
+#[test]
+fn permanently_absent_parent_gets_one_conservative_recheck_not_an_owner_spin() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = snapshot("server", 7);
+    let replies = data.clone();
+    let mut sent = false;
+    let peer = Peer::new(data, move |request| {
+        if matches!(request, Command::Initialization(Request::Pull { .. })) && !sent {
+            sent = true;
+            let mut unknown = replies.nodes[4].clone();
+            unknown.parent = Some("999".into());
+            Answer::Body(Body::Events(Some(Batch {
+                from: "native-v1:7".into(),
+                to: "native-v1:8".into(),
+                events: vec![drive_core::Event {
+                    id: "unresolved".into(),
+                    change: drive_core::Change::Upsert(unknown),
+                }],
+            })))
+        } else {
+            standard(&replies, request)
+        }
+    });
+    let bridge = bridge(Store::open(dir.path()).unwrap(), &peer, "server");
+    assert!(bridge.initial_pull().unwrap());
+    assert_eq!(
+        bridge.store.lock().unwrap().cursor().unwrap(),
+        "native-v1:8"
+    );
+    let log = peer.finish();
+    assert_eq!(
+        log.iter()
+            .filter(|item| item.as_str() == "directory:100")
+            .count(),
+        2
+    );
+    assert_eq!(
+        log.iter()
+            .filter(|item| item.as_str() == "directory:200")
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn deferred_page_directory_race_resumes_pull_before_relisting_changed_path() {
+    run_deferred_page_directory_race("native_snapshot_changed", true);
+}
+
+#[test]
+fn deferred_page_does_not_turn_transport_permission_or_root_errors_into_rechecks() {
+    for category in [
+        "transport",
+        "native_response_timeout",
+        "native_server_code:12291",
+        "native_root_unavailable",
+    ] {
+        run_deferred_page_directory_race(category, false);
+    }
+}
+
+fn run_deferred_page_directory_race(category: &'static str, expect_success: bool) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = complete_store(dir.path(), 7, true);
+    let before = protected(&store);
+    let old = snapshot("server", 7);
+    let binding = InitializationBinding {
+        task_id: TASK.into(),
+        scope: serde_json::to_value(&old.scope).unwrap(),
+        restore: "server".into(),
+        start_cursor: old.cursor.clone(),
+        expected_cursor: old.cursor.clone(),
+    };
+    let run = store
+        .begin_initialization(&binding, &old.nodes[0], InitializationBudget::default())
+        .unwrap();
+    let ticket = store.begin_initialization_directory(&run, "100").unwrap();
+    store
+        .store_initialization_directory(&ticket, 1, &old.nodes[1..4])
+        .unwrap();
+    let mut data = snapshot("server", 9);
+    data.nodes[3].name = "MovedSub".into();
+    data.nodes[4].parent = Some("300".into());
+    let mut nested = data.nodes[3].clone();
+    nested.id = "300".into();
+    nested.parent = Some("200".into());
+    nested.name = "Nested".into();
+    let mut token: serde_json::Value = serde_json::from_str(&nested.version).unwrap();
+    token["file"] = "300".into();
+    nested.version = token.to_string();
+    data.nodes.push(nested);
+    let replies = data.clone();
+    let paths = Arc::new(Mutex::new(Vec::new()));
+    let seen = paths.clone();
+    let peer = Peer::new(data, move |request| match request {
+        Command::Initialization(Request::Pull { cursor }) if cursor == "native-v1:7" => {
+            Answer::Body(Body::Events(Some(Batch {
+                from: cursor.clone(),
+                to: "native-v1:8".into(),
+                events: vec![drive_core::Event {
+                    id: "unknown-parent-page".into(),
+                    change: drive_core::Change::Upsert(replies.nodes[4].clone()),
+                }],
+            })))
+        }
+        Command::Initialization(Request::Pull { cursor }) if cursor == "native-v1:8" => {
+            Answer::Body(Body::Events(Some(Batch {
+                from: cursor.clone(),
+                to: "native-v1:9".into(),
+                events: vec![drive_core::Event {
+                    id: "directory-moved-next-page".into(),
+                    change: drive_core::Change::Upsert(replies.nodes[3].clone()),
+                }],
+            })))
+        }
+        Command::Initialization(Request::Directory { node, path }) => {
+            seen.lock().unwrap().push(path.clone());
+            if path == "/Lab/Sub" {
+                return Answer::Fail(category);
+            }
+            assert_eq!(
+                path,
+                match node.id.as_str() {
+                    "100" => "/Lab",
+                    "200" => "/Lab/MovedSub",
+                    "300" => "/Lab/MovedSub/Nested",
+                    _ => panic!("unexpected directory"),
+                }
+            );
+            Answer::Body(Body::Directory {
+                identity: node.id.clone(),
+                denied: false,
+                children: replies
+                    .nodes
+                    .iter()
+                    .filter(|child| child.parent.as_deref() == Some(node.id.as_str()))
+                    .cloned()
+                    .collect(),
+            })
+        }
+        _ => standard(&replies, request),
+    });
+    let bridge = bridge(store, &peer, "server");
+    let result = bridge.initial_pull();
+    if result.is_err() {
+        let store = bridge.store.lock().unwrap();
+        assert_eq!(protected(&store), before);
+        assert!(store.initialization_writeback_blocked().unwrap());
+    }
+    if !expect_success {
+        assert!(result.is_err());
+        let log = peer.finish();
+        assert!(!log.iter().any(|s| s == "candidate-pull:native-v1:8"));
+        return;
+    }
+    assert!(
+        result.is_ok(),
+        "coverage-race recovery failed: {result:?}; requests={:?}; paths={:?}",
+        peer.log.lock().unwrap(),
+        paths.lock().unwrap()
+    );
+    let store = bridge.store.lock().unwrap();
+    assert_eq!(store.cursor().unwrap(), "native-v1:9");
+    assert_eq!(store.node("200").unwrap().name, "MovedSub");
+    assert_eq!(store.node("201").unwrap().parent.as_deref(), Some("300"));
+    let mut after = protected(&store);
+    after["cursor"] = before["cursor"].clone();
+    assert_eq!(after, before);
+    drop(store);
+    let log = peer.finish();
+    let pull = log
+        .iter()
+        .position(|s| s == "candidate-pull:native-v1:8")
+        .unwrap();
+    let root_list = log.iter().position(|s| s == "directory:100").unwrap();
+    assert!(pull < root_list);
+    let paths = paths.lock().unwrap();
+    assert!(paths.iter().filter(|s| s.as_str() == "/Lab/Sub").count() <= 3);
+    assert!(paths.iter().any(|s| s == "/Lab/MovedSub/Nested"));
+}
+
+#[test]
+fn repeated_coverage_races_exhaust_budget_without_publishing_or_losing_dirty_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = complete_store(dir.path(), 7, true);
+    let before = protected(&store);
+    let data = snapshot("server", 7);
+    let binding = InitializationBinding {
+        task_id: TASK.into(),
+        scope: serde_json::to_value(&data.scope).unwrap(),
+        restore: "server".into(),
+        start_cursor: data.cursor.clone(),
+        expected_cursor: data.cursor.clone(),
+    };
+    let run = store
+        .begin_initialization(&binding, &data.nodes[0], InitializationBudget::default())
+        .unwrap();
+    let ticket = store.begin_initialization_directory(&run, "100").unwrap();
+    store
+        .store_initialization_directory(&ticket, 1, &data.nodes[1..4])
+        .unwrap();
+    let replies = data.clone();
+    let peer = Peer::new(data, move |request| match request {
+        Command::Initialization(Request::Pull { cursor }) => {
+            let n = number(cursor).unwrap();
+            let mut file = replies.nodes[4].clone();
+            file.parent = Some("300".into());
+            Answer::Body(Body::Events(Some(Batch {
+                from: cursor.clone(),
+                to: format!("native-v1:{}", n + 1),
+                events: vec![drive_core::Event {
+                    id: format!("missing-{n}"),
+                    change: drive_core::Change::Upsert(file),
+                }],
+            })))
+        }
+        Command::Initialization(Request::Directory { node, .. }) if node.id == "200" => {
+            Answer::Fail("native_snapshot_changed")
+        }
+        _ => standard(&replies, request),
+    });
+    let bridge = bridge(store, &peer, "server");
+    let error = bridge.initial_pull().unwrap_err();
+    assert!(
+        error.to_string().contains("coverage race budget exceeded"),
+        "{error}"
+    );
+    let store = bridge.store.lock().unwrap();
+    assert_eq!(protected(&store), before);
+    let state = store.initialization_status().unwrap().unwrap();
+    assert_eq!((state.applied_sequence, state.received_sequence), (16, 17));
+    assert!(store.initialization_writeback_blocked().unwrap());
+    drop(store);
+    let log = peer.finish();
+    assert_eq!(
+        log.iter()
+            .filter(|s| s.starts_with("candidate-pull:"))
+            .count(),
+        17
+    );
+    assert!(log.iter().filter(|s| s.as_str() == "directory:200").count() <= 51);
+}
+
+#[test]
 fn interrupted_active_and_failed_candidates_resume_received_root_after_store_reopen() {
     for failed in [false, true] {
         let dir = tempfile::tempdir().unwrap();
