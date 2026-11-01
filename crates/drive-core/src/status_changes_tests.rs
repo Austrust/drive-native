@@ -65,14 +65,25 @@ fn complete_snapshot_publishes_one_gap_and_incremental_writes_resume() {
     let (_dir, mut s) = fixture();
     s.pin("a", true).unwrap();
     let before = s.status_change_watermark().unwrap();
-    s.install_remote_snapshot(&[node("root", None, true), node("a", Some("root"), false)], "2", "server").unwrap();
+    s.install_remote_snapshot(
+        &[node("root", None, true), node("a", Some("root"), false)],
+        "2",
+        "server",
+    )
+    .unwrap();
     let after = s.status_change_watermark().unwrap();
     assert_eq!(after.cursor.sequence, before.cursor.sequence + 1);
     assert_eq!(after.retained_after, after.cursor.sequence);
     assert_eq!((after.entries, after.bytes), (0, 0));
     assert_eq!(after.overflows, before.overflows);
     assert_eq!(after.snapshot_resets, before.snapshot_resets + 1);
-    assert!(matches!(s.read_status_changes(&before.cursor, 10).unwrap(), ChangePage::Rebuild { reason: GapReason::HistoryDiscarded, .. }));
+    assert!(matches!(
+        s.read_status_changes(&before.cursor, 10).unwrap(),
+        ChangePage::Rebuild {
+            reason: GapReason::HistoryDiscarded,
+            ..
+        }
+    ));
     s.pin("a", false).unwrap();
     assert_eq!(rows(&s, &after.cursor).len(), 1);
     consistent(&s);
@@ -84,37 +95,68 @@ fn snapshot_statements_handle_absent_metadata_rollback_and_later_incremental_ups
     for round in 1..=3 {
         let mut file = node("a", Some("root"), false);
         file.version = format!("v{round}");
-        if round == 2 { file.metadata = None; }
+        if round == 2 {
+            file.metadata = None;
+        }
         let before = s.status_change_watermark().unwrap();
-        s.install_remote_snapshot(&[node("root", None, true), file], &round.to_string(), "server").unwrap();
+        s.install_remote_snapshot(
+            &[node("root", None, true), file],
+            &round.to_string(),
+            "server",
+        )
+        .unwrap();
         let after = s.status_change_watermark().unwrap();
         assert_eq!(after.cursor.sequence, before.cursor.sequence + 1);
-        let count: i64 = s.db.query_row("SELECT count(*) FROM node_metadata WHERE node='a'", [], |r| r.get(0)).unwrap();
+        let count: i64 =
+            s.db.query_row(
+                "SELECT count(*) FROM node_metadata WHERE node='a'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(count, if round == 2 { 0 } else { 1 });
     }
     let before = s.status_change_watermark().unwrap();
     let mut bad = node("a", Some("root"), false);
     bad.name = "must-roll-back".into();
     bad.metadata.as_mut().unwrap().mode = 0o7777;
-    assert!(s.install_remote_snapshot(&[node("root", None, true), bad.clone()], "4", "server").is_err());
+    assert!(
+        s.install_remote_snapshot(&[node("root", None, true), bad.clone()], "4", "server")
+            .is_err()
+    );
     assert_eq!(s.status_change_watermark().unwrap(), before);
     assert_eq!(s.node("a").unwrap().name, "a");
     // Retry creates new statement owners after the failed transaction; no
     // cached bulk flag or TEMP schema survives the rollback boundary.
     bad.metadata.as_mut().unwrap().mode = 0o644;
     bad.name = "a".into();
-    s.install_remote_snapshot(&[node("root", None, true), bad], "4", "server").unwrap();
+    s.install_remote_snapshot(&[node("root", None, true), bad], "4", "server")
+        .unwrap();
     let boundary = s.status_change_watermark().unwrap().cursor;
     let mut updated = node("a", Some("root"), false);
     updated.version = "event-v5".into();
     updated.metadata.as_mut().unwrap().size = 42;
-    s.receive(&Batch { from: "4".into(), to: "5".into(), events: vec![Event {
-        id: "after-snapshot".into(), change: Change::Upsert(updated),
-    }]}).unwrap();
+    s.receive(&Batch {
+        from: "4".into(),
+        to: "5".into(),
+        events: vec![Event {
+            id: "after-snapshot".into(),
+            change: Change::Upsert(updated),
+        }],
+    })
+    .unwrap();
     s.drain().unwrap();
     let changes = rows(&s, &boundary);
-    assert!(changes.iter().any(|c| c.source == "nodes" && c.new_node.as_deref() == Some("a")));
-    assert!(changes.iter().any(|c| c.source == "node_metadata" && c.new_node.as_deref() == Some("a")));
+    assert!(
+        changes
+            .iter()
+            .any(|c| c.source == "nodes" && c.new_node.as_deref() == Some("a"))
+    );
+    assert!(
+        changes
+            .iter()
+            .any(|c| c.source == "node_metadata" && c.new_node.as_deref() == Some("a"))
+    );
     consistent(&s);
 }
 
@@ -137,7 +179,9 @@ fn snapshot_error_and_panic_restore_main_rows_journal_and_trigger_gate() {
     }));
     assert!(panic.is_err());
     assert_eq!(s.status_change_watermark().unwrap(), before);
-    let name: String = s.db.query_row("SELECT name FROM nodes WHERE id='a'", [], |r| r.get(0)).unwrap();
+    let name: String =
+        s.db.query_row("SELECT name FROM nodes WHERE id='a'", [], |r| r.get(0))
+            .unwrap();
     assert_eq!(name, "a");
     s.pin("a", false).unwrap();
     assert_eq!(rows(&s, &before.cursor).len(), 1);
@@ -152,15 +196,24 @@ fn snapshot_savepoint_failure_and_sequence_exhaustion_fail_closed() {
         tx.execute_batch("SAVEPOINT inner_edit; UPDATE nodes SET name='bad' WHERE id='a'; ROLLBACK TO inner_edit; RELEASE inner_edit;")?;
         Ok(())
     }).unwrap();
-    assert_eq!(s.status_change_watermark().unwrap().cursor.sequence, before.cursor.sequence + 1);
-    let name: String = s.db.query_row("SELECT name FROM nodes WHERE id='a'", [], |r| r.get(0)).unwrap();
+    assert_eq!(
+        s.status_change_watermark().unwrap().cursor.sequence,
+        before.cursor.sequence + 1
+    );
+    let name: String =
+        s.db.query_row("SELECT name FROM nodes WHERE id='a'", [], |r| r.get(0))
+            .unwrap();
     assert_eq!(name, "a");
-    s.db.execute("UPDATE dn_status_meta SET head=9223372036854775807", []).unwrap();
+    s.db.execute("UPDATE dn_status_meta SET head=9223372036854775807", [])
+        .unwrap();
     let full = s.status_change_watermark().unwrap();
-    assert!(replace_snapshot(&mut s.db, |tx| {
-        tx.execute("DELETE FROM nodes WHERE id='a'", [])?;
-        Ok(())
-    }).is_err());
+    assert!(
+        replace_snapshot(&mut s.db, |tx| {
+            tx.execute("DELETE FROM nodes WHERE id='a'", [])?;
+            Ok(())
+        })
+        .is_err()
+    );
     assert_eq!(s.status_change_watermark().unwrap(), full);
     assert!(s.node("a").is_ok());
 }
@@ -170,7 +223,8 @@ fn incorrectly_committed_bulk_flag_and_nested_transaction_are_rejected() {
     let (_dir, mut s) = fixture();
     s.db.execute_batch("BEGIN;").unwrap();
     assert!(replace_snapshot(&mut s.db, |_| Ok(())).is_err());
-    s.db.execute_batch("ROLLBACK; UPDATE dn_status_meta SET bulk=1;").unwrap();
+    s.db.execute_batch("ROLLBACK; UPDATE dn_status_meta SET bulk=1;")
+        .unwrap();
     assert!(s.status_change_watermark().is_err());
     assert!(replace_snapshot(&mut s.db, |_| Ok(())).is_err());
 }
@@ -248,7 +302,11 @@ fn inherited_namespace_and_visibility_updates_still_invalidate_subtrees() {
             .unwrap();
         let changes = rows(&s, &start);
         assert_eq!(changes.len(), 1, "{update}");
-        assert_eq!(changes[0].scope, ChangeScope::SubtreeAndAncestors, "{update}");
+        assert_eq!(
+            changes[0].scope,
+            ChangeScope::SubtreeAndAncestors,
+            "{update}"
+        );
     }
     let (_dir, s) = fixture();
     let start = s.status_change_watermark().unwrap().cursor;
@@ -666,6 +724,8 @@ fn schema_inventory_requires_an_explicit_decision_for_new_tables_and_columns() {
         "initialization_entries",
         "initialization_directories",
         "initialization_events",
+        "initialization_event_hints",
+        "initialization_native_nodes",
         "sqlite_sequence",
     ];
     let expected: BTreeSet<String> = SOURCES

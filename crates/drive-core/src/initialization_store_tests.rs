@@ -1,6 +1,8 @@
 #![cfg(feature = "native")]
 #[path = "initialization_event_coverage_tests.rs"]
 mod event_coverage;
+#[path = "initialization_hint_store_tests.rs"]
+mod hint_store;
 use super::*;
 use crate::{
     Event, NodeMetadata,
@@ -526,7 +528,7 @@ fn migration_from_actual_v18_shape_backs_up_and_preserves_pending_content() {
     let (temp, mut store, _) = setup();
     store.save_local("101", b"must survive migration").unwrap();
     let pending = store.pending_operations().unwrap();
-    store.db.execute_batch("DROP TABLE initialization_events; DROP TABLE initialization_directories; DROP TABLE initialization_entries; DROP TABLE initialization_run; PRAGMA user_version=18;").unwrap();
+    store.db.execute_batch("DROP TABLE initialization_event_hints; DROP TABLE initialization_native_nodes; DROP TABLE initialization_events; DROP TABLE initialization_directories; DROP TABLE initialization_entries; DROP TABLE initialization_run; PRAGMA user_version=18;").unwrap();
     drop(store);
     let store = Store::open(temp.path()).unwrap();
     assert_eq!(store.cursor().unwrap(), "native-v1:7");
@@ -563,10 +565,10 @@ fn migration_from_actual_v18_shape_backs_up_and_preserves_pending_content() {
             .db
             .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
-        20
+        crate::STATE_SCHEMA_VERSION
     );
     // Future schema rejection is the same guard used by the frozen schema18
-    // client's open(): 20 > 18. The actual old-binary check is a package gate.
+    // client's open(): current schema > 18. The actual old-binary check is a package gate.
     store
         .db
         .pragma_update(None, "user_version", crate::STATE_SCHEMA_VERSION + 1)
@@ -1350,13 +1352,13 @@ fn cursor_reset_requires_exact_current_epoch_authorization_and_new_fence() {
 }
 
 #[test]
-fn schema19_candidate_migrates_to20_with_reset_permit_closed_and_old_data_preserved() {
+fn schema19_candidate_migrates_with_reset_permit_closed_and_old_data_preserved() {
     let (temp, mut store, binding) = setup();
     store.save_local("101", b"dirty migration").unwrap();
     let pending = store.pending_operations().unwrap();
     let run = start(&mut store, &binding);
     list(&mut store, &run, "100", &[]);
-    store.db.execute_batch("ALTER TABLE initialization_run DROP COLUMN reset_epoch; ALTER TABLE initialization_run DROP COLUMN reset_expected; DROP INDEX initialization_pending; PRAGMA user_version=19;").unwrap();
+    store.db.execute_batch("DROP TABLE initialization_event_hints; DROP TABLE initialization_native_nodes; ALTER TABLE initialization_run DROP COLUMN reset_epoch; ALTER TABLE initialization_run DROP COLUMN reset_expected; DROP INDEX initialization_pending; PRAGMA user_version=19;").unwrap();
     drop(store);
     let store = Store::open(temp.path()).unwrap();
     let current = store.initialization_status().unwrap().unwrap();
@@ -1369,7 +1371,7 @@ fn schema19_candidate_migrates_to20_with_reset_permit_closed_and_old_data_preser
             .db
             .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
-        20
+        crate::STATE_SCHEMA_VERSION
     );
     let permit: (Option<i64>, Option<String>) = store
         .db
@@ -1387,7 +1389,7 @@ fn schema19_candidate_migrates_to20_with_reset_permit_closed_and_old_data_preser
             p.file_name()
                 .unwrap()
                 .to_string_lossy()
-                .starts_with("state-before-v20-")
+                .starts_with(&format!("state-before-v{}-", crate::STATE_SCHEMA_VERSION))
         })
         .unwrap();
     let old = Connection::open(backup).unwrap();

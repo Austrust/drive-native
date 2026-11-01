@@ -1,6 +1,10 @@
 //! Bridge from verified native contracts to the durable local state engine.
 //! Research-gated writes cover file creation and content updates. Namespace
 //! operations are journaled; complete bootstrap recovery remains a gate.
+use crate::initialization_events::{
+    InitializationDirectoryEntry, InitializationEventHint, InitializationEventKind,
+    InitializationEventPage,
+};
 use crate::{Batch, Change, Error, Event, Node, Result, Store, backend::DownloadedFile};
 use serde::{Deserialize, Serialize};
 use sproto::{
@@ -104,6 +108,15 @@ impl NativeReadSession {
         let batch = self.scoped_events(&watch).await?;
         translate(&self.scope, self.client.restore_identity(), cursor, batch)
     }
+    /// One decoded native response supplies both normalized changes and hints.
+    async fn pull_initialization_page(
+        &self,
+        cursor: &str,
+    ) -> Result<Option<InitializationEventPage>> {
+        let watch = self.watch(cursor)?;
+        let batch = self.scoped_events(&watch).await?;
+        translate_initialization(&self.scope, self.client.restore_identity(), cursor, batch)
+    }
     pub async fn wait(
         &self,
         cursor: &str,
@@ -162,6 +175,37 @@ impl NativeReadSession {
 }
 
 fn translate(scope: &Scope, restore: &str, from: &str, batch: EventBatch) -> Result<Option<Batch>> {
+    Ok(translate_events(scope, restore, from, batch, false)?.map(|(batch, _)| batch))
+}
+
+fn translate_initialization(
+    scope: &Scope,
+    restore: &str,
+    from: &str,
+    batch: EventBatch,
+) -> Result<Option<InitializationEventPage>> {
+    let Some((batch, hints)) = translate_events(scope, restore, from, batch, true)? else {
+        return Ok(None);
+    };
+    let page = InitializationEventPage {
+        batch,
+        hints,
+        scope: serde_json::to_value(scope)?,
+        restore: restore.into(),
+    };
+    page.validate()?;
+    Ok(Some(page))
+}
+
+// The ordinary path retains the original validation/result contract and does
+// not clone event paths or construct/validate an unused hint envelope.
+fn translate_events(
+    scope: &Scope,
+    restore: &str,
+    from: &str,
+    batch: EventBatch,
+    collect_hints: bool,
+) -> Result<Option<(Batch, Vec<InitializationEventHint>)>> {
     if batch.recovery_required {
         return Err(Error::Unsupported("native event recovery/rescan signal"));
     }
@@ -170,8 +214,37 @@ fn translate(scope: &Scope, restore: &str, from: &str, batch: EventBatch) -> Res
         return Ok(None);
     }
     let mut events = Vec::new();
+    let mut hints = Vec::new();
     for e in batch.events {
         root_guard::root_event(scope, &e)?;
+        // Capture only decoder-verified fields before moving content into Node.
+        // file.parent_id may describe current metadata, not the event's old parent.
+        let hint = collect_hints.then(|| InitializationEventHint {
+            ordinal: events.len() as u64,
+            event_id: String::new(),
+            event_sync_id: e.version.sync_id,
+            file_id: e.file_id.clone(),
+            kind: match &e.kind {
+                EventKind::Modify => InitializationEventKind::Modify,
+                EventKind::Remove => InitializationEventKind::Remove,
+                EventKind::Move { .. } => InitializationEventKind::Move,
+            },
+            event_path: e.path.clone(),
+            destination_path: match &e.kind {
+                EventKind::Move { destination, .. } => Some(destination.clone()),
+                _ => None,
+            },
+            metadata_parent_id: if e.removed || e.parent_id.is_empty() {
+                None
+            } else {
+                Some(e.parent_id.clone())
+            },
+            destination_parent_id: match &e.kind {
+                EventKind::Move { parent_id, .. } => Some(parent_id.clone()),
+                _ => None,
+            },
+            metadata_removed: e.removed,
+        });
         let (path, parent) = match &e.kind {
             EventKind::Move {
                 destination,
@@ -226,16 +299,24 @@ fn translate(scope: &Scope, restore: &str, from: &str, batch: EventBatch) -> Res
         // Real historical events can carry current tombstone metadata. Hash the
         // normalized change rather than treating sync_id as an immutable event ID.
         let digest = crate::sha256(&serde_json::to_vec(&change)?);
+        let event_id = format!("native:{}:{}:{digest}", e.version.sync_id, e.file_id);
+        if let Some(mut hint) = hint {
+            hint.event_id = event_id.clone();
+            hints.push(hint);
+        }
         events.push(Event {
-            id: format!("native:{}:{}:{digest}", e.version.sync_id, e.file_id),
+            id: event_id,
             change,
         });
     }
-    Ok(Some(Batch {
-        from: from.into(),
-        to,
-        events,
-    }))
+    Ok(Some((
+        Batch {
+            from: from.into(),
+            to,
+            events,
+        },
+        hints,
+    )))
 }
 
 #[cfg(test)]
@@ -319,6 +400,134 @@ mod tests {
         };
         let b = translate(&scope(), "s", "", batch(e, 5)).unwrap().unwrap();
         assert!(matches!(b.events[0].change, Change::Delete { .. }));
+    }
+    #[test]
+    fn initialization_page_and_ordinary_batch_share_exact_normalized_changes() {
+        let ordinary = translate(&scope(), "server", "native-v1:4", batch(event(), 5))
+            .unwrap()
+            .unwrap();
+        let page = translate_initialization(&scope(), "server", "native-v1:4", batch(event(), 5))
+            .unwrap()
+            .unwrap();
+        assert_eq!(page.batch, ordinary);
+        assert_eq!(page.scope, serde_json::to_value(scope()).unwrap());
+        assert_eq!(page.restore, "server");
+        let h = &page.hints[0];
+        assert_eq!((h.ordinal, h.event_sync_id), (0, 5));
+        assert_eq!(h.event_id, page.batch.events[0].id);
+        assert_eq!(h.event_path, "/lab/run/A.doc");
+        assert_eq!(h.metadata_parent_id.as_deref(), Some("root"));
+        let encoded = serde_json::to_vec(&page).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<InitializationEventPage>(&encoded).unwrap(),
+            page
+        );
+    }
+    #[test]
+    fn ordinary_translation_collects_no_hints_and_matches_all_supported_changes() {
+        let mut cases = vec![event()];
+        let mut moved = event();
+        moved.kind = EventKind::Move {
+            destination: "/lab/run/sub/B.doc".into(),
+            parent_id: "sub".into(),
+        };
+        cases.push(moved.clone());
+        moved.kind = EventKind::Move {
+            destination: "/outside/B.doc".into(),
+            parent_id: "other".into(),
+        };
+        cases.push(moved);
+        let mut removed = event();
+        removed.removed = true;
+        cases.push(removed.clone());
+        removed.kind = EventKind::Remove;
+        cases.push(removed);
+        for e in cases {
+            let (ordinary, hints) = translate_events(
+                &scope(),
+                "server",
+                "native-v1:4",
+                batch(e.clone(), 5),
+                false,
+            )
+            .unwrap()
+            .unwrap();
+            assert!(hints.is_empty());
+            let page = translate_initialization(&scope(), "server", "native-v1:4", batch(e, 5))
+                .unwrap()
+                .unwrap();
+            assert_eq!(ordinary, page.batch);
+            assert_eq!(page.hints.len(), 1);
+        }
+    }
+    #[test]
+    fn hints_preserve_move_paths_without_claiming_current_metadata_is_source_parent() {
+        let mut e = event();
+        e.parent_id = "third-current-parent".into();
+        e.kind = EventKind::Move {
+            destination: "/lab/run/sub/B.doc".into(),
+            parent_id: "sub".into(),
+        };
+        let page = translate_initialization(&scope(), "s", "", batch(e, 5))
+            .unwrap()
+            .unwrap();
+        let h = &page.hints[0];
+        assert_eq!(h.kind, InitializationEventKind::Move);
+        assert_eq!(h.event_path, "/lab/run/A.doc");
+        assert_eq!(h.destination_path.as_deref(), Some("/lab/run/sub/B.doc"));
+        assert_eq!(
+            h.metadata_parent_id.as_deref(),
+            Some("third-current-parent")
+        );
+        assert_eq!(h.destination_parent_id.as_deref(), Some("sub"));
+        let Change::Upsert(node) = &page.batch.events[0].change else {
+            panic!()
+        };
+        assert_eq!(node.parent.as_deref(), Some("sub"));
+    }
+    #[test]
+    fn outgoing_move_and_historical_current_tombstone_hints_survive_translation() {
+        let mut e = event();
+        e.kind = EventKind::Move {
+            destination: "/outside/B.doc".into(),
+            parent_id: "other".into(),
+        };
+        for removed in [false, true] {
+            e.removed = removed;
+            let page = translate_initialization(&scope(), "s", "", batch(e.clone(), 5))
+                .unwrap()
+                .unwrap();
+            assert!(matches!(page.batch.events[0].change, Change::Delete { .. }));
+            assert_eq!(page.hints[0].metadata_removed, removed);
+            assert_eq!(page.hints[0].metadata_parent_id.is_none(), removed);
+            assert_eq!(
+                page.hints[0].destination_parent_id.as_deref(),
+                Some("other")
+            );
+            assert_eq!(page.hints[0].kind, InitializationEventKind::Move);
+        }
+    }
+    #[test]
+    fn empty_advanced_page_and_stationary_reply_keep_existing_meaning() {
+        let page = translate_initialization(
+            &scope(),
+            "s",
+            "native-v1:4",
+            EventBatch {
+                events: vec![],
+                next: EventCursor(5),
+                recovery_required: false,
+            },
+        )
+        .unwrap()
+        .unwrap();
+        assert!(page.batch.events.is_empty() && page.hints.is_empty());
+        assert_eq!(page.batch.to, "native-v1:5");
+        assert!(
+            translate_initialization(&scope(), "s", "native-v1:5", batch(event(), 5))
+                .unwrap()
+                .is_none()
+        );
     }
     #[test]
     fn unknown_recovery_scope_and_symlinks_fail_closed() {
@@ -568,8 +777,8 @@ mod directory;
 
 #[path = "native_snapshot.rs"]
 mod native_snapshot;
-pub use native_snapshot::{RemoteSnapshot, SNAPSHOT_NODE_LIMIT};
 pub use native_snapshot::{InitializationBody, InitializationReply, InitializationRequest};
+pub use native_snapshot::{RemoteSnapshot, SNAPSHOT_NODE_LIMIT};
 
 #[cfg(feature = "native-research")]
 #[path = "native_upload_origin.rs"]

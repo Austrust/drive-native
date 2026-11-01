@@ -1,5 +1,9 @@
 //! Durable, private initialization candidates. None of these tables supplies
 //! filesystem metadata or authorizes remote writes before atomic final install.
+use crate::initialization_events::{
+    InitializationDirectoryEntry, InitializationEventHint, InitializationEventKind,
+    InitializationEventPage,
+};
 use crate::{Batch, Change, Error, Node, Result, Store};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -119,7 +123,15 @@ pub(crate) fn migrate(db: &Connection) -> Result<()> {
         run TEXT NOT NULL REFERENCES initialization_run(run_id) ON DELETE CASCADE,
         seq INTEGER NOT NULL, from_cursor TEXT NOT NULL, to_cursor TEXT NOT NULL,
         body TEXT NOT NULL, digest TEXT NOT NULL, bytes INTEGER NOT NULL,
-        PRIMARY KEY(run,seq));",
+        PRIMARY KEY(run,seq));
+      CREATE TABLE IF NOT EXISTS initialization_event_hints(
+        run TEXT NOT NULL, seq INTEGER NOT NULL, body TEXT NOT NULL,
+        digest TEXT NOT NULL, bytes INTEGER NOT NULL CHECK(bytes>=0),
+        PRIMARY KEY(run,seq), FOREIGN KEY(run,seq) REFERENCES initialization_events(run,seq) ON DELETE CASCADE);
+      CREATE TABLE IF NOT EXISTS initialization_native_nodes(
+        run TEXT NOT NULL, id TEXT NOT NULL, body TEXT NOT NULL,
+        digest TEXT NOT NULL, bytes INTEGER NOT NULL CHECK(bytes>=0),
+        PRIMARY KEY(run,id), FOREIGN KEY(run,id) REFERENCES initialization_entries(run,id) ON DELETE CASCADE);",
     )?;
     // Schema 20 permits migrate closed; old candidates remain gated.
     let columns = db
@@ -741,8 +753,13 @@ impl Store {
     }
 }
 
+#[path = "initialization_store_evidence.rs"]
+mod evidence;
 #[path = "initialization_store_ops.rs"]
 mod ops;
+use evidence::{
+    encode_event_page, read_event_receipt, read_native_identity, store_native_identity,
+};
 pub(crate) use ops::{
     InitializationCommit, check_install_gate, finish_in_transaction, installation_restore,
 };

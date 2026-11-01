@@ -41,13 +41,14 @@ pub mod directory_conflicts;
 pub mod transfer_policy;
 
 pub mod desktop_status;
-pub mod status_changes;
 pub mod status_aggregate;
-pub mod status_projection;
+pub mod status_changes;
 pub mod status_index;
+pub mod status_projection;
 pub mod status_snapshot;
 pub mod status_transient;
 
-pub mod task_control;
-pub mod snapshot_progress;
+pub mod initialization_events;
 pub mod initialization_store;
+pub mod snapshot_progress;
+pub mod task_control;
