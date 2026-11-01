@@ -147,7 +147,7 @@ impl Drop for ReadHandle {
 }
 
 /// Version of the durable state contract, including journal semantics.
-pub const STATE_SCHEMA_VERSION: i64 = 21;
+pub const STATE_SCHEMA_VERSION: i64 = 22;
 
 impl Store {
     /// One store per account + sync root. Independent accounts never share event IDs or cursors.
@@ -242,6 +242,7 @@ impl Store {
             )?;
         }
         crate::initialization_store::migrate(&db)?;
+        crate::preview::migrate(&db)?;
         db.pragma_update(None, "user_version", STATE_SCHEMA_VERSION)?;
         db.execute_batch("COMMIT;")?;
         crate::initialization_store::recover_open(&db)?;

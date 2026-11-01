@@ -709,7 +709,7 @@ fn actual_schema20_legacy_receipts_migrate_without_hints_and_preserve_dirty_queu
         .db
         .query_row("SELECT body FROM initialization_events", [], |r| r.get(0))
         .unwrap();
-    store.db.execute_batch("DROP TABLE initialization_event_hints; DROP TABLE initialization_native_nodes; PRAGMA user_version=20;").unwrap();
+    store.db.execute_batch("DROP TRIGGER preview_denied_capture; DROP TRIGGER preview_denied_clear; DROP TABLE preview_denied; DROP TABLE preview_visibility; DROP TABLE preview_inodes; DROP TABLE preview_mount; DROP TABLE initialization_event_hints; DROP TABLE initialization_native_nodes; PRAGMA user_version=20;").unwrap();
     drop(store);
     let mut store = Store::open(temp.path()).unwrap();
     let resumed = store.initialization_status().unwrap().unwrap().run;
@@ -736,7 +736,7 @@ fn actual_schema20_legacy_receipts_migrate_without_hints_and_preserve_dirty_queu
             .db
             .pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0))
             .unwrap(),
-        21
+        crate::STATE_SCHEMA_VERSION
     );
     let backup = std::fs::read_dir(temp.path())
         .unwrap()
@@ -745,7 +745,7 @@ fn actual_schema20_legacy_receipts_migrate_without_hints_and_preserve_dirty_queu
             p.file_name()
                 .unwrap()
                 .to_string_lossy()
-                .starts_with("state-before-v21-")
+                .starts_with(&format!("state-before-v{}-", crate::STATE_SCHEMA_VERSION))
         })
         .unwrap();
     let old = Connection::open(backup).unwrap();

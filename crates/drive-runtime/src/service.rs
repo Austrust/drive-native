@@ -229,7 +229,9 @@ impl Service {
         let paused = store.sync_paused().map_err(io::Error::other)?;
         let trust_pending_durability = sync(store.storage_directory()).is_err();
         let diagnostics = crate::connection_diagnostics::Recorder::open(store.storage_directory());
-        let bridge = Arc::new(Bridge::offline(Arc::new(drive_core::SharedStore::new(store)))?);
+        let bridge = Arc::new(Bridge::offline(Arc::new(drive_core::SharedStore::new(
+            store,
+        )))?);
         bridge.enable_initialization_owner(&profile.task_id)?;
         Ok(Arc::new(Self {
             profile,
@@ -261,8 +263,15 @@ impl Service {
     }
     fn worker_executable(&self) -> io::Result<PathBuf> {
         use std::os::fd::AsRawFd;
-        self.worker_image.as_ref().map(|image| PathBuf::from(format!("/proc/self/fd/{}", image.as_raw_fd())))
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "matching worker image unavailable; restart after repairing installation"))
+        self.worker_image
+            .as_ref()
+            .map(|image| PathBuf::from(format!("/proc/self/fd/{}", image.as_raw_fd())))
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "matching worker image unavailable; restart after repairing installation",
+                )
+            })
     }
     fn configure_transfers(
         rpc: &Arc<Rpc>,
@@ -491,7 +500,12 @@ impl Service {
         if self.stop.load(Ordering::Acquire) {
             return Err(io::Error::other("mount is stopping"));
         }
-        self.bridge.store.lock().unwrap().set_sync_paused(true).map_err(io::Error::other)?;
+        self.bridge
+            .store
+            .lock()
+            .unwrap()
+            .set_sync_paused(true)
+            .map_err(io::Error::other)?;
         c.paused = true;
         c.state = ConnectionState::Paused;
         self.interrupt(&mut c);
@@ -502,7 +516,12 @@ impl Service {
         if self.stop.load(Ordering::Acquire) {
             return Err(io::Error::other("mount is stopping"));
         }
-        self.bridge.store.lock().unwrap().set_sync_paused(false).map_err(io::Error::other)?;
+        self.bridge
+            .store
+            .lock()
+            .unwrap()
+            .set_sync_paused(false)
+            .map_err(io::Error::other)?;
         c.paused = false;
         // Authentication/certificate/recovery failures require a fresh explicit
         // unlock; pause/resume must not silently retry rejected credentials.
@@ -532,17 +551,41 @@ impl Service {
             let store = self.bridge.store.lock().unwrap();
             match store.node(&self.profile.scope.file_id) {
                 Ok(_) => {}
-                Err(e) if e.is_not_found() => return Ok(None),
+                Err(e) if e.is_not_found() => {
+                    match store.preview_mount_root(&self.profile.scope.file_id) {
+                        Ok(Some(_)) => {}
+                        Ok(None) => return Ok(None),
+                        Err(drive_core::Error::Io(e))
+                            if matches!(e.raw_os_error(), Some(libc::EACCES | libc::EAGAIN)) =>
+                        {
+                            return Ok(None);
+                        }
+                        Err(_) => {
+                            return Err(io::Error::other(
+                                "initialization preview root cannot be loaded",
+                            ));
+                        }
+                    }
+                }
                 Err(_) => return Err(io::Error::other("cached root cannot be loaded")),
             }
         }
-        let mut fs = drive_fs::CacheFilesystem::new(
+        let mut fs = match drive_fs::CacheFilesystem::new(
             self.bridge.store.clone(),
             &self.profile.scope.file_id,
             unsafe { libc::getuid() },
             unsafe { libc::getgid() },
-        )
-        .map_err(io::Error::other)?
+        ) {
+            Ok(fs) => fs,
+            // A candidate can be revoked between the readiness check and
+            // constructor. Keep FSD alive to display/resolve the native error.
+            Err(drive_core::Error::Io(e))
+                if matches!(e.raw_os_error(), Some(libc::EACCES | libc::EAGAIN)) =>
+            {
+                return Ok(None);
+            }
+            Err(e) => return Err(io::Error::other(e)),
+        }
         .with_hydrator(self.bridge.clone());
         if self.profile.writable {
             fs = fs.with_writes_enabled();
@@ -599,9 +642,11 @@ impl Service {
             let mut stage = Stage::StartWorker;
             let started = std::time::Instant::now();
             let result = (|| -> io::Result<()> {
-                worker = Some(WorkerProcess::start(&self.worker_executable()?).map_err(|_| {
-                    io::Error::new(io::ErrorKind::InvalidInput, "worker executable unavailable")
-                })?);
+                worker = Some(
+                    WorkerProcess::start(&self.worker_executable()?).map_err(|_| {
+                        io::Error::new(io::ErrorKind::InvalidInput, "worker executable unavailable")
+                    })?,
+                );
                 let worker = worker.as_ref().unwrap();
                 {
                     let mut c = self.control.lock().unwrap();
@@ -709,25 +754,21 @@ impl Service {
                 } else {
                     ConnectionState::NeedsAttention
                 };
-                c.error = Some(
-                    if self.worker_image.is_none() {
-                        "worker_image_unavailable"
-                    } else if let Some(category) = crate::bridge::capacity_error(&error) {
-                        category
-                    } else if crate::bridge::is_root_unavailable(&error) {
-                        "native_root_unavailable"
-                    } else {
-                        match error.kind() {
-                            io::ErrorKind::PermissionDenied => {
-                                "authentication_or_protocol_rejected"
-                            }
-                            io::ErrorKind::InvalidInput => "certificate_or_configuration",
-                            io::ErrorKind::InvalidData => "native_state_recovery_required",
-                            _ if retry => "network_unavailable",
-                            _ => "local_or_protocol_error",
-                        }
-                    },
-                );
+                c.error = Some(if self.worker_image.is_none() {
+                    "worker_image_unavailable"
+                } else if let Some(category) = crate::bridge::capacity_error(&error) {
+                    category
+                } else if crate::bridge::is_root_unavailable(&error) {
+                    "native_root_unavailable"
+                } else {
+                    match error.kind() {
+                        io::ErrorKind::PermissionDenied => "authentication_or_protocol_rejected",
+                        io::ErrorKind::InvalidInput => "certificate_or_configuration",
+                        io::ErrorKind::InvalidData => "native_state_recovery_required",
+                        _ if retry => "network_unavailable",
+                        _ => "local_or_protocol_error",
+                    }
+                });
                 c.revision += 1;
             }
             if !c.attention {

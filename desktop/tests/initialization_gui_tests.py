@@ -29,6 +29,64 @@ class Bus(QObject):
 
 
 class ProgressTests(unittest.TestCase):
+    def test_preview_mode_blocks_body_actions_then_promotes_without_closing_window(self):
+        with patch.object(MainWindow, 'start', lambda _: None), patch('drive_native_gui.window.ClientBus', Bus):
+            window = MainWindow()
+            try:
+                window.show(); app.processEvents(); window.refresh_timer.stop()
+                data = {'connection': 'connecting', 'mounted': True, 'pending_operations': 0,
+                        'mount': '/tmp/synthetic', 'initialization': window.bus.progress, 'preview_only': True}
+                window.received_overview(data, None)
+                self.assertTrue(window.preview_label.isVisible())
+                self.assertTrue(window.open_folder.isEnabled())
+                row = {'id': 'file', 'path': 'A.doc', 'directory': False,
+                       'status': 'initializing', 'offline_available': False}
+                window.rows = [row]; window.render_rows()
+                item = window.table.topLevelItem(0)
+                self.assertEqual(item.text(2), '尚未可用')
+                window.bus.calls.clear()
+                with patch('drive_native_gui.window.QDesktopServices.openUrl') as opened:
+                    window.activate(item, 0)
+                    window.apply_action([row], 'SetPinned', True)
+                    opened.assert_not_called()
+                    self.assertNotIn('SetPinned', window.bus.calls)
+                    window.received_overview(dict(data, connection='online', preview_only=False), None)
+                    self.assertFalse(window.preview_label.isVisible())
+                    window.rows = [dict(row, status='online_only')]; window.render_rows()
+                    window.activate(window.table.topLevelItem(0), 0)
+                    opened.assert_called_once()
+                window.offline_ui()
+                self.assertFalse(window.preview_label.isVisible())
+            finally:
+                window.close(); window.deleteLater()
+                QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
+    def test_unready_and_changed_preview_pages_are_not_rendered_as_empty_or_complete(self):
+        with patch.object(MainWindow, 'start', lambda _: None), patch('drive_native_gui.window.ClientBus', Bus):
+            window = MainWindow()
+            try:
+                window.show(); app.processEvents(); window.refresh_timer.stop()
+                window.files_button.setChecked(True)
+                window.overview = {'preview_only': True}
+                window.rows = [{'id': 'old', 'path': 'Old', 'directory': True, 'status': 'initializing'}]
+                window.render_rows()
+                for state in ('pending', 'denied'):
+                    window.received_directory(window.folder, window.view_generation,
+                        {'preview_only': True, 'directory_state': state, 'offset': 0, 'total': None, 'entries': []}, None)
+                    self.assertEqual(window.table.topLevelItemCount(), 0)
+                    self.assertEqual(window.availability_value.text(), '尚未确认')
+                    self.assertNotIn('0 / 0', window.detail.text())
+                window.page_rows = [{'id': 'old', 'path': 'Old'}]
+                window.page_view_token = (True, 'previous-generation')
+                window.received_directory(window.folder, window.view_generation,
+                    {'preview_only': True, 'directory_state': 'received', 'preview_generation': 'new-generation',
+                     'offset': 1, 'total': 2, 'entries': [{'id': 'new', 'path': 'New'}]}, None)
+                self.assertFalse(window.page_rows)
+                self.assertIn('已变化', window.detail.text())
+            finally:
+                window.close(); window.deleteLater()
+                QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
     def test_retry_reason_remains_visible_during_next_scan(self):
         title, detail = progress_text({'active': True, 'phase': 'enumerating',
             'last_retry_reason': 'parent_unavailable', 'retry_count': 1})

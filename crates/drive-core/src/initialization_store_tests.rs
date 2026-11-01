@@ -530,7 +530,7 @@ fn migration_from_actual_v18_shape_backs_up_and_preserves_pending_content() {
     let (temp, mut store, _) = setup();
     store.save_local("101", b"must survive migration").unwrap();
     let pending = store.pending_operations().unwrap();
-    store.db.execute_batch("DROP TABLE initialization_event_hints; DROP TABLE initialization_native_nodes; DROP TABLE initialization_events; DROP TABLE initialization_directories; DROP TABLE initialization_entries; DROP TABLE initialization_run; PRAGMA user_version=18;").unwrap();
+    store.db.execute_batch("DROP TRIGGER preview_denied_capture; DROP TRIGGER preview_denied_clear; DROP TABLE preview_denied; DROP TABLE preview_visibility; DROP TABLE preview_inodes; DROP TABLE preview_mount; DROP TABLE initialization_event_hints; DROP TABLE initialization_native_nodes; DROP TABLE initialization_events; DROP TABLE initialization_directories; DROP TABLE initialization_entries; DROP TABLE initialization_run; PRAGMA user_version=18;").unwrap();
     drop(store);
     let store = Store::open(temp.path()).unwrap();
     assert_eq!(store.cursor().unwrap(), "native-v1:7");
@@ -1360,7 +1360,7 @@ fn schema19_candidate_migrates_with_reset_permit_closed_and_old_data_preserved()
     let pending = store.pending_operations().unwrap();
     let run = start(&mut store, &binding);
     list(&mut store, &run, "100", &[]);
-    store.db.execute_batch("DROP TABLE initialization_event_hints; DROP TABLE initialization_native_nodes; ALTER TABLE initialization_run DROP COLUMN reset_epoch; ALTER TABLE initialization_run DROP COLUMN reset_expected; DROP INDEX initialization_pending; PRAGMA user_version=19;").unwrap();
+    store.db.execute_batch("DROP TRIGGER preview_denied_capture; DROP TRIGGER preview_denied_clear; DROP TABLE preview_denied; DROP TABLE preview_visibility; DROP TABLE preview_inodes; DROP TABLE preview_mount; DROP TABLE initialization_event_hints; DROP TABLE initialization_native_nodes; ALTER TABLE initialization_run DROP COLUMN reset_epoch; ALTER TABLE initialization_run DROP COLUMN reset_expected; DROP INDEX initialization_pending; PRAGMA user_version=19;").unwrap();
     drop(store);
     let store = Store::open(temp.path()).unwrap();
     let current = store.initialization_status().unwrap().unwrap();

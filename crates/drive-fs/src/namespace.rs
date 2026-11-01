@@ -33,8 +33,8 @@ pub(super) fn rename(
     fs.queue.submit(Box::new(move || {
         let result = (|| -> drive_core::Result<Option<(String, String, String, String)>> {
             let mut s = store.lock().unwrap();
-            let p = s.record_by_inode(parent)?.node.id;
-            let np = s.record_by_inode(new_parent)?.node.id;
+            let p = preview::authoritative(&s, parent, libc::EROFS)?.node.id;
+            let np = preview::authoritative(&s, new_parent, libc::EROFS)?.node.id;
             let source = s.lookup(&p, &name)?.node.id;
             match s.lookup(&np, &new_name) {
                 Ok(target) if target.node.id != source && flags == 0 => {
@@ -84,7 +84,7 @@ pub(super) fn remove(
     let network = fs.network_queue.clone();
     fs.queue.submit(Box::new(move|| {
         let identity=(||->drive_core::Result<(String,String)>{
-            let s=store.lock().unwrap();let parent=s.record_by_inode(parent)?.node.id;let id=s.lookup(&parent,&name)?.node.id;Ok((parent,id))
+            let s=store.lock().unwrap();let parent=preview::authoritative(&s, parent, libc::EROFS)?.node.id;let id=s.lookup(&parent,&name)?.node.id;Ok((parent,id))
         })();
         let (parent,id)=match identity {Ok(v)=>v,Err(e)=>{reply.error(errno(&e));return;}};
         network.submit(Box::new(move|| {

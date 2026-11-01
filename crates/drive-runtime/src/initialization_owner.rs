@@ -349,11 +349,23 @@ impl Bridge {
                         {
                             if status.state != "ready"
                                 && status.binding.task_id == session.task
-                                && status.binding.restore == session.restore
+                                && status.binding.scope == serde_json::to_value(&session.scope)?
                             {
-                                store
-                                    .fail_initialization(&status.run, "initialization_rejected")
-                                    .map_err(io::Error::other)?;
+                                // Explicit native root loss/denial is evidence to revoke
+                                // candidate visibility, even across a server restore. A
+                                // generic failed run or transport loss is not such proof.
+                                // The sticky revocation survives resume; only verified
+                                // root recovery (or a newly verified seed) can clear it.
+                                if is_root_unavailable(&error) {
+                                    store
+                                        .revoke_initialization_preview_root(&status.run)
+                                        .map_err(io::Error::other)?;
+                                }
+                                if status.binding.restore == session.restore {
+                                    store
+                                        .fail_initialization(&status.run, "initialization_rejected")
+                                        .map_err(io::Error::other)?;
+                                }
                             }
                         }
                     }

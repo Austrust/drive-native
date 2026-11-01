@@ -1,5 +1,6 @@
 //! Stable directory cookies. Only opendir projects SQLite; continuation and
-//! release use local immutable views and never wait for Store or network work.
+//! release use immutable views. Warm continuations avoid Store; preview
+//! continuations validate their revocable capability while sending one reply.
 use super::*;
 use drive_core::filesystem::{DirectorySnapshot, DirectoryViewStamp};
 use std::sync::{
@@ -10,7 +11,12 @@ use std::sync::{
 const MAX_BYTES: usize = 64 * 1024 * 1024;
 const MAX_HANDLES: usize = 4096;
 
+enum ViewOrigin {
+    Authority,
+    Preview(drive_core::preview::PreviewStamp),
+}
 pub(super) struct View {
+    origin: ViewOrigin,
     ino: u64,
     snapshot: Option<DirectorySnapshot>,
     reclaimer: Arc<Reclaimer>,
@@ -122,13 +128,24 @@ impl Views {
             // an atomic stamp after dropping Store could race an ACL/namespace
             // commit whose publication has not reached that atomic yet.
             let store = store.lock().unwrap();
+            // One indexed preview lookup; do not compute file status on each
+            // warm opendir/cache hit. Promotion removes the preview reservation.
+            let authority = match store.preview_record_by_inode(ino) {
+                Ok(_) => false,
+                Err(e) if e.is_not_found() => true,
+                Err(e) => return Err(errno(&e)),
+            };
             let revision = store.directory_view_stamp().map_err(|e| errno(&e))?;
             let cached = self
                 .cached
                 .lock()
                 .unwrap()
                 .get(&ino)
-                .and_then(|(rev, view)| (rev == &revision).then(|| view.upgrade()).flatten());
+                .and_then(|(rev, view)| {
+                    (authority && rev == &revision)
+                        .then(|| view.upgrade())
+                        .flatten()
+                });
             match cached {
                 Some(view) => view,
                 None => {
@@ -139,20 +156,33 @@ impl Views {
                         return Err(libc::ENOMEM);
                     }
                     let remaining = MAX_BYTES.saturating_sub(self.charged.load(Ordering::Acquire));
-                    let snapshot = store
-                        .directory_snapshot(ino, remaining)
-                        .map_err(|e| errno(&e))?;
+                    let (snapshot, origin) = if authority {
+                        (
+                            store
+                                .directory_snapshot(ino, remaining)
+                                .map_err(|e| errno(&e))?,
+                            ViewOrigin::Authority,
+                        )
+                    } else {
+                        let v = store
+                            .preview_directory_snapshot(ino, remaining)
+                            .map_err(|e| errno(&e))?;
+                        (v.snapshot, ViewOrigin::Preview(v.stamp))
+                    };
                     let revision = store.directory_view_stamp().map_err(|e| errno(&e))?;
                     self.charged.fetch_add(snapshot.bytes, Ordering::AcqRel);
                     self.allocated.fetch_add(1, Ordering::AcqRel);
                     let view = Arc::new(View {
+                        origin,
                         ino,
                         snapshot: Some(snapshot),
                         reclaimer: self.reclaimer.clone(),
                     });
                     let mut cache = self.cached.lock().unwrap();
                     cache.retain(|_, (_, view)| view.strong_count() != 0);
-                    cache.insert(ino, (revision, Arc::downgrade(&view)));
+                    if authority {
+                        cache.insert(ino, (revision, Arc::downgrade(&view)));
+                    }
                     view
                 }
             }
@@ -204,34 +234,49 @@ pub(super) fn read(
     ino: u64,
     fh: u64,
     offset: i64,
-    mut reply: ReplyDirectory,
+    reply: ReplyDirectory,
 ) {
     let Ok(offset) = usize::try_from(offset) else {
         reply.error(libc::EINVAL);
         return;
     };
     let views = fs.directories.clone();
+    let store = fs.store.clone();
     fs.read_queue
         .submit(Box::new(move || match views.get(ino, fh) {
             Ok(view) => {
-                if offset > view.snapshot().entries.len() {
-                    reply.error(libc::EINVAL);
-                    return;
-                }
-                for (index, entry) in view.snapshot().entries.iter().enumerate().skip(offset) {
-                    let kind = if entry.directory {
-                        FileType::Directory
-                    } else {
-                        FileType::RegularFile
-                    };
-                    if reply.add(entry.ino, (index + 1) as i64, kind, &entry.name) {
-                        break;
+                match &view.origin {
+                    ViewOrigin::Authority => send_page(&view, offset, reply),
+                    ViewOrigin::Preview(stamp) => {
+                        let guard = store.lock().unwrap();
+                        match guard.preview_validate_view(stamp) {
+                            Ok(()) => send_page(&view, offset, reply),
+                            Err(e) => reply.error(errno(&e)),
+                        }
+                        // Keep the same guard through the single bounded reply.
+                        drop(guard);
                     }
                 }
-                reply.ok();
             }
             Err(e) => reply.error(e),
         }));
+}
+fn send_page(view: &View, offset: usize, mut reply: ReplyDirectory) {
+    if offset > view.snapshot().entries.len() {
+        reply.error(libc::EINVAL);
+        return;
+    }
+    for (index, entry) in view.snapshot().entries.iter().enumerate().skip(offset) {
+        let kind = if entry.directory {
+            FileType::Directory
+        } else {
+            FileType::RegularFile
+        };
+        if reply.add(entry.ino, (index + 1) as i64, kind, &entry.name) {
+            break;
+        }
+    }
+    reply.ok();
 }
 pub(super) fn release(fs: &mut CacheFilesystem, ino: u64, fh: u64, reply: ReplyEmpty) {
     // Kernel close is not retried if a bounded work queue rejects its job.
@@ -372,6 +417,7 @@ mod tests {
             charged.fetch_add(bytes, Ordering::AcqRel);
             allocated.fetch_add(1, Ordering::AcqRel);
             drop(View {
+                origin: ViewOrigin::Authority,
                 ino: 1,
                 snapshot: Some(snapshot),
                 reclaimer: reclaimer.clone(),

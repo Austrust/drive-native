@@ -371,6 +371,9 @@ fn kernel_atomic_replace_keeps_source_inode_and_old_target_handle() {
     src.write_all(b"replacement bytes").unwrap();
     src.sync_all().unwrap();
     let src_ino = src.metadata().unwrap().ino();
+    // Atomic replacement must preserve the source mode, including the caller's
+    // umask. The isolated validation runner deliberately uses a private umask.
+    let src_mode = src.metadata().unwrap().permissions().mode() & 0o777;
     std::fs::rename(&temp, &path).unwrap();
     assert!(!temp.exists());
     assert_eq!(std::fs::metadata(&path).unwrap().ino(), src_ino);
@@ -388,7 +391,7 @@ fn kernel_atomic_replace_keeps_source_inode_and_old_target_handle() {
     assert_eq!(std::fs::read(&path).unwrap(), b"replacement bytes!");
     assert_eq!(
         std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
-        0o644
+        src_mode
     );
     let q = s.lock().unwrap().next_replace().unwrap().unwrap();
     assert_eq!(q.state, "pending");

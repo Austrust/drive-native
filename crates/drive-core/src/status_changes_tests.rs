@@ -726,6 +726,11 @@ fn schema_inventory_requires_an_explicit_decision_for_new_tables_and_columns() {
         "initialization_events",
         "initialization_event_hints",
         "initialization_native_nodes",
+        // Cold preview reservations never supply authoritative status atoms.
+        "preview_mount",
+        "preview_inodes",
+        "preview_visibility",
+        "preview_denied",
         "sqlite_sequence",
     ];
     let expected: BTreeSet<String> = SOURCES

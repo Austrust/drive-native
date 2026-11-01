@@ -203,7 +203,7 @@ fn cursor(value: &str) -> Result<u64> {
     }
     Ok(result)
 }
-fn root_id(binding: &InitializationBinding) -> Result<&str> {
+pub(crate) fn root_id(binding: &InitializationBinding) -> Result<&str> {
     binding
         .scope
         .get("file_id")
@@ -270,7 +270,7 @@ fn validate_binding_against(
     }
     Ok(())
 }
-fn validate_root(binding: &InitializationBinding, node: &Node) -> Result<()> {
+pub(crate) fn validate_root(binding: &InitializationBinding, node: &Node) -> Result<()> {
     crate::state::valid_node(node)?;
     let path = binding
         .scope
@@ -322,7 +322,7 @@ fn status(db: &Connection) -> Result<Option<InitializationStatus>> {
     )
     .transpose()
 }
-fn checked(
+pub(crate) fn checked(
     db: &Connection,
     run: &InitializationRun,
     allow_failed: bool,
@@ -400,7 +400,7 @@ fn check_node_budget(db: &Connection, run: &str) -> Result<()> {
     }
     Ok(())
 }
-fn load_node(db: &Connection, run: &str, id: &str) -> Result<Node> {
+pub(crate) fn load_node(db: &Connection, run: &str, id: &str) -> Result<Node> {
     let body: String = db.query_row(
         "SELECT body FROM initialization_entries WHERE run=?1 AND id=?2",
         params![run, id],
@@ -421,7 +421,7 @@ fn invalidate(db: &Connection, run: &str, id: &str, recursive: bool) -> Result<(
 }
 
 /// Validate bounded directory ancestry using only the private candidate.
-fn directory_chain(
+pub(crate) fn directory_chain(
     db: &Connection,
     run: &str,
     binding: &InitializationBinding,
@@ -759,6 +759,7 @@ mod evidence;
 mod local_recheck;
 #[path = "initialization_store_ops.rs"]
 mod ops;
+pub(crate) use evidence::read_native_identity as preview_native_identity;
 use evidence::{
     encode_event_page, read_event_receipt, read_native_identity, store_native_identity,
 };

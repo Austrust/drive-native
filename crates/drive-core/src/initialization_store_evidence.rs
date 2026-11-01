@@ -162,7 +162,7 @@ struct NativeIdentity {
     node_digest: String,
     native_node_id: u64,
 }
-pub(super) fn read_native_identity(db: &Connection, run: &str, id: &str) -> Result<Option<u64>> {
+pub(crate) fn read_native_identity(db: &Connection, run: &str, id: &str) -> Result<Option<u64>> {
     let row:Option<(String,String,u64,String)>=db.query_row(
         "SELECT m.body,m.digest,m.bytes,n.body FROM initialization_native_nodes m JOIN initialization_entries n ON n.run=m.run AND n.id=m.id WHERE m.run=?1 AND m.id=?2",
         params![run,id],|r|Ok((r.get(0)?,r.get(1)?,read_counter(r,2)?,r.get(3)?))).optional()?;

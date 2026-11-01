@@ -1182,3 +1182,67 @@ fn mismatched_native_hint_page_header_is_rejected_before_persistent_receipt() {
         peer.finish();
     }
 }
+
+// An authenticated root rejection is different from loss of transport. The
+// former revokes candidate metadata; the latter retains confirmed offline lists.
+#[test]
+fn cold_preview_root_rejection_revokes_but_transport_and_generic_failure_preserve_lists() {
+    for (category, restore, revoked) in [
+        ("native_root_unavailable", "server", true),
+        ("native_root_unavailable", "new-server", true),
+        ("native_response_timeout", "server", false),
+        ("synthetic_bad_payload", "server", false),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(dir.path()).unwrap();
+        let data = snapshot("server", 7);
+        store
+            .bind_native_scope("server", &serde_json::to_string(&data.scope).unwrap())
+            .unwrap();
+        let binding = InitializationBinding {
+            task_id: TASK.into(),
+            scope: serde_json::to_value(&data.scope).unwrap(),
+            restore: "server".into(),
+            start_cursor: data.cursor.clone(),
+            expected_cursor: "".into(),
+        };
+        let run = store
+            .begin_initialization(&binding, &data.nodes[0], InitializationBudget::default())
+            .unwrap();
+        store.preview_mount_root("100").unwrap().unwrap();
+        let ticket = store.begin_initialization_directory(&run, "100").unwrap();
+        store
+            .store_initialization_native_directory(&ticket, 1, &fixture_children(&data, "100"))
+            .unwrap();
+        assert!(store.preview_directory_snapshot(1, 1024 * 1024).is_ok());
+        let peer = Peer::new(snapshot(restore, 7), move |request| {
+            assert!(matches!(
+                request,
+                Command::Initialization(Request::Root | Request::Seed)
+            ));
+            Answer::Fail(category)
+        });
+        let bridge = bridge(store, &peer, restore);
+        assert!(bridge.initial_pull().is_err());
+        {
+            let store = bridge.store.lock().unwrap();
+            let result = store.preview_directory_snapshot(1, 1024 * 1024);
+            if revoked {
+                assert!(
+                    matches!(result,Err(drive_core::Error::Io(ref e)) if e.raw_os_error()==Some(libc::EACCES)),
+                    "root rejection must revoke preview: {result:?}"
+                );
+            } else {
+                assert!(
+                    result.is_ok(),
+                    "transport/non-root failure must retain confirmed lists: {result:?}"
+                );
+            }
+            assert_eq!(store.cursor().unwrap(), "");
+            assert_eq!(store.pending_operations().unwrap(), 0);
+            assert!(store.initialization_writeback_blocked().unwrap());
+        }
+        let log = peer.finish();
+        assert_eq!(log.len(), 1);
+    }
+}

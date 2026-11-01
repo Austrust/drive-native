@@ -1,14 +1,14 @@
 # Drive Native
 
-当前实验分支整合[持久事件证据与已知目录局部重查](docs/INITIALIZATION_EVENT_EVIDENCE.md)和[目录视图缓存修复](docs/DIRECTORY_VIEW_STAMP.md)。合并后的隔离回归273项core、112项runtime、12项filesystem及全目标检查通过。实验使用schema21／IPC18，尚未打包或进行新的NAS实测；未知位置的局部协调和逐目录提前显示仍待实现。
+当前开发分支在[持久事件证据与已知目录局部重查](docs/INITIALIZATION_EVENT_EVIDENCE.md)、[目录视图缓存修复](docs/DIRECTORY_VIEW_STAMP.md)之上实现[冷启动目录预览](docs/INITIALIZATION_PREVIEW.md)：完整接收一个目录后可提前浏览元数据，文件正文仍须等全局初始化完成。拟构建 `0.1.0~dev20261101.6`，schema22／IPC18，尚未构建或发布。[隔离回归002](docs/validation/progressive-preview-002/REPORT.md)已通过：core 293项、runtime 115项、filesystem 12项及全目标检查；显式内核19项与runtime内核1项通过，包含7项新预览场景。GUI 75项、Nemo 10项、Nautilus 10项通过。001的真实失败保留，未沿用旧包数量。
 
-当前开发包 `.5` 的[初始化事件依赖等待与有界恢复](docs/CANDIDATE_EVENT_COVERAGE.md)已[发布](https://github.com/Austrust/drive-native/releases/tag/dev20261101.5)。本包本次真实只读初始化未通过；受控重启续扫完成=True，状态查询异常0次。最终0.266秒正常停止且无遗留挂载；未写NAS。实测期间宿主仍有开发活动，远端变更负载未控制，不作与旧版配对性能或长期验收结论。
+最近已发布开发包 `.5` 的[初始化事件依赖等待与有界恢复](docs/CANDIDATE_EVENT_COVERAGE.md)已[发布](https://github.com/Austrust/drive-native/releases/tag/dev20261101.5)。本包本次真实只读初始化未通过；受控重启续扫完成=True，状态查询异常0次。最终0.266秒正常停止且无遗留挂载；未写NAS。实测期间宿主仍有开发活动，远端变更负载未控制，不作与旧版配对性能或长期验收结论。
 
 历史 `.4` SQL修复及真实失败见[原报告](docs/CANDIDATE_QUERY_ORDER.md)与[包验证009](docs/validation/native-package-009/REPORT.md)，不与本轮结果混计。
 
 面向 Linux Mint Cinnamon / Nemo 的 Synology Drive 原生协议按需同步客户端。使用 Rust、FUSE、SQLite、PySide6 和 Nemo 扩展；独立连接 Drive Server，不依赖 WebDAV 或官方客户端进程。
 
-**开发测试版本，尚未完成日常使用验收。** `0.1.0~dev20261101.5` 已发布，[本轮验证](docs/validation/native-package-010/REPORT.md)记录671项Rust、73项GUI，debug/release各13项显式FUSE及 `.4 → .5` 同schema20暂停接管、旧ELF读取和未上传数据保留。schema20／IPC17不变。未知父完成覆盖后及目录事件仍可能整树回退；等待期间后页根／权限事件会延后获知，写回门禁不等于本地ACL即时撤权。逐目录提前显示、普通目录全量同步、运行时增量桌面状态、配对性能、Mint及最终数据安全／7×24验收仍开放。完整goal保持活动，本包不是rc1。P0原窗口满足23小时时长，异常条件未通过，不拼接或重计。
+**开发测试版本，尚未完成日常使用验收。** `0.1.0~dev20261101.5` 已发布，[该包验证](docs/validation/native-package-010/REPORT.md)记录671项Rust、73项GUI，debug/release各13项显式FUSE及 `.4 → .5` 同schema20暂停接管、旧ELF读取和未上传数据保留。该已发布包使用schema20／IPC17。未知父完成覆盖后及目录事件仍可能整树回退；等待期间后页根／权限事件会延后获知，写回门禁不等于本地ACL即时撤权。逐目录提前显示、普通目录全量同步、运行时增量桌面状态、配对性能、Mint及最终数据安全／7×24验收仍开放。完整goal保持活动，本包不是rc1。P0原窗口满足23小时时长，异常条件未通过，不拼接或重计。
 
 ## 已实现
 
@@ -28,7 +28,7 @@ Ubuntu更新包已逐项整合，继续在独立分支修复原生恢复及按�
 
 [恢复及增量状态基础](docs/validation/incremental-status-001/REPORT.md)已完成组件整合；[批量导入成本回退已修复](docs/validation/status-write-cost-003/REPORT.md)。运行时增量桌面状态尚未接入；不将这些基础模块算作 Personal 或整体性能问题已经解决。
 
-当前生产接线和可靠FD分步接口见[持久初始化](docs/INITIALIZATION_PERSISTENCE.md)。本包本次真实只读初始化未通过；受控重启续扫完成=True，状态查询异常0次。最终0.266秒正常停止且无遗留挂载；未写NAS。实测期间宿主仍有开发活动，远端变更负载未控制，不作与旧版配对性能或长期验收结论。 历史基础、owner和SQL修复保留各自验证范围。
+当前生产接线和可靠FD分步接口见[持久初始化](docs/INITIALIZATION_PERSISTENCE.md)。已发布 `.5` 的本次真实只读初始化未通过；受控重启续扫完成=True，状态查询异常0次。最终0.266秒正常停止且无遗留挂载；未写NAS。实测期间宿主仍有开发活动，远端变更负载未控制，不作与旧版配对性能或长期验收结论。 历史基础、owner和SQL修复保留各自验证范围。
 
 ## 构建和测试
 
@@ -60,6 +60,7 @@ dpkg-buildpackage -b -us -uc
 | [scripts](scripts/) | 构建、测试及显式运行的研究工具 |
 | [debian](debian/) | Debian 打包定义 |
 | [vendor](vendor/README.md) | 固定的 fuser 补丁及上游许可 |
+| [docs/INITIALIZATION_PREVIEW.md](docs/INITIALIZATION_PREVIEW.md) | 冷启动只读目录预览、ACL撤销、原子转正及待验证边界 |
 | [docs/P1_ARCHITECTURE.md](docs/P1_ARCHITECTURE.md) | P1修改契约；通知诊断与部分读取隔离已实现，完整性能验收仍开放 |
 | [docs/FUSE_READ_ISOLATION.md](docs/FUSE_READ_ISOLATION.md) | 已打开内容读取隔离的实现、回归与未完成范围 |
 | [docs/DOWNLOAD_PUBLICATION.md](docs/DOWNLOAD_PUBLICATION.md) | 原生下载锁外复制、校验与持久化，以及短 Store 发布和 GC 保留 |
