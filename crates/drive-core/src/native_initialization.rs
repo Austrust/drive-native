@@ -32,10 +32,10 @@ pub enum InitializationBody {
     },
     Directory {
         identity: String,
-        children: Vec<Node>,
+        children: Vec<InitializationDirectoryEntry>,
         denied: bool,
     },
-    Events(Option<Batch>),
+    Events(Option<InitializationEventPage>),
 }
 
 impl NativeReadSession {
@@ -108,7 +108,9 @@ impl NativeReadSession {
                 validate_initialization_cursor(&cursor)?;
                 // No private worker cursor is advanced; repeat the caller's
                 // explicit cursor after lost replies or a worker restart.
-                Ok(InitializationBody::Events(self.pull(&cursor).await?))
+                Ok(InitializationBody::Events(
+                    self.pull_initialization_page(&cursor).await?,
+                ))
             }
         }
     }
@@ -351,7 +353,10 @@ where
                 "initialization child identity mismatch".into(),
             ));
         }
-        children.push(child);
+        children.push(InitializationDirectoryEntry {
+            node: child,
+            native_node_id: info.node_id,
+        });
     }
     Ok(InitializationBody::Directory {
         identity: node.id.clone(),
@@ -654,7 +659,7 @@ mod tests {
         )
         .unwrap();
         assert!(
-            matches!(result,InitializationBody::Directory{children,denied:false,..} if children.len()==1 && children[0].id=="11")
+            matches!(result,InitializationBody::Directory{children,denied:false,..} if children.len()==1 && children[0].node.id=="11" && children[0].native_node_id==30)
         );
         for infos in [
             vec![info("10", "root", FileType::Dir)],
@@ -682,6 +687,40 @@ mod tests {
             directory_reply(&scope(), &root, Ok(vec![invalid]), |_| panic!()),
             Err(Error::State(_))
         ));
+    }
+    #[test]
+    fn directory_serialization_preserves_same_list_row_numeric_identity() {
+        let root = node("10", None, "selected");
+        let mut row = info("11", "child", FileType::Dir);
+        row.node_id = u64::MAX;
+        let reply = directory_reply(&scope(), &root, Ok(vec![row]), |n| {
+            Ok(node(&n.file_id, Some("10"), &n.name))
+        })
+        .unwrap();
+        let decoded: InitializationBody =
+            serde_json::from_slice(&serde_json::to_vec(&reply).unwrap()).unwrap();
+        let InitializationBody::Directory {
+            identity,
+            children,
+            denied,
+        } = decoded
+        else {
+            panic!()
+        };
+        assert_eq!(identity, "10"); // still requested identity, NOT a server lookup proof.
+        assert!(!denied);
+        assert_eq!(children[0].native_node_id, u64::MAX);
+        assert_eq!(children[0].node.id, "11");
+        let mut replaced = info("12", "same-name", FileType::Dir);
+        replaced.node_id = 45;
+        assert!(
+            directory_reply(&scope(), &root, Ok(vec![replaced]), |n| Ok(node(
+                "11",
+                Some("10"),
+                &n.name
+            )))
+            .is_err()
+        );
     }
     #[test]
     fn only_child_12290_is_denied_not_root_or_transport_failure() {

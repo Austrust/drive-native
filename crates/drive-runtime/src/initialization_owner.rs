@@ -3,6 +3,7 @@
 use super::*;
 use drive_core::{
     Batch,
+    initialization_events::InitializationEventPage,
     initialization_store::{
         InitializationApplyResult, InitializationBinding, InitializationBudget, InitializationRun,
     },
@@ -230,6 +231,14 @@ impl Bridge {
         if reply.scope != session.scope || reply.restore != session.restore {
             return Err(invalid("initialization response session mismatch"));
         }
+        if let Body::Events(Some(page)) = &reply.body {
+            if page.scope != serde_json::to_value(&session.scope).map_err(io::Error::other)?
+                || page.restore != session.restore
+            {
+                return Err(invalid("initialization event page session mismatch"));
+            }
+            page.validate().map_err(io::Error::other)?;
+        }
         self.current(rpc)?;
         Ok(reply.body)
     }
@@ -238,7 +247,7 @@ impl Bridge {
         &self,
         rpc: &Arc<Rpc>,
         run: &InitializationRun,
-        batch: Option<Batch>,
+        batch: Option<InitializationEventPage>,
         directory_race: bool,
     ) -> io::Result<bool> {
         let _writes = self.recovery_gate.write().unwrap();
@@ -254,7 +263,7 @@ impl Bridge {
                 return Err(invalid("candidate changed"));
             }
             changed = store
-                .record_initialization_events(
+                .record_initialization_event_page(
                     run,
                     status
                         .received_sequence
@@ -658,7 +667,7 @@ impl Bridge {
                                 .map_err(io::Error::other)?;
                         } else {
                             store
-                                .store_initialization_directory(&ticket, 1, &children)
+                                .store_initialization_native_directory(&ticket, 1, &children)
                                 .map_err(io::Error::other)?;
                         }
                         store

@@ -59,20 +59,38 @@ impl Store {
         sequence: u64,
         children: &[Node],
     ) -> Result<bool> {
-        self.store_initialization_listing(ticket, sequence, Some(children))
+        self.store_initialization_listing(ticket, sequence, Some(children), None)
+    }
+    /// Numeric identities come from the same native NodeInfo listing as Node.
+    /// They are not inferred from file IDs or embedded in content versions.
+    pub fn store_initialization_native_directory(
+        &mut self,
+        ticket: &InitializationDirectoryTicket,
+        sequence: u64,
+        entries: &[InitializationDirectoryEntry],
+    ) -> Result<bool> {
+        if entries.len() > 500_000 || entries.iter().any(|entry| entry.native_node_id == 0) {
+            return Err(invalid("invalid native directory identities"));
+        }
+        let children = entries
+            .iter()
+            .map(|entry| entry.node.clone())
+            .collect::<Vec<_>>();
+        self.store_initialization_listing(ticket, sequence, Some(&children), Some(entries))
     }
     pub fn store_initialization_denied(
         &mut self,
         ticket: &InitializationDirectoryTicket,
         sequence: u64,
     ) -> Result<bool> {
-        self.store_initialization_listing(ticket, sequence, None)
+        self.store_initialization_listing(ticket, sequence, None, None)
     }
     fn store_initialization_listing(
         &mut self,
         ticket: &InitializationDirectoryTicket,
         sequence: u64,
         listing: Option<&[Node]>,
+        native: Option<&[InitializationDirectoryEntry]>,
     ) -> Result<bool> {
         if sequence == 0 {
             return Err(invalid("zero receipt sequence"));
@@ -111,7 +129,17 @@ impl Store {
                 return Err(invalid("listing byte budget exceeded"));
             }
         }
-        let digest = crate::sha256(&serde_json::to_vec(&(listing.is_none(), children))?);
+        let digest = if let Some(entries) = native {
+            crate::sha256(&serde_json::to_vec(&("native-directory-v1", entries))?)
+        } else {
+            crate::sha256(&serde_json::to_vec(&(listing.is_none(), children))?)
+        };
+        let native_ids = native.map(|entries| {
+            entries
+                .iter()
+                .map(|entry| (entry.node.id.as_str(), entry))
+                .collect::<HashMap<_, _>>()
+        });
         if matches!(state.as_str(), "received" | "denied") {
             if seq == Some(sequence) && hash.as_deref() == Some(&digest) {
                 return Ok(false);
@@ -158,7 +186,13 @@ impl Store {
         let mut retained = HashSet::new();
         for body in old {
             let old: Node = serde_json::from_str(&body)?;
-            if ids.get(old.id.as_str()).is_some_and(|new| **new == old) {
+            let incoming_identity = native_ids
+                .as_ref()
+                .and_then(|ids| ids.get(old.id.as_str()))
+                .map(|entry| entry.native_node_id);
+            if ids.get(old.id.as_str()).is_some_and(|new| **new == old)
+                && read_native_identity(&tx, &ticket.run.run_id, &old.id)? == incoming_identity
+            {
                 retained.insert(old.id);
             } else {
                 delete_subtree(&tx, &ticket.run.run_id, &old.id)?;
@@ -167,6 +201,12 @@ impl Store {
         for child in children {
             if !retained.contains(&child.id) {
                 insert_node(&tx, &ticket.run.run_id, child)?;
+                if let Some(entry) = native_ids
+                    .as_ref()
+                    .and_then(|ids| ids.get(child.id.as_str()))
+                {
+                    store_native_identity(&tx, &ticket.run.run_id, entry)?;
+                }
             }
         }
         // Recheck any surviving old parent and reject its in-flight response.
@@ -253,6 +293,23 @@ impl Store {
         sequence: u64,
         batch: &Batch,
     ) -> Result<bool> {
+        self.record_initialization_events_inner(run, sequence, batch, None)
+    }
+    pub fn record_initialization_event_page(
+        &mut self,
+        run: &InitializationRun,
+        sequence: u64,
+        page: &InitializationEventPage,
+    ) -> Result<bool> {
+        self.record_initialization_events_inner(run, sequence, &page.batch, Some(page))
+    }
+    fn record_initialization_events_inner(
+        &mut self,
+        run: &InitializationRun,
+        sequence: u64,
+        batch: &Batch,
+        page: Option<&InitializationEventPage>,
+    ) -> Result<bool> {
         number(sequence)?;
         let from = cursor(&batch.from)?;
         let to = cursor(&batch.to)?;
@@ -279,6 +336,9 @@ impl Store {
         }
         let body = serde_json::to_string(batch)?;
         let digest = crate::sha256(body.as_bytes());
+        let hint_body = page
+            .map(|page| encode_event_page(&s.binding, &run.run_id, sequence, &digest, page))
+            .transpose()?;
         if let Some(old) = tx
             .query_row(
                 "SELECT digest FROM initialization_events WHERE run=?1 AND seq=?2",
@@ -287,7 +347,15 @@ impl Store {
             )
             .optional()?
         {
-            if old == digest {
+            let (saved_batch, saved_page) = read_event_receipt(&tx, &s, sequence)?;
+            if old == digest && saved_batch == *batch {
+                if let (Some(incoming), Some(saved)) = (page, saved_page.as_ref()) {
+                    if !saved.matches_page(incoming) {
+                        return Err(invalid("event hint evidence cannot be replaced"));
+                    }
+                }
+                // An upgraded peer may replay a legacy receipt with hints. Its
+                // original evidence remains absent; never backfill on replay.
                 return Ok(false);
             }
             return Err(invalid("event sequence reused with different contents"));
@@ -307,11 +375,16 @@ impl Store {
         )?;
         let total = old_bytes
             .checked_add(body.len() as u64)
+            .and_then(|n| n.checked_add(hint_body.as_ref().map_or(0, |body| body.len() as u64)))
             .ok_or_else(|| invalid("event byte overflow"))?;
         if sequence > limits.event_batches || total > limits.event_bytes {
             return Err(invalid("candidate event budget exceeded"));
         }
         tx.execute("INSERT INTO initialization_events(run,seq,from_cursor,to_cursor,body,digest,bytes) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![run.run_id,number(sequence)?,batch.from,batch.to,body,digest,body.len() as i64])?;
+        if let Some(hints) = hint_body {
+            tx.execute("INSERT INTO initialization_event_hints(run,seq,body,digest,bytes) VALUES(?1,?2,?3,?4,?5)",
+                params![run.run_id,number(sequence)?,hints,crate::sha256(hints.as_bytes()),hints.len() as i64])?;
+        }
         tx.execute("UPDATE initialization_run SET received=?2,received_seq=?3,event_bytes=?4,fenced=NULL,fence_ticket=NULL WHERE run_id=?1",params![run.run_id,batch.to,number(sequence)?,number(total)?])?;
         tx.commit()?;
         Ok(true)
@@ -325,9 +398,9 @@ impl Store {
         if limit == 0 || limit > 64 {
             return Err(invalid("invalid event page limit"));
         }
-        let rows=self.db.prepare("SELECT seq,body FROM initialization_events WHERE run=?1 AND seq>?2 ORDER BY seq LIMIT ?3")?.query_map(params![run.run_id,number(s.applied_sequence)?,limit as i64],|r|Ok((read_counter(r,0)?,r.get::<_,String>(1)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
+        let rows=self.db.prepare("SELECT seq FROM initialization_events WHERE run=?1 AND seq>?2 ORDER BY seq LIMIT ?3")?.query_map(params![run.run_id,number(s.applied_sequence)?,limit as i64],|r|read_counter(r,0))?.collect::<std::result::Result<Vec<_>,_>>()?;
         rows.into_iter()
-            .map(|(seq, body)| Ok((seq, serde_json::from_str(&body)?)))
+            .map(|seq| Ok((seq, read_event_receipt(&self.db, &s, seq)?.0)))
             .collect()
     }
     /// The owner needs only the next durable sequence, not another full decode
@@ -384,17 +457,13 @@ impl Store {
             return Err(invalid("event not received"));
         }
         if sequence <= s.applied_sequence {
+            read_event_receipt(&tx, &s, sequence)?;
             return Ok(InitializationApplyResult::AlreadyApplied);
         }
         if sequence != s.applied_sequence + 1 {
             return Err(invalid("event application gap"));
         }
-        let body: String = tx.query_row(
-            "SELECT body FROM initialization_events WHERE run=?1 AND seq=?2",
-            params![run.run_id, number(sequence)?],
-            |r| r.get(0),
-        )?;
-        let batch: Batch = serde_json::from_str(&body)?;
+        let (batch, _page) = read_event_receipt(&tx, &s, sequence)?;
         if batch.from != s.applied_cursor {
             return Err(invalid("candidate applied cursor mismatch"));
         }

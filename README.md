@@ -1,6 +1,6 @@
 # Drive Native
 
-当前源码增加[初始化事件依赖等待与有界恢复](docs/CANDIDATE_EVENT_COVERAGE.md)，计划开发包.5，尚未构建或发布。62项核心、15项owner及全目标检查通过；新源码真实NAS收敛尚未验证。
+当前实验分支增加[持久初始化事件证据](docs/INITIALIZATION_EVENT_EVIDENCE.md)，257项core、112项runtime及全目标检查通过。基于冻结`.5`，实验使用schema21／IPC18，尚未打包；局部重查调度和逐目录提前显示仍待实现。
 
 当前开发包 `.4` 修复候选递归查询的重复扫描，已[发布](https://github.com/Austrust/drive-native/releases/tag/dev20261101.4)；[真实失败、局部SQL复放及修复版复测](docs/CANDIDATE_QUERY_ORDER.md)。修复版真实只读初始化本次仍未通过：受控重启续扫已完成，状态查询异常0次，最终0.216秒正常退出且无遗留挂载。它不等于同负载端到端配对性能、断网故障或长期验收；本次未写NAS。
 

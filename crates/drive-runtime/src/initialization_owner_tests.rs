@@ -86,6 +86,87 @@ fn protected(store: &Store) -> serde_json::Value {
         "renamed":store.lookup_node("100","Renamed.txt").unwrap().id})
 }
 
+// Explicit synthetic envelope for RPC fixtures; never infer production hints here.
+fn fixture_page(data: &RemoteSnapshot, batch: Batch) -> InitializationEventPage {
+    use drive_core::initialization_events::{InitializationEventHint, InitializationEventKind};
+    let hints = batch
+        .events
+        .iter()
+        .enumerate()
+        .map(|(ordinal, event)| {
+            let (id, name, parent, removed) = match &event.change {
+                drive_core::Change::Upsert(node) => {
+                    (&node.id, node.name.clone(), node.parent.clone(), false)
+                }
+                drive_core::Change::Delete { id } => (id, "removed-fixture".into(), None, true),
+            };
+            let mut names = vec![name];
+            let mut next = parent.clone();
+            while let Some(id) = next {
+                if id == data.scope.file_id {
+                    break;
+                }
+                if let Some(node) = data.nodes.iter().find(|node| node.id == id) {
+                    names.push(node.name.clone());
+                    next = node.parent.clone();
+                } else {
+                    names.push(format!("missing-parent-{id}"));
+                    break;
+                }
+            }
+            names.reverse();
+            let path = if id == &data.scope.file_id {
+                data.scope.path.clone()
+            } else {
+                format!("{}/{}", data.scope.path, names.join("/"))
+            };
+            InitializationEventHint {
+                ordinal: ordinal as u64,
+                event_id: event.id.clone(),
+                event_sync_id: number(&batch.to).unwrap(),
+                file_id: id.clone(),
+                kind: if removed {
+                    InitializationEventKind::Remove
+                } else {
+                    InitializationEventKind::Modify
+                },
+                event_path: path,
+                destination_path: None,
+                metadata_parent_id: if removed { None } else { parent },
+                destination_parent_id: None,
+                metadata_removed: removed,
+            }
+        })
+        .collect();
+    let page = InitializationEventPage {
+        batch,
+        scope: serde_json::to_value(&data.scope).unwrap(),
+        restore: data.restore.clone(),
+        hints,
+    };
+    page.validate().unwrap();
+    page
+}
+
+// The synthetic native list has numeric IDs in a distinct fixture namespace;
+// no production code derives a native node ID from a file ID.
+fn fixture_children(
+    data: &RemoteSnapshot,
+    parent: &str,
+) -> Vec<drive_core::initialization_events::InitializationDirectoryEntry> {
+    data.nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, node)| node.parent.as_deref() == Some(parent))
+        .map(
+            |(index, node)| drive_core::initialization_events::InitializationDirectoryEntry {
+                node: node.clone(),
+                native_node_id: 10_000 + index as u64,
+            },
+        )
+        .collect()
+}
+
 enum Answer {
     Body(Body),
     Ordinary,
@@ -109,12 +190,7 @@ fn standard(data: &RemoteSnapshot, command: &Command) -> Answer {
             Answer::Body(Body::Directory {
                 identity: node.id.clone(),
                 denied: false,
-                children: data
-                    .nodes
-                    .iter()
-                    .filter(|child| child.parent.as_deref() == Some(node.id.as_str()))
-                    .cloned()
-                    .collect(),
+                children: fixture_children(&data, &node.id),
             })
         }
         Command::Pull { .. } => Answer::Ordinary,
@@ -317,14 +393,17 @@ fn deferred_file_parent_pauses_pull_while_multiple_directory_rounds_make_progres
             token["sync"] = 8.into();
             token["max"] = 8.into();
             older.version = token.to_string();
-            Answer::Body(Body::Events(Some(Batch {
-                from: "native-v1:7".into(),
-                to: "native-v1:8".into(),
-                events: vec![drive_core::Event {
-                    id: "missing-parent".into(),
-                    change: drive_core::Change::Upsert(older),
-                }],
-            })))
+            Answer::Body(Body::Events(Some(fixture_page(
+                &replies,
+                Batch {
+                    from: "native-v1:7".into(),
+                    to: "native-v1:8".into(),
+                    events: vec![drive_core::Event {
+                        id: "missing-parent".into(),
+                        change: drive_core::Change::Upsert(older),
+                    }],
+                },
+            ))))
         }
         Command::Initialization(Request::Pull { cursor }) => {
             assert!(
@@ -339,12 +418,7 @@ fn deferred_file_parent_pauses_pull_while_multiple_directory_rounds_make_progres
             Answer::Body(Body::Directory {
                 identity: node.id.clone(),
                 denied: false,
-                children: replies
-                    .nodes
-                    .iter()
-                    .filter(|child| child.parent.as_deref() == Some(node.id.as_str()))
-                    .cloned()
-                    .collect(),
+                children: fixture_children(&replies, &node.id),
             })
         }
         _ => standard(&replies, request),
@@ -385,14 +459,17 @@ fn permanently_absent_parent_gets_one_conservative_recheck_not_an_owner_spin() {
             sent = true;
             let mut unknown = replies.nodes[4].clone();
             unknown.parent = Some("999".into());
-            Answer::Body(Body::Events(Some(Batch {
-                from: "native-v1:7".into(),
-                to: "native-v1:8".into(),
-                events: vec![drive_core::Event {
-                    id: "unresolved".into(),
-                    change: drive_core::Change::Upsert(unknown),
-                }],
-            })))
+            Answer::Body(Body::Events(Some(fixture_page(
+                &replies,
+                Batch {
+                    from: "native-v1:7".into(),
+                    to: "native-v1:8".into(),
+                    events: vec![drive_core::Event {
+                        id: "unresolved".into(),
+                        change: drive_core::Change::Upsert(unknown),
+                    }],
+                },
+            ))))
         } else {
             standard(&replies, request)
         }
@@ -470,24 +547,30 @@ fn run_deferred_page_directory_race(category: &'static str, expect_success: bool
     let seen = paths.clone();
     let peer = Peer::new(data, move |request| match request {
         Command::Initialization(Request::Pull { cursor }) if cursor == "native-v1:7" => {
-            Answer::Body(Body::Events(Some(Batch {
-                from: cursor.clone(),
-                to: "native-v1:8".into(),
-                events: vec![drive_core::Event {
-                    id: "unknown-parent-page".into(),
-                    change: drive_core::Change::Upsert(replies.nodes[4].clone()),
-                }],
-            })))
+            Answer::Body(Body::Events(Some(fixture_page(
+                &replies,
+                Batch {
+                    from: cursor.clone(),
+                    to: "native-v1:8".into(),
+                    events: vec![drive_core::Event {
+                        id: "unknown-parent-page".into(),
+                        change: drive_core::Change::Upsert(replies.nodes[4].clone()),
+                    }],
+                },
+            ))))
         }
         Command::Initialization(Request::Pull { cursor }) if cursor == "native-v1:8" => {
-            Answer::Body(Body::Events(Some(Batch {
-                from: cursor.clone(),
-                to: "native-v1:9".into(),
-                events: vec![drive_core::Event {
-                    id: "directory-moved-next-page".into(),
-                    change: drive_core::Change::Upsert(replies.nodes[3].clone()),
-                }],
-            })))
+            Answer::Body(Body::Events(Some(fixture_page(
+                &replies,
+                Batch {
+                    from: cursor.clone(),
+                    to: "native-v1:9".into(),
+                    events: vec![drive_core::Event {
+                        id: "directory-moved-next-page".into(),
+                        change: drive_core::Change::Upsert(replies.nodes[3].clone()),
+                    }],
+                },
+            ))))
         }
         Command::Initialization(Request::Directory { node, path }) => {
             seen.lock().unwrap().push(path.clone());
@@ -506,12 +589,7 @@ fn run_deferred_page_directory_race(category: &'static str, expect_success: bool
             Answer::Body(Body::Directory {
                 identity: node.id.clone(),
                 denied: false,
-                children: replies
-                    .nodes
-                    .iter()
-                    .filter(|child| child.parent.as_deref() == Some(node.id.as_str()))
-                    .cloned()
-                    .collect(),
+                children: fixture_children(&replies, &node.id),
             })
         }
         _ => standard(&replies, request),
@@ -581,14 +659,17 @@ fn repeated_coverage_races_exhaust_budget_without_publishing_or_losing_dirty_sta
             let n = number(cursor).unwrap();
             let mut file = replies.nodes[4].clone();
             file.parent = Some("300".into());
-            Answer::Body(Body::Events(Some(Batch {
-                from: cursor.clone(),
-                to: format!("native-v1:{}", n + 1),
-                events: vec![drive_core::Event {
-                    id: format!("missing-{n}"),
-                    change: drive_core::Change::Upsert(file),
-                }],
-            })))
+            Answer::Body(Body::Events(Some(fixture_page(
+                &replies,
+                Batch {
+                    from: cursor.clone(),
+                    to: format!("native-v1:{}", n + 1),
+                    events: vec![drive_core::Event {
+                        id: format!("missing-{n}"),
+                        change: drive_core::Change::Upsert(file),
+                    }],
+                },
+            ))))
         }
         Command::Initialization(Request::Directory { node, .. }) if node.id == "200" => {
             Answer::Fail("native_snapshot_changed")
@@ -877,11 +958,14 @@ fn advancing_empty_event_pages_yield_to_directory_work_after_sixteen_pages() {
                 "continuous events starved directory enumeration"
             );
             let current = number(cursor).unwrap();
-            Answer::Body(Body::Events(Some(Batch {
-                from: cursor.clone(),
-                to: format!("native-v1:{}", current + 1),
-                events: vec![],
-            })))
+            Answer::Body(Body::Events(Some(fixture_page(
+                &replies,
+                Batch {
+                    from: cursor.clone(),
+                    to: format!("native-v1:{}", current + 1),
+                    events: vec![],
+                },
+            ))))
         }
         Command::Initialization(Request::Directory { .. }) => {
             assert_eq!(pages, 16);
@@ -996,7 +1080,7 @@ fn four_directory_requests_are_in_flight_before_any_child_reply_and_fence_is_sep
                         &data,
                         Body::Directory {
                             identity: node.id,
-                            children: data.nodes[1..].to_vec(),
+                            children: fixture_children(&data, &data.scope.file_id),
                             denied: false,
                         },
                     );
@@ -1060,4 +1144,41 @@ fn four_directory_requests_are_in_flight_before_any_child_reply_and_fence_is_sep
         5
     );
     assert_eq!(log.last().unwrap(), "candidate-pull:native-v1:7");
+}
+
+#[test]
+fn mismatched_native_hint_page_header_is_rejected_before_persistent_receipt() {
+    for wrong_restore in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let data = snapshot("server", 7);
+        let replies = data.clone();
+        let peer = Peer::new(data, move |request| match request {
+            Command::Initialization(Request::Pull { cursor }) => {
+                let mut page = fixture_page(
+                    &replies,
+                    Batch {
+                        from: cursor.clone(),
+                        to: "native-v1:8".into(),
+                        events: vec![],
+                    },
+                );
+                if wrong_restore {
+                    page.restore = "another-server".into();
+                } else {
+                    page.scope["view_id"] = 2.into();
+                }
+                Answer::Body(Body::Events(Some(page)))
+            }
+            _ => standard(&replies, request),
+        });
+        let bridge = bridge(Store::open(dir.path()).unwrap(), &peer, "server");
+        assert!(bridge.initial_pull().is_err());
+        let store = bridge.store.lock().unwrap();
+        assert_eq!(store.cursor().unwrap(), "");
+        let state = store.initialization_status().unwrap().unwrap();
+        assert_eq!(state.received_sequence, 0);
+        assert!(store.initialization_writeback_blocked().unwrap());
+        drop(store);
+        peer.finish();
+    }
 }

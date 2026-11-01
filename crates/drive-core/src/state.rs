@@ -147,7 +147,7 @@ impl Drop for ReadHandle {
 }
 
 /// Version of the durable state contract, including journal semantics.
-pub const STATE_SCHEMA_VERSION: i64 = 20;
+pub const STATE_SCHEMA_VERSION: i64 = 21;
 
 impl Store {
     /// One store per account + sync root. Independent accounts never share event IDs or cursors.
@@ -276,11 +276,20 @@ impl Store {
         )?)
     }
     pub fn skipped_symlink_count(&self) -> Result<u64> {
-        let count: Option<String> = self.db.query_row("SELECT value FROM metadata WHERE key='skipped_symlinks'", [], |r| r.get(0)).optional()?;
+        let count: Option<String> = self
+            .db
+            .query_row(
+                "SELECT value FROM metadata WHERE key='skipped_symlinks'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?;
         Ok(count.and_then(|s| s.parse().ok()).unwrap_or(0))
     }
     pub fn inaccessible_count(&self) -> Result<i64> {
-        Ok(self.db.query_row("SELECT count(*) FROM access_denied", [], |r| r.get(0))?)
+        Ok(self
+            .db
+            .query_row("SELECT count(*) FROM access_denied", [], |r| r.get(0))?)
     }
     pub fn is_inaccessible(&self, id: &str) -> Result<bool> {
         Ok(self.db.query_row("SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM access_denied) THEN 0 ELSE (
@@ -296,7 +305,9 @@ impl Store {
     fn read_node(&self, id: &str, orphan: bool) -> Result<Node> {
         // Walk this node's ancestors, not the entire retained denied subtree,
         // on the hot getattr/lookup path.
-        if self.is_inaccessible(id)? { return Err(rusqlite::Error::QueryReturnedNoRows.into()); }
+        if self.is_inaccessible(id)? {
+            return Err(rusqlite::Error::QueryReturnedNoRows.into());
+        }
         let mut node = self.db.query_row(
             "SELECT id,parent,name,remote_version,directory FROM nodes WHERE id=?1 AND (deleted=0 OR (?2 AND EXISTS(SELECT 1 FROM local_unlinks WHERE node=?1)))",
             params![id,orphan],
@@ -373,24 +384,42 @@ impl Store {
     /// Immutable, namespaced local integration marker. Never a server cursor.
     pub fn extension_marker(&self, name: &str) -> Result<Option<String>> {
         let key = format!("extension:{name}");
-        Ok(self.db.query_row("SELECT value FROM metadata WHERE key=?1", [key], |r| r.get(0)).optional()?)
+        Ok(self
+            .db
+            .query_row("SELECT value FROM metadata WHERE key=?1", [key], |r| {
+                r.get(0)
+            })
+            .optional()?)
     }
     pub fn claim_extension_marker(&mut self, name: &str, value: &str) -> Result<()> {
-        if name.is_empty() || name.len()>128 || value.len()>4096 {
+        if name.is_empty() || name.len() > 128 || value.len() > 4096 {
             return Err(Error::State("invalid local extension marker".into()));
         }
         let key = format!("extension:{name}");
-        let tx=self.db.transaction()?;
-        tx.execute("INSERT OR IGNORE INTO metadata(key,value) VALUES(?1,?2)",params![key,value])?;
-        let existing:String=tx.query_row("SELECT value FROM metadata WHERE key=?1",[key],|r|r.get(0))?;
-        if existing!=value {return Err(Error::State("local extension marker already claimed".into()));}
-        tx.commit()?;Ok(())
+        let tx = self.db.transaction()?;
+        tx.execute(
+            "INSERT OR IGNORE INTO metadata(key,value) VALUES(?1,?2)",
+            params![key, value],
+        )?;
+        let existing: String =
+            tx.query_row("SELECT value FROM metadata WHERE key=?1", [key], |r| {
+                r.get(0)
+            })?;
+        if existing != value {
+            return Err(Error::State(
+                "local extension marker already claimed".into(),
+            ));
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     /// Store the full batch before processing it. Receipt and consumption have distinct cursors.
     pub fn receive(&mut self, batch: &Batch) -> Result<()> {
         if self.initialization_writeback_blocked()? {
-            return Err(Error::State("initialization: candidate active; ordinary inbox blocked".into()));
+            return Err(Error::State(
+                "initialization: candidate active; ordinary inbox blocked".into(),
+            ));
         }
         if batch.to == batch.from {
             return Err(Error::State(
@@ -428,7 +457,9 @@ impl Store {
 
     pub fn apply_next(&mut self) -> Result<bool> {
         if self.initialization_writeback_blocked()? {
-            return Err(Error::State("initialization: candidate active; ordinary inbox blocked".into()));
+            return Err(Error::State(
+                "initialization: candidate active; ordinary inbox blocked".into(),
+            ));
         }
         let next: Option<(i64, String)> = self
             .db
@@ -517,7 +548,9 @@ impl Store {
         )?)
     }
     pub fn pin(&mut self, id: &str, value: bool) -> Result<()> {
-        if self.is_inaccessible(id)? { return Err(Error::Io(std::io::Error::from_raw_os_error(libc::EACCES))); }
+        if self.is_inaccessible(id)? {
+            return Err(Error::Io(std::io::Error::from_raw_os_error(libc::EACCES)));
+        }
         if self.db.execute(
             "UPDATE nodes SET pinned=?2 WHERE id=?1 AND deleted=0",
             params![id, value],
@@ -540,7 +573,10 @@ impl Store {
             .collect::<std::result::Result<Vec<_>, _>>()?;
         let mut result = Vec::new();
         for (id, version, cached) in candidates {
-            if self.cache_release_pending(&DownloadTicket{id:id.clone(),version:version.clone()})? {
+            if self.cache_release_pending(&DownloadTicket {
+                id: id.clone(),
+                version: version.clone(),
+            })? {
                 continue;
             }
             if self.dirty_draft(&id)? || crate::namespace::blocks_upload(&self.db, &id)? {
@@ -581,7 +617,9 @@ impl Store {
         size: u64,
         expected_sha256: &str,
     ) -> Result<()> {
-        let body = self.prepare_download(ticket)?.prepare(source, size, expected_sha256, || false)?;
+        let body = self
+            .prepare_download(ticket)?
+            .prepare(source, size, expected_sha256, || false)?;
         self.publish_prepared_download(body)
     }
     pub(crate) fn write_blob(&self, bytes: &[u8]) -> Result<String> {
@@ -623,7 +661,9 @@ impl Store {
         Ok(name)
     }
     pub fn open_cached(&self, id: &str) -> Result<ReadHandle> {
-        if self.is_inaccessible(id)? { return Err(Error::Io(std::io::Error::from_raw_os_error(libc::EACCES))); }
+        if self.is_inaccessible(id)? {
+            return Err(Error::Io(std::io::Error::from_raw_os_error(libc::EACCES)));
+        }
         let row:Option<(Option<String>,bool,bool,Option<String>)>=self.db.query_row("SELECT COALESCE(dirty_blob,blob),deleted,conflict,COALESCE(base_version,local_version) FROM nodes WHERE id=?1",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional()?;
         let Some((Some(blob), deleted, conflict, Some(version))) = row else {
             return Err(Error::Offline);
@@ -982,17 +1022,28 @@ impl Store {
         self.install_remote_snapshot_with_access(nodes, cursor, server, &[])
     }
     pub(crate) fn install_remote_snapshot_with_access(
-        &mut self, nodes: &[Node], cursor: &str, server: &str, inaccessible: &[String],
+        &mut self,
+        nodes: &[Node],
+        cursor: &str,
+        server: &str,
+        inaccessible: &[String],
     ) -> Result<()> {
-        self.install_remote_snapshot_with_initialization(nodes,cursor,server,inaccessible,None)
+        self.install_remote_snapshot_with_initialization(nodes, cursor, server, inaccessible, None)
     }
     pub(crate) fn install_remote_snapshot_with_initialization(
-        &mut self,nodes:&[Node],cursor:&str,server:&str,inaccessible:&[String],
-        initialization:Option<&crate::initialization_store::InitializationCommit>,
-    )->Result<()> {
-        crate::initialization_store::check_install_gate(&self.db,initialization)?;
+        &mut self,
+        nodes: &[Node],
+        cursor: &str,
+        server: &str,
+        inaccessible: &[String],
+        initialization: Option<&crate::initialization_store::InitializationCommit>,
+    ) -> Result<()> {
+        crate::initialization_store::check_install_gate(&self.db, initialization)?;
         use std::collections::{HashMap, HashSet};
-        let inaccessible = inaccessible.iter().map(|id| self.local_identity(id)).collect::<Result<Vec<_>>>()?;
+        let inaccessible = inaccessible
+            .iter()
+            .map(|id| self.local_identity(id))
+            .collect::<Result<Vec<_>>>()?;
         let mapped = self.mapped_snapshot(nodes)?;
         let nodes = &mapped;
         if nodes.is_empty() || nodes.len() > 1_000_000 || cursor.is_empty() || server.is_empty() {
@@ -1017,7 +1068,11 @@ impl Store {
         }
         let mut denied_unique = HashSet::new();
         for id in &inaccessible {
-            if !denied_unique.insert(id) || !by_id.get(id.as_str()).is_some_and(|n| n.directory && n.parent.is_some()) {
+            if !denied_unique.insert(id)
+                || !by_id
+                    .get(id.as_str())
+                    .is_some_and(|n| n.directory && n.parent.is_some())
+            {
                 return Err(Error::State("invalid inaccessible subtree identity".into()));
             }
         }
@@ -1059,60 +1114,70 @@ impl Store {
             verified.extend(visiting);
         }
         crate::status_changes::replace_snapshot(&mut self.db, |tx| {
-        crate::initialization_store::check_install_gate(tx,initialization)?;
-        tx.execute_batch("CREATE TEMP TABLE recovery_ids(id TEXT PRIMARY KEY);")?;
-        {
-            let mut insert = tx.prepare("INSERT INTO recovery_ids VALUES(?1)")?;
-            for n in nodes { insert.execute([&n.id])?; }
-        }
-        // Permission loss is not deletion. Keep previous denied roots that the
-        // server now omits, until the same identity is positively enumerated.
-        tx.execute("DELETE FROM access_denied WHERE node IN (SELECT id FROM recovery_ids)", [])?;
-        {
-            let mut insert = tx.prepare("INSERT OR IGNORE INTO access_denied VALUES(?1)")?;
-            for id in &inaccessible { insert.execute([id])?; }
-        }
-        tx.execute("INSERT OR IGNORE INTO recovery_ids SELECT id FROM access_blocked", [])?;
-        // Only absent objects become tombstones. Dirty content remains visible as
-        // a conflict and stays protected from garbage collection.
-        tx.execute("UPDATE nodes SET deleted=1,conflict=CASE WHEN dirty_blob IS NOT NULL AND id NOT IN (SELECT node FROM local_unlinks) THEN 1 ELSE conflict END WHERE id NOT IN (SELECT id FROM recovery_ids) AND id NOT IN (SELECT node FROM local_creations) AND id NOT IN (SELECT node FROM namespace_overlay)",[])?;
-        // A missing/replaced remote object must not leave a pending upload
-        // eligible for automatic recreation. Keep its blob for conflict resolution.
-        tx.execute("UPDATE operations SET state='conflict' WHERE kind='upload' AND state='pending' AND node IN (SELECT id FROM nodes WHERE deleted=1 AND conflict=1)", [])?;
-        tx.execute("UPDATE namespace_overlay SET remote='null' WHERE node NOT IN (SELECT id FROM recovery_ids)",[])?;
-        tx.execute("UPDATE nodes SET conflict=1 WHERE id IN (SELECT node FROM namespace_overlay WHERE remote='null') AND id NOT IN (SELECT node FROM local_unlinks)",[])?;
-        {
-        let mut upsert = tx.prepare("INSERT INTO nodes(id,parent,name,remote_version,directory) VALUES(?1,?2,?3,?4,?5)
+            crate::initialization_store::check_install_gate(tx, initialization)?;
+            tx.execute_batch("CREATE TEMP TABLE recovery_ids(id TEXT PRIMARY KEY);")?;
+            {
+                let mut insert = tx.prepare("INSERT INTO recovery_ids VALUES(?1)")?;
+                for n in nodes {
+                    insert.execute([&n.id])?;
+                }
+            }
+            // Permission loss is not deletion. Keep previous denied roots that the
+            // server now omits, until the same identity is positively enumerated.
+            tx.execute(
+                "DELETE FROM access_denied WHERE node IN (SELECT id FROM recovery_ids)",
+                [],
+            )?;
+            {
+                let mut insert = tx.prepare("INSERT OR IGNORE INTO access_denied VALUES(?1)")?;
+                for id in &inaccessible {
+                    insert.execute([id])?;
+                }
+            }
+            tx.execute(
+                "INSERT OR IGNORE INTO recovery_ids SELECT id FROM access_blocked",
+                [],
+            )?;
+            // Only absent objects become tombstones. Dirty content remains visible as
+            // a conflict and stays protected from garbage collection.
+            tx.execute("UPDATE nodes SET deleted=1,conflict=CASE WHEN dirty_blob IS NOT NULL AND id NOT IN (SELECT node FROM local_unlinks) THEN 1 ELSE conflict END WHERE id NOT IN (SELECT id FROM recovery_ids) AND id NOT IN (SELECT node FROM local_creations) AND id NOT IN (SELECT node FROM namespace_overlay)",[])?;
+            // A missing/replaced remote object must not leave a pending upload
+            // eligible for automatic recreation. Keep its blob for conflict resolution.
+            tx.execute("UPDATE operations SET state='conflict' WHERE kind='upload' AND state='pending' AND node IN (SELECT id FROM nodes WHERE deleted=1 AND conflict=1)", [])?;
+            tx.execute("UPDATE namespace_overlay SET remote='null' WHERE node NOT IN (SELECT id FROM recovery_ids)",[])?;
+            tx.execute("UPDATE nodes SET conflict=1 WHERE id IN (SELECT node FROM namespace_overlay WHERE remote='null') AND id NOT IN (SELECT node FROM local_unlinks)",[])?;
+            {
+                let mut upsert = tx.prepare("INSERT INTO nodes(id,parent,name,remote_version,directory) VALUES(?1,?2,?3,?4,?5)
                 ON CONFLICT(id) DO UPDATE SET parent=excluded.parent,name=excluded.name,remote_version=excluded.remote_version,directory=excluded.directory,deleted=CASE WHEN EXISTS(SELECT 1 FROM local_unlinks WHERE node=nodes.id) THEN 1 ELSE 0 END,
                 conflict=CASE WHEN nodes.dirty_blob IS NOT NULL AND nodes.base_version!=excluded.remote_version AND NOT EXISTS(SELECT 1 FROM local_unlinks WHERE node=nodes.id) THEN 1 ELSE nodes.conflict END")?;
-        let mut metadata = crate::filesystem::SnapshotMetadataWriter::new(tx)?;
-        for original in nodes {
-            let Some(Change::Upsert(n)) =
-                crate::namespace::overlay_change(tx, &Change::Upsert(original.clone()))?
-            else {
-                continue;
-            };
-            upsert.execute(params![n.id,n.parent,n.name,n.version,n.directory])?;
-            metadata.write(&n)?;
-        }
-        }
-        tx.execute(
-            "UPDATE operations SET state='uncertain' WHERE state='inflight'",
-            [],
-        )?;
-        tx.execute("UPDATE transfers SET state='obsolete' WHERE direction='download' AND NOT EXISTS(SELECT 1 FROM nodes n WHERE n.id=transfers.node AND n.remote_version=transfers.version AND n.deleted=0)",[])?;
-        tx.execute("DELETE FROM inbox", [])?;
-        tx.execute("DELETE FROM seen", [])?;
-        tx.execute(
-            "UPDATE metadata SET value=?1 WHERE key IN ('received_cursor','committed_cursor')",
-            [cursor],
-        )?;
-        tx.execute("INSERT INTO metadata(key,value) VALUES('server_restore_id',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[server])?;
-        if let Some(initialization)=initialization {
-            crate::initialization_store::finish_in_transaction(tx,initialization,cursor)?;
-        }
-        tx.execute_batch("DROP TABLE recovery_ids;")?;
-        Ok(())
+                let mut metadata = crate::filesystem::SnapshotMetadataWriter::new(tx)?;
+                for original in nodes {
+                    let Some(Change::Upsert(n)) =
+                        crate::namespace::overlay_change(tx, &Change::Upsert(original.clone()))?
+                    else {
+                        continue;
+                    };
+                    upsert.execute(params![n.id, n.parent, n.name, n.version, n.directory])?;
+                    metadata.write(&n)?;
+                }
+            }
+            tx.execute(
+                "UPDATE operations SET state='uncertain' WHERE state='inflight'",
+                [],
+            )?;
+            tx.execute("UPDATE transfers SET state='obsolete' WHERE direction='download' AND NOT EXISTS(SELECT 1 FROM nodes n WHERE n.id=transfers.node AND n.remote_version=transfers.version AND n.deleted=0)",[])?;
+            tx.execute("DELETE FROM inbox", [])?;
+            tx.execute("DELETE FROM seen", [])?;
+            tx.execute(
+                "UPDATE metadata SET value=?1 WHERE key IN ('received_cursor','committed_cursor')",
+                [cursor],
+            )?;
+            tx.execute("INSERT INTO metadata(key,value) VALUES('server_restore_id',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[server])?;
+            if let Some(initialization) = initialization {
+                crate::initialization_store::finish_in_transaction(tx, initialization, cursor)?;
+            }
+            tx.execute_batch("DROP TABLE recovery_ids;")?;
+            Ok(())
         })
     }
 
