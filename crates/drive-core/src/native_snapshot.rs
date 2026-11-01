@@ -10,6 +10,12 @@ mod reconcile;
 #[path = "native_snapshot_watermark.rs"]
 mod watermark_seed;
 
+// Stepwise initialization shares these verified seed/list helpers, but does not
+// retain a worker-side checkpoint or publish any candidate by sending a reply.
+#[path = "native_initialization.rs"]
+mod initialization;
+pub use initialization::{InitializationBody, InitializationReply, InitializationRequest};
+
 pub const SNAPSHOT_NODE_LIMIT: usize = 500_000;
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

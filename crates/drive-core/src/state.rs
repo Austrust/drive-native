@@ -147,7 +147,7 @@ impl Drop for ReadHandle {
 }
 
 /// Version of the durable state contract, including journal semantics.
-pub const STATE_SCHEMA_VERSION: i64 = 19;
+pub const STATE_SCHEMA_VERSION: i64 = 20;
 
 impl Store {
     /// One store per account + sync root. Independent accounts never share event IDs or cursors.

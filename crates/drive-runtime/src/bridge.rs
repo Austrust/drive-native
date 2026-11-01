@@ -11,7 +11,7 @@ use std::{
     process::{Child, Command as Process, Stdio},
     sync::{
         Arc, Condvar, Mutex,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -82,6 +82,9 @@ pub struct Bridge {
     recovery_gate: std::sync::RwLock<()>,
     event_gate: Mutex<()>,
     connection: Mutex<Arc<Rpc>>,
+    initialization_task: Mutex<Option<String>>,
+    initialization_session: Mutex<Option<initialization_owner::Session>>,
+    session_pending: AtomicBool,
     flights: Mutex<HashMap<(String, String), Arc<Flight>>>,
     notifier: Arc<Mutex<Option<fuser::Notifier>>>,
     notifications: std::sync::mpsc::SyncSender<Invalidation>,
@@ -105,15 +108,19 @@ impl Bridge {
         self.connection.lock().unwrap().clone()
     }
     /// Stop/join the prior event loop before attaching. The mount, handles and
-    /// SQLite writer survive. A different server restore/root is rejected.
+    /// SQLite writer survive. A changed restore requires verified initialization;
+    /// a different selected scope is rejected.
     pub fn reconnect(&self, rpc: Arc<Rpc>, login: Login) -> io::Result<()> {
         let scope = serde_json::to_string(&login.scope)?;
         let restore = Self::authenticate(&rpc, login)?;
         self.attach(rpc, &restore, &scope)
     }
-    /// The supervisor serializes this short commit with pause/stop. Network
-    /// authentication happens outside that lock and can be interrupted.
+    /// Attach under the recovery gate, outside the supervisor control lock so
+    /// pause/stop can interrupt network work. The supervisor rechecks generation.
     pub fn attach(&self, rpc: Arc<Rpc>, restore: &str, scope: &str) -> io::Result<()> {
+        if self.initialization_task.lock().unwrap().is_some() {
+            return self.attach_initialization_session(rpc, restore, scope);
+        }
         // Initialization owners must take the write side before beginning or
         // completing a durable candidate. Keep the same gate -> Store ordering
         // as mutation dispatch, including while publishing the new connection.
@@ -243,6 +250,9 @@ impl Bridge {
             store,
             recovery_gate: std::sync::RwLock::new(()),
             event_gate: Mutex::new(()),
+            initialization_task: Mutex::new(None),
+            initialization_session: Mutex::new(None),
+            session_pending: AtomicBool::new(false),
             connection: Mutex::new(rpc),
             flights: Mutex::new(HashMap::new()),
             notifier,
@@ -259,11 +269,13 @@ impl Bridge {
     pub fn set_notifier(&self, notifier: fuser::Notifier) {
         *self.notifier.lock().unwrap() = Some(notifier);
     }
-    /// Initial cursor zero is restricted to the verified lab bootstrap in the live
-    /// test. Complete snapshot/permission recovery remains a production gate.
-    /// Retry quarantined permissions on an explicit session boundary. The service
-    /// uses cursor-based pull for transport retries within that session.
+    /// Resume persistent candidates before ordinary events. Recheck quarantined
+    /// permissions at explicit session boundaries; transport retries otherwise
+    /// continue from the committed cursor.
     pub fn initial_pull(&self) -> io::Result<bool> {
+        if self.initialization_task.lock().unwrap().is_some() {
+            return self.owner_initial_pull();
+        }
         let denied = self
             .store
             .lock()
@@ -284,6 +296,9 @@ impl Bridge {
         self.initialization
             .phase(crate::initialization::Phase::CatchingUp);
         let _event = self.event_gate.lock().unwrap();
+        if self.owner_candidate_pending()? {
+            return self.run_initialization_owner(crate::initialization::RecoveryReason::InitialIndex);
+        }
         let cursor = self
             .store
             .lock()
@@ -293,9 +308,14 @@ impl Bridge {
         if cursor.is_empty() {
             return self.rebuild_snapshot(crate::initialization::RecoveryReason::InitialIndex);
         }
-        let response = self
-            .connection()
-            .call(Command::Pull { cursor }, Duration::from_secs(60))?;
+        let rpc = self.connection();
+        let response = rpc.call(Command::Pull { cursor }, Duration::from_secs(60))?;
+        // Attach takes the writer. Only the current session may commit this
+        // reply; never hold this guard while waiting for the network.
+        let receipt = self.recovery_gate.read().unwrap();
+        if self.initialization_task.lock().unwrap().is_some() {
+            self.current(&rpc)?;
+        }
         let batch = match response.body {
             Response::Events(batch) => batch,
             Response::Failed { category }
@@ -304,6 +324,7 @@ impl Bridge {
                     "native_cursor_reset" | "native_filtered_type_changed"
                 ) =>
             {
+                drop(receipt);
                 return self.rebuild_snapshot(if category == "native_cursor_reset" {
                     crate::initialization::RecoveryReason::CursorInvalidated
                 } else {
@@ -314,6 +335,8 @@ impl Bridge {
         };
         let Some(batch) = batch else {
             self.initialization.pulled(false, 0, changed_notification);
+            drop(receipt);
+            self.finish_session_catchup(&rpc)?;
             return Ok(false);
         };
         let event_count = batch.events.len();
@@ -344,15 +367,20 @@ impl Bridge {
             }
         }
         drop(store);
+        drop(receipt);
         self.initialization
             .pulled(true, event_count, changed_notification);
         for (p, name) in invalidations {
             let _ = self.notifications.try_send(Invalidation::Entry(p, name));
         }
         self.signal_upload();
+        self.finish_session_catchup(&rpc)?;
         Ok(true)
     }
     fn rebuild_snapshot(&self, reason: crate::initialization::RecoveryReason) -> io::Result<bool> {
+        if self.initialization_task.lock().unwrap().is_some() {
+            return self.run_initialization_owner(reason);
+        }
         use std::io::Read;
         self.initialization.recovery(reason);
         let _mutations = self.recovery_gate.write().unwrap();
@@ -1037,6 +1065,7 @@ impl Bridge {
     /// Reconciliation sends only read queries. Unknown outcomes never re-upload.
     pub fn upload_pending(&self, reconcile: bool) -> io::Result<usize> {
         let _mutation = self.recovery_gate.read().unwrap();
+        if self.session_pending.load(Ordering::Acquire) { return Ok(0); }
         // A restored process has a fresh in-memory lock. Only the durable gate
         // prevents it from reconciling or submitting against an incomplete tree.
         // Reconciliation is read-only remotely but changes local operation state.
@@ -1530,6 +1559,9 @@ mod snapshot_bridge_tests;
 #[cfg(test)]
 #[path = "initialization_gate_tests.rs"]
 mod initialization_gate_tests;
+
+#[path = "initialization_owner.rs"]
+mod initialization_owner;
 
 #[cfg(test)]
 #[path = "event_transfer_tests.rs"]

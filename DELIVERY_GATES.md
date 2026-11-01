@@ -20,9 +20,11 @@
 
 ## 当前整合工作
 
-2026-11-01 `.2` 已[构建、隔离安装并发布](docs/validation/native-package-007/REPORT.md)：616项Rust、73项GUI、debug/release各13项FUSE通过；schema18→19暂停升级、旧ELF拒绝及两份未上传修改保留通过。新增持久候选API和运行层门禁，生产owner与目录提前可见尚未接入；没有新NAS/性能对比，不关闭最终门槛。
+当前于 `codex/initialization-owner` 开发生产持久初始化调度器，源码为schema20／IPC17；四路目录、每轮最多16页追赶、恢复只Root且保留旧S0/received已接入。计划开发版 `0.1.0~dev20261101.3` 尚未构建或发布。[本轮记录](docs/validation/native-package-008/REPORT.md)：run003执行至runtime共476通过、1失败；失败是 `contains(":20")` 将 `directory:200` 误匹配的测试断言。修正后run004定向runtime为106通过、0失败、1忽略，workspace all-features/all-targets check也已通过；不能将其当作最终完整构建通过。此前run002为core213通过、1旧schema断言失败，check通过；原失败记录保留。逐目录早显未实现，真实NAS/性能、新包GUI/FUSE/安装及全部最终门槛仍开放。
 
-2026-11-01 用户恢复完整goal，现于 `codex/persistent-initialization` 隔离开发持久候选、写回门禁及精确重试诊断。候选持久化和运行层接线需要联合验证；逐目录提前可见、真正全量及最终门槛尚未完成，不沿用已发布包结果为新代码背书。原P0运行已结束，保存原状态和证据，不启动替代窗口。
+2026-11-01 `.2` 已[构建、隔离安装并发布](docs/validation/native-package-007/REPORT.md)：616项Rust、73项GUI、debug/release各13项FUSE通过；schema18→19暂停升级、旧ELF拒绝及两份未上传修改保留通过。该发布版本新增持久候选API和运行层门禁，当时生产owner与目录提前可见尚未接入；没有新NAS/性能对比，不关闭最终门槛。
+
+2026-11-01 用户恢复完整goal后，先在 `codex/persistent-initialization` 完成持久候选基础及 `.2` 交付，再进入上述生产owner开发。新接线独立验证，不沿用已发布包结果为新代码背书；逐目录提前可见、真正全量及最终门槛仍开放。原P0运行已结束，保存原状态和证据，不启动替代窗口。
 
 2026-11-01 本轮初始化修复已[构建、安装并发布](docs/validation/native-package-006/REPORT.md)：583项Rust、72项GUI、debug/release各13项显式FUSE，暂停接管与待上传数据保留通过。所测个人子目录从当前水位开始，完整只读快照和临时Store导入通过；仍观察一次整树回退，未做真实FSD首屏/配对性能验收。逐目录提前发布、持久续扫及原最终门槛保留；该轮交付时曾暂停，随后用户恢复完整目标；历史产物及原基线数据保留。
 

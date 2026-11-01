@@ -1,6 +1,25 @@
 use super::*;
 
 impl Store {
+    /// A sibling directory response may have moved or replaced this subtree.
+    /// Discard that stale read rather than publishing it or failing the run.
+    pub fn initialization_directory_ticket_current(
+        &self,
+        ticket: &InitializationDirectoryTicket,
+    ) -> Result<bool> {
+        checked(&self.db, &ticket.run, false)?;
+        let row = self
+            .db
+            .query_row(
+                "SELECT generation,state FROM initialization_directories WHERE run=?1 AND id=?2",
+                params![ticket.run.run_id, ticket.directory],
+                |r| Ok((read_counter(r, 0)?, r.get::<_, String>(1)?)),
+            )
+            .optional()?;
+        Ok(row.is_some_and(|(generation, state)| {
+            generation == ticket.generation && state == "loading"
+        }))
+    }
     pub fn begin_initialization_directory(
         &mut self,
         run: &InitializationRun,
@@ -102,6 +121,34 @@ impl Store {
         if state != "loading" {
             return Err(invalid("directory not loading"));
         }
+        // Observe moves in either parent order. Collect all cross-parent IDs
+        // before changing anything; child order must not erase fresh siblings.
+        let mut moved = Vec::new();
+        let mut old_parents = HashSet::new();
+        for child in children {
+            let previous = match load_node(&tx, &ticket.run.run_id, &child.id) {
+                Ok(node) => node,
+                Err(error) if error.is_not_found() => continue,
+                Err(error) => return Err(error),
+            };
+            if previous.parent.as_deref() == Some(ticket.directory.as_str()) {
+                continue;
+            }
+            let parent = previous
+                .parent
+                .as_deref()
+                .ok_or_else(|| invalid("cannot relocate candidate root"))?;
+            directory_chain(&tx, &ticket.run.run_id, &s.binding, parent)?;
+            let target = directory_chain(&tx, &ticket.run.run_id, &s.binding, &ticket.directory)?;
+            if target.iter().any(|node| node.id == previous.id) {
+                return Err(invalid("candidate move would cross its own subtree"));
+            }
+            old_parents.insert(parent.to_owned());
+            moved.push(previous.id);
+        }
+        for id in moved {
+            delete_subtree(&tx, &ticket.run.run_id, &id)?;
+        }
         let old = tx
             .prepare("SELECT body FROM initialization_entries WHERE run=?1 AND parent=?2")?
             .query_map(params![ticket.run.run_id, ticket.directory], |r| {
@@ -120,6 +167,16 @@ impl Store {
         for child in children {
             if !retained.contains(&child.id) {
                 insert_node(&tx, &ticket.run.run_id, child)?;
+            }
+        }
+        // Recheck any surviving old parent and reject its in-flight response.
+        // A parent reinserted in this batch must likewise remain pending.
+        for parent in old_parents {
+            match load_node(&tx, &ticket.run.run_id, &parent) {
+                Ok(node) if node.directory => invalidate(&tx, &ticket.run.run_id, &parent, false)?,
+                Ok(_) => return Err(invalid("relocation parent became a file")),
+                Err(error) if error.is_not_found() => {}
+                Err(error) => return Err(error),
             }
         }
         check_node_budget(&tx, &ticket.run.run_id)?;
@@ -509,12 +566,20 @@ fn validate_completion_state(db: &Connection, s: &InitializationStatus, at: &str
     )?;
     // A candidate may start behind the committed boundary and catch up. It may
     // not silently reset that boundary within the same server restore domain.
-    // Verified same-restore cursor reset is deliberately not exposed by this API.
     if base_restore == s.binding.restore
         && !s.binding.expected_cursor.is_empty()
         && cursor(at)? < cursor(&s.binding.expected_cursor)?
     {
-        return Err(invalid("candidate cursor precedes committed boundary"));
+        let (epoch, expected): (Option<u64>, Option<String>) = db.query_row(
+            "SELECT reset_epoch,reset_expected FROM initialization_run WHERE run_id=?1",
+            [&s.run.run_id],
+            |r| Ok((read_optional_counter(r, 0)?, r.get(1)?)),
+        )?;
+        if epoch != Some(s.run.epoch)
+            || expected.as_deref() != Some(s.binding.expected_cursor.as_str())
+        {
+            return Err(invalid("candidate cursor precedes committed boundary"));
+        }
     }
     if s.root_needs_refresh
         || s.received_cursor != at

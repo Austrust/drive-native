@@ -1,3 +1,12 @@
+drive-native (0.1.0~dev20261101.3) unstable; urgency=medium
+
+  * Resume durable initialization candidates through session-bound native reads.
+  * Bound event catchup and restore four concurrent directory requests.
+  * Reject stale sessions and directory receipts while preserving local drafts.
+  * Migrate to schema 20 with explicit cursor-reset authorization; pair IPC 17.
+
+ -- Drive Native contributors <noreply@localhost>  Sun, 01 Nov 2026 16:19:57 +0800
+
 drive-native (0.1.0~dev20261101.2) unstable; urgency=medium
 
   * Report typed initialization retry causes without advancing completed work.

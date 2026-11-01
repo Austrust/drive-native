@@ -106,12 +106,24 @@ pub(crate) fn migrate(db: &Connection) -> Result<()> {
         state TEXT NOT NULL CHECK(state IN ('pending','loading','received','denied','failed')),
         receipt_seq INTEGER, receipt_hash TEXT, PRIMARY KEY(run,id),
         FOREIGN KEY(run,id) REFERENCES initialization_entries(run,id) ON DELETE CASCADE);
+      CREATE INDEX IF NOT EXISTS initialization_pending ON initialization_directories(run,id) WHERE state IN ('pending','failed');
       CREATE TABLE IF NOT EXISTS initialization_events(
         run TEXT NOT NULL REFERENCES initialization_run(run_id) ON DELETE CASCADE,
         seq INTEGER NOT NULL, from_cursor TEXT NOT NULL, to_cursor TEXT NOT NULL,
         body TEXT NOT NULL, digest TEXT NOT NULL, bytes INTEGER NOT NULL,
         PRIMARY KEY(run,seq));",
     )?;
+    // Schema 20 permits migrate closed; old candidates remain gated.
+    let columns = db
+        .prepare("PRAGMA table_info(initialization_run)")?
+        .query_map([], |r| r.get::<_, String>(1))?
+        .collect::<std::result::Result<HashSet<_>, _>>()?;
+    if !columns.contains("reset_epoch") {
+        db.execute_batch("ALTER TABLE initialization_run ADD COLUMN reset_epoch INTEGER;")?;
+    }
+    if !columns.contains("reset_expected") {
+        db.execute_batch("ALTER TABLE initialization_run ADD COLUMN reset_expected TEXT;")?;
+    }
     Ok(())
 }
 
@@ -132,7 +144,7 @@ pub(crate) fn recover_open(db: &Connection) -> Result<()> {
             .checked_add(1)
             .ok_or_else(|| invalid("epoch exhausted on reopen"))?;
         tx.execute(
-            "UPDATE initialization_run SET epoch=?1,root_ticket=NULL,fenced=NULL,fence_ticket=NULL WHERE slot=1",
+            "UPDATE initialization_run SET epoch=?1,reset_epoch=NULL,reset_expected=NULL,root_ticket=NULL,fenced=NULL,fence_ticket=NULL WHERE slot=1",
             [number(next)?],
         )?;
         tx.execute("UPDATE initialization_directories SET state='pending',receipt_seq=NULL,receipt_hash=NULL WHERE state IN ('loading','failed')",[])?;
@@ -378,7 +390,91 @@ fn invalidate(db: &Connection, run: &str, id: &str, recursive: bool) -> Result<(
     clear_fence(db, run)
 }
 
+/// Validate bounded directory ancestry using only the private candidate.
+fn directory_chain(
+    db: &Connection,
+    run: &str,
+    binding: &InitializationBinding,
+    id: &str,
+) -> Result<Vec<Node>> {
+    let mut chain = Vec::new();
+    let mut visited = HashSet::new();
+    let mut next = id.to_owned();
+    loop {
+        if !visited.insert(next.clone()) || chain.len() >= 129 {
+            return Err(invalid("directory ancestry cycle or depth exceeded"));
+        }
+        let node = load_node(db, run, &next)?;
+        crate::state::valid_node(&node)?;
+        if node.id != next {
+            return Err(invalid("directory ancestry identity mismatch"));
+        }
+        if !node.directory {
+            return Err(invalid("directory ancestry contains a file"));
+        }
+        if node.id == root_id(binding)? {
+            validate_root(binding, &node)?;
+            chain.push(node);
+            return Ok(chain);
+        }
+        next = node
+            .parent
+            .clone()
+            .ok_or_else(|| invalid("directory ancestry disconnected"))?;
+        chain.push(node);
+    }
+}
+
 impl Store {
+    /// Read the existing pair without rebinding either authoritative identity.
+    pub fn native_scope_binding(&self) -> Result<Option<(String, String)>> {
+        let read = |key: &str| -> Result<Option<String>> {
+            Ok(self
+                .db
+                .query_row("SELECT value FROM metadata WHERE key=?1", [key], |r| {
+                    r.get(0)
+                })
+                .optional()?)
+        };
+        match (read("server_restore_id")?, read("native_scope")?) {
+            (None, None) => Ok(None),
+            (Some(restore), Some(scope)) if !restore.is_empty() && !scope.is_empty() => {
+                Ok(Some((restore, scope)))
+            }
+            _ => Err(invalid("incomplete native binding")),
+        }
+    }
+    pub fn initialization_directory_path(
+        &self,
+        run: &InitializationRun,
+        id: &str,
+    ) -> Result<String> {
+        let state = checked(&self.db, run, false)?;
+        let root_path = state
+            .binding
+            .scope
+            .get("path")
+            .and_then(|p| p.as_str())
+            .ok_or_else(|| invalid("missing scope path"))?;
+        if !root_path.starts_with('/')
+            || root_path.contains('\0')
+            || (root_path != "/"
+                && root_path[1..]
+                    .split('/')
+                    .any(|part| part.is_empty() || matches!(part, "." | "..")))
+        {
+            return Err(invalid("noncanonical scope path"));
+        }
+        let chain = directory_chain(&self.db, &run.run_id, &state.binding, id)?;
+        let mut path = root_path.to_owned();
+        for node in chain.iter().rev().skip(1) {
+            if path != "/" {
+                path.push('/');
+            }
+            path.push_str(&node.name);
+        }
+        Ok(path)
+    }
     pub fn initialization_writeback_blocked(&self) -> Result<bool> {
         Ok(self.db.query_row(
             "SELECT EXISTS(SELECT 1 FROM initialization_run WHERE state!='ready')",
@@ -395,10 +491,38 @@ impl Store {
         root: &Node,
         b: InitializationBudget,
     ) -> Result<InitializationRun> {
+        self.begin_initialization_checked(binding, root, b, false)
+    }
+    /// Caller must authenticate and validate the same selected root in the new
+    /// server session. Old authoritative restore changes only at atomic install.
+    pub fn begin_initialization_verified_restore(
+        &mut self,
+        binding: &InitializationBinding,
+        root: &Node,
+        b: InitializationBudget,
+    ) -> Result<InitializationRun> {
+        self.begin_initialization_checked(binding, root, b, true)
+    }
+    fn begin_initialization_checked(
+        &mut self,
+        binding: &InitializationBinding,
+        root: &Node,
+        b: InitializationBudget,
+        verified_restore: bool,
+    ) -> Result<InitializationRun> {
         validate_budget(b)?;
         validate_root(binding, root)?;
         let tx = self.db.transaction()?;
-        validate_binding(&tx, binding)?;
+        let base: String = tx.query_row(
+            "SELECT value FROM metadata WHERE key='server_restore_id'",
+            [],
+            |r| r.get(0),
+        )?;
+        if verified_restore {
+            validate_binding_against(&tx, binding, &base)?;
+        } else {
+            validate_binding(&tx, binding)?;
+        }
         if tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM initialization_run WHERE state!='ready')",
             [],
@@ -425,7 +549,7 @@ impl Store {
             epoch,
         };
         tx.execute("DELETE FROM initialization_run", [])?;
-        tx.execute("INSERT INTO initialization_run(slot,run_id,epoch,format,binding,base_restore,budget,state,received,applied) VALUES(1,?1,?2,1,?3,?6,?4,'active',?5,?5)",params![run.run_id,number(epoch)?,serde_json::to_string(binding)?,serde_json::to_string(&b)?,binding.start_cursor,binding.restore])?;
+        tx.execute("INSERT INTO initialization_run(slot,run_id,epoch,format,binding,base_restore,budget,state,received,applied) VALUES(1,?1,?2,1,?3,?6,?4,'active',?5,?5)",params![run.run_id,number(epoch)?,serde_json::to_string(binding)?,serde_json::to_string(&b)?,binding.start_cursor,base])?;
         insert_node(&tx, &run.run_id, root)?;
         check_node_budget(&tx, &run.run_id)?;
         tx.commit()?;
@@ -448,7 +572,7 @@ impl Store {
             .checked_add(1)
             .ok_or_else(|| invalid("epoch exhausted"))?;
         number(epoch)?;
-        tx.execute("UPDATE initialization_run SET epoch=?1,state='active',root_ticket=NULL,fenced=NULL,fence_ticket=NULL,error=NULL WHERE slot=1",[number(epoch)?])?;
+        tx.execute("UPDATE initialization_run SET epoch=?1,state='active',reset_epoch=NULL,reset_expected=NULL,root_ticket=NULL,fenced=NULL,fence_ticket=NULL,error=NULL WHERE slot=1",[number(epoch)?])?;
         tx.execute("UPDATE initialization_directories SET state='pending',receipt_seq=NULL,receipt_hash=NULL WHERE run=?1 AND state IN ('loading','failed')",[&run.run_id])?;
         tx.commit()?;
         Ok(InitializationRun {
@@ -500,6 +624,32 @@ impl Store {
         tx.commit()?;
         Ok(next)
     }
+    /// Call only after this authenticated session explicitly returned
+    /// native_cursor_reset for this exact old committed cursor. A smaller S0 is
+    /// insufficient. Reopening/resuming revokes this epoch-bound permit.
+    pub fn authorize_initialization_cursor_reset(
+        &mut self,
+        run: &InitializationRun,
+        expected_cursor: &str,
+    ) -> Result<()> {
+        let tx = self.db.transaction()?;
+        let state = checked(&tx, run, false)?;
+        let base: String = tx.query_row(
+            "SELECT base_restore FROM initialization_run WHERE slot=1",
+            [],
+            |r| r.get(0),
+        )?;
+        if expected_cursor.is_empty()
+            || state.binding.expected_cursor != expected_cursor
+            || state.binding.restore != base
+        {
+            return Err(invalid("cursor reset authorization mismatch"));
+        }
+        cursor(expected_cursor)?;
+        tx.execute("UPDATE initialization_run SET reset_epoch=?1,reset_expected=?2,fenced=NULL,fence_ticket=NULL WHERE slot=1",params![number(run.epoch)?,expected_cursor])?;
+        tx.commit()?;
+        Ok(())
+    }
     pub fn fail_initialization(&mut self, run: &InitializationRun, code: &str) -> Result<()> {
         if code.is_empty()
             || code.len() > 96
@@ -530,15 +680,42 @@ impl Store {
         run: &InitializationRun,
         limit: usize,
     ) -> Result<Vec<Node>> {
-        checked(&self.db, run, false)?;
+        let state = checked(&self.db, run, false)?;
         if limit == 0 || limit > 4096 {
             return Err(invalid("invalid page limit"));
         }
-        let bodies=self.db.prepare("SELECT n.body FROM initialization_entries n JOIN initialization_directories d ON d.run=n.run AND d.id=n.id WHERE n.run=?1 AND d.state IN ('pending','failed') ORDER BY n.id LIMIT ?2")?.query_map(params![run.run_id,limit as i64],|r|r.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?;
-        bodies
-            .into_iter()
-            .map(|b| Ok(serde_json::from_str(&b)?))
-            .collect()
+        let bodies=self.db.prepare("SELECT n.body FROM initialization_directories d JOIN initialization_entries n ON n.run=d.run AND n.id=d.id WHERE d.run=?1 AND d.state IN ('pending','failed') ORDER BY d.id LIMIT ?2")?.query_map(params![run.run_id,limit as i64],|r|r.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?;
+        let mut frontier = Vec::new();
+        let mut selected = HashSet::new();
+        for body in bodies {
+            let candidate: Node = serde_json::from_str(&body)?;
+            let chain = directory_chain(&self.db, &run.run_id, &state.binding, &candidate.id)?;
+            let mut ancestor = None;
+            let mut loading = false;
+            for node in chain {
+                let coverage: String = self.db.query_row(
+                    "SELECT state FROM initialization_directories WHERE run=?1 AND id=?2",
+                    params![run.run_id, node.id],
+                    |r| r.get(0),
+                )?;
+                match coverage.as_str() {
+                    "pending" | "failed" => ancestor = Some(node),
+                    "loading" => loading = true,
+                    "received" => {}
+                    _ => return Err(invalid("pending directory below unavailable coverage")),
+                }
+            }
+            // A nonempty in-flight set can temporarily produce an empty frontier;
+            // this is not global completion (the final coverage/fence gate decides).
+            if !loading {
+                let ancestor =
+                    ancestor.ok_or_else(|| invalid("pending directory state changed"))?;
+                if selected.insert(ancestor.id.clone()) {
+                    frontier.push(ancestor);
+                }
+            }
+        }
+        Ok(frontier)
     }
     pub fn initialization_node(&self, run: &InitializationRun, id: &str) -> Result<Node> {
         checked(&self.db, run, true)?;

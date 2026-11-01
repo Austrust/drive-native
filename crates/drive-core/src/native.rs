@@ -569,6 +569,7 @@ mod directory;
 #[path = "native_snapshot.rs"]
 mod native_snapshot;
 pub use native_snapshot::{RemoteSnapshot, SNAPSHOT_NODE_LIMIT};
+pub use native_snapshot::{InitializationBody, InitializationReply, InitializationRequest};
 
 #[cfg(feature = "native-research")]
 #[path = "native_upload_origin.rs"]

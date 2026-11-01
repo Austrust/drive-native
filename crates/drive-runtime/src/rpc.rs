@@ -98,7 +98,7 @@ impl Rpc {
                     Ok((env, fd)) if env.version == VERSION => {
                         let expect_fd = matches!(
                             &env.body,
-                            Response::Content { .. } | Response::RecoverySnapshot { .. }
+                            Response::Content { .. } | Response::RecoverySnapshot { .. } | Response::Initialization { .. }
                         );
                         if expect_fd != fd.is_some() {
                             break;
