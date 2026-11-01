@@ -1,7 +1,8 @@
 # Candidate recursive traversal
 
 2026-11-01. Development fix for recursive invalidation and removal; schema 20
-and IPC 17 remain unchanged. Package `.4` is planned, not yet released.
+and IPC 17 remain unchanged. Development package `.4` is [published](https://github.com/Austrust/drive-native/releases/tag/dev20261101.4);
+[package validation](validation/native-package-009/REPORT.md) covers the frozen build and same-schema installation.
 
 ## Observed failure
 
@@ -52,7 +53,12 @@ initialization_query_replay -- /absolute/isolated/replay-copy.sqlite`. Use only
 an explicit database backup; raw database contents and server evidence are not
 distributed. The tool never connects to a NAS and rolls back both updates.
 
-Full frozen-package regressions, installation, and a fixed FSD real-NAS trial
-remain pending. Whole-tree invalidation on ambiguous events, progressive
+Frozen-package validation passed: 656 Rust tests, 73 GUI tests, and 13 explicit
+kernel tests each in debug and release. Same-schema paused handover, old ELF
+readback and package reinstallation preserved two pending edits and drafts.
+
+The fixed FSD real read-only initialization trial did not pass. Controlled restart completed: true; overview errors: 0; normal stop: 0.216 seconds, with no remaining mount. This is not paired whole-client performance, network-fault or long-run acceptance. No NAS writes were issued.
+
+Paired whole-client performance remains unverified. Whole-tree invalidation on ambiguous events, progressive
 directory visibility, normal-folder full sync, and final safety/desktop/long-run
 gates remain open. See [DELIVERY_GATES.md](../DELIVERY_GATES.md).

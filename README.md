@@ -1,10 +1,10 @@
 # Drive Native
 
-当前开发分支修复了候选递归查询的重复扫描：[真实初始化失败与SQL复放](docs/CANDIDATE_QUERY_ORDER.md)。计划 `.4`，尚未发布；已发布 `.3` 的完整初始化性能仍未通过实网验收。
+当前开发包 `.4` 修复候选递归查询的重复扫描，已[发布](https://github.com/Austrust/drive-native/releases/tag/dev20261101.4)；[真实失败、局部SQL复放及修复版复测](docs/CANDIDATE_QUERY_ORDER.md)。修复版真实只读初始化本次仍未通过：受控重启续扫已完成，状态查询异常0次，最终0.216秒正常退出且无遗留挂载。它不等于同负载端到端配对性能、断网故障或长期验收；本次未写NAS。
 
 面向 Linux Mint Cinnamon / Nemo 的 Synology Drive 原生协议按需同步客户端。使用 Rust、FUSE、SQLite、PySide6 和 Nemo 扩展；独立连接 Drive Server，不依赖 WebDAV 或官方客户端进程。
 
-**开发测试版本，尚未完成日常使用验收。** `0.1.0~dev20261101.3` 已发布，生产持久初始化调度器已接入：四路目录、每轮最多16页事件追赶、恢复只查询Root并保留原S0及收到的事件。[本轮验证](docs/validation/native-package-008/REPORT.md)记录651项Rust、73项GUI，debug/release各13项显式FUSE及schema19→20暂停升级和未上传数据保留。逐目录提前向FUSE显示仍未实现；目录事件仍可保守失效整树，最终仍须完整候选验证与整树提交。真实NAS初始化／续扫、成对性能、普通目录全量同步、Mint及最终7×24验收继续开放。 下载见[GitHub Releases](https://github.com/Austrust/drive-native/releases/tag/dev20261101.3)。
+**开发测试版本，尚未完成日常使用验收。** `0.1.0~dev20261101.4` 已发布，[本轮验证](docs/validation/native-package-009/REPORT.md)记录656项Rust、73项GUI，debug/release各13项显式FUSE及 `.3 → .4` 同schema20暂停接管、旧ELF实际读取和未上传数据保留。schema20／IPC17不变。逐目录提前显示、候选权限拒绝可见性、保守整树失效及最终整树提交成本、普通目录全量同步、运行时增量桌面状态、Mint与最终数据安全／7×24门槛仍开放。完整goal保持活动，本包不是rc1。 下载见[GitHub Releases](https://github.com/Austrust/drive-native/releases/tag/dev20261101.4)。
 
 ## 已实现
 
@@ -24,7 +24,7 @@ Ubuntu更新包已逐项整合，继续在独立分支修复原生恢复及按�
 
 [恢复及增量状态基础](docs/validation/incremental-status-001/REPORT.md)已完成组件整合；[批量导入成本回退已修复](docs/validation/status-write-cost-003/REPORT.md)。运行时增量桌面状态尚未接入；不将这些基础模块算作 Personal 或整体性能问题已经解决。
 
-当前生产接线和可靠FD分步接口见[持久初始化](docs/INITIALIZATION_PERSISTENCE.md)。跨连接／重启恢复已通过合成本地RPC和持久状态回归；完整真实NAS恢复与性能仍待验证。历史 `.2` 只交付候选基础，见[包验证007](docs/validation/native-package-007/REPORT.md)，不与本轮混计。
+当前生产接线和可靠FD分步接口见[持久初始化](docs/INITIALIZATION_PERSISTENCE.md)。修复版真实只读初始化本次仍未通过：受控重启续扫已完成，状态查询异常0次，最终0.216秒正常退出且无遗留挂载。它不等于同负载端到端配对性能、断网故障或长期验收；本次未写NAS。 历史 `.2` 候选基础与 `.3` owner交付见[包验证007](docs/validation/native-package-007/REPORT.md)、[包验证008](docs/validation/native-package-008/REPORT.md)，不与本轮混计。
 
 ## 构建和测试
 
