@@ -111,6 +111,11 @@ fn fixture(mode: &str) -> (tempfile::TempDir, Arc<Service>) {
         mount: root.path().join("mount"),
         writable: false,
     };
+    // This fixture represents an already authenticated native task. Preserve
+    // the same restore/scope binding production establishes before importing.
+    store
+        .bind_native_scope("server", &serde_json::to_string(&profile.scope).unwrap())
+        .unwrap();
     (root, Service::new(profile, store, worker).unwrap())
 }
 
