@@ -13,6 +13,9 @@ pub(super) struct EventEnvelope {
     hints: Vec<InitializationEventHint>,
 }
 impl EventEnvelope {
+    pub(super) fn hint(&self, ordinal: usize) -> Option<&InitializationEventHint> {
+        self.hints.get(ordinal)
+    }
     pub(super) fn matches_page(&self, page: &InitializationEventPage) -> bool {
         self.scope == page.scope && self.restore == page.restore && self.hints == page.hints
     }

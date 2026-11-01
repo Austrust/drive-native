@@ -3,6 +3,8 @@
 mod event_coverage;
 #[path = "initialization_hint_store_tests.rs"]
 mod hint_store;
+#[path = "initialization_local_recheck_tests.rs"]
+mod local_recheck;
 use super::*;
 use crate::{
     Event, NodeMetadata,
