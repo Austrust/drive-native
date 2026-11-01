@@ -1,6 +1,6 @@
 # 暂停、升级与恢复
 
-本文说明源码中的升级机制及实际验证。当前20261101 `.3 → .4` 为同schema20升级，暂停接管、旧ELF正常挂载读取及两份pending编辑／草稿保留见[包验证009](validation/native-package-009/REPORT.md)。这不是新schema迁移或旧ELF拒绝验收；未执行包管理器降级。历史 `.3` 的schema19→20迁移与拒绝见[包验证008](validation/native-package-008/REPORT.md)，`.2` 的18→19见[包验证007](validation/native-package-007/REPORT.md)。最终状态以 [DELIVERY_GATES.md](../DELIVERY_GATES.md) 为准。
+本文说明源码中的升级机制及实际验证。当前20261101 `.4 → .5` 为同schema20升级：暂停接管、旧ELF实际挂载读取及两份pending编辑／草稿保留见[包验证010](validation/native-package-010/REPORT.md)。未知提交和活跃候选升级不在本安装夹具范围；未安装旧包降级。历史 `.3 → .4` 见[包验证009](validation/native-package-009/REPORT.md)，schema迁移见[008](validation/native-package-008/REPORT.md)和[007](validation/native-package-007/REPORT.md)。正常升级不要求清缓存，最终状态以[DELIVERY_GATES.md](../DELIVERY_GATES.md)为准。
 
 ## 正常升级
 

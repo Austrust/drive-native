@@ -51,9 +51,12 @@ application still validates run, epoch, continuity and the source cursor.
   source and final worktree produced identical bytes; tested source copies and
   failed evidence were not overwritten.
 
-These are synthetic local tests, not a new NAS or throughput result. Frozen
-package regressions, installation and actual initialization remain to be run.
-Detailed logs and source manifests remain local.
+The preceding targeted runs are synthetic and are not added to the package total.
+Development package `.5` is [published](https://github.com/Austrust/drive-native/releases/tag/dev20261101.5); [validation](validation/native-package-010/REPORT.md) records 671 Rust, 73 GUI and 13 explicit kernel tests each in debug/release. Same-schema paused handover, old ELF readback and reinstallation preserved two pending edits and drafts.
+
+The real read-only initialization trial did not pass; controlled restart completed: true, overview errors: 0. Normal stop took 0.266 seconds with no remaining mount or NAS writes. Concurrent host development and uncontrolled remote changes prevent paired performance or long-run conclusions.
+
+Detailed logs and source manifests remain local. Whole-tree fallback, delayed ACL visibility, progressive directory publication, full sync and final gates remain open.
 
 ## Remaining work
 
