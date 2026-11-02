@@ -2,26 +2,49 @@
 use super::*;
 use std::collections::BTreeMap;
 
+#[path = "initialization_unknown_directory_tests.rs"]
+mod unknown_directory;
+
 #[test]
 fn corrupt_directory_identity_still_rejects_unchanged_and_metadata_refresh() {
     for metadata_change in [false, true] {
         let (_temp, mut store, _binding, run) = prepared();
         let protected = preserved(&store);
         let before = store.initialization_status().unwrap().unwrap();
-        store.db.execute("UPDATE initialization_native_nodes SET digest='bad' WHERE run=?1 AND id='200'", [&run.run_id]).unwrap();
+        store
+            .db
+            .execute(
+                "UPDATE initialization_native_nodes SET digest='bad' WHERE run=?1 AND id='200'",
+                [&run.run_id],
+            )
+            .unwrap();
         let mut changed = p();
-        if metadata_change { changed.metadata.as_mut().unwrap().mtime += 1; }
+        if metadata_change {
+            changed.metadata.as_mut().unwrap().mtime += 1;
+        }
         let ticket = store.begin_initialization_directory(&run, "100").unwrap();
-        let error = store.store_initialization_native_directory(&ticket, 1,
-            &[entry(file()),entry(changed),entry(q()),entry(unrelated())]).unwrap_err();
+        let error = store
+            .store_initialization_native_directory(
+                &ticket,
+                1,
+                &[
+                    entry(file()),
+                    entry(changed),
+                    entry(q()),
+                    entry(unrelated()),
+                ],
+            )
+            .unwrap_err();
         assert!(error.to_string().contains("identity digest mismatch"));
-        assert_eq!(store.initialization_node(&run,"200").unwrap(), p());
-        assert_eq!(store.initialization_node(&run,"211").unwrap(), child());
-        assert!(store.initialization_native_node_id(&run,"200").is_err());
+        assert_eq!(store.initialization_node(&run, "200").unwrap(), p());
+        assert_eq!(store.initialization_node(&run, "211").unwrap(), child());
+        assert!(store.initialization_native_node_id(&run, "200").is_err());
         let after = store.initialization_status().unwrap().unwrap();
-        assert_eq!((before.node_count,before.node_bytes,before.applied_cursor),
-                   (after.node_count,after.node_bytes,after.applied_cursor));
-        assert_eq!(protected,preserved(&store));
+        assert_eq!(
+            (before.node_count, before.node_bytes, before.applied_cursor),
+            (after.node_count, after.node_bytes, after.applied_cursor)
+        );
+        assert_eq!(protected, preserved(&store));
         assert!(store.initialization_writeback_blocked().unwrap());
     }
 }

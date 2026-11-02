@@ -8,7 +8,9 @@ use drive_core::Batch;
 use drive_core::{
     initialization_events::InitializationEventPage,
     initialization_store::{
-        InitializationApplyResult, InitializationBinding, InitializationBudget, InitializationRun,
+        InitializationApplyResult, InitializationBinding, InitializationBudget,
+        InitializationDirectoryClaim, InitializationPriorityCache,
+        InitializationPriorityPreparation, InitializationRun,
     },
     native::{
         InitializationBody as Body, InitializationReply, InitializationRequest as Request, Scope,
@@ -324,12 +326,11 @@ impl Bridge {
                 }
                 break false;
             };
-            let applied = if directory_race {
-                store.apply_initialization_events_after_directory_race(run, sequence)
-            } else {
-                store.apply_initialization_events(run, sequence)
-            };
-            match applied.map_err(io::Error::other)? {
+            let outcome = store
+                .apply_initialization_events_diagnosed(run, sequence, directory_race)
+                .map_err(io::Error::other)?;
+            self.initialization.work.event_application(&outcome);
+            match outcome.result {
                 InitializationApplyResult::AwaitingCoverage => {
                     self.initialization.work.count(Counter::AwaitingCoverage, 1);
                     // Do not retry the same durable batch under the Store lock.
@@ -557,6 +558,7 @@ impl Bridge {
             self.initialization.work.count(Counter::Restarted, 1);
         }
         let mut awaiting_coverage = self.apply_candidate_events(rpc, &run, None, false)?;
+        let mut priority_cache = InitializationPriorityCache::default();
         let mut directories = 0u64;
         let mut pages = 0usize;
         loop {
@@ -613,7 +615,13 @@ impl Bridge {
                 self.refresh_candidate_root(rpc, session, &run, deadline)?;
             }
             let directories_before = directories;
-            let coverage_race = self.initialization_directory_window(
+            let priority = if awaiting_coverage {
+                self.initialization_priority_job(rpc, &run, &mut priority_cache)?
+            } else {
+                priority_cache = InitializationPriorityCache::default();
+                None
+            };
+            let coverage_race = self.initialization_directory_window_with_priority(
                 rpc,
                 session,
                 &run,
@@ -621,6 +629,7 @@ impl Bridge {
                 awaiting_coverage,
                 attempt,
                 &mut directories,
+                priority,
             )?;
             if coverage_race {
                 // All reads in this group have joined. Invalidate after their
@@ -715,6 +724,7 @@ impl Bridge {
     /// Four network reads, as before, but completed receipts commit immediately
     /// and refill the freed slot. Each event window admits at most sixteen jobs.
     /// Network waits never hold the Store; events still apply between windows.
+    #[cfg(test)]
     fn initialization_directory_window(
         &self,
         rpc: &Arc<Rpc>,
@@ -724,6 +734,71 @@ impl Bridge {
         awaiting_coverage: bool,
         attempt: u8,
         directories: &mut u64,
+    ) -> io::Result<bool> {
+        self.initialization_directory_window_with_priority(
+            rpc,
+            session,
+            run,
+            deadline,
+            awaiting_coverage,
+            attempt,
+            directories,
+            None,
+        )
+    }
+
+    fn initialization_priority_job(
+        &self,
+        rpc: &Arc<Rpc>,
+        run: &InitializationRun,
+        cache: &mut InitializationPriorityCache,
+    ) -> io::Result<Option<InitializationDirectoryClaim>> {
+        let _writes = self.initialization_writer();
+        self.current(rpc)?;
+        let mut store = self.initialization_store();
+        let prepared = {
+            let _span = self.initialization.work.span(Stage::PriorityPrepare);
+            store
+                .prepare_initialization_priority(run, cache)
+                .map_err(io::Error::other)?
+        };
+        match prepared {
+            InitializationPriorityPreparation::Prepared => {
+                self.initialization.work.count(Counter::PriorityPrepared, 1)
+            }
+            InitializationPriorityPreparation::Reused => {
+                self.initialization.work.count(Counter::PriorityReused, 1)
+            }
+            InitializationPriorityPreparation::Unavailable => {
+                self.initialization.work.count(Counter::PrioritySkipped, 1);
+                return Ok(None);
+            }
+        }
+        let _span = self.initialization.work.span(Stage::PriorityClaim);
+        let claim = store
+            .claim_initialization_priority(run, cache)
+            .map_err(io::Error::other)?;
+        self.initialization.work.count(
+            if claim.is_some() {
+                Counter::PriorityClaimed
+            } else {
+                Counter::PrioritySkipped
+            },
+            1,
+        );
+        Ok(claim)
+    }
+
+    fn initialization_directory_window_with_priority(
+        &self,
+        rpc: &Arc<Rpc>,
+        session: &Session,
+        run: &InitializationRun,
+        deadline: Instant,
+        awaiting_coverage: bool,
+        attempt: u8,
+        directories: &mut u64,
+        mut priority: Option<InitializationDirectoryClaim>,
     ) -> io::Result<bool> {
         use drive_core::initialization_store::InitializationDirectoryClaim;
         let mut coverage_race = false;
@@ -755,19 +830,28 @@ impl Bridge {
                             ));
                             break;
                         }
-                        let page = (|| {
-                            let _writes = self.initialization_writer();
-                            self.current(rpc)?;
-                            let mut store = self.initialization_store();
-                            let _span = self.initialization.work.span(Stage::Scheduling);
-                            store
-                                .claim_initialization_directories(
-                                    run,
-                                    (4 - in_flight).min(16 - admitted),
-                                    after.as_ref(),
-                                )
-                                .map_err(io::Error::other)
-                        })();
+                        let priority_page = priority.is_some();
+                        let page = if let Some(job) = priority.take() {
+                            Ok(drive_core::initialization_store::InitializationClaimPage {
+                                jobs: vec![job],
+                                next: None,
+                                stats: Default::default(),
+                            })
+                        } else {
+                            (|| {
+                                let _writes = self.initialization_writer();
+                                self.current(rpc)?;
+                                let mut store = self.initialization_store();
+                                let _span = self.initialization.work.span(Stage::Scheduling);
+                                store
+                                    .claim_initialization_directories(
+                                        run,
+                                        (4 - in_flight).min(16 - admitted),
+                                        after.as_ref(),
+                                    )
+                                    .map_err(io::Error::other)
+                            })()
+                        };
                         let page = match page {
                             Ok(page) => page,
                             Err(error) => {
@@ -776,7 +860,9 @@ impl Bridge {
                             }
                         };
                         let work = &self.initialization.work;
-                        work.count(Counter::ClaimPages, 1);
+                        if !priority_page {
+                            work.count(Counter::ClaimPages, 1);
+                        }
                         work.count(Counter::ClaimExamined, page.stats.examined as u64);
                         work.count(
                             Counter::ClaimAncestorPromotions,
@@ -791,13 +877,15 @@ impl Bridge {
                             Counter::ClaimPreviouslyClaimed,
                             page.stats.previously_claimed as u64,
                         );
-                        work.count(
-                            Counter::ClaimNew,
-                            page.jobs
-                                .len()
-                                .saturating_sub(page.stats.previously_claimed)
-                                as u64,
-                        );
+                        if !priority_page {
+                            work.count(
+                                Counter::ClaimNew,
+                                page.jobs
+                                    .len()
+                                    .saturating_sub(page.stats.previously_claimed)
+                                    as u64,
+                            );
+                        }
                         let found = !page.jobs.is_empty();
                         if found {
                             self.initialization
@@ -869,11 +957,16 @@ impl Bridge {
                                 let _ = tx.send((node, ticket, result));
                             }));
                         }
-                        if in_flight == 4 || admitted == 16 || page.next.is_none() {
+                        if in_flight == 4
+                            || admitted == 16
+                            || (page.next.is_none() && !priority_page)
+                        {
                             break;
                         }
                         after = page.next;
-                        work.count(Counter::ClaimScanYields, 1);
+                        if !priority_page {
+                            work.count(Counter::ClaimScanYields, 1);
+                        }
                         // Issuing claims changes loading/generation, not paths.
                         // Keep the keyset hint while filling vacant slots past
                         // a blocked prefix; never carry it across a receipt.

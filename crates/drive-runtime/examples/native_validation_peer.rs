@@ -28,6 +28,62 @@ mod peer {
     };
     type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
     const LAB: &str = "/DriveNative-Lab";
+    pub struct Diagnostics {
+        stage: &'static str,
+        log: Option<File>,
+    }
+    impl Default for Diagnostics {
+        fn default() -> Self {
+            Self {
+                stage: "preflight",
+                log: None,
+            }
+        }
+    }
+    fn classification(error: &(dyn std::error::Error + 'static)) -> (&'static str, Option<u32>) {
+        if let Some(native) = error.downcast_ref::<sproto::Error>() {
+            return match native {
+                sproto::Error::Server { code, .. } => ("native_server", Some(*code)),
+                sproto::Error::Timeout(_) => ("timeout", None),
+                sproto::Error::Io(_) | sproto::Error::ConnectionClosed => ("transport", None),
+                sproto::Error::Tls(_) => ("tls", None),
+                sproto::Error::SessionInvalid => ("session_invalid", None),
+                sproto::Error::InvalidConfig(_) => ("configuration", None),
+                sproto::Error::UnsupportedServer { .. } => ("unsupported_server", None),
+                sproto::Error::CursorReset { .. } => ("cursor_reset", None),
+                _ => ("protocol", None),
+            };
+        }
+        if error.downcast_ref::<serde_json::Error>().is_some() {
+            return ("input", None);
+        }
+        if error.downcast_ref::<std::io::Error>().is_some() {
+            return ("io", None);
+        }
+        ("invariant", None)
+    }
+    impl Diagnostics {
+        fn stage(&mut self, stage: &'static str) -> Result<()> {
+            self.stage = stage;
+            if let Some(log) = &mut self.log {
+                journal(log, stage, json!({"started":true}))?;
+            }
+            Ok(())
+        }
+        fn frame(&self, error: &(dyn std::error::Error + 'static)) -> Value {
+            let (category, code) = classification(error);
+            json!({"failed":true,"stage":self.stage,"category":category,"native_code":code})
+        }
+        pub fn report(&mut self, error: &(dyn std::error::Error + 'static)) {
+            // Neither Display nor Debug of an upstream error may cross this boundary.
+            let frame = self.frame(error);
+            if let Some(log) = &mut self.log {
+                let _ = journal(log, "failure", frame.clone());
+            }
+            let _ = send(frame.clone());
+            eprintln!("{}", frame);
+        }
+    }
     #[derive(Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Input {
@@ -98,7 +154,7 @@ mod peer {
     async fn listing(client: &Client, watch: &Watch) -> Result<Vec<NodeInfo>> {
         Ok(client.list_dir(watch.view_id, &watch.path).await?)
     }
-    pub async fn run() -> Result<()> {
+    pub async fn run(trace: &mut Diagnostics) -> Result<()> {
         if unsafe { libc::geteuid() } == 0 || unsafe { libc::isatty(libc::STDIN_FILENO) } != 0 {
             return Err("non-root private stdin pipe required".into());
         }
@@ -127,9 +183,13 @@ mod peer {
             .mode(0o600)
             .custom_flags(libc::O_NOFOLLOW)
             .open(out.join("peer-journal.jsonl"))?;
+        trace.log = Some(log.try_clone()?);
+        trace.stage("input_read")?;
         let mut input = std::io::BufReader::new(std::io::stdin());
         let login: Input = read(&mut input)?;
+        trace.stage("ca_parse")?;
         let ca = sproto::trust::parse_trusted_pem(&login.trusted_ca_pem)?;
+        trace.stage("connect")?;
         let client = Client::connect(
             Config::builder()
                 .host(login.host)
@@ -144,21 +204,26 @@ mod peer {
                 .build(),
         )
         .await?;
+        trace.stage("personal_root")?;
         let home = client.personal_root().await?;
+        trace.stage("personal_root_validate")?;
         if !home.writable || !home.download_allowed || home.view_id == 0 || home.node_id == 0 {
             return Err("personal root unavailable".into());
         }
         // '/' is the protocol path relative to the server-returned personal view.
         // Never use a homes share or accept an arbitrary caller-supplied root.
-        let lab = client
-            .list_dir(home.view_id, "/")
-            .await?
+        trace.stage("personal_root_list")?;
+        let listed = client.list_dir(home.view_id, "/").await?;
+        trace.stage("lab_select")?;
+        let lab = listed
             .into_iter()
             .find(|n| live(n, "DriveNative-Lab", FileType::Dir))
             .ok_or("authorized Lab must already exist")?;
+        trace.stage("lab_verify")?;
         root(&client, home.view_id, LAB, &lab.file_id, lab.node_id).await?;
         let leaf = format!("native-validation-{}", uuid::Uuid::new_v4());
         let path = format!("{LAB}/{leaf}");
+        trace.stage("scope_preflight")?;
         if client
             .list_dir(home.view_id, LAB)
             .await?
@@ -168,14 +233,17 @@ mod peer {
             return Err("fresh name collision".into());
         }
         // Intent is durable before the sole mkdir attempt. Unknown results stop.
+        trace.stage("mkdir_intent")?;
         journal(
             &mut log,
             "mkdir_intent",
             json!({"path":path,"parent":lab.file_id}),
         )?;
+        trace.stage("mkdir_request")?;
         let made = match client.mkdir_at_identity(&lab.file_id, &leaf, &path).await {
             Ok(v) => v,
-            Err(_) => {
+            Err(error) => {
+                trace.stage("mkdir_reconcile")?;
                 let observed = client
                     .list_dir(home.view_id, LAB)
                     .await
@@ -186,10 +254,13 @@ mod peer {
                     "mkdir_uncertain",
                     json!({"desired_name_observed":observed,"retry":false}),
                 )?;
-                return Err("mkdir result uncertain; retained for reconciliation".into());
+                trace.stage("mkdir_uncertain")?;
+                return Err(error.into());
             }
         };
+        trace.stage("lab_reverify")?;
         root(&client, home.view_id, LAB, &lab.file_id, lab.node_id).await?;
+        trace.stage("scope_verify")?;
         root(&client, home.view_id, &path, &made.file_id, made.node_id).await?;
         let mut watch = Watch {
             view_id: home.view_id,
@@ -197,27 +268,34 @@ mod peer {
             path: path.clone(),
             cursor: EventCursor(0),
         };
+        trace.stage("watermark")?;
         watch.cursor = client.current_sync_watermark(&watch).await?;
         journal(
             &mut log,
             "scope_verified",
             json!({"view_id":home.view_id,"node_id":made.node_id,"file_id":made.file_id,"path":path,"cursor":watch.cursor.0}),
         )?;
+        trace.stage("ready_reply")?;
         send(
             json!({"ready":true,"scope":{"view_id":home.view_id,"node_id":made.node_id,"file_id":made.file_id,"path":path},"protocol_ipc":drive_runtime::wire::VERSION}),
         )?;
         let mut previous: Option<ContentVersion> = None;
         let mut generation = 0u8;
         loop {
+            trace.stage("await_command")?;
             let command: Command = read(&mut input)?;
             if matches!(command, Command::Quit) {
                 send(json!({"stopped":true,"nas_cleanup":false}))?;
                 break;
             }
+            trace.stage("command_lab_verify")?;
             root(&client, home.view_id, LAB, &lab.file_id, lab.node_id).await?;
+            trace.stage("command_scope_verify")?;
             root(&client, home.view_id, &path, &made.file_id, made.node_id).await?;
             if matches!(command, Command::Events) {
+                trace.stage("pull_events")?;
                 let batch = client.pull_events(&watch).await?;
+                trace.stage("events_validate")?;
                 if batch.recovery_required || batch.next.0 < watch.cursor.0 {
                     return Err("event recovery required".into());
                 }
@@ -233,14 +311,17 @@ mod peer {
                 )?;
                 continue;
             }
+            trace.stage("command_validate")?;
             match (&command, generation) {
                 (Command::Create, 0) | (Command::Update, 1) => {}
                 _ => return Err("invalid write order; no retries".into()),
             }
+            trace.stage("pre_upload_list")?;
             let current = listing(&client, &watch)
                 .await?
                 .into_iter()
                 .find(|n| n.name == "A.bin" && !n.is_removed);
+            trace.stage("pre_upload_validate")?;
             match (&previous, &current) {
                 (None, None) => {}
                 (Some(p), Some(n))
@@ -251,6 +332,7 @@ mod peer {
                         && content(n).hash == p.hash => {}
                 _ => return Err("fixture changed independently".into()),
             }
+            trace.stage("body_prepare")?;
             let bytes = vec![b'A' + generation; 2 * 1024 * 1024];
             let expected = drive_core::sha256(&bytes);
             let source = out.join(format!("body-{generation}.bin"));
@@ -263,6 +345,7 @@ mod peer {
             file.write_all(&bytes)?;
             file.sync_all()?;
             drop(file);
+            trace.stage("upload_intent")?;
             journal(
                 &mut log,
                 "upload_intent",
@@ -279,6 +362,7 @@ mod peer {
                     sync_id: 0,
                     max_id: 0,
                 });
+            trace.stage("upload_request")?;
             let receipt = client
                 .upload_snapshot_at_identity(
                     identity,
@@ -287,10 +371,12 @@ mod peer {
                     &source,
                 )
                 .await;
+            trace.stage("upload_observe_list")?;
             let observed = listing(&client, &watch)
                 .await?
                 .into_iter()
                 .find(|n| live(n, "A.bin", FileType::File));
+            trace.stage("upload_observe_download")?;
             let verified = if let Some(n) = observed.as_ref() {
                 client
                     .download_checked(&content(n), &out.join(format!("verified-{generation}.bin")))
@@ -306,9 +392,10 @@ mod peer {
                 "upload_observed",
                 json!({"generation":generation,"acknowledged":acknowledged,"desired_content_observed":verified,"retry":false}),
             )?;
-            let accepted = receipt.map_err(
-                |_| "upload acknowledgement unknown; read observation is not commit attribution",
-            )?;
+            trace.stage("upload_validate_receipt")?;
+            // Retain the typed native class, never its error text; an observed
+            // desired body still does not attribute an uncertain acknowledgement.
+            let accepted = receipt?;
             let observed = observed.ok_or("uploaded file absent")?;
             if verified != Some(true)
                 || content(&observed).file_id != accepted.file_id
@@ -316,9 +403,11 @@ mod peer {
             {
                 return Err("receipt/content mismatch".into());
             }
+            trace.stage("upload_scope_reverify")?;
             root(&client, home.view_id, &path, &made.file_id, made.node_id).await?;
             previous = Some(accepted);
             generation += 1;
+            trace.stage("upload_reply")?;
             send(
                 json!({"committed":true,"generation":generation,"sha256":expected,"size":bytes.len(),"file_id":observed.file_id,"sync_id":observed.sync_id,"max_id":observed.max_id}),
             )?;
@@ -342,15 +431,63 @@ mod peer {
             ));
             assert!(read::<Command>(&mut std::io::Cursor::new(b"\"events\"")).is_err());
         }
+        #[test]
+        fn diagnostics_never_serialize_native_reason_or_error_text() {
+            let mut trace = Diagnostics::default();
+            trace.stage("connect").unwrap();
+            let error = sproto::Error::Server {
+                code: 402,
+                reason: "SECRET user/path/password".into(),
+            };
+            let frame = trace.frame(&error);
+            assert_eq!(frame["stage"], "connect");
+            assert_eq!(frame["category"], "native_server");
+            assert_eq!(frame["native_code"], 402);
+            assert!(!frame.to_string().contains("SECRET"));
+            let io = std::io::Error::other("SECRET path");
+            assert_eq!(trace.frame(&io)["category"], "io");
+            assert!(!trace.frame(&io).to_string().contains("SECRET"));
+        }
+        #[test]
+        fn prewrite_stages_are_durable_without_identity_fields() {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("trace");
+            let file = OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(&path)
+                .unwrap();
+            let mut trace = Diagnostics {
+                stage: "preflight",
+                log: Some(file),
+            };
+            for stage in [
+                "input_read",
+                "connect",
+                "personal_root",
+                "personal_root_list",
+                "lab_select",
+                "lab_verify",
+            ] {
+                trace.stage(stage).unwrap();
+            }
+            let text = std::fs::read_to_string(path).unwrap();
+            let rows: Vec<Value> = text
+                .lines()
+                .map(|s| serde_json::from_str(s).unwrap())
+                .collect();
+            assert_eq!(rows.len(), 6);
+            assert_eq!(rows.last().unwrap()["stage"], "lab_verify");
+            assert!(!text.contains("path") && !text.contains("password"));
+        }
     }
 }
 #[cfg(feature = "native-research")]
 #[tokio::main]
 async fn main() {
-    if peer::run().await.is_err() {
-        eprintln!(
-            "native_validation_peer failed; private intent journal retained; no retry or cleanup"
-        );
+    let mut trace = peer::Diagnostics::default();
+    if let Err(error) = peer::run(&mut trace).await {
+        trace.report(error.as_ref());
         std::process::exit(1);
     }
 }

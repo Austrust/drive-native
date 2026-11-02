@@ -1,5 +1,30 @@
 use super::*;
 
+pub(super) fn begin_directory_in_transaction(
+    db: &Connection,
+    run: &InitializationRun,
+    id: &str,
+) -> Result<InitializationDirectoryTicket> {
+    let generation: u64 = db.query_row(
+        "SELECT r.directory_clock FROM initialization_run r JOIN initialization_directories d ON d.run=r.run_id WHERE r.run_id=?1 AND d.id=?2",
+        params![run.run_id,id], |r|read_counter(r,0))?;
+    let generation = generation
+        .checked_add(1)
+        .ok_or_else(|| invalid("directory generation exhausted"))?;
+    number(generation)?;
+    db.execute(
+        "UPDATE initialization_run SET directory_clock=?2 WHERE run_id=?1",
+        params![run.run_id, number(generation)?],
+    )?;
+    db.execute("UPDATE initialization_directories SET generation=?3,state='loading',receipt_seq=NULL,receipt_hash=NULL WHERE run=?1 AND id=?2",params![run.run_id,id,number(generation)?])?;
+    clear_fence(db, &run.run_id)?;
+    Ok(InitializationDirectoryTicket {
+        run: run.clone(),
+        directory: id.into(),
+        generation,
+    })
+}
+
 impl Store {
     /// A sibling directory response may have moved or replaced this subtree.
     /// Discard that stale read rather than publishing it or failing the run.
@@ -27,29 +52,11 @@ impl Store {
     ) -> Result<InitializationDirectoryTicket> {
         let tx = self.db.transaction()?;
         checked(&tx, run, false)?;
-        let generation: u64 = tx.query_row(
-            "SELECT r.directory_clock FROM initialization_run r JOIN initialization_directories d ON d.run=r.run_id WHERE r.run_id=?1 AND d.id=?2",
-            params![run.run_id, id],
-            |r| read_counter(r,0),
-        )?;
-        let generation = generation
-            .checked_add(1)
-            .ok_or_else(|| invalid("directory generation exhausted"))?;
-        number(generation)?;
         // Run-wide allocation prevents ABA after a parent replacement deletes
         // and recreates the same directory ID/row within the same run epoch.
-        tx.execute(
-            "UPDATE initialization_run SET directory_clock=?2 WHERE run_id=?1",
-            params![run.run_id, number(generation)?],
-        )?;
-        tx.execute("UPDATE initialization_directories SET generation=?3,state='loading',receipt_seq=NULL,receipt_hash=NULL WHERE run=?1 AND id=?2",params![run.run_id,id,number(generation)?])?;
-        clear_fence(&tx, &run.run_id)?;
+        let ticket = begin_directory_in_transaction(&tx, run, id)?;
         tx.commit()?;
-        Ok(InitializationDirectoryTicket {
-            run: run.clone(),
-            directory: id.into(),
-            generation,
-        })
+        Ok(ticket)
     }
     /// Accept only a complete, checked direct listing. No offset/partial page is
     /// persisted as completed coverage. False is an exact idempotent duplicate.
@@ -210,7 +217,9 @@ impl Store {
             let previous_identity = read_native_identity(&tx, &ticket.run.run_id, &old.id)?;
             if unchanged && previous_identity == incoming_identity {
                 retained.insert(old.id);
-            } else if let Some(new) = incoming.filter(|_| refresh_directory && previous_identity == incoming_identity) {
+            } else if let Some(new) =
+                incoming.filter(|_| refresh_directory && previous_identity == incoming_identity)
+            {
                 // A fresh listing changed only this directory's metadata/version.
                 // Retain discovered identities, never their old coverage/authority.
                 // Updating the identity sidecar must also rebind its Node digest.
@@ -483,7 +492,8 @@ impl Store {
         run: &InitializationRun,
         sequence: u64,
     ) -> Result<InitializationApplyResult> {
-        self.apply_initialization_events_inner(run, sequence, true)
+        self.apply_initialization_events_diagnosed(run, sequence, true)
+            .map(|outcome| outcome.result)
     }
     /// Apply means that the event's required rechecks are durably scheduled,
     /// not that old event metadata was copied over a newer directory listing.
@@ -492,14 +502,18 @@ impl Store {
         run: &InitializationRun,
         sequence: u64,
     ) -> Result<InitializationApplyResult> {
-        self.apply_initialization_events_inner(run, sequence, false)
+        self.apply_initialization_events_diagnosed(run, sequence, false)
+            .map(|outcome| outcome.result)
     }
-    fn apply_initialization_events_inner(
+    /// The same transaction and policy as the compatibility wrappers. Return
+    /// diagnostic success only after durable obligations/cursor commit; errors
+    /// never return a misleading successful plan summary.
+    pub fn apply_initialization_events_diagnosed(
         &mut self,
         run: &InitializationRun,
         sequence: u64,
         directory_race: bool,
-    ) -> Result<InitializationApplyResult> {
+    ) -> Result<InitializationApplyOutcome> {
         let tx = self.db.transaction()?;
         let s = checked(&tx, run, false)?;
         if sequence == 0 || sequence > s.received_sequence {
@@ -507,7 +521,10 @@ impl Store {
         }
         if sequence <= s.applied_sequence {
             read_event_receipt(&tx, &s, sequence)?;
-            return Ok(InitializationApplyResult::AlreadyApplied);
+            return Ok(InitializationApplyOutcome {
+                result: InitializationApplyResult::AlreadyApplied,
+                summary: InitializationApplySummary::default(),
+            });
         }
         if sequence != s.applied_sequence + 1 {
             return Err(invalid("event application gap"));
@@ -532,7 +549,53 @@ impl Store {
                 return Err(rejection);
             }
         }
+        // Plan the entire page before mutating coverage: children can precede
+        // their unknown directory event. No hinted identity is inserted here.
+        let mut unknown_directories = HashMap::new();
+        // A bounded optional optimization. Larger pages retain the existing
+        // conservative policy, rather than multiplying ancestry work per item.
+        if !directory_race
+            && batch.events.len() <= 4096
+            && batch
+                .events
+                .iter()
+                .filter(|event| matches!(&event.change, Change::Upsert(n) if n.directory))
+                .count()
+                <= 64
+        {
+            let mut occurrences = HashMap::<&str, usize>::new();
+            for event in &batch.events {
+                let id = match &event.change {
+                    Change::Upsert(n) => n.id.as_str(),
+                    Change::Delete { id } => id.as_str(),
+                };
+                *occurrences.entry(id).or_default() += 1;
+            }
+            for (ordinal, event) in batch.events.iter().enumerate() {
+                let Change::Upsert(node) = &event.change else {
+                    continue;
+                };
+                if !node.directory || occurrences.get(node.id.as_str()) != Some(&1) {
+                    continue;
+                }
+                match load_node(&tx, &run.run_id, &node.id) {
+                    Ok(_) => continue,
+                    Err(e) if e.is_not_found() => {}
+                    Err(e) => return Err(e),
+                }
+                if let Some(plan) = local_recheck::plan_unknown_directory(
+                    &tx,
+                    &s,
+                    node,
+                    page.as_ref().and_then(|p| p.hint(ordinal)),
+                )? {
+                    unknown_directories.insert(node.id.as_str(), plan);
+                }
+            }
+        }
         let mut all = directory_race;
+        let mut full_reason =
+            directory_race.then_some(InitializationFullRecheckReason::DirectoryRace);
         let mut missing_file_parent = false;
         let mut root_refresh = false;
         let mut parents = HashSet::new();
@@ -553,12 +616,22 @@ impl Store {
                     _ => return Err(invalid("selected root removed")),
                 }
                 all = true;
+                full_reason = full_reason.max(Some(InitializationFullRecheckReason::Root));
                 root_refresh = true;
                 crate::preview::invalidate_root_in_transaction(&tx, &s)?;
                 continue;
             }
+            if let Some(plan) = unknown_directories.get(id.as_str()) {
+                parents.insert(plan.parent.clone());
+                continue;
+            }
             let directory_event = old.as_ref().is_some_and(|node| node.directory)
                 || matches!(&event.change, Change::Upsert(node) if node.directory);
+            if matches!((&old, &event.change), (Some(previous), Change::Upsert(node)) if previous.directory != node.directory)
+            {
+                all = true;
+                full_reason = full_reason.max(Some(InitializationFullRecheckReason::TypeMismatch));
+            }
             if directory_event && !all {
                 if let Some(plan) = local_recheck::plan_known_directory(
                     &tx,
@@ -574,6 +647,8 @@ impl Store {
             }
             if old.as_ref().is_some_and(|node| node.directory) {
                 all = true;
+                full_reason =
+                    full_reason.max(Some(InitializationFullRecheckReason::UnsupportedDirectory));
             }
             if let Some(parent) = old.as_ref().and_then(|node| node.parent.as_ref()) {
                 parents.insert(parent.clone());
@@ -583,6 +658,8 @@ impl Store {
                     crate::state::valid_node(node)?;
                     if node.directory {
                         all = true;
+                        full_reason = full_reason
+                            .max(Some(InitializationFullRecheckReason::UnsupportedDirectory));
                     }
                     let parent = node
                         .parent
@@ -592,18 +669,40 @@ impl Store {
                         Ok(node) if node.directory => {
                             parents.insert(parent.clone());
                         }
-                        Ok(_) => all = true,
-                        Err(error) if error.is_not_found() => missing_file_parent = true,
+                        Ok(_) => {
+                            all = true;
+                            full_reason = full_reason
+                                .max(Some(InitializationFullRecheckReason::TypeMismatch));
+                        }
+                        Err(error) if error.is_not_found() => {
+                            let covered =
+                                unknown_directories
+                                    .get(parent.as_str())
+                                    .is_some_and(|plan| {
+                                        local_recheck::covers_unknown_parent_file(
+                                            plan,
+                                            node,
+                                            page.as_ref().and_then(|p| p.hint(ordinal)),
+                                        )
+                                    });
+                            if !covered {
+                                missing_file_parent = true;
+                            }
+                        }
                         Err(error) => return Err(error),
                     }
                 }
-                Change::Delete { .. } if old.is_none() => all = true,
+                Change::Delete { .. } if old.is_none() => {
+                    all = true;
+                    full_reason =
+                        full_reason.max(Some(InitializationFullRecheckReason::UnknownDelete));
+                }
                 _ => {}
             }
         }
         // Inspect the entire batch before changing coverage. Only verified
-        // known-directory plans are local; root/unknown/mismatch and mixed
-        // unresolved dependencies retain the conservative complete recheck.
+        // known-directory or existing-parent plans are local; root, unsupported
+        // unknowns/mismatches and uncovered mixed dependencies remain conservative.
         // This is our scheduling policy, not an inferred Windows algorithm.
         if missing_file_parent && !all && local_subtrees.is_empty() {
             // Use the partial pending index first. Do not put both EXISTS in a
@@ -621,10 +720,34 @@ impl Store {
             if unfinished {
                 // Leave this durable receipt unapplied. In particular, neither
                 // the applied cursor nor completed directory coverage changes.
-                return Ok(InitializationApplyResult::AwaitingCoverage);
+                return Ok(InitializationApplyOutcome {
+                    result: InitializationApplyResult::AwaitingCoverage,
+                    summary: InitializationApplySummary {
+                        awaiting_coverage_reason: Some(
+                            InitializationCoverageWaitReason::MissingFileParent,
+                        ),
+                        ..InitializationApplySummary::default()
+                    },
+                });
             }
         }
         all |= missing_file_parent;
+        if missing_file_parent {
+            full_reason = full_reason.max(Some(InitializationFullRecheckReason::MissingParent));
+        }
+        let summary = if all {
+            InitializationApplySummary {
+                full_recheck_reason: full_reason,
+                ..InitializationApplySummary::default()
+            }
+        } else {
+            InitializationApplySummary {
+                local_parent_plans: parents.len() as u64,
+                local_subtree_plans: local_subtrees.len() as u64,
+                unknown_directory_dependency_plans: unknown_directories.len() as u64,
+                ..InitializationApplySummary::default()
+            }
+        };
         if all {
             invalidate(&tx, &run.run_id, root, true)?;
         } else {
@@ -635,7 +758,10 @@ impl Store {
         }
         tx.execute("UPDATE initialization_run SET applied=?2,applied_seq=?3,root_refresh=max(root_refresh,?4),root_ticket=CASE WHEN ?4 THEN NULL ELSE root_ticket END,fenced=NULL,fence_ticket=NULL WHERE run_id=?1",params![run.run_id,batch.to,number(sequence)?,root_refresh])?;
         tx.commit()?;
-        Ok(InitializationApplyResult::Applied)
+        Ok(InitializationApplyOutcome {
+            result: InitializationApplyResult::Applied,
+            summary,
+        })
     }
     /// Capture the candidate boundary immediately before the native stationary
     /// fence request. Every subsequent mutation invalidates this one-use ticket.

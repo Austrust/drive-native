@@ -1,12 +1,100 @@
-//! Narrow local scheduling for an already known non-root directory. Native
-//! identities are prior list observations, not proof of the current path.
-//! Re-list the affected parents/subtree; never copy event metadata into entries.
+//! Narrow local scheduling for known directories and page-local unknown-child
+//! dependencies under verified existing parents. Native identities are prior
+//! list observations, not proof of the current path. Re-list affected parents
+//! and subtrees; never copy event metadata into entries.
 use super::*;
 use crate::Event;
 
 pub(super) struct LocalDirectoryPlan {
     pub directory: String,
     pub parents: HashSet<String>,
+}
+
+/// A page-local dependency, NOT a candidate identity. Only the already observed
+/// parent is scheduled; its native listing must discover (or disprove) this ID.
+pub(super) struct UnknownDirectoryPlan {
+    pub parent: String,
+    path: String,
+}
+
+pub(super) fn plan_unknown_directory(
+    db: &Connection,
+    s: &InitializationStatus,
+    node: &Node,
+    hint: Option<&InitializationEventHint>,
+) -> Result<Option<UnknownDirectoryPlan>> {
+    let Some(hint) = hint else {
+        return Ok(None);
+    };
+    if !node.directory
+        || node.id == root_id(&s.binding)?
+        || hint.kind != InitializationEventKind::Modify
+        || hint.metadata_removed
+        || hint.destination_path.is_some()
+        || s.root_needs_refresh
+    {
+        return Ok(None);
+    }
+    let Some(parent) = node.parent.as_ref() else {
+        return Ok(None);
+    };
+    if hint.metadata_parent_id.as_ref() != Some(parent) {
+        return Ok(None);
+    }
+    let parent_node = match load_node(db, &s.run.run_id, parent) {
+        Ok(node) if node.directory => node,
+        Ok(_) => return Ok(None),
+        Err(e) if e.is_not_found() => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    let Some((parent_path, chain)) = observed_path(db, s, &parent_node.id)? else {
+        return Ok(None);
+    };
+    for ancestor in &chain {
+        let denied: bool = db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM preview_denied WHERE run=?1 AND id=?2)",
+            params![s.run.run_id, ancestor.id],
+            |row| row.get(0),
+        )?;
+        if denied {
+            return Ok(None);
+        }
+    }
+    let root_invalid: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM preview_visibility WHERE run=?1 AND id=?2 AND root_invalid!=0)",
+        params![s.run.run_id, root_id(&s.binding)?], |row| row.get(0))?;
+    if root_invalid {
+        return Ok(None);
+    }
+    let expected = format!("{}/{}", parent_path.trim_end_matches('/'), node.name);
+    if hint.event_path != expected {
+        return Ok(None);
+    }
+    let collision: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM initialization_entries WHERE run=?1 AND parent=?2 AND name=?3)",
+        params![s.run.run_id, parent, node.name], |row| row.get(0))?;
+    if collision {
+        return Ok(None);
+    }
+    Ok(Some(UnknownDirectoryPlan {
+        parent: parent.clone(),
+        path: expected,
+    }))
+}
+
+pub(super) fn covers_unknown_parent_file(
+    plan: &UnknownDirectoryPlan,
+    node: &Node,
+    hint: Option<&InitializationEventHint>,
+) -> bool {
+    hint.is_some_and(|hint| {
+        !node.directory
+            && hint.kind == InitializationEventKind::Modify
+            && !hint.metadata_removed
+            && hint.destination_path.is_none()
+            && hint.metadata_parent_id == node.parent
+            && hint.event_path == format!("{}/{}", plan.path.trim_end_matches('/'), node.name)
+    })
 }
 
 /// Only known, non-denied ancestry with same-row native identities is eligible.

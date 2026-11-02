@@ -27,6 +27,8 @@ pub enum Stage {
     FinalCheck,
     FinalCommit,
     QueueSample,
+    PriorityPrepare,
+    PriorityClaim,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -53,6 +55,20 @@ pub enum Counter {
     ClaimPreviouslyClaimed,
     ClaimNew,
     ClaimScanYields,
+    PriorityPrepared,
+    PriorityReused,
+    PriorityClaimed,
+    PrioritySkipped,
+    EventLocalParentPlans,
+    EventLocalSubtreePlans,
+    EventUnknownDirectoryDependencyPlans,
+    EventFullRecheckRoot,
+    EventFullRecheckDirectoryRace,
+    EventFullRecheckTypeMismatch,
+    EventFullRecheckUnsupportedDirectory,
+    EventFullRecheckUnknownDelete,
+    EventFullRecheckMissingParent,
+    EventAwaitingMissingFileParent,
 }
 #[derive(Clone, Default, Serialize)]
 pub struct Total {
@@ -104,6 +120,55 @@ pub struct Span<'a> {
     start: Instant,
 }
 impl Metrics {
+    /// Only successful core outcomes reach this boundary. These are planned
+    /// durable rechecks, not completed listings or additional directory scans.
+    pub fn event_application(
+        &self,
+        outcome: &drive_core::initialization_store::InitializationApplyOutcome,
+    ) {
+        use drive_core::initialization_store::{
+            InitializationApplyResult as Result, InitializationCoverageWaitReason as Wait,
+            InitializationFullRecheckReason as Full,
+        };
+        let summary = &outcome.summary;
+        match outcome.result {
+            Result::Applied => {
+                for (counter, count) in [
+                    (Counter::EventLocalParentPlans, summary.local_parent_plans),
+                    (Counter::EventLocalSubtreePlans, summary.local_subtree_plans),
+                    (
+                        Counter::EventUnknownDirectoryDependencyPlans,
+                        summary.unknown_directory_dependency_plans,
+                    ),
+                ] {
+                    if count != 0 {
+                        self.count(counter, count);
+                    }
+                }
+                if let Some(reason) = summary.full_recheck_reason {
+                    self.count(
+                        match reason {
+                            Full::Root => Counter::EventFullRecheckRoot,
+                            Full::DirectoryRace => Counter::EventFullRecheckDirectoryRace,
+                            Full::TypeMismatch => Counter::EventFullRecheckTypeMismatch,
+                            Full::UnsupportedDirectory => {
+                                Counter::EventFullRecheckUnsupportedDirectory
+                            }
+                            Full::UnknownDelete => Counter::EventFullRecheckUnknownDelete,
+                            Full::MissingParent => Counter::EventFullRecheckMissingParent,
+                        },
+                        1,
+                    );
+                }
+            }
+            Result::AwaitingCoverage => {
+                if summary.awaiting_coverage_reason == Some(Wait::MissingFileParent) {
+                    self.count(Counter::EventAwaitingMissingFileParent, 1);
+                }
+            }
+            Result::AlreadyApplied => {}
+        }
+    }
     pub fn queue_due(&self) -> bool {
         self.state
             .lock()
@@ -212,6 +277,85 @@ impl Drop for Span<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn event_plans_count_committed_pages_and_keep_waits_distinct() {
+        use drive_core::initialization_store::{
+            InitializationApplyOutcome as Outcome, InitializationApplyResult as Result,
+            InitializationApplySummary as Summary, InitializationCoverageWaitReason as Wait,
+            InitializationFullRecheckReason as Full,
+        };
+        let metrics = Metrics::default();
+        let local = Summary {
+            local_parent_plans: 2,
+            local_subtree_plans: 1,
+            unknown_directory_dependency_plans: 1,
+            ..Summary::default()
+        };
+        metrics.event_application(&Outcome {
+            result: Result::Applied,
+            summary: local,
+        });
+        // Even an accidental duplicate carrying a summary cannot count again.
+        metrics.event_application(&Outcome {
+            result: Result::AlreadyApplied,
+            summary: local,
+        });
+        for _ in 0..3 {
+            metrics.event_application(&Outcome {
+                result: Result::AwaitingCoverage,
+                summary: Summary {
+                    awaiting_coverage_reason: Some(Wait::MissingFileParent),
+                    ..local
+                },
+            });
+        }
+        let snapshot = metrics.snapshot();
+        assert_eq!(
+            snapshot.counters,
+            vec![
+                (Counter::EventLocalParentPlans, 2),
+                (Counter::EventLocalSubtreePlans, 1),
+                (Counter::EventUnknownDirectoryDependencyPlans, 1),
+                (Counter::EventAwaitingMissingFileParent, 3)
+            ]
+        );
+        for reason in [
+            Full::Root,
+            Full::DirectoryRace,
+            Full::TypeMismatch,
+            Full::UnsupportedDirectory,
+            Full::UnknownDelete,
+            Full::MissingParent,
+        ] {
+            metrics.event_application(&Outcome {
+                result: Result::Applied,
+                summary: Summary {
+                    full_recheck_reason: Some(reason),
+                    ..Summary::default()
+                },
+            });
+        }
+        let snapshot = metrics.snapshot();
+        for counter in [
+            Counter::EventFullRecheckRoot,
+            Counter::EventFullRecheckDirectoryRace,
+            Counter::EventFullRecheckTypeMismatch,
+            Counter::EventFullRecheckUnsupportedDirectory,
+            Counter::EventFullRecheckUnknownDelete,
+            Counter::EventFullRecheckMissingParent,
+        ] {
+            assert_eq!(
+                snapshot
+                    .counters
+                    .iter()
+                    .find(|(key, _)| *key == counter)
+                    .map(|(_, value)| *value),
+                Some(1)
+            );
+        }
+        assert!(snapshot.stages.is_empty());
+        assert!(snapshot.native.requests.is_empty());
+    }
     #[test]
     fn stalled_spans_visible_and_early_error_drop_recorded() {
         let metrics = Metrics::default();
