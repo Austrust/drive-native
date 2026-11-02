@@ -1,6 +1,6 @@
 # Drive Native
 
-当前开发分支正在整合[初始化流水线与阶段诊断](docs/INITIALIZATION_PIPELINE.md)、不确定提交的依赖调度、[文件时间写回](docs/FILE_TIMESTAMPS.md)与目录属性热路径优化。配套 FSD／worker 使用 IPC20、数据库 schema23；`.8` 尚未发布，相关回归、真实联调与升级门禁按最终源码重新验证。
+当前开发分支正在整合[初始化流水线与阶段诊断](docs/INITIALIZATION_PIPELINE.md)、[队列恢复与目录属性优化](docs/ISSUES_20261103.md)和[文件时间写回](docs/FILE_TIMESTAMPS.md)。配套 FSD／worker 使用 IPC20、数据库 schema23；`.8` 尚未发布，相关回归、真实联调与升级门禁按最终源码重新验证。
 
 `.7` 已发布，完成[停止恢复、多挂载界面与初始化修复](docs/ISSUES_20261102.md)及[包验证012](docs/validation/native-package-012/REPORT.md)。冻结源码 `c6f0a80f22180654d696830d7d4c47beaad9a6b5`，schema22／IPC18；751项Rust、96项GUI、debug／release各23项显式内核通过，隔离升级和重装保留未上传修改。[下载开发包](https://github.com/Austrust/drive-native/releases/download/dev20261102.7/drive-native_0.1.0.dev20261102.7_amd64.deb)，六项资产SHA256已核验；详情见[Release](https://github.com/Austrust/drive-native/releases/tag/dev20261102.7)。
 
@@ -12,7 +12,7 @@
 
 面向 Linux Mint Cinnamon / Nemo 的 Synology Drive 原生协议按需同步客户端。使用 Rust、FUSE、SQLite、PySide6 和 Nemo 扩展；独立连接 Drive Server，不依赖 WebDAV 或官方客户端进程。
 
-**开发测试版本，尚未完成日常使用验收。** `.7` 的真实只读观察通过约2.083秒根目录预览、暂停和重启续接；600秒内完整初始化未完成，诊断去重2次响应超时后继续枚举。事件接收／应用序号均0，不作为非空事件恢复证明。普通目录全量同步、持久历史、Mint及最终数据安全／7×24仍开放。完整目标未完成，长期goal当前暂停，本轮issue修复按用户新请求执行。
+**开发测试版本，尚未完成日常使用验收。** `.7` 的真实只读观察通过约2.083秒根目录预览、暂停和重启续接；600秒内完整初始化未完成，诊断去重2次响应超时后继续枚举。事件接收／应用序号均0，不作为非空事件恢复证明。普通目录全量同步、持久历史、Mint及最终数据安全／7×24仍开放。完整目标未完成；本轮继续修复与验证，发布有实测改善的开发包后按用户要求暂停。
 
 ## 已实现
 
