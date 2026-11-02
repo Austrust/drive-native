@@ -97,7 +97,7 @@
 
 `work.native` 使用 [`sproto::diagnostics`](../crates/sproto/src/diagnostics.rs) 的封闭字段：连接池等待、新建／复用连接、连接建立、请求发送／接收、帧数、continuation／keepalive、列表页数、条目数和节点解析时间。`decode_active_poll_us` 是同步 Future polling 的累计活动时间，包含传输 polling，不是独立测得的纯解析 CPU 时间。
 
-请求样本中的 `received_bytes` 和 `positive_read_count` 统计解密流进入 `BufReader` 前的正字节读取。它们包含预读；从已有缓冲区消费字节、零字节读取及 EOF 不增加计数。`first_byte_us/last_byte_us` 是相对同一请求开始时刻（包括发送阶段）的首／末次正读偏移，没有正读时为 `null`。它们不包含内容或身份，不表示已解析对象大小，也不能单独证明整个响应期间持续有流量。`elapsed_us - last_byte_us` 可表示该请求结束前多久没有观察到新正读。累计请求统计只合并读取次数和字节数，不相加各请求的首末时间。缺少新读取计数的旧诊断消息不能伪造为零读取；本批 worker 与 FSD 必须使用同一冻结构建，IPC 版本仍为 19。
+请求样本中的 `received_bytes` 和 `positive_read_count` 统计解密流进入 `BufReader` 前的正字节读取。它们包含预读；从已有缓冲区消费字节、零字节读取及 EOF 不增加计数。`first_byte_us/last_byte_us` 是相对同一请求开始时刻（包括发送阶段）的首／末次正读偏移，没有正读时为 `null`。它们不包含内容或身份，不表示已解析对象大小，也不能单独证明整个响应期间持续有流量。`elapsed_us - last_byte_us` 可表示该请求结束前多久没有观察到新正读。累计请求统计只合并读取次数和字节数，不相加各请求的首末时间。缺少新读取计数的旧诊断消息不能伪造为零读取；本批 worker 与 FSD 必须使用同一冻结构建，IPC 版本为 20。
 
 普通 `list` 每页最多请求 1000 项；每页的 30 秒 `native_response_timeout` 包含发送、完整 PObject 解码及该响应全部 continuation 的总 exchange 时间，收到字节不会延长它。连接池等待、其他分页和完整响应后的节点字段转换不属于该截止。`frames` 只在完整 PObject 返回后增加，且包含 keepalive：已收到字节但 `frames=0` 可以是半个对象；`frames=1/keepalive_frames=1` 不能当作一页目录已经成功。长通知的 receive-idle 截止是另一条路径，不能据普通请求超时推断 30 秒完全没有网络流量。本批只增加观察指标，不改变这两种超时策略。
 
