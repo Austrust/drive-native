@@ -1,8 +1,8 @@
 # Drive Native
 
-当前开发分支正在整合[初始化流水线与阶段诊断](docs/INITIALIZATION_PIPELINE.md)、[队列恢复与目录属性优化](docs/ISSUES_20261103.md)和[文件时间写回](docs/FILE_TIMESTAMPS.md)。配套 FSD／worker 使用 IPC20、数据库 schema23；`.8` 尚未发布，相关回归、真实联调与升级门禁按最终源码重新验证。
+`.8` 开发包已冻结准备发布，包含[初始化流水线与阶段诊断](docs/INITIALIZATION_PIPELINE.md)、[队列恢复与目录属性优化](docs/ISSUES_20261103.md)和[文件时间写回](docs/FILE_TIMESTAMPS.md)。配套 FSD／worker 使用 IPC20、数据库 schema23；源码为 `416cc41b11fce2774bc8eb1e899e100f3d896b8f`。
 
-冻结416cc41的[中间包013](docs/validation/native-package-013/REPORT.md)已通过构建、内核及隔离升级门禁，[真实Lab004](docs/validation/native-lab-004/REPORT.md)通过非空事件、后台缓存保鲜及文件时间写回。用户要求FS进一步接近本地目录体验；[当前FSearch改善](docs/validation/fsearch-001/REPORT.md)仍未达该目标，独立FS专项继续，以上中间包不作为最终发布。
+用户决定先发布已验证的[包013](docs/validation/native-package-013/REPORT.md)，然后停止目标。[真实Lab004](docs/validation/native-lab-004/REPORT.md)通过非空事件、后台缓存保鲜及文件时间写回；[原版FSearch扫描](docs/validation/fsearch-001/REPORT.md)首轮约170→79秒、重扫162→70秒。近本地性能及Personal_Sync完整初始化仍未通过；后续缓存实验和目录等待分支未纳入本包。发布范围见[本版结论](docs/RELEASE_20261102_8.md)。
 
 `.7` 已发布，完成[停止恢复、多挂载界面与初始化修复](docs/ISSUES_20261102.md)及[包验证012](docs/validation/native-package-012/REPORT.md)。冻结源码 `c6f0a80f22180654d696830d7d4c47beaad9a6b5`，schema22／IPC18；751项Rust、96项GUI、debug／release各23项显式内核通过，隔离升级和重装保留未上传修改。[下载开发包](https://github.com/Austrust/drive-native/releases/download/dev20261102.7/drive-native_0.1.0.dev20261102.7_amd64.deb)，六项资产SHA256已核验；详情见[Release](https://github.com/Austrust/drive-native/releases/tag/dev20261102.7)。
 

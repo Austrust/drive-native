@@ -4,7 +4,7 @@
   "source_commit": "416cc41b11fce2774bc8eb1e899e100f3d896b8f",
   "database_schema": 23,
   "ipc_version": 20,
-  "package_role": "intermediate_frozen_validation_build",
+  "package_role": "frozen_development_release_selected_by_user",
   "published": false,
   "final_goal_complete": false,
   "final_delivery_gates_closed": false,
@@ -78,5 +78,6 @@
   "active_initialization_candidate_upgrade_covered": false,
   "authenticated_cross_version_worker_session_verified": false,
   "nas_trial_included_in_this_report": false,
-  "paired_performance_claim": false
+  "paired_performance_claim": false,
+  "release_decision": "publish verified package013 then pause; later filesystem experiments excluded"
 }

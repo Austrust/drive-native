@@ -20,7 +20,7 @@
 
 ## 当前整合工作
 
-2026-11-03，长期goal保持活动。当前按用户优先级整合issue 3–5与初始化性能修复，目标开发包`.8`，schema23／IPC20。冻结416cc41的package013已通过构建、显式内核、授权Lab联调及schema22升级门禁；没有发布。用户新增FS接近本地目录要求，由独立分支继续实现；[原版FSearch基准](docs/validation/fsearch-001/REPORT.md)虽降低约54%／57%耗时，仍未达这一目标，#5保持开放。该联调包不等于最终交付；普通目录全量同步、Personal_Sync完整初始化及P0–P6全部未通过项保留，不称候选版。
+2026-11-03，用户最新要求先将实测提速与本轮已解决问题固定到新版本，然后终止目标。选择冻结416cc41的package013作为`.8`开发版发布，schema23／IPC20；发布核验后暂停执行。后续FS缓存和目录等待实验保留本地、不进入本包。[原版FSearch基准](docs/validation/fsearch-001/REPORT.md)降低约54%／57%耗时，仍未达到近本地体验，#5保持开放。普通目录全量同步、Personal_Sync完整初始化及P0–P6全部未通过项保留，不称候选版或完整目标完成。
 
 [包013门禁](docs/validation/native-package-013/REPORT.md)已完成：debug／release各25项显式内核、peer4及重试10轮×5通过；暂停升级schema22→23及备份、配套worker、旧ELF拒绝、重装／卸载保留两份未上传修改均通过。[真实Lab004](docs/validation/native-lab-004/REPORT.md)验证同候选非空事件提交、未固定缓存后台更新和真正断网读取新版，以及独立原生会话确认的文件mtime写回。它们不替代新FS代码、Personal完整初始化、Mint或最终长期验收；包013仍未发布。
 
