@@ -1,5 +1,7 @@
 # Drive Native
 
+当前开发分支正在验证[初始化流水线与阶段诊断](docs/INITIALIZATION_PIPELINE.md)，配套 FSD／worker 使用 IPC19、数据库仍为 schema22。`.8` 尚未发布；机制说明不代表真实初始化或事件闭环已经通过。
+
 `.7` 已发布，完成[停止恢复、多挂载界面与初始化修复](docs/ISSUES_20261102.md)及[包验证012](docs/validation/native-package-012/REPORT.md)。冻结源码 `c6f0a80f22180654d696830d7d4c47beaad9a6b5`，schema22／IPC18；751项Rust、96项GUI、debug／release各23项显式内核通过，隔离升级和重装保留未上传修改。[下载开发包](https://github.com/Austrust/drive-native/releases/download/dev20261102.7/drive-native_0.1.0.dev20261102.7_amd64.deb)，六项资产SHA256已核验；详情见[Release](https://github.com/Austrust/drive-native/releases/tag/dev20261102.7)。
 
 历史开发包 `0.1.0~dev20261101.6` 已[发布](https://github.com/Austrust/drive-native/releases/tag/dev20261101.6)，冻结 `7683b36dcbce91b5e6143ef17bb8e97882f0453b`，schema22／IPC18。[冷启动目录预览](docs/INITIALIZATION_PREVIEW.md)让完整接收的目录先显示元数据，正文仍须等全局初始化完成；同时整合[已知目录局部重查](docs/INITIALIZATION_EVENT_EVIDENCE.md)与[目录视图缓存修复](docs/DIRECTORY_VIEW_STAMP.md)。[包验证011](docs/validation/native-package-011/REPORT.md)记录743项Rust、75项GUI，debug／release各20项显式内核测试，以及schema20→22迁移和未上传数据保留。该冻结源码在发布时尚无NAS或配对性能实测；随后短时预览观察另行记录。
