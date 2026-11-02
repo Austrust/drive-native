@@ -326,10 +326,31 @@ impl Client {
         base: NativeVersion,
         snapshot: &Path,
     ) -> Result<ContentVersion> {
+        self.upload_snapshot_at_identity_with_mtime(identity, leaf, base, snapshot, None)
+            .await
+    }
+    /// Official Linux PrepareMtime: top-level object with u32 whole seconds.
+    /// None preserves legacy requests; explicit times require listing verification.
+    #[cfg(feature = "protocol-research")]
+    pub async fn upload_snapshot_at_identity_with_mtime(
+        &self,
+        identity: &str,
+        leaf: Option<&str>,
+        base: NativeVersion,
+        snapshot: &Path,
+        mtime: Option<u32>,
+    ) -> Result<ContentVersion> {
         validate_identity_base(leaf, base)?;
         let wire_path = identity_upload_path(identity, leaf)?;
-        self.upload_wire(None, &wire_path, base, snapshot, UploadReceiptMode::Read)
-            .await
+        self.upload_wire(
+            None,
+            &wire_path,
+            base,
+            snapshot,
+            UploadReceiptMode::Read,
+            mtime,
+        )
+        .await
     }
 
     /// Explicit unread-reply injection using the same identity wire shape.
@@ -353,6 +374,7 @@ impl Client {
             base,
             snapshot,
             UploadReceiptMode::DropAfter(Box::pin(observed)),
+            None,
         )
         .await
     }
@@ -370,7 +392,7 @@ impl Client {
         if path == "/" {
             return Err(Error::InvalidConfig("cannot upload over root".into()));
         }
-        self.upload_wire(Some(view_id), path, base, snapshot, receipt_mode)
+        self.upload_wire(Some(view_id), path, base, snapshot, receipt_mode, None)
             .await
     }
     #[cfg(feature = "protocol-research")]
@@ -381,6 +403,7 @@ impl Client {
         base: NativeVersion,
         snapshot: &Path,
         receipt_mode: UploadReceiptMode<'_>,
+        mtime: Option<u32>,
     ) -> Result<ContentVersion> {
         let mut file = tokio::fs::File::open(snapshot).await?;
         let stat = file.metadata().await?;
@@ -415,6 +438,12 @@ impl Client {
             "conflict_policy"=>"overwrite_client","is_dir"=>false,"file_type"=>"file",
             "file"=>pmap!{"data"=>PObject::Binary{length:size},"size"=>size,"hash"=>hash.as_str(),"refer"=>false,"is_delta"=>false},
         };
+        if let Some(seconds) = mtime {
+            fields
+                .as_map_mut()
+                .unwrap()
+                .insert("mtime".into(), upload_mtime(seconds));
+        }
         // Official PrepareUploadRequest erases view_id for id:-style paths.
         // Sending both was rejected with 0x7000 on Drive 4.0.3.
         if let Some(view) = view_id {
@@ -467,6 +496,11 @@ impl Client {
         .map_err(|_| Error::Timeout("upload; commit uncertain"))?;
         guard.poison_on_err(result)
     }
+}
+
+#[cfg(any(feature = "protocol-research", test))]
+fn upload_mtime(seconds: u32) -> PObject {
+    pmap! {"refer"=>false,"mtime"=>u64::from(seconds)}
 }
 
 #[cfg(test)]
@@ -569,6 +603,18 @@ pub(super) fn identity_upload_path(identity: &str, leaf: Option<&str>) -> Result
 mod identity_path_tests {
     use super::*;
     #[test]
+    fn explicit_mtime_envelope_uses_unsigned_seconds_and_no_reference() {
+        for value in [0, 1, u32::MAX] {
+            let fields = upload_mtime(value);
+            assert_eq!(fields.get("refer").unwrap().as_int(), Some(0));
+            assert_eq!(
+                fields.get("mtime").unwrap().as_int(),
+                Some(u64::from(value))
+            );
+            assert_eq!(fields.as_map().unwrap().len(), 2);
+        }
+    }
+    #[test]
     fn identity_upload_address_cannot_escape_to_another_path() {
         assert!(
             validate_identity_base(
@@ -613,8 +659,8 @@ mod identity_path_tests {
 
         assert_eq!(identity_upload_path("123", None).unwrap(), "id:123");
         assert_eq!(
-            identity_upload_path("123", Some("离线 A.txt")).unwrap(),
-            "id:123/离线 A.txt"
+            identity_upload_path("123", Some("绂荤嚎 A.txt")).unwrap(),
+            "id:123/绂荤嚎 A.txt"
         );
         for id in ["", "0", "-1", "1/2", "id:1", "18446744073709551616"] {
             assert!(identity_upload_path(id, None).is_err());

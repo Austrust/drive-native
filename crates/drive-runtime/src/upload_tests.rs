@@ -18,7 +18,9 @@ fn node(version: &str) -> Node {
 }
 fn fixture(socket: UnixStream) -> (tempfile::TempDir, Arc<drive_core::SharedStore>, Bridge) {
     let dir = tempfile::tempdir().unwrap();
-    let store = Arc::new(drive_core::SharedStore::new(Store::open(dir.path()).unwrap()));
+    let store = Arc::new(drive_core::SharedStore::new(
+        Store::open(dir.path()).unwrap(),
+    ));
     let bridge = Bridge::connect(
         store.clone(),
         Arc::new(Rpc::new(socket).unwrap()),
@@ -94,6 +96,10 @@ fn uncertain_commit_uses_read_only_reconciliation_and_never_replays_upload() {
         handshake(&mut b);
         for reconcile in [false, true] {
             let (req, fd) = crate::transport::receive::<Envelope<Command>>(&mut b).unwrap();
+            let confirmed_mtime = match &req.body {
+                Command::Upload { mtime, .. } => *mtime,
+                _ => None,
+            };
             match req.body {
                 Command::Upload {
                     path,
@@ -118,7 +124,10 @@ fn uncertain_commit_uses_read_only_reconciliation_and_never_replays_upload() {
                     version: VERSION,
                     id: req.id,
                     body: if reconcile {
-                        Response::Committed { node: node("v2") }
+                        let mut confirmed = node("v2");
+                        confirmed.metadata.as_mut().unwrap().mtime =
+                            u64::from(confirmed_mtime.unwrap());
+                        Response::Committed { node: confirmed }
                     } else {
                         Response::Uncertain
                     },
@@ -270,12 +279,12 @@ fn uncertain_remove_reconciles_identity_without_resending_and_unblocks_recreatio
         let n = s.create_local_file("1", "A.doc", 0o644).unwrap();
         s.creation_saved(&n.id).unwrap();
     }
-    assert_eq!(bridge.namespace_pending().unwrap(), 0);
+    assert_eq!(namespace_without_backoff(&bridge, &store).unwrap(), 0);
     assert_eq!(
         store.lock().unwrap().next_remove().unwrap().unwrap().state,
         "uncertain"
     );
-    assert_eq!(bridge.namespace_pending().unwrap(), 1);
+    assert_eq!(namespace_without_backoff(&bridge, &store).unwrap(), 1);
     let mut s = store.lock().unwrap();
     assert!(s.next_namespace_kind().unwrap().is_none());
     let op = s.upload_operations("pending").unwrap().remove(0);
@@ -303,13 +312,15 @@ fn replacement_upload_and_cleanup_have_independent_uncertainty_barriers() {
             assert_eq!(got, reconcile);
             assert_eq!(job.destination, "A.doc");
             assert_eq!(job.source_remote.as_deref(), Some("3"));
+            let mut confirmed = node("v2");
+            confirmed.metadata.as_mut().unwrap().mtime = u64::from(job.mtime.unwrap());
             crate::transport::send(
                 &mut b,
                 &Envelope {
                     version: VERSION,
                     id: req.id,
                     body: if reconcile {
-                        Response::Committed { node: node("v2") }
+                        Response::Committed { node: confirmed }
                     } else {
                         Response::Uncertain
                     },
@@ -380,17 +391,17 @@ fn replacement_upload_and_cleanup_have_independent_uncertainty_barriers() {
         s.replace_local("1", "temporary", "1", "A.doc", "3", "2")
             .unwrap();
     }
-    assert_eq!(bridge.namespace_pending().unwrap(), 0);
+    assert_eq!(namespace_without_backoff(&bridge, &store).unwrap(), 0);
     assert_eq!(
         store.lock().unwrap().next_replace().unwrap().unwrap().state,
         "uncertain"
     );
-    assert_eq!(bridge.namespace_pending().unwrap(), 1);
+    assert_eq!(namespace_without_backoff(&bridge, &store).unwrap(), 1);
     assert_eq!(
         store.lock().unwrap().next_replace().unwrap().unwrap().state,
         "cleanup_uncertain"
     );
-    assert_eq!(bridge.namespace_pending().unwrap(), 1);
+    assert_eq!(namespace_without_backoff(&bridge, &store).unwrap(), 1);
     assert!(
         store
             .lock()
@@ -439,8 +450,8 @@ fn unknown_directory_receipt_never_replays_creation_or_releases_child_uploads() 
         s.creation_saved(&child.id).unwrap();
         (dir, op)
     };
-    assert_eq!(bridge.namespace_pending().unwrap(), 0);
-    assert_eq!(bridge.namespace_pending().unwrap(), 0);
+    assert_eq!(namespace_without_backoff(&bridge, &store).unwrap(), 0);
+    assert_eq!(namespace_without_backoff(&bridge, &store).unwrap(), 0);
     let mut s = store.lock().unwrap();
     assert_eq!(s.next_directory().unwrap().unwrap().state, "uncertain");
     assert!(s.mark_upload_started(&op).is_err());
@@ -509,12 +520,12 @@ fn directory_move_refresh_is_persisted_before_a_second_conditional_request() {
         s.ensure_fs_root("1").unwrap();
         s.rename_local("1", "A", "1", "B", false).unwrap();
     }
-    assert_eq!(bridge.namespace_pending().unwrap(), 0);
+    assert_eq!(namespace_without_backoff(&bridge, &store).unwrap(), 0);
     assert_eq!(
         store.lock().unwrap().next_rename().unwrap().unwrap().state,
         "pending"
     );
-    assert_eq!(bridge.namespace_pending().unwrap(), 1);
+    assert_eq!(namespace_without_backoff(&bridge, &store).unwrap(), 1);
     server.join().unwrap();
 }
 
@@ -576,13 +587,13 @@ fn directory_preparation_is_persisted_before_send_and_survives_uncertain_reply()
         s.creation_saved(&f.id).unwrap();
         (d, op)
     };
-    assert_eq!(bridge.namespace_pending().unwrap(), 1);
+    assert_eq!(namespace_without_backoff(&bridge, &store).unwrap(), 1);
     {
         let mut s = store.lock().unwrap();
         assert_eq!(s.next_directory().unwrap().unwrap().state, "uncertain");
         assert!(s.mark_upload_started(&op).is_err());
     }
-    assert_eq!(bridge.namespace_pending().unwrap(), 1);
+    assert_eq!(namespace_without_backoff(&bridge, &store).unwrap(), 1);
     let mut s = store.lock().unwrap();
     assert_eq!(s.local_identity("10").unwrap(), dir.id);
     s.mark_upload_started(&op).unwrap();
@@ -647,6 +658,7 @@ fn new_file_provenance_is_durable_before_upload_and_preserved_for_reconciliation
             let Command::Upload {
                 origin: received,
                 reconcile,
+                mtime,
                 ..
             } = req.body
             else {
@@ -660,6 +672,7 @@ fn new_file_provenance_is_durable_before_upload_and_preserved_for_reconciliation
             );
             let mut confirmed = node.clone();
             confirmed.version = "created-v1".into();
+            confirmed.metadata.as_mut().unwrap().mtime = u64::from(mtime.unwrap());
             crate::transport::send(
                 &mut b,
                 &Envelope {
@@ -787,6 +800,7 @@ fn replacement_origin_roundtrip(lose_preparation: bool) {
             );
             let mut target = job.target;
             target.version = "created-destination".into();
+            target.metadata.as_mut().unwrap().mtime = u64::from(job.mtime.unwrap());
             crate::transport::send(
                 &mut b,
                 &Envelope {
@@ -826,18 +840,18 @@ fn replacement_origin_roundtrip(lose_preparation: bool) {
     };
     tx.send(store.clone()).unwrap();
     if lose_preparation {
-        assert!(bridge.namespace_pending().is_err());
+        assert!(namespace_without_backoff(&bridge, &store).is_err());
         assert_eq!(
             store.lock().unwrap().next_replace().unwrap().unwrap().state,
             "pending"
         );
     } else {
-        assert_eq!(bridge.namespace_pending().unwrap(), 0);
+        assert_eq!(namespace_without_backoff(&bridge, &store).unwrap(), 0);
         assert_eq!(
             store.lock().unwrap().next_replace().unwrap().unwrap().state,
             "uncertain"
         );
-        assert_eq!(bridge.namespace_pending().unwrap(), 1);
+        assert_eq!(namespace_without_backoff(&bridge, &store).unwrap(), 1);
         assert!(store.lock().unwrap().next_replace().unwrap().is_none());
         assert_eq!(
             store.lock().unwrap().local_identity("98").unwrap(),
@@ -846,3 +860,30 @@ fn replacement_origin_roundtrip(lose_preparation: bool) {
     }
     server.join().unwrap();
 }
+
+// These existing protocol fixtures deliberately advance reconciliation without
+// wall-clock waits. The scheduler-specific tests below exercise real backoff.
+fn namespace_without_backoff(
+    bridge: &Bridge,
+    store: &Arc<drive_core::SharedStore>,
+) -> io::Result<usize> {
+    let operation = store
+        .lock()
+        .unwrap()
+        .next_namespace_operation()
+        .unwrap()
+        .map(|q| q.operation);
+    let result = bridge.namespace_pending();
+    if let Some(operation) = operation {
+        store
+            .lock()
+            .unwrap()
+            .clear_namespace_observation(&operation);
+    }
+    result
+}
+#[path = "namespace_schedule_tests.rs"]
+mod namespace_schedule_tests;
+
+#[path = "timestamp_upload_tests.rs"]
+mod timestamp_upload_tests;

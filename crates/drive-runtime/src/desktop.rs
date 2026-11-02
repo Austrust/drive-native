@@ -377,6 +377,7 @@ pub fn overview(service: &Service) -> io::Result<String> {
         "skipped_symlinks":store.skipped_symlink_count().map_err(|_|other())?,
         "skipped_permission_directories":store.inaccessible_count().map_err(|_|other())?,
         "pending_operations":pending,"revision":revision,"local_revision":store.local_revision(),
+        "queue_health":store.queue_health().map_err(|_|other())?,
         "downloads_started":service.bridge.downloads.load(Ordering::Relaxed),
         "download_errors":store.download_failure_count().map_err(|_|other())?,
         "download_diagnostics":{"failures_seen":service.bridge.download_failures_seen.load(Ordering::Relaxed),

@@ -4,19 +4,19 @@ use super::*;
 use drive_core::preview::PreviewRecord;
 
 pub(super) enum Metadata {
-    Authority(FileRecord),
+    Authority(drive_core::filesystem::PosixRecord),
     Preview(PreviewRecord),
 }
 impl Metadata {
     pub(super) fn attr(&self, uid: u32, gid: u32) -> FileAttr {
         match self {
-            Self::Authority(r) => attr(r, uid, gid),
+            Self::Authority(r) => posix_attr(r, uid, gid),
             Self::Preview(r) => preview_attr(r, uid, gid),
         }
     }
 }
 pub(super) fn metadata(s: &Store, ino: u64) -> drive_core::Result<Metadata> {
-    match s.record_by_inode(ino) {
+    match s.posix_record_by_inode(ino) {
         Ok(r) => Ok(Metadata::Authority(r)),
         Err(e) if e.is_not_found() => s.preview_record_by_inode(ino).map(Metadata::Preview),
         Err(e) => Err(e),
@@ -25,10 +25,10 @@ pub(super) fn metadata(s: &Store, ino: u64) -> drive_core::Result<Metadata> {
 pub(super) fn lookup(s: &Store, parent: u64, name: &str) -> drive_core::Result<Metadata> {
     match metadata(s, parent)? {
         Metadata::Authority(p) => {
-            if !p.node.directory {
+            if !p.directory {
                 return Err(Error::Io(std::io::Error::from_raw_os_error(libc::ENOTDIR)));
             }
-            s.lookup(&p.node.id, name).map(Metadata::Authority)
+            s.posix_lookup(&p.id, name).map(Metadata::Authority)
         }
         Metadata::Preview(_) => s.preview_lookup(parent, name).map(Metadata::Preview),
     }
@@ -40,9 +40,48 @@ pub(super) fn authoritative(
     ino: u64,
     preview_error: i32,
 ) -> drive_core::Result<FileRecord> {
-    match metadata(s, ino)? {
-        Metadata::Authority(r) => Ok(r),
-        Metadata::Preview(_) => Err(Error::Io(std::io::Error::from_raw_os_error(preview_error))),
+    match s.record_by_inode(ino) {
+        Ok(r) => Ok(r),
+        Err(e) if e.is_not_found() => {
+            s.preview_record_by_inode(ino)?;
+            Err(Error::Io(std::io::Error::from_raw_os_error(preview_error)))
+        }
+        Err(e) => Err(e),
+    }
+}
+pub(super) fn posix_attr(r: &drive_core::filesystem::PosixRecord, uid: u32, gid: u32) -> FileAttr {
+    let time = UNIX_EPOCH
+        .checked_add(Duration::from_secs(r.mtime))
+        .unwrap_or(UNIX_EPOCH);
+    let atime = UNIX_EPOCH
+        .checked_add(Duration::new(r.atime, r.atime_nsec))
+        .unwrap_or(UNIX_EPOCH);
+    FileAttr {
+        ino: r.ino,
+        size: r.size,
+        blocks: r.blocks,
+        atime,
+        mtime: time,
+        ctime: time,
+        crtime: UNIX_EPOCH,
+        kind: if r.directory {
+            FileType::Directory
+        } else {
+            FileType::RegularFile
+        },
+        perm: r.mode as u16,
+        nlink: if r.unlinked {
+            0
+        } else if r.directory {
+            2
+        } else {
+            1
+        },
+        uid,
+        gid,
+        rdev: 0,
+        blksize: 4096,
+        flags: 0,
     }
 }
 pub(super) fn preview_attr(r: &PreviewRecord, uid: u32, gid: u32) -> FileAttr {

@@ -254,10 +254,7 @@ impl Store {
         }
         copy.metadata = Some(NodeMetadata {
             size: metadata.len(),
-            mtime: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
+            mtime: u64::from(crate::timestamps::native_mtime(metadata.modified()?)?),
             mode: self.metadata(id)?.map_or(0o644, |m| m.mode),
         });
         self.commit_kept_both(root, id, copy, blob, issue.reason == "creation_conflict")
@@ -279,6 +276,10 @@ impl Store {
             [&copy.id],
         )?;
         tx.execute("INSERT INTO operations(id,node,kind,base,blob,generation) VALUES(?1,?2,'upload',?3,?4,1)",params![op,copy.id,CREATE_VERSION,blob])?;
+        tx.execute(
+            "INSERT INTO upload_times(operation,mtime) VALUES(?1,?2)",
+            params![op, copy.metadata.as_ref().unwrap().mtime],
+        )?;
         tx.execute("UPDATE operations SET state='superseded' WHERE node=?1 AND state IN ('pending','conflict')",[id])?;
         tx.execute("DELETE FROM drafts WHERE node=?1", [id])?;
         tx.execute(

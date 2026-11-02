@@ -78,6 +78,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let desired = b"complete content whose upload acknowledgement is deliberately lost\n";
     std::fs::write(&snapshot, desired)?;
     let intent = UploadIntent {
+        mtime: None,
         view_id: home.view_id,
         path: path.clone(),
         original_file_id: Some(initial.file_id.clone()),

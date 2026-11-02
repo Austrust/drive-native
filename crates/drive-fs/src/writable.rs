@@ -343,6 +343,8 @@ pub(super) fn sync(fs: &mut CacheFilesystem, ino: u64, fh: u64, release: bool, r
 #[cfg(test)]
 #[path = "sync_routing_tests.rs"]
 mod sync_routing_tests;
+#[path = "timestamp_setattr.rs"]
+mod timestamp_setattr;
 #[allow(clippy::too_many_arguments)]
 pub(super) fn setattr(
     fs: &mut CacheFilesystem,
@@ -371,12 +373,17 @@ pub(super) fn setattr(
         reply.error(libc::EPERM);
         return;
     }
-    if atime.is_some()
-        || mtime.is_some()
-        || flags.is_some()
-        || mode.is_some_and(|v| v & !(0o777 | libc::S_IFMT) != 0)
-    {
+    if flags.is_some() || mode.is_some_and(|v| v & !(0o777 | libc::S_IFMT) != 0) {
         reply.error(libc::EOPNOTSUPP);
+        return;
+    }
+    if atime.is_some() || mtime.is_some() {
+        // Validate the whole supported request before starting any local edit.
+        if mode.is_some() || size.is_some() {
+            reply.error(libc::EOPNOTSUPP);
+        } else {
+            timestamp_setattr::set_times(fs, ino, fh, atime, mtime, reply);
+        }
         return;
     }
     let Some(size) = size else {

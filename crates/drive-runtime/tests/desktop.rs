@@ -65,6 +65,41 @@ fn get(s: &Service, path: &str) -> serde_json::Value {
 }
 
 #[test]
+fn overview_reports_exact_unknown_commits_without_running_dependency_scheduler() {
+    let (_d, service) = fixture();
+    {
+        let mut store = service.bridge.store.lock().unwrap();
+        let upload = store.save_local("one", b"unconfirmed local edit").unwrap();
+        store.mark_upload_started(&upload).unwrap();
+        store.mark_upload_uncertain(&upload).unwrap();
+        store
+            .create_local_directory("root", "new-directory", 0o700)
+            .unwrap();
+        let operation = store.next_directory().unwrap().unwrap().job.operation;
+        store.mark_directory_started(&operation).unwrap();
+        store.mark_directory_uncertain(&operation).unwrap();
+    }
+    let before = service.bridge.store.lock().unwrap().queue_health().unwrap();
+    let overview: serde_json::Value =
+        serde_json::from_str(&desktop::overview(&service).unwrap()).unwrap();
+    let health = &overview["queue_health"];
+    assert_eq!(health["namespace_uncertain"], 1);
+    assert_eq!(health["upload_uncertain"], 1);
+    assert_eq!(health["namespace_unfinished"], 1);
+    assert_eq!(health["upload_unfinished"], 1);
+    assert_eq!(
+        health["schedule"],
+        serde_json::to_value(before.schedule).unwrap()
+    );
+    assert_eq!(health["recovery_attempts_observed"], 0);
+    assert_eq!(health["next_recovery_ms"], serde_json::Value::Null);
+    // Overview neither issues observations nor refreshes the cached schedule.
+    let after = service.bridge.store.lock().unwrap().queue_health().unwrap();
+    assert!(after.schedule_age_ms >= before.schedule_age_ms);
+    assert_eq!(after.recovery_attempts_observed, 0);
+}
+
+#[test]
 fn initialization_remains_available_while_store_and_control_are_held() {
     let (_root, service) = fixture();
     service.bridge.initialization.begin();

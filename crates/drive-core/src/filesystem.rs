@@ -3,12 +3,18 @@ use crate::{Error, Node, NodeMetadata, Result, Status, Store};
 use rusqlite::{OptionalExtension, params};
 use serde::Serialize;
 
+#[path = "filesystem_posix.rs"]
+mod posix;
+pub use posix::PosixRecord;
+
 #[derive(Debug, Clone, Serialize)]
 pub struct FileRecord {
     pub node: Node,
     pub ino: u64,
     pub size: u64,
     pub mtime: u64,
+    pub atime: u64,
+    pub atime_nsec: u32,
     pub mode: u32,
     pub status: Status,
     pub unlinked: bool,
@@ -28,6 +34,14 @@ pub struct DirectorySnapshot {
     pub entries: Vec<DirectoryEntry>,
     /// Owned allocation estimate (entry capacity and UTF-8 name capacity).
     pub bytes: usize,
+}
+#[derive(Debug, Default)]
+pub struct DirectoryBuildTimings {
+    pub identity_us: u64,
+    pub count_us: u64,
+    pub inode_allocation_us: u64,
+    pub collect_us: u64,
+    pub commit_us: u64,
 }
 
 /// Conservative identity of the committed authoritative namespace. Compare it
@@ -64,6 +78,31 @@ impl Store {
     /// allocated in one INSERT SELECT, without constructing FileRecords or
     /// touching cached bodies/drafts. The byte limit is checked before allocation.
     pub fn directory_snapshot(&self, ino: u64, max_bytes: usize) -> Result<DirectorySnapshot> {
+        self.directory_snapshot_impl(ino, max_bytes, None)
+    }
+    /// Explicit opt-in measurements. Normal callers do not read a clock.
+    pub fn directory_snapshot_measured(
+        &self,
+        ino: u64,
+        max_bytes: usize,
+    ) -> Result<(DirectorySnapshot, DirectoryBuildTimings)> {
+        let mut timings = DirectoryBuildTimings::default();
+        let snapshot = self.directory_snapshot_impl(ino, max_bytes, Some(&mut timings))?;
+        Ok((snapshot, timings))
+    }
+    fn directory_snapshot_impl(
+        &self,
+        ino: u64,
+        max_bytes: usize,
+        mut timings: Option<&mut DirectoryBuildTimings>,
+    ) -> Result<DirectorySnapshot> {
+        let mut start = timings.as_ref().map(|_| std::time::Instant::now());
+        let mut elapsed = || {
+            let Some(old) = start.replace(std::time::Instant::now()) else {
+                return 0;
+            };
+            old.elapsed().as_micros().min(u64::MAX as u128) as u64
+        };
         let tx = self.db.unchecked_transaction()?;
         let id: String = tx.query_row(
             "SELECT node FROM fs_inodes WHERE ino=?1",
@@ -73,6 +112,9 @@ impl Store {
         let node = self.node(&id)?;
         if !node.directory {
             return Err(Error::Io(std::io::Error::from_raw_os_error(libc::ENOTDIR)));
+        }
+        if let Some(t) = timings.as_deref_mut() {
+            t.identity_us = elapsed();
         }
         let sql = format!(
             "SELECT count(*),coalesce(sum(length(CAST(n.name AS BLOB))),0) FROM nodes n WHERE {VISIBLE_CHILDREN}"
@@ -95,6 +137,9 @@ impl Store {
         if bytes > max_bytes {
             return Err(Error::Io(std::io::Error::from_raw_os_error(libc::ENOMEM)));
         }
+        if let Some(t) = timings.as_deref_mut() {
+            t.count_us = elapsed();
+        }
         let parent_ino = match node.parent.as_deref() {
             None => 1,
             Some(parent) => {
@@ -109,6 +154,9 @@ impl Store {
             "INSERT INTO fs_inodes(node) SELECT n.id FROM nodes n WHERE {VISIBLE_CHILDREN} AND NOT EXISTS(SELECT 1 FROM fs_inodes i WHERE i.node=n.id) ORDER BY n.name,n.id"
         );
         tx.execute(&insert, [&id])?;
+        if let Some(t) = timings.as_deref_mut() {
+            t.inode_allocation_us = elapsed();
+        }
         let mut entries = Vec::with_capacity(count);
         entries.push(DirectoryEntry {
             ino,
@@ -141,7 +189,13 @@ impl Store {
         if actual > max_bytes {
             return Err(Error::Io(std::io::Error::from_raw_os_error(libc::ENOMEM)));
         }
+        if let Some(t) = timings.as_deref_mut() {
+            t.collect_us = elapsed();
+        }
         tx.commit()?;
+        if let Some(t) = timings.as_deref_mut() {
+            t.commit_us = elapsed();
+        }
         Ok(DirectorySnapshot {
             entries,
             bytes: actual,
@@ -291,11 +345,14 @@ impl Store {
             })
             .optional()?
             .unwrap_or(meta.mode & 0o777);
+        let (atime, atime_nsec) = self.local_atime(id, mtime)?;
         Ok(FileRecord {
             node,
             ino,
             size,
             mtime,
+            atime,
+            atime_nsec,
             mode,
             status: self.status(id)?,
             unlinked: self.locally_unlinked(id)?,
@@ -441,3 +498,6 @@ fn sql_unsigned(value: u64) -> Result<i64> {
 #[cfg(test)]
 #[path = "filesystem_directory_stamp_tests.rs"]
 mod directory_stamp_tests;
+#[cfg(test)]
+#[path = "filesystem_posix_tests.rs"]
+mod posix_tests;

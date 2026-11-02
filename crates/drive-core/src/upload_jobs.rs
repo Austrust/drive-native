@@ -6,6 +6,7 @@ pub struct UploadJob {
     pub relative_path: String,
     pub file: File,
     pub state: String,
+    pub mtime: Option<u32>,
 }
 impl Store {
     pub fn upload_operations(&self, state: &str) -> Result<Vec<String>> {
@@ -54,6 +55,7 @@ impl Store {
             },
             file: File::open(self.root.join("blobs").join(blob))?,
             state,
+            mtime: self.upload_mtime(op)?,
         })
     }
     pub fn conflict_upload(&mut self, op: &str) -> Result<()> {

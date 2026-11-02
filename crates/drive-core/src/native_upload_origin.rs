@@ -145,8 +145,21 @@ impl NativeReadSession {
         path: &str,
         source: &Path,
         sha256: &str,
+        staging: &Path,
+        origin: Option<&UploadOrigin>,
+    ) -> Result<NativeWriteOutcome> {
+        self.upload_with_origin_mtime(node, path, source, sha256, staging, origin, None)
+            .await
+    }
+    pub async fn upload_with_origin_mtime(
+        &self,
+        node: &Node,
+        path: &str,
+        source: &Path,
+        sha256: &str,
         _staging: &Path,
         origin: Option<&UploadOrigin>,
+        mtime: Option<u32>,
     ) -> Result<NativeWriteOutcome> {
         if node.version == crate::creations::CREATE_VERSION {
             let Some(origin) = origin else {
@@ -159,7 +172,7 @@ impl NativeReadSession {
                 return Ok(NativeWriteOutcome::Uncertain);
             }
         }
-        self.upload_prepared(node, path, source, sha256, origin)
+        self.upload_prepared(node, path, source, sha256, origin, mtime)
             .await
     }
     pub async fn reconcile_with_origin(
@@ -171,9 +184,22 @@ impl NativeReadSession {
         staging: &Path,
         origin: Option<&UploadOrigin>,
     ) -> Result<NativeWriteOutcome> {
+        self.reconcile_with_origin_mtime(node, path, source, sha256, staging, origin, None)
+            .await
+    }
+    pub async fn reconcile_with_origin_mtime(
+        &self,
+        node: &Node,
+        path: &str,
+        source: &Path,
+        sha256: &str,
+        staging: &Path,
+        origin: Option<&UploadOrigin>,
+        mtime: Option<u32>,
+    ) -> Result<NativeWriteOutcome> {
         if node.version != crate::creations::CREATE_VERSION {
             return self
-                .reconcile_existing(node, path, source, sha256, staging)
+                .reconcile_existing_with_mtime(node, path, source, sha256, staging, mtime)
                 .await;
         }
         let Some(origin) = origin else {
@@ -183,7 +209,7 @@ impl NativeReadSession {
         if origin.boundary.restore != self.client.restore_identity() {
             return Ok(NativeWriteOutcome::Uncertain);
         }
-        let mut intent = self.write_intent(node, path, source, sha256).await?;
+        let mut intent = self.write_intent(node, path, source, sha256, mtime).await?;
         let (parent, name) = path
             .rsplit_once('/')
             .ok_or_else(|| Error::State("creation path invalid".into()))?;
@@ -219,7 +245,7 @@ impl NativeReadSession {
             R::DesiredStatePresent(content)
                 if content.file_id == current.file_id && content.version == intent.base =>
             {
-                self.confirmed_node(node, content)
+                self.confirmed_node(node, content, mtime)
             }
             R::Diverged(_) => Ok(NativeWriteOutcome::Conflict),
             _ => Ok(NativeWriteOutcome::Uncertain),

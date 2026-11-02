@@ -10,7 +10,8 @@ impl NativeReadSession {
         sha256: &str,
         _staging: &Path,
     ) -> Result<NativeWriteOutcome> {
-        self.upload_prepared(node, path, source, sha256, None).await
+        self.upload_prepared(node, path, source, sha256, None, None)
+            .await
     }
     async fn upload_parent_matches(&self, path: &str, parent_file: &str) -> Result<bool> {
         if !native_file_id(parent_file) {
@@ -49,8 +50,9 @@ impl NativeReadSession {
         source: &Path,
         sha256: &str,
         origin: Option<&crate::upload_origin::UploadOrigin>,
+        mtime: Option<u32>,
     ) -> Result<NativeWriteOutcome> {
-        let intent = self.write_intent(node, path, source, sha256).await?;
+        let intent = self.write_intent(node, path, source, sha256, mtime).await?;
         let (parent, name) = path
             .rsplit_once('/')
             .ok_or_else(|| Error::State("write path invalid".into()))?;
@@ -88,7 +90,13 @@ impl NativeReadSession {
         self.verify_root().await?;
         let receipt = match self
             .client
-            .upload_snapshot_at_identity(address.0, address.1, intent.base, source)
+            .upload_snapshot_at_identity_with_mtime(
+                address.0,
+                address.1,
+                intent.base,
+                source,
+                mtime,
+            )
             .await
         {
             Ok(receipt)
@@ -126,9 +134,10 @@ impl NativeReadSession {
                     && n.sync_id == receipt.version.sync_id
                     && n.max_id == receipt.version.max_id
                     && n.file_size == receipt.size
-                    && n.hash == receipt.hash =>
+                    && n.hash == receipt.hash
+                    && mtime.is_none_or(|seconds| n.mtime == u64::from(seconds)) =>
             {
-                self.confirmed_node(node, receipt)
+                self.confirmed_node(node, receipt, mtime)
             }
             (Some(n), None)
                 if n.file_id != receipt.file_id

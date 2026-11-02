@@ -105,6 +105,7 @@ pub struct Store {
     pub(crate) db: Connection,
     pub(crate) root: PathBuf,
     pub(crate) handles: Arc<Mutex<HashMap<String, (String, usize)>>>,
+    pub(crate) namespace_runtime: Mutex<crate::namespace_schedule::NamespaceRuntime>,
     // Fields drop in order: close SQLite before releasing writer ownership.
     _writer_lock: WriterLock,
 }
@@ -147,7 +148,7 @@ impl Drop for ReadHandle {
 }
 
 /// Version of the durable state contract, including journal semantics.
-pub const STATE_SCHEMA_VERSION: i64 = 22;
+pub const STATE_SCHEMA_VERSION: i64 = 23;
 
 impl Store {
     /// One store per account + sync root. Independent accounts never share event IDs or cursors.
@@ -224,6 +225,10 @@ impl Store {
             CREATE TABLE IF NOT EXISTS cache_access(seq INTEGER PRIMARY KEY AUTOINCREMENT,node TEXT UNIQUE NOT NULL);
             CREATE TABLE IF NOT EXISTS cache_published(node TEXT PRIMARY KEY,at INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS local_modes(node TEXT PRIMARY KEY,mode INTEGER NOT NULL CHECK(mode>=0 AND mode<=511));
+            CREATE TABLE IF NOT EXISTS local_atimes(node TEXT PRIMARY KEY REFERENCES nodes(id) ON DELETE CASCADE ON UPDATE CASCADE,seconds INTEGER NOT NULL CHECK(seconds>=0),nanoseconds INTEGER NOT NULL CHECK(nanoseconds>=0 AND nanoseconds<1000000000));
+            CREATE TABLE IF NOT EXISTS upload_times(operation TEXT PRIMARY KEY REFERENCES operations(id) ON DELETE CASCADE,mtime INTEGER NOT NULL CHECK(mtime>=0 AND mtime<=4294967295));
+            CREATE INDEX IF NOT EXISTS namespace_unfinished ON namespace_ops(seq) WHERE state NOT IN ('committed','superseded');
+            CREATE INDEX IF NOT EXISTS operations_unfinished ON operations(id) WHERE state NOT IN ('committed','superseded');
             CREATE TABLE IF NOT EXISTS cache_releases(node TEXT PRIMARY KEY,version TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('pending','retained','committed','reclaimed')),attempts INTEGER NOT NULL DEFAULT 0,retry_at INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS engine_bridge_intents(key TEXT PRIMARY KEY,node TEXT NOT NULL,body TEXT NOT NULL,baseline TEXT,phase TEXT NOT NULL CHECK(phase IN ('prepared','succeeded','failed','applied')),attempts INTEGER NOT NULL DEFAULT 0,retry_at INTEGER NOT NULL DEFAULT 0,error TEXT);
             CREATE TABLE IF NOT EXISTS engine_bridge_tombstones(node TEXT PRIMARY KEY,cutoff TEXT NOT NULL);
@@ -267,6 +272,7 @@ impl Store {
             db,
             root,
             handles: Arc::new(Mutex::new(HashMap::new())),
+            namespace_runtime: Mutex::new(Default::default()),
         })
     }
     pub fn cursor(&self) -> Result<String> {
@@ -852,12 +858,30 @@ impl Store {
         let blob = self.write_blob_reader(source, None)?;
         self.commit_local_blob(id, opened_version, blob)
     }
+    /// Preserve the mutable draft timestamp on its immutable queued snapshot.
+    /// The byte copy creates a new inode; copying only bytes loses utimens.
+    pub(crate) fn save_draft_file_from_version(
+        &mut self,
+        id: &str,
+        base: &str,
+        source: &mut File,
+    ) -> Result<String> {
+        let modified = source.metadata()?.modified()?;
+        let blob = self.write_blob_reader(source, None)?;
+        let snapshot = File::open(self.root.join("blobs").join(&blob))?;
+        snapshot.set_modified(modified)?;
+        snapshot.sync_all()?;
+        self.commit_local_blob(id, base, blob)
+    }
     fn commit_local_blob(
         &mut self,
         id: &str,
         opened_version: &str,
         blob: String,
     ) -> Result<String> {
+        let mtime = crate::timestamps::native_mtime(
+            std::fs::metadata(self.root.join("blobs").join(&blob))?.modified()?,
+        )?;
         let normalized = crate::namespace::normalized_version(&self.db, id, opened_version)?;
         let opened_version = normalized.as_str();
         let tx = self.db.transaction()?;
@@ -873,6 +897,10 @@ impl Store {
             [id],
         )?;
         tx.execute("INSERT INTO operations(id,node,kind,base,blob,generation) VALUES(?1,?2,'upload',?3,?4,?5)",params![op,id,base,blob,generation+1])?;
+        tx.execute(
+            "INSERT INTO upload_times(operation,mtime) VALUES(?1,?2)",
+            params![op, mtime],
+        )?;
         tx.commit()?;
         Ok(op)
     }
@@ -1008,6 +1036,7 @@ impl Store {
             }
         }
         tx.execute("UPDATE operations SET state='committed' WHERE id=?1", [op])?;
+        tx.execute("UPDATE node_metadata SET mtime=(SELECT mtime FROM upload_times WHERE operation=?1) WHERE node=?2 AND EXISTS(SELECT 1 FROM upload_times WHERE operation=?1)",params![op,id])?;
         tx.commit()?;
         Ok(())
     }
