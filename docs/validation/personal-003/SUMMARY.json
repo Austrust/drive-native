@@ -1,0 +1,138 @@
+{
+  "schema": 2,
+  "terminal": true,
+  "source_commit": "416cc41b11fce2774bc8eb1e899e100f3d896b8f",
+  "passed": false,
+  "baseline_changed": false,
+  "paired_performance": false,
+  "terminal_summary": {
+    "full_initialization": false,
+    "controlled_restart": true,
+    "terminal_reason": "observation_deadline",
+    "nas_writes": 0,
+    "first_preview": {
+      "seconds": 1.3187737539992668,
+      "preview_only_at_observation": true,
+      "access": {
+        "observed_seconds": 1.3187737539992668,
+        "entries": 24,
+        "latency_seconds": 0.07177357999898959,
+        "read_seconds": 0.033606769000471104
+      }
+    },
+    "restart_preserved": {
+      "candidate": true,
+      "start_watermark": true,
+      "events": true,
+      "nodes": true
+    },
+    "restart_stop": {
+      "requested": true,
+      "mount_remaining": false,
+      "exit": 0,
+      "seconds": 0.16504807800083654,
+      "root_probe": {
+        "quiesced": true
+      }
+    },
+    "stop": {
+      "requested": true,
+      "mount_remaining": false,
+      "exit": 0,
+      "seconds": 0.21493103700049687,
+      "root_probe": {
+        "quiesced": true,
+        "helper_pending": false
+      }
+    }
+  },
+  "full_checkpoint_verified": false,
+  "final_candidate": {
+    "schema": 23,
+    "expected_scope_match": true,
+    "state": "active",
+    "epoch": 12,
+    "node_count": 251164,
+    "received_seq": 159,
+    "applied_seq": 158,
+    "received_equals_applied": false,
+    "fenced_equals_applied": false,
+    "root_refresh_clear": true,
+    "committed_equals_candidate": false,
+    "committed_at_or_after_fence": false,
+    "scope_and_restore_match": true
+  },
+  "progress_interpretation": {
+    "full_checkpoint_verified": false,
+    "work_observed_without_verified_checkpoint": true,
+    "full_recheck_reason_observations": 11,
+    "node_decrease_observations": 0,
+    "received_coverage_decrease_observations": 8,
+    "repeated_claim_admissions": 132250,
+    "infinite_loop_proven": false
+  },
+  "request_failure_counts_outside_control_hold": {
+    "list/transport": 6,
+    "list/response_timeout": 7
+  },
+  "counters": {
+    "restarted": 1,
+    "pull_no_advance": 5607,
+    "claim_pages": 59366,
+    "claim_examined": 242932,
+    "claim_ancestor_promotions": 222,
+    "claim_coalesced": 12941,
+    "claim_blocked_loading": 43355,
+    "claim_previously_claimed": 132250,
+    "claim_new": 54386,
+    "directory_committed": 186677,
+    "resumed": 10,
+    "pull_pages": 159,
+    "pull_events": 1220,
+    "event_awaiting_missing_file_parent": 6062,
+    "awaiting_coverage": 6062,
+    "priority_prepared": 19,
+    "priority_claimed": 59,
+    "priority_reused": 40,
+    "event_local_parent_plans": 173,
+    "applied_pages": 158,
+    "event_unknown_directory_dependency_plans": 14,
+    "event_full_recheck_unsupported_directory": 7,
+    "claim_scan_yields": 625,
+    "event_full_recheck_unknown_delete": 4,
+    "priority_skipped": 6003
+  },
+  "shared_loads": [
+    "compilation",
+    "functional_validation",
+    "other"
+  ],
+  "evidence_hashes": {
+    "result": "cb7fc2626ea46f9e745d9679e16f70b3cf926b4c8c2daa3965e6063c366e011c",
+    "observations": "c8e80fc2dddd8a10b6bc289fd4306f98d7646095d1394f3c6f292d7cde23d12d",
+    "manifest": "0b28d04385162201410086962d296c453efad6254592575673a57d63c5d7a46f"
+  },
+  "root_readdir": {
+    "status_counts": {
+      "ok": 557,
+      "not_yet_browsable": 1,
+      "probe_timeout": 1
+    },
+    "scandir_seconds": {
+      "samples": 557,
+      "p50": 0.0060623940007644705,
+      "p95": 0.055191483996168245,
+      "p99": 0.26749508699867874,
+      "max": 2.412942513998132
+    },
+    "helper_wall_seconds": {
+      "samples": 557,
+      "p50": 0.04075499500322621,
+      "p95": 0.09506527399935294,
+      "p99": 0.2949249730008887,
+      "max": 2.4439854820011533
+    }
+  },
+  "resources_summary_has_process_samples": false,
+  "raw_evidence_uploaded": false
+}
