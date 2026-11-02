@@ -98,6 +98,12 @@ pub struct RequestSample {
     /// Sum of synchronous Future::poll work, including transport polls; not pure parser CPU.
     pub decode_active_poll_us: u64,
     pub received_bytes: u64,
+    /// Positive decrypted-transport reads below BufReader, including read-ahead.
+    /// Buffered consumption, empty reads and EOF do not increment this count.
+    pub positive_read_count: u64,
+    /// Relative to request start (including send), not wall clock or parser progress.
+    pub first_byte_us: Option<u64>,
+    pub last_byte_us: Option<u64>,
     pub frames: u64,
     pub continuation_frames: u64,
     pub keepalive_frames: u64,
@@ -114,9 +120,22 @@ pub struct RequestTotals {
     pub receive_us: u64,
     pub decode_active_poll_us: u64,
     pub received_bytes: u64,
+    pub positive_read_count: u64,
     pub frames: u64,
     pub continuation_frames: u64,
     pub keepalive_frames: u64,
+}
+impl RequestSample {
+    fn valid_progress(&self) -> bool {
+        if self.positive_read_count == 0 {
+            return self.received_bytes == 0
+                && self.first_byte_us.is_none()
+                && self.last_byte_us.is_none();
+        }
+        self.positive_read_count <= self.received_bytes
+            && matches!((self.first_byte_us, self.last_byte_us),
+                (Some(first), Some(last)) if first <= last && last <= self.elapsed_us)
+    }
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -211,6 +230,8 @@ impl Snapshot {
             }
             if u128::from(t.keepalive_frames) + u128::from(t.continuation_frames)
                 > u128::from(t.frames)
+                || t.positive_read_count > t.received_bytes
+                || (t.positive_read_count == 0) != (t.received_bytes == 0)
             {
                 return false;
             }
@@ -223,15 +244,13 @@ impl Snapshot {
         if self
             .last_request
             .as_ref()
-            .is_some_and(|r| !kinds.contains(&r.kind))
+            .is_some_and(|r| !kinds.contains(&r.kind) || !r.valid_progress())
         {
             return false;
         }
-        if self
-            .last_failure
-            .as_ref()
-            .is_some_and(|r| r.outcome == RequestOutcome::Success || !kinds.contains(&r.kind))
-        {
+        if self.last_failure.as_ref().is_some_and(|r| {
+            r.outcome == RequestOutcome::Success || !kinds.contains(&r.kind) || !r.valid_progress()
+        }) {
             return false;
         }
         true
@@ -253,7 +272,15 @@ impl Snapshot {
                 .requests
                 .iter()
                 .find(|t| t.kind == incoming.kind)
-                .is_some_and(|t| t.count.checked_add(incoming.count).is_none())
+                .is_some_and(|t| {
+                    t.count.checked_add(incoming.count).is_none()
+                        || t.received_bytes
+                            .checked_add(incoming.received_bytes)
+                            .is_none()
+                        || t.positive_read_count
+                            .checked_add(incoming.positive_read_count)
+                            .is_none()
+                })
             {
                 return false;
             }
@@ -270,6 +297,7 @@ impl Snapshot {
                     receive_us,
                     decode_active_poll_us,
                     received_bytes,
+                    positive_read_count,
                     frames,
                     continuation_frames,
                     keepalive_frames
@@ -343,6 +371,7 @@ impl Capture {
                     receive_us: 0,
                     decode_active_poll_us: 0,
                     received_bytes: 0,
+                    positive_read_count: 0,
                     frames: 0,
                     continuation_frames: 0,
                     keepalive_frames: 0,
@@ -369,6 +398,7 @@ impl Capture {
                 receive_us,
                 decode_active_poll_us,
                 received_bytes,
+                positive_read_count,
                 frames,
                 continuation_frames,
                 keepalive_frames
@@ -383,7 +413,12 @@ impl Capture {
         }
     }
 }
-tokio::task_local! { static CAPTURE: Capture; static REQUEST: Arc<Mutex<RequestSample>>; }
+#[derive(Clone)]
+struct RequestContext {
+    sample: Arc<Mutex<RequestSample>>,
+    started: Instant,
+}
+tokio::task_local! { static CAPTURE: Capture; static REQUEST: RequestContext; }
 pub async fn scope<F: Future>(capture: Capture, future: F) -> F::Output {
     CAPTURE.scope(capture, future).await
 }
@@ -482,6 +517,7 @@ where
     let Ok(capture) = CAPTURE.try_with(Clone::clone) else {
         return future.await;
     };
+    let started = Instant::now();
     let sample = Arc::new(Mutex::new(RequestSample {
         kind,
         phase: RequestPhase::Starting,
@@ -491,6 +527,9 @@ where
         receive_us: 0,
         decode_active_poll_us: 0,
         received_bytes: 0,
+        positive_read_count: 0,
+        first_byte_us: None,
+        last_byte_us: None,
         frames: 0,
         continuation_frames: 0,
         keepalive_frames: 0,
@@ -498,10 +537,12 @@ where
     let mut guard = Completion {
         capture,
         sample: sample.clone(),
-        start: Instant::now(),
+        start: started,
         outcome: RequestOutcome::Cancelled,
     };
-    let result = REQUEST.scope(sample, future).await;
+    let result = REQUEST
+        .scope(RequestContext { sample, started }, future)
+        .await;
     guard.outcome = RequestOutcome::of(&result);
     result
 }
@@ -525,7 +566,7 @@ pub(crate) struct PhaseSpan {
     start: Instant,
 }
 pub(crate) fn phase(phase: RequestPhase) -> PhaseSpan {
-    let sample = REQUEST.try_with(Clone::clone).ok();
+    let sample = REQUEST.try_with(|context| context.sample.clone()).ok();
     if let Some(sample) = &sample {
         sample.lock().unwrap().phase = phase;
     }
@@ -558,7 +599,7 @@ pub(crate) async fn decode<F: Future>(future: F) -> F::Output {
         let result = future.as_mut().poll(cx);
         let elapsed = micros(start);
         let _ = REQUEST.try_with(|s| {
-            let mut s = s.lock().unwrap();
+            let mut s = s.sample.lock().unwrap();
             s.decode_active_poll_us = s.decode_active_poll_us.saturating_add(elapsed);
         });
         result
@@ -566,14 +607,21 @@ pub(crate) async fn decode<F: Future>(future: F) -> F::Output {
     .await
 }
 pub(crate) fn received(bytes: usize) {
-    let _ = REQUEST.try_with(|s| {
-        let mut s = s.lock().unwrap();
+    if bytes == 0 {
+        return;
+    }
+    let _ = REQUEST.try_with(|context| {
+        let at = micros(context.started);
+        let mut s = context.sample.lock().unwrap();
         s.received_bytes = s.received_bytes.saturating_add(bytes as u64);
+        s.positive_read_count = s.positive_read_count.saturating_add(1);
+        s.first_byte_us.get_or_insert(at);
+        s.last_byte_us = Some(at);
     });
 }
 pub(crate) fn frame(keepalive: bool, continuation: bool) {
     let _ = REQUEST.try_with(|s| {
-        let mut s = s.lock().unwrap();
+        let mut s = s.sample.lock().unwrap();
         s.frames = s.frames.saturating_add(1);
         s.keepalive_frames = s.keepalive_frames.saturating_add(u64::from(keepalive));
         s.continuation_frames = s

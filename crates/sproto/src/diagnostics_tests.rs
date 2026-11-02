@@ -59,8 +59,14 @@ async fn partial_progress_does_not_reset_total_response_deadline() {
         peer.write_all(&encode(&pmap! {"type"=>"keep_alive"}))
             .await
             .unwrap();
+        let mut metadata =
+            encode(&pmap! {"node_list"=>PObject::Array(vec![pmap!{"name"=>"synthetic"}])});
+        assert_eq!(metadata.pop(), Some(0x40)); // missing outer map END
+        let split = metadata.len() / 2;
         tokio::time::sleep(Duration::from_secs(10)).await;
-        peer.write_all(&[0x42]).await.unwrap();
+        peer.write_all(&metadata[..split]).await.unwrap();
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        peer.write_all(&metadata[split..]).await.unwrap();
         std::future::pending::<()>().await;
     });
     let capture = Capture::new();
@@ -81,6 +87,9 @@ async fn partial_progress_does_not_reset_total_response_deadline() {
     assert_eq!(sample.outcome, RequestOutcome::ResponseTimeout);
     assert_eq!(sample.keepalive_frames, 1);
     assert!(sample.received_bytes > 1);
+    assert_eq!(sample.positive_read_count, 3);
+    assert!(sample.valid_progress());
+    assert!(sample.last_byte_us.unwrap() <= sample.elapsed_us);
     writer.abort();
     let _ = writer.await;
 }
@@ -188,6 +197,122 @@ async fn send_timeout_is_distinct_from_receive_timeout() {
     assert_eq!(sample.phase, RequestPhase::Send);
     assert_eq!(sample.outcome, RequestOutcome::SendTimeout);
     assert_eq!(sample.received_bytes, 0);
+    assert_eq!(sample.positive_read_count, 0);
+    assert_eq!(sample.first_byte_us, None);
+    assert_eq!(sample.last_byte_us, None);
+}
+
+#[tokio::test]
+async fn positive_read_offsets_are_bounded_and_zero_reads_do_not_change_them() {
+    let capture = Capture::new();
+    let result: Result<()> = scope(
+        capture.clone(),
+        request(RequestKind::List, async {
+            received(0);
+            REQUEST.with(|c| {
+                let sample = c.sample.lock().unwrap();
+                assert_eq!(sample.first_byte_us, None);
+                assert_eq!(sample.last_byte_us, None);
+            });
+            received(7);
+            let before = REQUEST.with(|c| c.sample.lock().unwrap().clone());
+            received(0);
+            assert_eq!(REQUEST.with(|c| c.sample.lock().unwrap().clone()), before);
+            received(11);
+            Err(Error::ConnectionClosed)
+        }),
+    )
+    .await;
+    assert!(result.is_err());
+    let snapshot = capture.snapshot();
+    let sample = snapshot.last_failure.as_ref().unwrap();
+    assert_eq!(sample.received_bytes, 18);
+    assert_eq!(sample.positive_read_count, 2);
+    assert!(sample.valid_progress());
+    assert!(snapshot.valid());
+    let mut invalid = snapshot.clone();
+    invalid.last_failure.as_mut().unwrap().last_byte_us = Some(sample.elapsed_us + 1);
+    assert!(!invalid.valid());
+    invalid.last_failure.as_mut().unwrap().last_byte_us = None;
+    assert!(!invalid.valid());
+    let mut merged = Snapshot::default();
+    assert!(merged.merge(&snapshot));
+    assert!(merged.merge(&snapshot));
+    assert_eq!(merged.requests[0].positive_read_count, 4);
+    assert_eq!(
+        merged.last_failure.as_ref().unwrap().first_byte_us,
+        sample.first_byte_us
+    );
+    let mut overflow = snapshot.clone();
+    overflow.requests[0].positive_read_count = u64::MAX;
+    overflow.requests[0].received_bytes = u64::MAX;
+    assert!(overflow.valid());
+    let before = merged.clone();
+    assert!(!merged.merge(&overflow));
+    assert_eq!(merged, before);
+    // Missing required read counts from an older diagnostics shape are rejected;
+    // do not manufacture a claim of zero reads from legacy received byte counts.
+    let mut legacy = serde_json::to_value(&snapshot).unwrap();
+    legacy["last_request"]
+        .as_object_mut()
+        .unwrap()
+        .remove("positive_read_count");
+    assert!(serde_json::from_value::<Snapshot>(legacy).is_err());
+}
+
+#[tokio::test]
+async fn buffered_consumption_and_eof_do_not_count_as_new_transport_reads() {
+    use tokio::io::{AsyncReadExt, BufReader};
+    let capture = Capture::new();
+    let (stream, mut peer) = tokio::io::duplex(32);
+    peer.write_all(&[1, 2, 3]).await.unwrap();
+    drop(peer);
+    let result: Result<()> = scope(
+        capture.clone(),
+        request(RequestKind::List, async {
+            let mut reader = BufReader::new(crate::receive_activity::Reader::new(stream));
+            assert_eq!(reader.read_u8().await?, 1);
+            assert_eq!(
+                REQUEST.with(|c| c.sample.lock().unwrap().positive_read_count),
+                1
+            );
+            assert_eq!(reader.read_u8().await?, 2);
+            assert_eq!(reader.read_u8().await?, 3);
+            let mut byte = [0];
+            assert_eq!(reader.read(&mut byte).await?, 0);
+            Ok(())
+        }),
+    )
+    .await;
+    result.unwrap();
+    let sample = capture.snapshot().last_request.unwrap();
+    assert_eq!(sample.positive_read_count, 1);
+    assert_eq!(sample.received_bytes, 3);
+    assert!(sample.valid_progress());
+}
+
+#[tokio::test]
+async fn cancelling_after_positive_reads_keeps_complete_bounded_offsets() {
+    let capture = Capture::new();
+    let (ready, observed) = tokio::sync::oneshot::channel();
+    let task = tokio::spawn(scope(
+        capture.clone(),
+        request(RequestKind::List, async {
+            received(5);
+            ready.send(()).unwrap();
+            std::future::pending::<Result<()>>().await
+        }),
+    ));
+    observed.await.unwrap();
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    let snapshot = capture.snapshot();
+    assert!(snapshot.valid());
+    let sample = snapshot.last_failure.unwrap();
+    assert_eq!(sample.outcome, RequestOutcome::Cancelled);
+    assert_eq!(sample.positive_read_count, 1);
+    assert_eq!(sample.received_bytes, 5);
+    assert!(sample.valid_progress());
 }
 
 #[tokio::test]

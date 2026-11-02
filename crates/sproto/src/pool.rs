@@ -366,6 +366,59 @@ mod tests {
 #[cfg(test)]
 mod cancellation_tests {
     use super::*;
+    #[tokio::test]
+    async fn keepalive_then_truncated_metadata_eof_is_not_success_or_reusable() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let channels = Arc::new(Mutex::new(Vec::new()));
+        let permits = Arc::new(Semaphore::new(1));
+        let (stream, mut peer) = tokio::io::duplex(4096);
+        let mut guard = Guard {
+            reusable: false,
+            channel: Some(Channel::from_stream(stream)),
+            _permit: permits.clone().acquire_owned().await.unwrap(),
+            channels: channels.clone(),
+        };
+        let server = tokio::spawn(async move {
+            let mut request = [0; 1024];
+            assert!(peer.read(&mut request).await.unwrap() > 0);
+            let mut keepalive = Vec::new();
+            crate::pstream::encode(&pmap! {"type"=>"keep_alive"}, &mut keepalive).unwrap();
+            let mut partial = Vec::new();
+            crate::pstream::encode(&pmap! {"node_list"=>PObject::Array(vec![])}, &mut partial)
+                .unwrap();
+            assert_eq!(partial.pop(), Some(0x40));
+            peer.write_all(&keepalive).await.unwrap();
+            peer.write_all(&partial).await.unwrap();
+            peer.shutdown().await.unwrap();
+        });
+        let capture = crate::diagnostics::Capture::new();
+        let result = crate::diagnostics::scope(
+            capture.clone(),
+            guard
+                .channel()
+                .request(crate::frame::SCMD_LIST, &pmap! {"_action"=>"list"}),
+        )
+        .await;
+        assert!(
+            matches!(&result, Err(Error::Io(e)) if e.kind()==std::io::ErrorKind::UnexpectedEof)
+        );
+        assert!(guard.poison_on_err(result).is_err());
+        drop(guard);
+        server.await.unwrap();
+        assert!(channels.lock().unwrap().is_empty());
+        assert_eq!(permits.available_permits(), 1);
+        let snapshot = capture.snapshot();
+        assert!(snapshot.valid());
+        let sample = snapshot.last_failure.unwrap();
+        assert_eq!(
+            sample.outcome,
+            crate::diagnostics::RequestOutcome::Transport
+        );
+        assert_eq!(sample.frames, 1);
+        assert_eq!(sample.keepalive_frames, 1);
+        assert!(sample.received_bytes > 0 && sample.positive_read_count > 0);
+    }
+
     #[tokio::test(start_paused = true)]
     async fn cancelled_partial_notification_closes_stream_and_releases_permit() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};

@@ -31,6 +31,16 @@
 
 停止或连接替换依靠当前 RPC 核验及既有取消机制。网络读取不持有 Store 锁；本地回执事务仍需要 Store。该设计不承诺任意大小目录的提交没有锁等待，也不改变旧完整缓存的本地访问规则。
 
+## 等待事件依赖时的有限优先级
+
+当持久事件页因普通文件的父身份尚未发现而处于 `AwaitingCoverage`，[`initialization_priority`](../crates/drive-core/src/initialization_priority.rs) 可为本窗口建议一个已有 pending 目录。它根据已验证 hint 的有效目标父路径，沿候选 `(run,parent,name)` 索引走到最近的未完成目录；该路径只是排序线索，不是文件身份或访问授权。
+
+领取事务重新核验当前 head、run／epoch、候选边、native numeric identity、祖先覆盖、sticky deny 和根有效性。不能从路径创建缺失父节点，不能使 received 目录重新 pending，不能推进事件或标记覆盖完成。若完整已接收路径中仍找不到子项，继续原普通队列和事件处理，不猜测它的新位置。
+
+每16任务窗口最多一项优先任务，其余槽位由普通队列领取。准备阶段只处理正文和 hint 合计不超过256KiB的页，最多缓存8个缺父依赖，每个路径最多128层；没有 hint、超预算或权限／证明链不完整时不提供优先任务。缓存绑定 head sequence、batch／hint digest 和 run／epoch，仅缓存排序线索；同一 head 后续窗口不再解析整页。原事件应用仍独立执行完整性验证，损坏响应不能靠缓存跳过。
+
+这是本客户端的有界调度策略，不是已逆向确认的 Windows 调度算法。它旨在缩短事件等候已知分支的时间，不改变未知父在全覆盖后仍缺失时的保守处理方式。
+
 ## 如何读取诊断
 
 初始化快照的 `work` 来自 [`initialization_metrics`](../crates/drive-runtime/src/initialization_metrics.rs)，是当前后台进程生命周期内的观察值；普通网络重连不会清零。它不参与覆盖判定、权限判断或游标提交。
@@ -45,6 +55,7 @@
 | `claim_ancestor_promotions`、`claim_coalesced` | 提升到祖先领取、同页合并的次数 |
 | `claim_blocked_loading`、`claim_scan_yields` | 被在途祖先阻塞及扫描续页次数，可识别 loading 前缀影响 |
 | `claim_new`、`claim_previously_claimed` | generation 原先为零／非零的领取数量。再次领取可能是合法事件重查或恢复，不能直接称为重复下载 |
+| `priority_prepared/reused/claimed/skipped` | 新的有界依赖计划、复用计划、实际发放优先票据及未提供加速的次数；优先票据不重复计入普通 `claim_new` |
 | `directory_committed/denied/retry`、`stale_receipt` | 持久化目录回执、拒绝访问、重新发放重试票据及丢弃失效回执的次数 |
 | `pull_pages/pull_events/applied_pages/awaiting_coverage` | 投影后收页、事件数、应用页数及等待覆盖的观察次数；等待同一页会重复观察 |
 | `resumed/restarted/coverage_race` | 候选恢复、重新建立候选及受限保守逃生次数 |
@@ -52,11 +63,17 @@
 
 队列状态聚合需要扫描目录状态。owner 在循环边界、距上次取样至少十秒时采集，不在每次 claim 或桌面状态查询时扫描；长时间请求期间该值可能变旧。
 
+`priority_prepare` 与 `priority_claim` 分别计时准备／复用检查和领取阶段。`priority_skipped` 可以来自预算、缺 hint、依赖已出现、在途任务或不可用路径；它不是协议丢事件计数。
+
 不同阶段可能嵌套，也可能由并发任务重叠。`total_us` 不能直接相加解释为整个初始化墙钟时间；`rpc_directory` 也不是纯 NAS 执行时间，它包含本地 IPC、worker 处理和远端等待。
 
 ## 原生请求、分页与事件的区分
 
 `work.native` 使用 [`sproto::diagnostics`](../crates/sproto/src/diagnostics.rs) 的封闭字段：连接池等待、新建／复用连接、连接建立、请求发送／接收、帧数、continuation／keepalive、列表页数、条目数和节点解析时间。`decode_active_poll_us` 是同步 Future polling 的累计活动时间，包含传输 polling，不是独立测得的纯解析 CPU 时间。
+
+请求样本中的 `received_bytes` 和 `positive_read_count` 统计解密流进入 `BufReader` 前的正字节读取。它们包含预读；从已有缓冲区消费字节、零字节读取及 EOF 不增加计数。`first_byte_us/last_byte_us` 是相对同一请求开始时刻（包括发送阶段）的首／末次正读偏移，没有正读时为 `null`。它们不包含内容或身份，不表示已解析对象大小，也不能单独证明整个响应期间持续有流量。`elapsed_us - last_byte_us` 可表示该请求结束前多久没有观察到新正读。累计请求统计只合并读取次数和字节数，不相加各请求的首末时间。缺少新读取计数的旧诊断消息不能伪造为零读取；本批 worker 与 FSD 必须使用同一冻结构建，IPC 版本仍为 19。
+
+普通 `list` 每页最多请求 1000 项；每页的 30 秒 `native_response_timeout` 包含发送、完整 PObject 解码及该响应全部 continuation 的总 exchange 时间，收到字节不会延长它。连接池等待、其他分页和完整响应后的节点字段转换不属于该截止。`frames` 只在完整 PObject 返回后增加，且包含 keepalive：已收到字节但 `frames=0` 可以是半个对象；`frames=1/keepalive_frames=1` 不能当作一页目录已经成功。长通知的 receive-idle 截止是另一条路径，不能据普通请求超时推断 30 秒完全没有网络流量。本批只增加观察指标，不改变这两种超时策略。
 
 原生 Pull 诊断区分：
 
@@ -71,6 +88,7 @@
 ## 针对性验证入口
 
 - [核心队列回归](../crates/drive-core/src/initialization_scheduler_tests.rs)：祖先去重后的补足、loading 前缀续页、原子回滚、generation 溢出、不可用祖先、跨 epoch 游标、空页与 fence，以及固定 pending 页的 SQLite VM 工作量。
+- [依赖优先级回归](../crates/drive-core/src/initialization_priority_tests.rs)：计划复用、原子领取、权限与身份变化、损坏证据、页／依赖预算、旧 epoch、无提示页和危险混合页退回普通调度。
 - [owner 回归](../crates/drive-runtime/src/initialization_owner_tests.rs)：独立回包与慢请求、80个后代的阻塞前缀、超时后的成功回执保留／重开复用、兄弟目录移动后的旧路径重试拒绝，使用本地 Unix RPC 和 SCM_RIGHTS。
 - [公开合成 replay](../crates/drive-core/examples/initialization_claim_replay.rs)：`legacy` 与 `batched` 在新建隔离 Store 上处理相同的 64 个待枚举目录，仅累计 claim 调用时间；准备数据和写回目录回执不计入该指标。
 
