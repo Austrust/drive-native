@@ -20,9 +20,9 @@
 
 ## 当前整合工作
 
-2026-11-03，长期goal保持活动。当前按用户优先级整合issue 3–5与初始化性能修复，目标开发包`.8`，schema23／IPC20。冻结416cc41的package013已构建：846项Rust、101项GUI通过，显式内核、真实联调及schema22升级门禁继续执行；没有发布。用户新增FS接近本地目录要求，由独立分支继续实现；[原版FSearch基准](docs/validation/fsearch-001/REPORT.md)虽降低约54%／57%耗时，仍未达这一目标，#5保持开放。该联调包不等于最终交付；普通目录全量同步、Personal_Sync完整初始化及P0–P6全部未通过项保留，不称候选版。
+2026-11-03，长期goal保持活动。当前按用户优先级整合issue 3–5与初始化性能修复，目标开发包`.8`，schema23／IPC20。冻结416cc41的package013已通过构建、显式内核、授权Lab联调及schema22升级门禁；没有发布。用户新增FS接近本地目录要求，由独立分支继续实现；[原版FSearch基准](docs/validation/fsearch-001/REPORT.md)虽降低约54%／57%耗时，仍未达这一目标，#5保持开放。该联调包不等于最终交付；普通目录全量同步、Personal_Sync完整初始化及P0–P6全部未通过项保留，不称候选版。
 
-随后[包013门禁](docs/validation/native-package-013/REPORT.md)已完成：debug／release各25项显式内核、peer4及重试10轮×5通过；暂停升级schema22→23及备份、配套worker、旧ELF拒绝、重装／卸载保留两份未上传修改均通过。[真实Lab004](docs/validation/native-lab-004/REPORT.md)验证同候选非空事件提交、未固定缓存后台更新和真正断网读取新版，以及独立原生会话确认的文件mtime写回。它们不替代新FS代码、Personal完整初始化、Mint或最终长期验收；包013仍未发布。
+[包013门禁](docs/validation/native-package-013/REPORT.md)已完成：debug／release各25项显式内核、peer4及重试10轮×5通过；暂停升级schema22→23及备份、配套worker、旧ELF拒绝、重装／卸载保留两份未上传修改均通过。[真实Lab004](docs/validation/native-lab-004/REPORT.md)验证同候选非空事件提交、未固定缓存后台更新和真正断网读取新版，以及独立原生会话确认的文件mtime写回。它们不替代新FS代码、Personal完整初始化、Mint或最终长期验收；包013仍未发布。
 
 最近已发布的`.7`完成[包验证012](docs/validation/native-package-012/REPORT.md)：冻结c6f0a80，schema22／IPC18，751项Rust、96项GUI、debug／release各23项显式内核；同schema暂停接管、旧ELF读取及重装保留2份dirty／pending。真实600秒预览、暂停、重启通过，完整初始化未完成；去重2次响应超时后继续枚举。局部合成性能改善与真实整树收敛分别记录。六项远端资产SHA256核验通过；详细证据未公开。
 
