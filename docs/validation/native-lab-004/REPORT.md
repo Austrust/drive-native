@@ -1,6 +1,6 @@
 # 原生事件、离线缓存与文件时间：Lab004
 
-2026-11-03，WSL／Ubuntu 24.04，实际通过。使用[中间验证包013](../native-package-013/REPORT.md)内的FSD／worker，以及同源码的独立原生测试peer；源码 `416cc41b11fce2774bc8eb1e899e100f3d896b8f`，schema23／IPC20。此包尚未发布，后续FS优化另行进行。
+2026-11-03，WSL／Ubuntu 24.04，实际通过。使用[中间验证包013](../native-package-013/REPORT.md)内的FSD／worker，以及同源码的独立原生测试peer；源码 `416cc41b11fce2774bc8eb1e899e100f3d896b8f`，schema23／IPC20。实验执行时此包尚未发布；随后用户决定将本冻结包发布为 `.8` 并停止目标，后续FS实验未纳入安装包。
 
 测试只创建并操作授权实验目录下的全新子树。没有修改真实个人文件、NAS权限或旧基线，也没有执行NAS清理。详细协议与服务器证据留本地；[SUMMARY.json](SUMMARY.json)仅含聚合、布尔核验及原结果哈希。
 
