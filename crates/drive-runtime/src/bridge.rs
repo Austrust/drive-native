@@ -1521,7 +1521,18 @@ mod download_scheduler_tests {
     fn concurrent_foreground_reads_wait_for_transport_backoff_after_reconnect() {
         retry_roundtrip(true, "transport");
     }
+    #[test]
+    fn concurrent_retry_observer_can_resume_after_request_is_queued() {
+        retry_roundtrip_observed(true, "native_server_code:32772", true);
+    }
     fn retry_roundtrip(foreground: bool, failure_category: &'static str) {
+        retry_roundtrip_observed(foreground, failure_category, false);
+    }
+    fn retry_roundtrip_observed(
+        foreground: bool,
+        failure_category: &'static str,
+        queued_observer: bool,
+    ) {
         let d = tempfile::tempdir().unwrap();
         let mut store = Store::open(d.path()).unwrap();
         let root = Node {
@@ -1553,9 +1564,14 @@ mod download_scheduler_tests {
         let bridge = Arc::new(
             Bridge::from_connection(store.clone(), Arc::new(Rpc::new(a).unwrap())).unwrap(),
         );
+        let peer_store = store.clone();
         let peer = std::thread::spawn(move || {
             let (request, _) = transport::receive::<Envelope<Command>>(&mut b).unwrap();
             assert!(matches!(request.body, Command::Download { .. }));
+            // Start before sending: once Failed is sent, the client can already
+            // persist the deadline and retry while this observer is descheduled.
+            let first = Instant::now();
+            let failed_at = unix_seconds();
             transport::send(
                 &mut b,
                 &Envelope {
@@ -1568,10 +1584,39 @@ mod download_scheduler_tests {
                 None,
             )
             .unwrap();
-            let first = Instant::now();
+            if queued_observer {
+                // Deterministically cover an observer resuming only after the
+                // retry is queued. No extra retry delay or product clock change.
+                let mut poll = libc::pollfd {
+                    fd: std::os::fd::AsRawFd::as_raw_fd(&b),
+                    events: libc::POLLIN,
+                    revents: 0,
+                };
+                assert_eq!(unsafe { libc::poll(&mut poll, 1, 5_000) }, 1);
+                assert_ne!(poll.revents & libc::POLLIN, 0);
+            }
             let (request, _) = transport::receive::<Envelope<Command>>(&mut b).unwrap();
             assert!(first.elapsed() >= Duration::from_millis(900));
             assert!(matches!(request.body, Command::Download { .. }));
+            {
+                let store = peer_store.lock().unwrap();
+                let failure = store.download_failure("file").unwrap().unwrap();
+                assert_eq!(failure.attempts, 1);
+                let retry_at = failure.retry_at.unwrap();
+                assert!(retry_at >= failed_at + 2);
+                assert!(unix_seconds() >= retry_at);
+                assert!(
+                    !store
+                        .download_ready(
+                            &DownloadTicket {
+                                id: "file".into(),
+                                version: "v1".into(),
+                            },
+                            retry_at - 1
+                        )
+                        .unwrap()
+                );
+            }
             let mut content = tempfile::tempfile().unwrap();
             content.write_all(b"new").unwrap();
             content.seek(SeekFrom::Start(0)).unwrap();
