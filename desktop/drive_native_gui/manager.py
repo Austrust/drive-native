@@ -12,6 +12,7 @@ from .config import service_unit
 from .initialization import progress_text
 from .shutdown import shutdown_text, ShutdownWatcher
 from .theme import apply_window_theme
+from .queue_health import queue_caption, queue_notice
 
 LABELS = {"locked":"等待解锁", "connecting":"连接中", "online":"已连接", "offline":"离线", "paused":"已暂停", "needs_attention":"需要处理", "stopping":"正在停止"}
 
@@ -189,6 +190,12 @@ class MountManager(QMainWindow):
                 item.setText(1, title)
         else:
             item.setToolTip(1, "")
+        overview = self.overviews.get(slot, {})
+        caption = queue_caption(overview)
+        if caption:
+            state = overview.get("connection")
+            item.setText(1, f"{LABELS.get(state, '状态未知')} · {caption}")
+            item.setToolTip(1, queue_notice(overview) + ("\n" + detail if detail else ""))
 
     def refresh_progress(self, slot):
         if not self.isVisible() or slot not in self.items:
