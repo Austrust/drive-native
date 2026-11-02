@@ -68,6 +68,20 @@ class UnifiedTests(unittest.TestCase):
         self.assertEqual(os.environ['DRIVE_NATIVE_INSTANCE'], B)
         self.assertNotIn('GetDirectory', first.bus.calls)
 
+    def test_online_uncertain_queue_is_visible_in_manager_and_tray(self):
+        method, callback = self.window.buses[A].waiting.pop(0)
+        self.assertEqual(method, 'GetOverview')
+        callback({'task_id': 'task-' + A, 'connection': 'online', 'mounted': True,
+                  'queue_health': {'namespace_uncertain': 1, 'upload_uncertain': 0}}, None)
+        self.complete_overview(B)
+        self.window.render_progress(A, {'active': True, 'phase': 'waiting'})
+        self.assertIn('已连接', self.window.items[A].text(1))
+        self.assertIn('1 项提交待确认', self.window.items[A].text(1))
+        self.assertNotIn('提交待确认', self.window.items[B].text(1))
+        self.assertIn('需要检查', self.window.tray.icon.toolTip())
+        self.assertFalse(any(name in ('Resume', 'Pause', 'KeepBoth')
+                             for bus in self.window.buses.values() for name in bus.calls))
+
     def test_explicit_wizard_and_config_do_not_follow_other_task_environment(self):
         from drive_native_gui.wizard import SetupWizard
         a = dict(self.records[0][1]); b = dict(self.records[1][1])

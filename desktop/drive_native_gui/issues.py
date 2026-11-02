@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 REASONS = {
     "content_conflict": "本地和远端都有修改",
     "remote_deleted": "远端已删除，本地修改仍保留",
-    "commit_uncertain": "正在核对服务器是否已提交",
+    "commit_uncertain": "服务器执行结果尚未确认",
     "namespace_conflict": "目录、改名或删除操作需要处理",
     "directory_creation_conflict": "新建文件夹与远端同名条目冲突",
     "creation_conflict": "新建文件与远端同名条目冲突",

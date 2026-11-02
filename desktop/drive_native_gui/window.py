@@ -34,6 +34,7 @@ from .upgrade import BackendUpgrade
 from .initialization import progress_text
 from .shutdown import shutdown_text, ShutdownWatcher
 from .theme import apply_window_theme
+from .queue_health import queue_notice, uncertain_operations
 
 STATUS = {
     "initializing": ("初始化预览", "#bc8425"),
@@ -563,7 +564,9 @@ class MainWindow(QMainWindow):
             self.progress_timer.stop()
         if title and self.bus.owner and (
                 not self.overview or self.overview.get("connection") in ("connecting", "online")):
-            self.connection_value.setText(title)
+            self.connection_value.setText(
+                CONNECTION.get(self.overview.get("connection"), "需要检查")
+                if uncertain_operations(self.overview) else title)
 
     def received_overview(self, data, error):
         if error:
@@ -609,6 +612,8 @@ class MainWindow(QMainWindow):
             self.show_error("部分传输未完成。已有完整内容已保留，请检查连接后重试。")
         elif data.get("download_errors"):
             self.show_error("部分下载未完成。已有完整内容会保留，可查看文件状态或右键重试下载。")
+        elif queue_notice(data):
+            self.show_error(queue_notice(data))
         elif state in ("offline", "paused", "locked"):
             self.show_error("当前未与 NAS 同步，已确认的目录仍可预览，文件正文暂不可用。"
                             if data.get("preview_only") is True else

@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
 )
 from .window import status_icon
 from .transfers import PHASES, size_text
+from .queue_health import uncertain_operations
 
 
 class CurrentActivity(QDialog):
@@ -129,7 +130,8 @@ class MountTray:
     def refresh(self):
         states = [data.get('connection') for data in self.manager.overviews.values()]
         unknown = len(states) != len(self.manager.records)
-        if unknown or any(s in ('needs_attention', 'locked') for s in states):
+        if (unknown or any(s in ('needs_attention', 'locked') for s in states)
+                or any(uncertain_operations(data) for data in self.manager.overviews.values())):
             status, label = 'conflict', '有任务需要检查'
         elif any(s in ('connecting', 'offline', 'stopping') for s in states):
             status, label = 'pinning', '连接或恢复中'
