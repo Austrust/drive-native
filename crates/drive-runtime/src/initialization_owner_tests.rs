@@ -353,7 +353,15 @@ impl WindowPeer {
                     let Command::Initialization(Request::Directory { node, path }) = request.body else {
                         panic!("window fixture received non-directory command");
                     };
-                    assert_eq!(path, format!("/Lab/{}", node.name));
+                    let mut names=vec![node.name.clone()];
+                    let mut parent=node.parent.clone().unwrap();
+                    while parent!=data.scope.file_id {
+                        let ancestor=data.nodes.iter().find(|n|n.id==parent).unwrap();
+                        names.push(ancestor.name.clone());
+                        parent=ancestor.parent.clone().unwrap();
+                    }
+                    names.reverse();
+                    assert_eq!(path, format!("/Lab/{}", names.join("/")));
                     requests_log.lock().unwrap().push(format!("directory:{}", node.id));
                     let outstanding = active.fetch_add(1, Ordering::SeqCst) + 1;
                     peak_thread.fetch_max(outstanding, Ordering::SeqCst);
@@ -458,6 +466,61 @@ fn directory_window_commits_and_refills_while_one_independent_response_is_held()
 }
 
 #[test]
+fn directory_window_refills_past_eighty_descendants_of_a_held_ancestor() {
+    let dir=tempfile::tempdir().unwrap();
+    let (mut store,mut data,run,before)=window_candidate(dir.path(),2);
+    let independent=data.nodes.iter_mut().find(|n|n.id=="201").unwrap();
+    independent.id="900".into();
+    let mut version:serde_json::Value=serde_json::from_str(&independent.version).unwrap();
+    version["file"]="900".into(); independent.version=version.to_string();
+    let template=data.nodes[3].clone();
+    for index in 0..80 {
+        let mut child=template.clone();
+        child.id=(3000+index).to_string(); child.parent=Some("200".into()); child.name=format!("Child{index:03}");
+        let mut version:serde_json::Value=serde_json::from_str(&child.version).unwrap();
+        version["file"]=child.id.clone().into(); child.version=version.to_string();
+        data.nodes.push(child);
+    }
+    for id in ["100","200"] {
+        let ticket=store.begin_initialization_directory(&run,id).unwrap();
+        store.store_initialization_native_directory(&ticket,1,&fixture_children(&data,id)).unwrap();
+    }
+    // Model a crashed re-list: reopening makes the ancestor pending without
+    // deleting its already discovered (also pending) descendants.
+    store.begin_initialization_directory(&run,"200").unwrap();
+    drop(store);
+    let store=Store::open(dir.path()).unwrap();
+    let run=store.initialization_status().unwrap().unwrap().run;
+    let peer=WindowPeer::new(data,true);
+    let bridge=bridge(store,&peer.peer,"server");
+    let owner=bridge.clone();
+    let run_for_owner=run.clone();
+    let work=std::thread::spawn(move || {
+        let mut completed=0;
+        let result=owner.initialization_directory_window(&owner.connection(),&owner.session().unwrap(),
+            &run_for_owner,Instant::now()+Duration::from_secs(10),false,1,&mut completed);
+        (result,completed)
+    });
+    let mut saw_independent=false;
+    for _ in 0..2 {
+        match peer.requests.recv_timeout(Duration::from_secs(3)) {
+            Ok(id) => saw_independent |= id=="900", Err(_) => break,
+        }
+    }
+    // Release even on the failing implementation so its threads terminate and
+    // the assertion reports the scheduling regression rather than hanging.
+    peer.release();
+    let (result,completed)=work.join().unwrap();
+    assert!(saw_independent,"a 64-key page/coalescing prefix left independent work behind a held ancestor");
+    assert!(result.is_ok(),"{result:?}");
+    assert_eq!(completed,16);
+    assert!(peer.peak.load(Ordering::SeqCst)<=4);
+    let store=bridge.store.lock().unwrap();
+    assert_eq!(protected(&store),before);
+    assert!(store.initialization_writeback_blocked().unwrap());
+}
+
+#[test]
 fn directory_window_timeout_keeps_other_receipts_and_reopen_reuses_them() {
     let dir = tempfile::tempdir().unwrap();
     let (store,data,run,before) = window_candidate(dir.path(),8);
@@ -495,6 +558,93 @@ fn directory_window_timeout_keeps_other_receipts_and_reopen_reuses_them() {
     assert_eq!(protected(&store),before);
     assert!(store.initialization_writeback_blocked().unwrap());
     assert_ne!(store.initialization_status().unwrap().unwrap().state,"ready");
+}
+
+#[test]
+fn delayed_directory_race_cannot_reticket_old_path_after_sibling_moves_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = complete_store(dir.path(), 7, true);
+    let before = protected(&store);
+    let mut data = snapshot("server", 8);
+    let prototype = data.nodes[3].clone();
+    data.nodes.truncate(3);
+    for (id,parent,name) in [("200","100","A"),("300","100","B"),("400","300","D")] {
+        let mut node = prototype.clone();
+        node.id=id.into(); node.parent=Some(parent.into()); node.name=name.into();
+        let mut version: serde_json::Value=serde_json::from_str(&node.version).unwrap();
+        version["file"]=id.into(); node.version=version.to_string();
+        data.nodes.push(node);
+    }
+    let binding=InitializationBinding{task_id:TASK.into(),scope:serde_json::to_value(&data.scope).unwrap(),
+        restore:data.restore.clone(),start_cursor:data.cursor.clone(),expected_cursor:"native-v1:7".into()};
+    let run=store.begin_initialization(&binding,&data.nodes[0],InitializationBudget::default()).unwrap();
+    for id in ["100","300"] {
+        let ticket=store.begin_initialization_directory(&run,id).unwrap();
+        store.store_initialization_native_directory(&ticket,1,&fixture_children(&data,id)).unwrap();
+    }
+    // Remote D has moved into A. The first D request still carries /Lab/B/D.
+    data.nodes.iter_mut().find(|n|n.id=="400").unwrap().parent=Some("200".into());
+    let (socket,mut remote)=UnixStream::pair().unwrap();
+    let rpc=Arc::new(Rpc::new(socket).unwrap());
+    let log=Arc::new(Mutex::new(Vec::new()));
+    let requests=log.clone();
+    let thread=std::thread::spawn(move || {
+        let send=|remote:&mut UnixStream,id:u64,body:Option<Body>| {
+            let (response,descriptor)=if let Some(body)=body {
+                let bytes=serde_json::to_vec(&InitializationReply{scope:data.scope.clone(),restore:data.restore.clone(),body}).unwrap();
+                let mut file=tempfile::tempfile().unwrap(); file.write_all(&bytes).unwrap(); file.seek(SeekFrom::Start(0)).unwrap();
+                (Response::Initialization{size:bytes.len() as u64,sha256:drive_core::sha256(&bytes)},Some(OwnedFd::from(file)))
+            } else { (Response::Failed{category:"native_snapshot_changed".into()},None) };
+            transport::send(remote,&Envelope{version:VERSION,id,body:response},descriptor.as_ref()).unwrap();
+        };
+        let mut parent_request=None;
+        let mut old_request=None;
+        let mut parent_sent=false;
+        while let Ok((request,_))=transport::receive::<Envelope<Command>>(&mut remote) {
+            if matches!(request.body,Command::Cancel{..}) { continue; }
+            let Command::Initialization(Request::Directory{node,path})=request.body else { panic!("unexpected window command"); };
+            requests.lock().unwrap().push(path.clone());
+            assert!(requests.lock().unwrap().len()<16,"stale-path retry loop");
+            match (node.id.as_str(),path.as_str()) {
+                ("200","/Lab/A") => parent_request=Some(request.id),
+                ("400","/Lab/B/D") if old_request.is_none() => old_request=Some(request.id),
+                ("300","/Lab/B") => send(&mut remote,request.id,Some(Body::Directory{identity:"300".into(),denied:false,children:vec![]})),
+                ("400","/Lab/A/D") => {
+                    // This request can only be scheduled after A's move receipt
+                    // committed. Now return the old request's typed race.
+                    send(&mut remote,old_request.unwrap(),None);
+                    send(&mut remote,request.id,Some(Body::Directory{identity:"400".into(),denied:false,children:vec![]}));
+                }
+                ("400","/Lab/B/D") => {
+                    // Make the unsafe implementation terminate normally; the
+                    // assertion below must detect this forbidden second query.
+                    send(&mut remote,request.id,Some(Body::Directory{identity:"400".into(),denied:false,children:vec![]}));
+                }
+                _ => panic!("unexpected candidate path"),
+            }
+            if !parent_sent && parent_request.is_some() && old_request.is_some() {
+                send(&mut remote,parent_request.unwrap(),Some(Body::Directory{
+                    identity:"200".into(),denied:false,children:fixture_children(&data,"200"),
+                }));
+                parent_sent=true;
+            }
+        }
+    });
+    let peer=Peer{rpc,log,thread:Some(thread)};
+    let bridge=bridge(store,&peer,"server");
+    let mut completed=0;
+    let result=bridge.initialization_directory_window(&peer.rpc,&bridge.session().unwrap(),&run,
+        Instant::now()+Duration::from_secs(5),false,1,&mut completed);
+    let requests=peer.log.lock().unwrap().clone();
+    assert!(result.is_ok(),"{result:?}; requests={requests:?}");
+    assert_eq!(requests.iter().filter(|p|p.as_str()=="/Lab/B/D").count(),1,
+        "an invalidated old identity/path was granted a new generation");
+    assert!(requests.contains(&"/Lab/A/D".into()));
+    let store=bridge.store.lock().unwrap();
+    assert_eq!(store.initialization_node(&run,"400").unwrap().parent.as_deref(),Some("200"));
+    assert_eq!(protected(&store),before);
+    assert!(store.initialization_writeback_blocked().unwrap());
+    assert_eq!(store.initialization_coverage(&run).unwrap().iter().find(|c|c.directory=="400").unwrap().state,"received");
 }
 
 #[test]

@@ -1,5 +1,6 @@
-//! FSD-owned initialization. Replies are repeatable reads, not checkpoints;
-//! the next request is issued only after the prior receipt is committed locally.
+//! FSD-owned initialization. Bounded directory reads form a pipeline; the owner
+//! alone commits their receipts and advances candidate events/checkpoints.
+//! Repeatable read replies are never themselves a committed checkpoint.
 use super::*;
 use crate::initialization_metrics::{Counter, Stage};
 #[cfg(test)]
@@ -652,6 +653,8 @@ impl Bridge {
             {
                 continue;
             }
+            self.initialization
+                .phase(crate::initialization::Phase::Fencing);
             let ticket = {
                 self.initialization.work.count(Counter::FenceAttempts, 1);
                 let _writes = self.initialization_writer();
@@ -661,8 +664,6 @@ impl Bridge {
                     .begin_initialization_fence(&run)
                     .map_err(io::Error::other)?
             };
-            self.initialization
-                .phase(crate::initialization::Phase::Fencing);
             match self.initialization_read(
                 rpc,
                 session,
@@ -733,12 +734,27 @@ impl Bridge {
             let mut admitted = 0usize;
             let mut handles = Vec::new();
             loop {
+                let mut completed = None;
                 if first_error.is_none() && !coverage_race && admitted < 16 && in_flight < 4 {
                     let mut after = None;
                     // Bound each lock hold and yield between indexed pages. An
                     // exhausted scan is not coverage: the existing fence checks
                     // every directory after the window has drained.
                     loop {
+                        // Commit ready receipts before scanning another page.
+                        // The following outer iteration then starts at the first
+                        // key because that commit may change candidate ancestry.
+                        if let Ok(receipt) = rx.try_recv() {
+                            completed = Some(receipt);
+                            break;
+                        }
+                        if Instant::now() >= deadline {
+                            first_error = Some(io::Error::new(
+                                io::ErrorKind::TimedOut,
+                                "initialization work budget exhausted",
+                            ));
+                            break;
+                        }
                         let page = (|| {
                             let _writes = self.initialization_writer();
                             self.current(rpc)?;
@@ -815,17 +831,32 @@ impl Bridge {
                                                         Some(Recheck::Directory)
                                                     ) && retry < 2 =>
                                                 {
-                                                    self.initialization
-                                                        .work
-                                                        .count(Counter::DirectoryRetry, 1);
                                                     let _writes = self.initialization_writer();
                                                     self.current(rpc)?;
-                                                    ticket = self
-                                                        .initialization_store()
+                                                    let mut store = self.initialization_store();
+                                                    // Another completed listing may have moved,
+                                                    // replaced or revoked this subtree while this
+                                                    // request was in flight. Never issue a fresh
+                                                    // ticket for the new identity using the old
+                                                    // captured node/path. The coordinator will
+                                                    // discard this old ticket and schedule the
+                                                    // current candidate independently.
+                                                    if !store
+                                                        .initialization_directory_ticket_current(
+                                                            &ticket,
+                                                        )
+                                                        .map_err(io::Error::other)?
+                                                    {
+                                                        return Err(error);
+                                                    }
+                                                    ticket = store
                                                         .begin_initialization_directory(
                                                             run, &node.id,
                                                         )
                                                         .map_err(io::Error::other)?;
+                                                    self.initialization
+                                                        .work
+                                                        .count(Counter::DirectoryRetry, 1);
                                                 }
                                                 result => return result,
                                             }
@@ -838,30 +869,21 @@ impl Bridge {
                                 let _ = tx.send((node, ticket, result));
                             }));
                         }
-                        if found || page.next.is_none() {
+                        if in_flight == 4 || admitted == 16 || page.next.is_none() {
                             break;
                         }
                         after = page.next;
                         work.count(Counter::ClaimScanYields, 1);
-                        if Instant::now() >= deadline {
-                            first_error = Some(io::Error::new(
-                                io::ErrorKind::TimedOut,
-                                "initialization work budget exhausted",
-                            ));
-                            break;
-                        }
-                        // Do not scan a large blocked prefix while there are
-                        // completed/in-flight requests waiting to be committed.
-                        if in_flight > 0 {
-                            break;
-                        }
+                        // Issuing claims changes loading/generation, not paths.
+                        // Keep the keyset hint while filling vacant slots past
+                        // a blocked prefix; never carry it across a receipt.
                         std::thread::yield_now();
                     }
                 }
                 if in_flight == 0 {
                     break;
                 }
-                let (node, ticket, result) = match rx.recv() {
+                let (node, ticket, result) = match completed.map(Ok).unwrap_or_else(|| rx.recv()) {
                     Ok(result) => result,
                     Err(_) => {
                         first_error =
