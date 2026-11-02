@@ -1,0 +1,82 @@
+{
+  "summary_schema": 1,
+  "version": "0.1.0~dev20261102.8",
+  "source_commit": "416cc41b11fce2774bc8eb1e899e100f3d896b8f",
+  "database_schema": 23,
+  "ipc_version": 20,
+  "package_role": "intermediate_frozen_validation_build",
+  "published": false,
+  "final_goal_complete": false,
+  "final_delivery_gates_closed": false,
+  "subsequent_filesystem_optimization_included": false,
+  "deb_bytes": 53953102,
+  "deb_sha256": "e89573f0fb88f731c365dbe631bb5d1bc68891896fb97e7b0d2e2e0cf238bb2c",
+  "source_archive_and_vendor_provenance_verified": true,
+  "package_build": {
+    "exit_code": 0,
+    "rust_passed": 846,
+    "rust_failed": 0,
+    "rust_ignored": 27,
+    "gui_passed": 101
+  },
+  "native_validation_peer_tests": {
+    "passed": 4,
+    "failed": 0,
+    "nas_accessed": false
+  },
+  "download_retry_repeats": {
+    "rounds": 10,
+    "tests_per_round": 5,
+    "failed": 0,
+    "test_timing_origin_fixed": true,
+    "product_backoff_changed": false
+  },
+  "explicit_kernel_tests": {
+    "debug_fs_passed": 24,
+    "debug_runtime_passed": 1,
+    "release_fs_passed": 24,
+    "release_runtime_passed": 1,
+    "failed": 0
+  },
+  "managed_upgrade": {
+    "passed": true,
+    "from_version": "0.1.0~dev20261102.7",
+    "from_schema": 22,
+    "to_schema": 23,
+    "from_ipc": 18,
+    "to_ipc": 20,
+    "migration_backup_verified": true,
+    "legacy_upload_mtime_intent_absent": true,
+    "paired_worker_images_verified": true,
+    "semantic_state_preserved": true,
+    "dirty_drafts": 2,
+    "pending_operations": 2,
+    "uncertain_operations": 0
+  },
+  "old_elf_rejection": {
+    "expected_old_schema": 22,
+    "existing_schema": 23,
+    "exit_code": 1,
+    "persistent_data_fingerprint_unchanged": true,
+    "package_downgrade_performed": false
+  },
+  "installation_lifecycle": {
+    "existing_ubuntu_24_04_chroot": true,
+    "clean_os_install": false,
+    "mint_hardware_verified": false,
+    "installed_gui_single_instance": true,
+    "same_version_reinstall": true,
+    "purge_preserves_user_data": true,
+    "reinstall_readback": true,
+    "normal_cleanup": true,
+    "final_isolation_check_passed": true,
+    "forced_cleanup": false,
+    "nas_accessed": false,
+    "host_packages_changed": false
+  },
+  "unknown_commit_upgrade_covered": false,
+  "active_initialization_candidate_upgrade_covered": false,
+  "authenticated_cross_version_worker_session_verified": false,
+  "nas_trial_included_in_this_report": false,
+  "paired_performance_claim": false
+}
