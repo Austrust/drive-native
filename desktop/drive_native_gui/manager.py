@@ -1,17 +1,17 @@
 """Manage independent mounts; credentials remain in each task's existing UI/keyring."""
-import os
-import sys
 import uuid
 from pathlib import Path
-from PySide6.QtCore import Qt, QTimer, QProcess
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtCore import QUrl
-from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTreeWidget, QTreeWidgetItem, QInputDialog
-from .config import profile_records
+from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTreeWidget, QTreeWidgetItem, QInputDialog, QListWidget, QListWidgetItem, QStackedWidget, QApplication, QHeaderView
+from .config import profile_records, config_path
 from .bus import ClientBus
 from .lifecycle import ServiceLauncher
 from .config import service_unit
 from .initialization import progress_text
+from .shutdown import shutdown_text, ShutdownWatcher
+from .theme import apply_window_theme
 
 LABELS = {"locked":"等待解锁", "connecting":"连接中", "online":"已连接", "offline":"离线", "paused":"已暂停", "needs_attention":"需要处理", "stopping":"正在停止"}
 
@@ -19,9 +19,15 @@ LABELS = {"locked":"等待解锁", "connecting":"连接中", "online":"已连接
 class MountManager(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Drive Native · 挂载管理")
-        self.resize(980, 600)
+        self.setWindowTitle("Drive Native")
+        self.resize(1240, 780)
         self.setMinimumSize(720, 420)
+        self.pages = {}
+        self.nav_items = {}
+        self.overviews = {}
+        self.shutdown_watchers = {}
+        self.status_pending = set()
+        self.status_again = set()
         self.records = {}
         self.buses = {}
         self.items = {}
@@ -30,21 +36,58 @@ class MountManager(QMainWindow):
         self.progress_pending = set()
         self.progress_again = set()
         root = QWidget(); self.setCentralWidget(root)
-        layout = QVBoxLayout(root)
+        shell = QVBoxLayout(root)
+        navigation = QHBoxLayout()
+        add_button = QPushButton("添加挂载…"); add_button.clicked.connect(self.add)
+        navigation.addWidget(add_button)
+        navigation.addWidget(QLabel("关闭界面不会停止后台同步")); navigation.addStretch()
+        shell.addLayout(navigation)
+        body = QHBoxLayout(); shell.addLayout(body, 1)
+        self.navigation = QListWidget(); self.navigation.setMaximumWidth(190)
+        self.navigation.setAccessibleName("挂载导航")
+        body.addWidget(self.navigation)
+        self.stack = QStackedWidget(); body.addWidget(self.stack, 1)
+        self.all_page = QWidget(); self.stack.addWidget(self.all_page)
+        self.settings_page = QWidget(); settings = QVBoxLayout(self.settings_page)
+        settings.addWidget(QLabel("全局界面设置"))
+        hint = QLabel("关闭主窗口时，托盘可用则保留托盘；没有托盘时退出界面，后台继续同步。\n证书、缓存和带宽设置属于各个挂载，请先选择挂载。\n此版本提供当前传输查询；尚无持久历史及全部暂停／恢复。")
+        hint.setWordWrap(True); settings.addWidget(hint); settings.addStretch()
+        self.stack.addWidget(self.settings_page)
+        self.navigation.currentItemChanged.connect(self.navigate)
+        layout = QVBoxLayout(self.all_page)
         title = QLabel("我的挂载"); title.setStyleSheet("font-size: 25px; font-weight: 600; padding: 12px 0;")
         layout.addWidget(title)
         layout.addWidget(QLabel("多个目录可以同时挂载。每个挂载独立连接、缓存和同步，关闭窗口不会停止挂载。"))
         bar = QHBoxLayout()
-        for label, fn in [("添加挂载…", self.add), ("打开管理", self.open_task), ("启动挂载", self.start), ("暂停 / 恢复", self.pause), ("打开文件夹", self.open_folder)]:
+        for label, fn in [("查看挂载", self.open_task), ("启动挂载", self.start), ("暂停 / 恢复", self.pause), ("打开文件夹", self.open_folder)]:
             button = QPushButton(label); button.clicked.connect(fn); bar.addWidget(button)
         bar.addStretch(); layout.addLayout(bar)
         self.table = QTreeWidget(); self.table.setHeaderLabels(["挂载名称", "状态", "远端目录", "本地位置"])
         self.table.setRootIsDecorated(False); self.table.setAlternatingRowColors(True)
+        self.table.header().setMinimumSectionSize(150)
+        self.table.header().setSectionResizeMode(QHeaderView.Stretch)
         self.table.itemDoubleClicked.connect(lambda *_: self.open_task())
         layout.addWidget(self.table, 1)
         self.message = QLabel(); self.message.setWordWrap(True); layout.addWidget(self.message)
         self.timer = QTimer(self); self.timer.setInterval(2000); self.timer.timeout.connect(self.refresh_catalog); self.timer.start()
         self.refresh_catalog()
+        from .tray import MountTray
+        self.tray = MountTray(self)
+        self.apply_theme()
+
+    def apply_theme(self):
+        apply_window_theme(self)
+        self.setStyleSheet(self.styleSheet() + "QListWidget{background:palette(base);color:palette(text);border:1px solid palette(midlight);selection-background-color:palette(highlight);selection-color:palette(highlighted-text);} QListWidget::item{padding:12px 10px;}")
+        for page in self.pages.values(): page.apply_theme()
+
+    def render_shutdown(self, slot, value, mounted):
+        if slot not in self.items: return
+        text = shutdown_text(value)
+        if text:
+            self.items[slot].setText(1, text)
+            self.items[slot].setData(1, Qt.UserRole, 'stopping')
+            if slot in self.overviews and type(mounted) is bool:
+                self.overviews[slot]['mounted'] = mounted
 
     def selected(self):
         item = self.table.currentItem()
@@ -55,10 +98,33 @@ class MountManager(QMainWindow):
             records = dict(profile_records())
         except (OSError, ValueError, KeyError) as error:
             self.message.setText(str(error)); return
-        signature = tuple((key, p["task_id"], p["mount"]) for key, p in records.items())
+        signature = tuple((key, p["task_id"], p["mount"], p["scope"]["path"]) for key, p in records.items())
         if signature == self.signature:
             return
-        selected = self.selected(); self.signature = signature; self.records = records
+        selected = self.selected(); self.signature = signature
+        for slot in set(self.records) | set(self.pages):
+            old, current = self.records.get(slot), records.get(slot)
+            page = self.pages.get(slot)
+            changed = (old is not None and (current is None or old["task_id"] != current["task_id"]))
+            arrived = old is None and current is not None and page is not None
+            if changed or arrived:
+                old_task = old["task_id"] if old else None
+                keep_page = page is not None and (
+                    page.owns_catalog_transition(old_task, current)
+                    or (old is None and current is not None and page.profile is not None
+                        and page.profile.get("task_id") == current["task_id"]))
+                if keep_page and old is None:
+                    page.catalog_replacement = None
+                if page is not None and not keep_page:
+                    self.pages.pop(slot)
+                    self.stack.removeWidget(page); page.hide(); page.deleteLater()
+                self.overviews.pop(slot, None)
+                self.shutdown_watchers.pop(slot, None)
+                old_bus = self.buses.pop(slot, None)
+                if old_bus is not None: old_bus.deleteLater()
+                self.status_pending.discard(slot); self.status_again.discard(slot)
+                self.progress_pending.discard(slot); self.progress_again.discard(slot)
+        self.records = records
         self.table.clear(); self.items = {}
         for slot, profile in records.items():
             item = QTreeWidgetItem([Path(profile["mount"]).name, "正在读取状态…", profile["scope"]["path"], profile["mount"]])
@@ -69,23 +135,49 @@ class MountManager(QMainWindow):
                 bus.changed.connect(lambda key=slot: self.refresh_status(key))
                 bus.progress_changed.connect(lambda key=slot: self.refresh_progress(key))
                 bus.availability.connect(lambda _up, key=slot: self.refresh_status(key))
+                watcher = ShutdownWatcher(bus, lambda key=slot: self.records.get(key, {}).get("task_id"), lambda value, mounted, key=slot: self.render_shutdown(key, value, mounted), bus)
+                self.shutdown_watchers[slot] = watcher
+                if hasattr(bus, "shutdown_changed"): watcher.refresh()
             self.refresh_status(slot)
+        self.rebuild_navigation()
+        if hasattr(self, "tray"): self.tray.refresh()
         if not records: self.message.setText("点击“添加挂载”，为第一个目录设置名称和本地位置。")
         else: self.message.setText(f"共 {len(records)} 个挂载。双击任务可登录、查看传输或处理错误。")
-        for col in range(3): self.table.resizeColumnToContents(col)
+
 
     def refresh_status(self, slot):
         if slot not in self.items: return
+        if slot in self.status_pending:
+            self.status_again.add(slot); return
+        self.status_pending.add(slot)
+        expected = self.records[slot]["task_id"]
+        bus = self.buses[slot]
         def received(data, error):
+            if self.buses.get(slot) is not bus: return
+            self.status_pending.discard(slot)
+            if slot in self.status_again:
+                self.status_again.discard(slot)
+                QTimer.singleShot(100, self, lambda: self.refresh_status(slot))
             if slot not in self.items: return
             profile = self.records[slot]
+            if profile["task_id"] != expected: return
+            self.overviews.pop(slot, None)
+            self.items[slot].setData(1, Qt.UserRole, None)
             if error:
-                self.items[slot].setText(1, "未启动"); return
+                self.items[slot].setText(1, "状态暂不可用")
+                if hasattr(self, "tray"): self.tray.refresh()
+                return
             if data.get("task_id") != profile["task_id"]:
                 self.items[slot].setText(1, "任务不匹配"); return
+            self.overviews[slot] = data
             self.items[slot].setText(1, LABELS.get(data.get("connection"), "状态未知"))
             self.items[slot].setData(1, Qt.UserRole, data.get("connection"))
             self.render_progress(slot, data.get("initialization"))
+            watcher = self.shutdown_watchers.get(slot)
+            stop = shutdown_text(watcher.value if watcher and watcher.value is not None else data.get("shutdown"))
+            if stop:
+                self.render_shutdown(slot, watcher.value if watcher and watcher.value is not None else data.get("shutdown"), watcher.mounted if watcher and watcher.value is not None else data.get("mounted"))
+            if hasattr(self, "tray"): self.tray.refresh()
         self.buses[slot].call("GetOverview", callback=received)
 
     def render_progress(self, slot, progress):
@@ -105,24 +197,74 @@ class MountManager(QMainWindow):
             self.progress_again.add(slot)
             return
         self.progress_pending.add(slot)
+        bus = self.buses[slot]
         def received(data, error):
+            if self.buses.get(slot) is not bus: return
             self.progress_pending.discard(slot)
             if slot in self.progress_again:
                 self.progress_again.discard(slot)
-                QTimer.singleShot(100, lambda: self.refresh_progress(slot))
+                QTimer.singleShot(100, self, lambda: self.refresh_progress(slot))
             if error or slot not in self.items or data.get("task_id") != self.records[slot]["task_id"]:
                 return
             self.render_progress(slot, data.get("initialization"))
         self.buses[slot].call("GetInitialization", callback=received)
 
-    def spawn(self, slot, name=None):
-        args = ["--task", slot or "legacy"]
-        if name: args += ["--new-name", name]
-        if getattr(sys, "frozen", False): program = sys.executable
+    def rebuild_navigation(self):
+        current = self.navigation.currentItem()
+        selected = current.data(Qt.UserRole) if current else ("all", "")
+        self.navigation.blockSignals(True)
+        self.navigation.clear(); self.nav_items = {}
+        for key, title in [(('all', ''), '所有挂载')] + [
+            (('task', slot), Path(profile['mount']).name) for slot, profile in self.records.items()
+        ] + [(('task', slot), page.new_name or '新挂载') for slot, page in self.pages.items() if slot not in self.records] + [(('settings', ''), '全局设置')]:
+            item = QListWidgetItem(title); item.setData(Qt.UserRole, key)
+            self.navigation.addItem(item); self.nav_items[key] = item
+        self.navigation.setCurrentItem(self.nav_items.get(selected, self.nav_items[('all', '')]))
+        self.navigation.blockSignals(False)
+        self.navigate(self.navigation.currentItem(), None)
+
+    def navigate(self, item, _previous):
+        if item is None: return
+        kind, slot = item.data(Qt.UserRole)
+        if kind == 'task':
+            self.activate_task(slot)
         else:
-            program = sys.executable; args = ["-m", "drive_native_gui"] + args
-        ok, _ = QProcess.startDetached(program, args)
-        if not ok: self.message.setText("无法打开挂载配置窗口。")
+            self.stack.setCurrentWidget(self.all_page if kind == 'all' else self.settings_page)
+
+    def activate_task(self, slot=None, name=None):
+        if slot is None:
+            self.navigation.setCurrentItem(self.nav_items[('all', '')])
+            self.stack.setCurrentWidget(self.all_page)
+            return
+        config_path(slot)  # Validate before constructing any task-bound component.
+        if slot not in self.pages:
+            from .window import MainWindow
+            page = MainWindow(self.stack, instance=slot, new_name=name)
+            page.setWindowFlags(Qt.Widget)
+            page.ready.connect(self.refresh_catalog)
+            self.pages[slot] = page; self.stack.addWidget(page)
+            self.rebuild_navigation()
+        page = self.pages[slot]
+        self.stack.setCurrentWidget(page)
+        item = self.nav_items.get(('task', slot))
+        if item and item is not self.navigation.currentItem():
+            self.navigation.setCurrentItem(item)
+
+    def activate(self, task='', name=''):
+        # The CLI uses 'legacy' for the old profile, '' for the global overview.
+        self.activate_task(None if task == '' else '' if task == 'legacy' else task, name or None)
+        self.showNormal(); self.raise_(); self.activateWindow()
+
+    def spawn(self, slot, name=None):
+        # Kept as an internal compatibility entry point; never launches a process.
+        self.activate_task(slot, name)
+
+    def closeEvent(self, event):
+        if self.tray.available():
+            self.hide(); event.ignore()
+        else:
+            event.accept()
+            QApplication.instance().quit()
 
     def add(self):
         name, ok = QInputDialog.getText(self, "添加挂载", "挂载名称（本地文件夹名称，可在配置时修改）")
@@ -139,7 +281,7 @@ class MountManager(QMainWindow):
     def start(self):
         slot = self.selected()
         if slot is None: return
-        launcher = ServiceLauncher(self, managed=True, unit=service_unit(slot))
+        launcher = ServiceLauncher(self, managed=True, unit=service_unit(slot), instance=slot)
         self.launchers.append(launcher)
         def done(error):
             if error: self.message.setText(error)
@@ -151,8 +293,19 @@ class MountManager(QMainWindow):
         slot = self.selected()
         if slot is None: return
         state = self.items[slot].data(1, Qt.UserRole)
+        if state is None:
+            self.message.setText("状态未确认，请稍后重试。"); return
         self.buses[slot].call("Resume" if state == "paused" else "Pause", callback=lambda _data, _error: self.refresh_status(slot))
 
     def open_folder(self):
         slot = self.selected()
-        if slot is not None: QDesktopServices.openUrl(QUrl.fromLocalFile(self.records[slot]["mount"]))
+        if slot is not None: self.open_task_folder(slot)
+
+    def open_task_folder(self, slot):
+        data = self.overviews.get(slot, {})
+        if slot not in self.records or not data.get("mounted"):
+            self.activate()
+            self.message.setText("挂载尚不可用，请先检查该任务的连接和初始化状态。"); return
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(self.records[slot]["mount"])):
+            self.activate()
+            self.message.setText("无法打开文件管理器，请检查桌面默认应用设置。")

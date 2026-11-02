@@ -41,3 +41,8 @@ override_dh_compress:
 override_dh_auto_clean:
 	# Build artifacts live only in the disposable build checkout.
 	rm -rf build
+
+override_dh_clean:
+	# This tracked upstream manifest is provenance, not an editor backup.
+	# Preserve it so the frozen source remains verifiable after packaging.
+	dh_clean -Xvendor/fuser/Cargo.toml.orig

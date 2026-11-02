@@ -1,17 +1,22 @@
 """One user service lifecycle for installed builds; explicit development isolation."""
 
 import os
-from PySide6.QtCore import QObject, QProcess, QTimer, Signal
+from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, QTimer, Signal
 from .config import binary, config_path, service_unit
+
+
+def _start_detached(process):
+    return process.startDetached()
 
 
 class ServiceLauncher(QObject):
     completed = Signal(object)
 
-    def __init__(self, parent=None, *, managed=None, unit=None):
+    def __init__(self, parent=None, *, managed=None, unit=None, instance=None):
         super().__init__(parent)
         self.managed = "DRIVE_NATIVE_BIN_DIR" not in os.environ if managed is None else managed
-        self.unit = unit or service_unit()
+        self.instance = os.environ.get("DRIVE_NATIVE_INSTANCE", "") if instance is None else instance
+        self.unit = unit or service_unit(self.instance)
         self.process = QProcess(self)
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
@@ -31,9 +36,17 @@ class ServiceLauncher(QObject):
         self.checking = False
         if not self.managed:
             try:
-                started, _pid = QProcess.startDetached(
-                    binary("drive-native-fsd"), ["--config", str(config_path())]
-                )
+                child = QProcess(self)
+                environment = QProcessEnvironment.systemEnvironment()
+                if self.instance:
+                    environment.insert("DRIVE_NATIVE_INSTANCE", self.instance)
+                else:
+                    environment.remove("DRIVE_NATIVE_INSTANCE")
+                child.setProcessEnvironment(environment)
+                child.setProgram(binary("drive-native-fsd"))
+                child.setArguments(["--config", str(config_path(self.instance))])
+                started = _start_detached(child)
+                child.deleteLater()
                 self._finish(None if started else "后台组件无法启动。")
             except (OSError, ValueError):
                 self._finish("后台组件未安装完整。")

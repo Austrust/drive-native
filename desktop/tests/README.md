@@ -21,6 +21,9 @@
 - [managed_service_test.py](managed_service_test.py)
 - [mounted_read_retry_test.py](mounted_read_retry_test.py)
 - [multi_mount_tests.py](multi_mount_tests.py)
+- [unified_manager_tests.py](unified_manager_tests.py)：同窗切换、显式配置、开发子进程环境、独立任务请求、托盘可达性与停止阶段。
+- [gui_instance_test.py](gui_instance_test.py)：在独立 `dbus-run-session` 中验证第二个 GUI 进程激活现有窗口。
+- [unified_gui_render.py](unified_gui_render.py)：合成多挂载的浅／深色布局截图，不连接后台或 NAS。
 - [multi_nemo_check.py](multi_nemo_check.py)
 - [multi_process_check.py](multi_process_check.py)
 - [multi_ui_check.py](multi_ui_check.py)

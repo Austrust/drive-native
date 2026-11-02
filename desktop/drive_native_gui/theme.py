@@ -39,3 +39,21 @@ def install_theme(app):
         for widget in app.topLevelWidgets():
             if hasattr(widget, "apply_theme"): widget.apply_theme()
     hints.colorSchemeChanged.connect(changed)
+
+
+def apply_window_theme(window):
+    muted = "#a8b2c2" if window.palette().color(QPalette.Window).lightness() < 128 else "#626d7c"
+    stylesheet = """QWidget{font-size:14px;} QMainWindow{background:palette(window);}
+        QFrame#sidebar{background:palette(base);border-right:1px solid palette(midlight);}
+        QLabel#brand{font-size:22px;font-weight:700;} QLabel#heading{font-size:27px;font-weight:650;}
+        QLabel#metric{font-size:24px;font-weight:600;} QLabel#muted{color:MUTED_COLOR;font-size:12px;}
+        QFrame#card{background:palette(base);border:1px solid palette(midlight);border-radius:12px;}
+        QPushButton{color:palette(button-text);padding:9px 14px;border:1px solid palette(midlight);border-radius:7px;background:palette(base);}
+        QPushButton:hover{background:palette(alternate-base);} QPushButton:disabled{color:palette(mid);}
+        QPushButton#primary,QPushButton#navigation{background:#446fd1;color:white;border:none;}
+        QLineEdit{color:palette(text);selection-background-color:palette(highlight);selection-color:palette(highlighted-text);padding:9px;border:1px solid palette(midlight);border-radius:6px;background:palette(base);}
+        QTreeWidget{border:1px solid palette(midlight);border-radius:9px;background:palette(base);color:palette(text);selection-background-color:palette(highlight);selection-color:palette(highlighted-text);outline:none;}
+        QTreeWidget::item{padding:10px 6px;} QHeaderView::section{padding:10px;background:palette(alternate-base);border:none;text-align:left;}
+        QLabel#message{padding:12px;border-radius:8px;background:palette(alternate-base);}
+    """
+    window.setStyleSheet(stylesheet.replace("MUTED_COLOR", muted))

@@ -16,6 +16,7 @@ PATH = "/org/drivenative/Client1"
 class ClientBus(QObject):
     changed = Signal()
     progress_changed = Signal()
+    shutdown_changed = Signal()
     availability = Signal(bool)
 
     def __init__(self, parent=None, *, instance=None):
@@ -36,6 +37,13 @@ class ClientBus(QObject):
         self.bus.connect(
             self.service, PATH, NAME, "ProgressChanged", self, SLOT("_progress_changed(qulonglong)")
         )
+        self.bus.connect(
+            self.service, PATH, NAME, "ShutdownChanged", self, SLOT("_shutdown_changed(qulonglong)")
+        )
+
+    @Slot("qulonglong")
+    def _shutdown_changed(self, _revision):
+        self.shutdown_changed.emit()
 
     @Slot("qulonglong")
     def _progress_changed(self, _revision):

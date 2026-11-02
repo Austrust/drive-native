@@ -232,6 +232,19 @@ fn unescape(data: &[u8]) -> Option<Vec<u8>> {
     }
     Some(out)
 }
+/// Observe only this namespace/path. Never unmount a different namespace or
+/// infer absence from a failed stat on an unresponsive FUSE filesystem.
+pub fn mount_present(path: &Path) -> io::Result<bool> {
+    let data = fs::read("/proc/self/mountinfo")?;
+    Ok(data.split(|b| *b == b'\n').any(|line| {
+        line.split(|b| *b == b' ')
+            .nth(4)
+            .and_then(unescape)
+            .as_deref()
+            == Some(path.as_os_str().as_bytes())
+    }))
+}
+
 fn mounted_id(data: &[u8], path: &Path) -> io::Result<u64> {
     let mut found = None;
     for line in data.split(|b| *b == b'\n') {

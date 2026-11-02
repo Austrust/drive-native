@@ -145,7 +145,7 @@ class Tests(unittest.TestCase):
             wizard.remember.setChecked(False)
             saved = []
             with patch(
-                "drive_native_gui.wizard.save_profile", lambda profile: saved.append(profile)
+                "drive_native_gui.wizard.save_profile", lambda profile, instance: (self.assertEqual(instance, wizard.instance), saved.append(profile))
             ):
                 wizard.finish_setup()
             self.assertEqual(saved[0]["host"], "original.invalid")

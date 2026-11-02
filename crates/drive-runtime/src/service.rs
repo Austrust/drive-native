@@ -188,6 +188,7 @@ pub struct Service {
     changed: Condvar,
     pub stop: AtomicBool,
     pub mounted: AtomicBool,
+    pub shutdown_diagnostics: crate::shutdown::Diagnostics,
     // Keep the matching worker inode alive across atomic package replacement.
     worker_image: Option<fs::File>,
     pub(crate) diagnostics: crate::connection_diagnostics::Recorder,
@@ -257,6 +258,7 @@ impl Service {
             changed: Condvar::new(),
             stop: AtomicBool::new(false),
             mounted: AtomicBool::new(false),
+            shutdown_diagnostics: crate::shutdown::Diagnostics::default(),
             worker_image,
             diagnostics,
         }))
@@ -536,6 +538,8 @@ impl Service {
         Ok(())
     }
     pub fn shutdown(&self) {
+        self.shutdown_diagnostics
+            .phase(crate::shutdown::Phase::Requested);
         let mut c = self.control.lock().unwrap();
         self.stop.store(true, Ordering::Release);
         c.password = None;

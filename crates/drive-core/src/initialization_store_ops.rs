@@ -190,9 +190,57 @@ impl Store {
                 .as_ref()
                 .and_then(|ids| ids.get(old.id.as_str()))
                 .map(|entry| entry.native_node_id);
-            if ids.get(old.id.as_str()).is_some_and(|new| **new == old)
-                && read_native_identity(&tx, &ticket.run.run_id, &old.id)? == incoming_identity
-            {
+            let incoming = ids.get(old.id.as_str()).copied();
+            let unchanged = incoming.is_some_and(|new| *new == old);
+            let refresh_directory = incoming.is_some_and(|new| {
+                old.directory
+                    && new.directory
+                    && old.parent == new.parent
+                    && old.name == new.name
+                    && incoming_identity.is_some()
+            });
+            // No identity proof is reused when a complete parent list removes
+            // or structurally replaces this child. A corrupt obsolete sidecar
+            // must not prevent deletion of the entire private subtree. Every
+            // retention/refresh path still validates its digest before reuse.
+            if !unchanged && !refresh_directory {
+                delete_subtree(&tx, &ticket.run.run_id, &old.id)?;
+                continue;
+            }
+            let previous_identity = read_native_identity(&tx, &ticket.run.run_id, &old.id)?;
+            if unchanged && previous_identity == incoming_identity {
+                retained.insert(old.id);
+            } else if let Some(new) = incoming.filter(|_| refresh_directory && previous_identity == incoming_identity) {
+                // A fresh listing changed only this directory's metadata/version.
+                // Retain discovered identities, never their old coverage/authority.
+                // Updating the identity sidecar must also rebind its Node digest.
+                let body = serde_json::to_string(new)?;
+                if body.len() > 1_048_576 || new.name.len() > 255 {
+                    return Err(invalid("node budget exceeded"));
+                }
+                let previous_bytes: i64 = tx.query_row(
+                    "SELECT bytes FROM initialization_entries WHERE run=?1 AND id=?2",
+                    params![ticket.run.run_id, old.id],
+                    |r| r.get(0),
+                )?;
+                tx.execute(
+                    "DELETE FROM initialization_native_nodes WHERE run=?1 AND id=?2",
+                    params![ticket.run.run_id, old.id],
+                )?;
+                tx.execute(
+                    "UPDATE initialization_entries SET body=?3,bytes=?4 WHERE run=?1 AND id=?2",
+                    params![ticket.run.run_id, old.id, body, body.len() as i64],
+                )?;
+                tx.execute(
+                    "UPDATE initialization_run SET node_bytes=node_bytes-?2+?3 WHERE run_id=?1",
+                    params![ticket.run.run_id, previous_bytes, body.len() as i64],
+                )?;
+                store_native_identity(
+                    &tx,
+                    &ticket.run.run_id,
+                    native_ids.as_ref().unwrap()[old.id.as_str()],
+                )?;
+                invalidate(&tx, &ticket.run.run_id, &old.id, true)?;
                 retained.insert(old.id);
             } else {
                 delete_subtree(&tx, &ticket.run.run_id, &old.id)?;

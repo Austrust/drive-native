@@ -32,6 +32,8 @@ from .credentials import secret_job
 from .lifecycle import ServiceLauncher, same_task
 from .upgrade import BackendUpgrade
 from .initialization import progress_text
+from .shutdown import shutdown_text, ShutdownWatcher
+from .theme import apply_window_theme
 
 STATUS = {
     "initializing": ("初始化预览", "#bc8425"),
@@ -98,15 +100,20 @@ def status_icon(status):
 class MainWindow(QMainWindow):
     ready = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, instance=None, new_name=None):
         super().__init__(parent)
         self.setWindowTitle("Drive Native")
         self.resize(1120, 740)
         self.setMinimumSize(820, 580)
-        self.bus = ClientBus(self)
-        self.launcher = ServiceLauncher(self)
+        self.instance = os.environ.get("DRIVE_NATIVE_INSTANCE", "") if instance is None else instance
+        config_path(self.instance)
+        self.new_name = new_name
+        self.bus = ClientBus(self) if instance is None else ClientBus(self, instance=self.instance)
+        self.launcher = ServiceLauncher(self) if instance is None else ServiceLauncher(self, instance=self.instance)
         self.launcher.completed.connect(self.service_started)
         self.profile = None
+        self.profile_transition = None
+        self.catalog_replacement = None
         self.overview = {}
         self.folder = ""
         self.display_limit = 256
@@ -208,6 +215,9 @@ class MainWindow(QMainWindow):
         self.progress_label.setWordWrap(True)
         self.progress_label.hide()
         content.addWidget(self.progress_label)
+        self.shutdown_label = QLabel(); self.shutdown_label.setWordWrap(True)
+        self.shutdown_label.hide(); content.addWidget(self.shutdown_label)
+        self.shutdown_watcher = ShutdownWatcher(self.bus, lambda: self.profile.get("task_id") if self.profile else None, self.render_shutdown, self)
         self.preview_label = QLabel("目录预览 · 已确认的目录可浏览，文件正文暂不可用。初始化完成后自动开放正常操作。")
         self.preview_label.setWordWrap(True)
         self.preview_label.setObjectName("message")
@@ -278,7 +288,7 @@ class MainWindow(QMainWindow):
         for label in self.findChildren(QLabel):
             label.setTextFormat(Qt.PlainText)
         self.apply_theme()
-        QTimer.singleShot(0, self.start)
+        QTimer.singleShot(0, self, self.start)
 
     def toggle_files(self, visible):
         self.file_details.setVisible(visible)
@@ -294,6 +304,7 @@ class MainWindow(QMainWindow):
         super().showEvent(event)
         self.schedule_refresh()
         self.refresh_progress()
+        if hasattr(self.bus, "shutdown_changed"): self.shutdown_watcher.refresh()
 
     def hideEvent(self, event):
         self.refresh_timer.stop()
@@ -348,25 +359,12 @@ class MainWindow(QMainWindow):
         return result
 
     def apply_theme(self):
-        muted = "#a8b2c2" if self.palette().color(QPalette.Window).lightness() < 128 else "#626d7c"
-        stylesheet = """QWidget{font-size:14px;} QMainWindow{background:palette(window);}
-            QFrame#sidebar{background:palette(base);border-right:1px solid palette(midlight);}
-            QLabel#brand{font-size:22px;font-weight:700;} QLabel#heading{font-size:27px;font-weight:650;}
-            QLabel#metric{font-size:24px;font-weight:600;} QLabel#muted{color:MUTED_COLOR;font-size:12px;}
-            QFrame#card{background:palette(base);border:1px solid palette(midlight);border-radius:12px;}
-            QPushButton{color:palette(button-text);padding:9px 14px;border:1px solid palette(midlight);border-radius:7px;background:palette(base);}
-            QPushButton:hover{background:palette(alternate-base);} QPushButton:disabled{color:palette(mid);}
-            QPushButton#primary,QPushButton#navigation{background:#446fd1;color:white;border:none;}
-            QLineEdit{color:palette(text);selection-background-color:palette(highlight);selection-color:palette(highlighted-text);padding:9px;border:1px solid palette(midlight);border-radius:6px;background:palette(base);}
-            QTreeWidget{border:1px solid palette(midlight);border-radius:9px;background:palette(base);color:palette(text);selection-background-color:palette(highlight);selection-color:palette(highlighted-text);outline:none;}
-            QTreeWidget::item{padding:10px 6px;} QHeaderView::section{padding:10px;background:palette(alternate-base);border:none;text-align:left;}
-            QLabel#message{padding:12px;border-radius:8px;background:palette(alternate-base);}
-        """
-        self.setStyleSheet(stylesheet.replace("MUTED_COLOR", muted))
+        apply_window_theme(self)
 
     def start(self):
         try:
-            self.profile = load_profile()
+            self.profile = load_profile(self.instance)
+            if hasattr(self.bus, "shutdown_changed"): self.shutdown_watcher.refresh()
         except Exception:
             self.show_error("无法读取同步配置，请检查配置文件权限。")
         self.bus.call("GetOverview", callback=self.initial_overview)
@@ -412,17 +410,29 @@ class MainWindow(QMainWindow):
             if ok and password:
                 self.unlock_if_matching(password)
             return
-        wizard = SetupWizard(self)
+        wizard = SetupWizard(self, instance=self.instance, new_name=self.new_name)
         wizard.configured.connect(self.configured)
         wizard.open()
         self.wizard = wizard
 
     def configured(self, profile, password):
+        if self.profile_transition is not None:
+            self.catalog_replacement = (self.profile_transition, profile["task_id"])
+        self.profile_transition = None
         self.profile = profile
         self.folder = ""
         self.auto_unlock_attempted = False
         self.pending_password = password
         self.start_service(enable=True)
+
+    def owns_catalog_transition(self, old_task, new_profile):
+        if new_profile is None:
+            return self.profile_transition == old_task and old_task is not None
+        if (self.catalog_replacement == (old_task, new_profile.get("task_id"))
+                and self.profile and self.profile.get("task_id") == new_profile.get("task_id")):
+            self.catalog_replacement = None
+            return True
+        return False
 
     def choose_other_folder(self):
         if not self.profile:
@@ -454,13 +464,16 @@ class MainWindow(QMainWindow):
                 self.show_error("后台服务未确认停止，原配置保持不变。")
                 return
             try:
-                backup = archive_profile(previous["task_id"])
+                backup = archive_profile(previous["task_id"], self.instance)
             except (OSError, ValueError) as error:
                 self.show_error(str(error))
                 self.start_service()
                 return
+            # This page owns the temporary absence between archive and setup.
+            self.profile_transition = previous["task_id"]
+            self.new_name = Path(previous["mount"]).name
             self.profile = None
-            wizard = SetupWizard(self)
+            wizard = SetupWizard(self, instance=self.instance, new_name=self.new_name)
             wizard.host.setText(previous["host"])
             wizard.tls.setText(previous["tls_name"])
             wizard.username.setText(previous["username"])
@@ -470,8 +483,10 @@ class MainWindow(QMainWindow):
 
             def cancelled():
                 try:
-                    restore_profile(backup)
+                    restore_profile(backup, self.instance)
                     self.profile = previous
+                    self.profile_transition = None
+                    self.catalog_replacement = None
                     self.start_service()
                 except (OSError, ValueError):
                     self.show_error(f"原配置保留在 {backup}；当前存在其他配置或无法恢复，请检查。")
@@ -529,6 +544,14 @@ class MainWindow(QMainWindow):
 
         self.bus.call("GetInitialization", callback=received)
 
+    def render_shutdown(self, value, mounted):
+        text = shutdown_text(value)
+        self.shutdown_label.setText(text)
+        self.shutdown_label.setVisible(bool(text))
+        if isinstance(value, dict) and value.get('phase') not in (None, 'idle'):
+            self.pause.setEnabled(False)
+            self.open_folder.setEnabled(mounted is True)
+
     def render_progress(self, progress):
         title, detail = progress_text(progress)
         self.progress_label.setText(f"{title}\n{detail}" if title else "")
@@ -576,6 +599,10 @@ class MainWindow(QMainWindow):
         self.open_folder.setEnabled(data["mounted"])
         self.pause.setEnabled(state not in ("locked", "stopping"))
         self.pause.setText("恢复同步" if state == "paused" else "暂停同步")
+        if self.shutdown_watcher.value is None:
+            self.render_shutdown(data.get("shutdown"), data.get("mounted"))
+        else:
+            self.render_shutdown(self.shutdown_watcher.value, self.shutdown_watcher.mounted)
         if data.get("error"):
             self.show_error(ERRORS.get(data["error"], "同步需要检查，已保存的文件会保留。"))
         elif data.get("background_error"):

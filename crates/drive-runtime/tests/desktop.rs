@@ -68,7 +68,10 @@ fn get(s: &Service, path: &str) -> serde_json::Value {
 fn initialization_remains_available_while_store_and_control_are_held() {
     let (_root, service) = fixture();
     service.bridge.initialization.begin();
-    service.bridge.initialization.phase(drive_runtime::initialization::Phase::Importing);
+    service
+        .bridge
+        .initialization
+        .phase(drive_runtime::initialization::Phase::Importing);
     let store = service.bridge.store.lock().unwrap();
     let control = service.control.lock().unwrap();
     let (send, receive) = std::sync::mpsc::channel();
@@ -78,7 +81,8 @@ fn initialization_remains_available_while_store_and_control_are_held() {
     drop(control);
     drop(store);
     thread.join().unwrap();
-    let data: serde_json::Value = serde_json::from_str(&result.expect("progress must not wait for Store/control")).unwrap();
+    let data: serde_json::Value =
+        serde_json::from_str(&result.expect("progress must not wait for Store/control")).unwrap();
     assert_eq!(data["schema"], 1);
     assert_eq!(data["task_id"], service.profile.task_id);
     assert_eq!(data["initialization"]["phase"], "importing");
@@ -89,14 +93,21 @@ fn directory_pages_are_complete_without_inode_allocation_or_downloads() {
     let d = tempfile::tempdir().unwrap();
     let mut store = Store::open(d.path()).unwrap();
     let mut nodes = vec![node("root", None, true)];
-    nodes.extend((0..513).rev().map(|i| node(&format!("item-{i:04}"), Some("root"), false)));
-    store.install_remote_snapshot(&nodes, "1", "server").unwrap();
+    nodes.extend(
+        (0..513)
+            .rev()
+            .map(|i| node(&format!("item-{i:04}"), Some("root"), false)),
+    );
+    store
+        .install_remote_snapshot(&nodes, "1", "server")
+        .unwrap();
     store.ensure_fs_root("root").unwrap();
     let before = store.local_revision();
     let service = Service::new(profile(), store, PathBuf::from("/nonexistent-worker")).unwrap();
     let mut paths = Vec::new();
     for (offset, expected_count) in [(0, 256), (256, 256), (512, 1), (513, 0), (u32::MAX, 0)] {
-        let page: serde_json::Value = serde_json::from_str(&desktop::directory(&service, "", offset).unwrap()).unwrap();
+        let page: serde_json::Value =
+            serde_json::from_str(&desktop::directory(&service, "", offset).unwrap()).unwrap();
         assert_eq!(page["total"], 513);
         assert_eq!(page["offset"], offset);
         let entries = page["entries"].as_array().unwrap();
@@ -107,10 +118,28 @@ fn directory_pages_are_complete_without_inode_allocation_or_downloads() {
             paths.push(entry["path"].as_str().unwrap().to_owned());
         }
     }
-    assert_eq!(paths, (0..513).map(|i| format!("item-{i:04}")).collect::<Vec<_>>());
-    assert_eq!(service.bridge.store.lock().unwrap().local_revision(), before);
-    assert!(service.bridge.store.lock().unwrap().downloads_needed().unwrap().is_empty());
-    assert_eq!(std::fs::read_dir(d.path().join("blobs")).unwrap().count(), 0);
+    assert_eq!(
+        paths,
+        (0..513).map(|i| format!("item-{i:04}")).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        service.bridge.store.lock().unwrap().local_revision(),
+        before
+    );
+    assert!(
+        service
+            .bridge
+            .store
+            .lock()
+            .unwrap()
+            .downloads_needed()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        std::fs::read_dir(d.path().join("blobs")).unwrap().count(),
+        0
+    );
 }
 
 #[test]
@@ -125,7 +154,9 @@ fn large_online_only_tree_has_bounded_local_status_cost() {
             nodes.push(node(&format!("file-{folder}-{file}"), Some(&id), false));
         }
     }
-    store.install_remote_snapshot(&nodes, "1", "server").unwrap();
+    store
+        .install_remote_snapshot(&nodes, "1", "server")
+        .unwrap();
     store.ensure_fs_root("root").unwrap();
     assert!(store.downloads_needed().unwrap().is_empty());
     let service = Service::new(profile(), store, PathBuf::from("/nonexistent-worker")).unwrap();
@@ -136,7 +167,10 @@ fn large_online_only_tree_has_bounded_local_status_cost() {
     // Deliberately generous: catches recursive per-node SQL regressions without
     // requiring benchmark-grade timing on ordinary CI machines.
     assert!(start.elapsed() < std::time::Duration::from_secs(15));
-    assert_eq!(std::fs::read_dir(d.path().join("blobs")).unwrap().count(), 0);
+    assert_eq!(
+        std::fs::read_dir(d.path().join("blobs")).unwrap().count(),
+        0
+    );
 }
 #[test]
 fn folder_completion_follows_every_child_and_stale_cache_remains_visible() {
@@ -490,4 +524,31 @@ fn failed_trust_publication_does_not_change_runtime_settings() {
         before
     );
     assert_eq!(s.control.lock().unwrap().state, ConnectionState::Locked);
+}
+
+#[test]
+fn shutdown_diagnostics_remain_available_while_store_and_control_are_held() {
+    let (_root, service) = fixture();
+    service
+        .shutdown_diagnostics
+        .phase(drive_runtime::shutdown::Phase::CheckpointingLocal);
+    let store = service.bridge.store.lock().unwrap();
+    let control = service.control.lock().unwrap();
+    let (send, receive) = std::sync::mpsc::channel();
+    let reader = service.clone();
+    let thread = std::thread::spawn(move || {
+        let _ = send.send(desktop::shutdown_status(&reader));
+    });
+    let result = receive.recv_timeout(std::time::Duration::from_secs(1));
+    drop(control);
+    drop(store);
+    // Release locks before asserting, so a future lock regression exits naturally.
+    if result.is_ok() {
+        thread.join().unwrap();
+    }
+    let data: serde_json::Value =
+        serde_json::from_str(&result.expect("shutdown status waited on Store/control")).unwrap();
+    assert_eq!(data["task_id"], service.profile.task_id);
+    assert_eq!(data["shutdown"]["phase"], "checkpointing_local");
+    assert_eq!(data["mounted"], false);
 }

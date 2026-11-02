@@ -47,6 +47,21 @@ impl ReadRequests {
         self.0.lock().unwrap().insert(id, Arc::downgrade(&pending));
         ReadReply(pending)
     }
+    pub fn cancel_all(&self) {
+        let pending: Vec<_> = self
+            .0
+            .lock()
+            .unwrap()
+            .values()
+            .filter_map(Weak::upgrade)
+            .collect();
+        for pending in pending {
+            pending.cancel.cancel();
+            if let Some(reply) = pending.reply.lock().unwrap().take() {
+                reply.error(libc::EINTR);
+            }
+        }
+    }
     pub fn interrupt(&self, id: u64) -> bool {
         let pending = self.0.lock().unwrap().get(&id).and_then(Weak::upgrade);
         if let Some(pending) = pending {

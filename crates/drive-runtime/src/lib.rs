@@ -28,3 +28,5 @@ pub mod trust;
 pub mod transfers;
 
 pub mod instance;
+
+pub mod shutdown;

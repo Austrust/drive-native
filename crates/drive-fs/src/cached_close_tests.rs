@@ -20,7 +20,11 @@ impl Hydrator for Saved {
         Err(libc::ENETDOWN)
     }
 }
-fn fixture() -> (tempfile::TempDir, Arc<drive_core::SharedStore>, CacheFilesystem) {
+pub(super) fn fixture() -> (
+    tempfile::TempDir,
+    Arc<drive_core::SharedStore>,
+    CacheFilesystem,
+) {
     let uid = unsafe { libc::getuid() };
     assert_ne!(uid, 0);
     let temp = tempfile::tempdir().unwrap();
@@ -62,7 +66,7 @@ fn fixture() -> (tempfile::TempDir, Arc<drive_core::SharedStore>, CacheFilesyste
         .with_writes_enabled();
     (temp, store, fs)
 }
-fn mount(fs: CacheFilesystem, path: &std::path::Path) -> fuser::BackgroundSession {
+pub(super) fn mount(fs: CacheFilesystem, path: &std::path::Path) -> fuser::BackgroundSession {
     std::fs::create_dir(path).unwrap();
     fuser::spawn_mount2(
         fs,
