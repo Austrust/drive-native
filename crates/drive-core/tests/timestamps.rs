@@ -265,3 +265,22 @@ fn legacy_uncertain_replacement_does_not_gain_a_time_intent_on_restart() {
     assert_eq!(queued.state, "uncertain");
     assert_eq!(queued.job.mtime, None);
 }
+#[test]
+fn cached_rename_never_substitutes_cache_creation_time_for_remote_mtime() {
+    let (_d, mut s) = fixture();
+    let ino = s.record("a").unwrap().ino;
+    assert_eq!(s.record("a").unwrap().mtime, 7);
+    s.rename_local("root", "a", "root", "renamed", false)
+        .unwrap();
+    assert_eq!(s.status("a").unwrap(), Status::PendingUpload);
+    assert_eq!(s.record("a").unwrap().mtime, 7);
+    assert_eq!(s.posix_record_by_inode(ino).unwrap().mtime, 7);
+    let job = s.next_rename().unwrap().unwrap().job;
+    s.mark_rename_started(&job.operation).unwrap();
+    let mut confirmed = node("a", false);
+    confirmed.name = "renamed".into();
+    confirmed.version = "2".into();
+    s.confirm_rename(&job.operation, &confirmed, true).unwrap();
+    assert_eq!(s.record("a").unwrap().mtime, 7);
+    assert_eq!(s.posix_record_by_inode(ino).unwrap().mtime, 7);
+}

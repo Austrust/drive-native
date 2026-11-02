@@ -35,7 +35,7 @@ pub enum UploadReconciliation {
     /// The object changed while verifying. Await events/reconcile again; no write.
     ChangedDuringVerification,
 }
-fn same_revision(a: &NodeInfo, b: &NodeInfo) -> bool {
+fn same_revision(a: &NodeInfo, b: &NodeInfo, explicit_mtime: bool) -> bool {
     a.file_id == b.file_id
         && a.sync_id == b.sync_id
         && a.max_id == b.max_id
@@ -43,7 +43,7 @@ fn same_revision(a: &NodeInfo, b: &NodeInfo) -> bool {
         && a.hash == b.hash
         && a.file_type == b.file_type
         && a.is_removed == b.is_removed
-        && a.mtime == b.mtime
+        && (!explicit_mtime || a.mtime == b.mtime)
 }
 impl UploadIntent {
     fn matches_metadata(&self, current: &NodeInfo) -> bool {
@@ -131,7 +131,10 @@ impl Client {
             return Ok(UploadReconciliation::Diverged(before));
         }
         let after = self.current_path(intent.view_id, &intent.path).await?;
-        if !after.as_ref().is_some_and(|n| same_revision(&before, n)) {
+        if !after
+            .as_ref()
+            .is_some_and(|n| same_revision(&before, n, intent.mtime.is_some()))
+        {
             return Ok(UploadReconciliation::ChangedDuringVerification);
         }
         Ok(UploadReconciliation::DesiredStatePresent(verified.remote))
@@ -160,19 +163,20 @@ mod tests {
         let n = node();
         let mut changed = n.clone();
         changed.file_id = "20".into();
-        assert!(!same_revision(&n, &changed));
+        assert!(!same_revision(&n, &changed, true));
         changed = n.clone();
         changed.max_id += 1;
-        assert!(!same_revision(&n, &changed));
+        assert!(!same_revision(&n, &changed, true));
         changed = n.clone();
         changed.sync_id += 1;
-        assert!(!same_revision(&n, &changed));
+        assert!(!same_revision(&n, &changed, true));
         changed = n.clone();
         changed.mtime += 1;
-        assert!(!same_revision(&n, &changed));
+        assert!(!same_revision(&n, &changed, true));
+        assert!(same_revision(&n, &changed, false)); // no invented legacy time intent
         changed = n.clone();
         changed.is_removed = true;
-        assert!(!same_revision(&n, &changed));
+        assert!(!same_revision(&n, &changed, true));
     }
     #[test]
     fn malformed_intents_are_rejected_before_network() {

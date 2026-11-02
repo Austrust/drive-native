@@ -267,6 +267,13 @@ impl Store {
         blob: String,
         retire_creation: bool,
     ) -> Result<KeptBoth> {
+        let mtime = u32::try_from(
+            copy.metadata
+                .as_ref()
+                .ok_or_else(|| Error::State("conflict copy metadata missing".into()))?
+                .mtime,
+        )
+        .map_err(|_| Error::Io(std::io::Error::from_raw_os_error(libc::EOVERFLOW)))?;
         let op = uuid::Uuid::new_v4().to_string();
         let tx = self.db.transaction()?;
         tx.execute("INSERT INTO nodes(id,parent,name,remote_version,directory,local_version,blob,dirty_blob,base_version,dirty_generation) VALUES(?1,?2,?3,?4,0,?4,?5,?5,?4,1)",params![copy.id,copy.parent,copy.name,CREATE_VERSION,blob])?;
@@ -278,7 +285,7 @@ impl Store {
         tx.execute("INSERT INTO operations(id,node,kind,base,blob,generation) VALUES(?1,?2,'upload',?3,?4,1)",params![op,copy.id,CREATE_VERSION,blob])?;
         tx.execute(
             "INSERT INTO upload_times(operation,mtime) VALUES(?1,?2)",
-            params![op, copy.metadata.as_ref().unwrap().mtime],
+            params![op, mtime],
         )?;
         tx.execute("UPDATE operations SET state='superseded' WHERE node=?1 AND state IN ('pending','conflict')",[id])?;
         tx.execute("DELETE FROM drafts WHERE node=?1", [id])?;

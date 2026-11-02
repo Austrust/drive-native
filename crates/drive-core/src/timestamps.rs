@@ -25,15 +25,26 @@ pub fn local_time(time: SystemTime) -> Result<(u64, u32)> {
 }
 impl Store {
     pub fn local_atime(&self, id: &str, fallback: u64) -> Result<(u64, u32)> {
-        Ok(self
+        let row: Option<(i64, i64)> = self
             .db
             .query_row(
                 "SELECT seconds,nanoseconds FROM local_atimes WHERE node=?1",
                 [id],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
-            .optional()?
-            .unwrap_or((fallback, 0)))
+            .optional()?;
+        match row {
+            None => Ok((fallback, 0)),
+            Some((seconds, nanoseconds)) => {
+                let seconds = u64::try_from(seconds)
+                    .map_err(|_| Error::State("invalid local access time".into()))?;
+                let nanoseconds = u32::try_from(nanoseconds)
+                    .ok()
+                    .filter(|n| *n < 1_000_000_000)
+                    .ok_or_else(|| Error::State("invalid local access time".into()))?;
+                Ok((seconds, nanoseconds))
+            }
+        }
     }
     pub fn set_local_atime(&mut self, id: &str, seconds: u64, nanoseconds: u32) -> Result<()> {
         self.node_for_handle(id)?;
