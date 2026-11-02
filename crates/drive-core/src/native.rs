@@ -609,6 +609,7 @@ impl NativeReadSession {
         path: &str,
         source: &Path,
         sha256: &str,
+        mtime: Option<u32>,
     ) -> Result<sproto::actions::mutations::UploadIntent> {
         use sha2::Digest;
         let creating = node.version == crate::creations::CREATE_VERSION;
@@ -652,6 +653,8 @@ impl NativeReadSession {
                     "upload descriptor is not a regular file".into(),
                 ));
             }
+            // The durable job owns the time intent. Cached remote content may
+            // have a local storage timestamp unrelated to its remote mtime.
             let mut h = sha2::Sha256::new();
             let mut m = md4::Md4::new();
             let mut size = 0;
@@ -684,9 +687,15 @@ impl NativeReadSession {
             size,
             md4,
             sha256,
+            mtime,
         })
     }
-    fn confirmed_node(&self, node: &Node, content: ContentVersion) -> Result<NativeWriteOutcome> {
+    fn confirmed_node(
+        &self,
+        node: &Node,
+        content: ContentVersion,
+        mtime: Option<u32>,
+    ) -> Result<NativeWriteOutcome> {
         let creating = node.version == crate::creations::CREATE_VERSION;
         let mut token: VersionToken = if creating {
             VersionToken {
@@ -715,6 +724,9 @@ impl NativeReadSession {
         node.version = serde_json::to_string(&token)?;
         if let Some(m) = &mut node.metadata {
             m.size = content.size;
+            if let Some(seconds) = mtime {
+                m.mtime = u64::from(seconds);
+            }
         }
         if creating {
             Ok(NativeWriteOutcome::Created {
@@ -733,7 +745,7 @@ impl NativeReadSession {
     ) -> Result<NativeWriteOutcome> {
         use sproto::actions::mutations::UploadReconciliation as R;
         match self.client.reconcile_upload(intent, staging).await? {
-            R::DesiredStatePresent(content) => self.confirmed_node(node, content),
+            R::DesiredStatePresent(content) => self.confirmed_node(node, content, intent.mtime),
             R::Diverged(current)
                 if current.sync_id != intent.base.sync_id
                     || current.max_id != intent.base.max_id
@@ -752,12 +764,24 @@ impl NativeReadSession {
         sha256: &str,
         staging: &Path,
     ) -> Result<NativeWriteOutcome> {
+        self.reconcile_existing_with_mtime(node, path, source, sha256, staging, None)
+            .await
+    }
+    pub async fn reconcile_existing_with_mtime(
+        &self,
+        node: &Node,
+        path: &str,
+        source: &Path,
+        sha256: &str,
+        staging: &Path,
+        mtime: Option<u32>,
+    ) -> Result<NativeWriteOutcome> {
         if node.version == crate::creations::CREATE_VERSION {
             // Legacy callers lack durable author provenance. Matching bytes do
             // not authorize binding another client's file identity.
             return Ok(NativeWriteOutcome::Uncertain);
         }
-        let intent = self.write_intent(node, path, source, sha256).await?;
+        let intent = self.write_intent(node, path, source, sha256, mtime).await?;
         self.reconcile_intent(node, &intent, staging).await
     }
 }

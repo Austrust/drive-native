@@ -21,6 +21,8 @@ pub struct UploadIntent {
     pub size: u64,
     pub md4: String,
     pub sha256: String,
+    /// None for legacy requests that did not carry an mtime intent.
+    pub mtime: Option<u32>,
 }
 #[derive(Debug)]
 pub enum UploadReconciliation {
@@ -41,8 +43,21 @@ fn same_revision(a: &NodeInfo, b: &NodeInfo) -> bool {
         && a.hash == b.hash
         && a.file_type == b.file_type
         && a.is_removed == b.is_removed
+        && a.mtime == b.mtime
 }
 impl UploadIntent {
+    fn matches_metadata(&self, current: &NodeInfo) -> bool {
+        current.file_type == FileType::File
+            && current.file_size == self.size
+            && current.hash == self.md4
+            && self
+                .mtime
+                .is_none_or(|time| current.mtime == u64::from(time))
+            && self
+                .original_file_id
+                .as_ref()
+                .is_none_or(|id| id == &current.file_id)
+    }
     fn validate(&self) -> Result<()> {
         validate_path(&self.path)?;
         if self.path == "/"
@@ -96,14 +111,7 @@ impl Client {
         let Some(before) = self.current_path(intent.view_id, &intent.path).await? else {
             return Ok(UploadReconciliation::Missing);
         };
-        if before.file_type != FileType::File
-            || before.file_size != intent.size
-            || before.hash != intent.md4
-            || intent
-                .original_file_id
-                .as_ref()
-                .is_some_and(|id| id != &before.file_id)
-        {
+        if !intent.matches_metadata(&before) {
             return Ok(UploadReconciliation::Diverged(before));
         }
         let expected = ContentVersion {
@@ -160,6 +168,9 @@ mod tests {
         changed.sync_id += 1;
         assert!(!same_revision(&n, &changed));
         changed = n.clone();
+        changed.mtime += 1;
+        assert!(!same_revision(&n, &changed));
+        changed = n.clone();
         changed.is_removed = true;
         assert!(!same_revision(&n, &changed));
     }
@@ -176,6 +187,7 @@ mod tests {
             size: 0,
             md4: "a".repeat(32),
             sha256: "b".repeat(64),
+            mtime: None,
         };
         i.validate().unwrap();
         i.path = "/lab/../a".into();
@@ -183,5 +195,29 @@ mod tests {
         i.path = "/lab/a".into();
         i.original_file_id = Some("1".into());
         assert!(i.validate().is_err());
+    }
+    #[test]
+    fn same_content_cannot_confirm_timestamp_intent_but_legacy_none_is_preserved() {
+        let mut current = node();
+        let mut intent = UploadIntent {
+            view_id: 1,
+            path: "/lab/a".into(),
+            original_file_id: Some(current.file_id.clone()),
+            base: NativeVersion {
+                sync_id: 7,
+                max_id: 7,
+            },
+            size: current.file_size,
+            md4: current.hash.clone(),
+            sha256: "a".repeat(64),
+            mtime: Some(123),
+        };
+        assert!(!intent.matches_metadata(&current));
+        current.mtime = 123;
+        assert!(intent.matches_metadata(&current));
+        current.mtime = 124;
+        assert!(!intent.matches_metadata(&current));
+        intent.mtime = None;
+        assert!(intent.matches_metadata(&current));
     }
 }

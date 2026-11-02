@@ -1066,15 +1066,18 @@ impl Bridge {
             let signaled = *wake;
             *wake = false;
             drop(wake);
-            // Only durable retry deadlines are checked here. No NAS enumeration.
-            let retry_due = self
-                .store
-                .lock()
-                .unwrap()
-                .next_download_retry()
-                .ok()
-                .flatten()
-                .is_some_and(|at| at <= unix_seconds());
+            // Download deadlines and bounded namespace observation deadlines
+            // only. Namespace intent remains durable; its backoff is local to
+            // this process. This check does not enumerate the NAS.
+            let retry_due = {
+                let store = self.store.lock().unwrap();
+                store
+                    .next_download_retry()
+                    .ok()
+                    .flatten()
+                    .is_some_and(|at| at <= unix_seconds())
+                    || store.namespace_recovery_due().unwrap_or(false)
+            };
             if !signaled && !retry_due {
                 continue;
             }
@@ -1202,7 +1205,7 @@ impl Bridge {
                     _ => continue,
                 }
             }
-            let (node, path, origin) = {
+            let (node, path, origin, mtime) = {
                 let mut s = self.store.lock().unwrap();
                 let fresh = s.upload_job(&op).map_err(io::Error::other)?;
                 if !reconcile && s.mark_upload_started(&op).is_err() {
@@ -1212,6 +1215,7 @@ impl Bridge {
                     fresh.node,
                     format!("{}/{}", scope.trim_end_matches('/'), fresh.relative_path),
                     s.upload_origin(&op).map_err(io::Error::other)?,
+                    fresh.mtime,
                 )
             };
             let outcome = rpc.call_with_descriptor(
@@ -1221,6 +1225,7 @@ impl Bridge {
                     path,
                     sha256,
                     reconcile,
+                    mtime,
                 },
                 Duration::from_secs(1800),
                 Some(job.file.into()),
@@ -1229,11 +1234,23 @@ impl Bridge {
             match outcome {
                 Ok(reply) => match reply.body {
                     Response::Created { node, remote } => {
+                        if let Err(e) = s.validate_upload_mtime(&op, &node) {
+                            if !reconcile {
+                                s.mark_upload_uncertain(&op).map_err(io::Error::other)?;
+                            }
+                            return Err(io::Error::other(e));
+                        }
                         s.confirm_upload_identity(&op, &node.version, Some(&remote))
                             .map_err(io::Error::other)?;
                         confirmed += 1;
                     }
                     Response::Committed { node } => {
+                        if let Err(e) = s.validate_upload_mtime(&op, &node) {
+                            if !reconcile {
+                                s.mark_upload_uncertain(&op).map_err(io::Error::other)?;
+                            }
+                            return Err(io::Error::other(e));
+                        }
                         s.confirm_upload(&op, &node.version)
                             .map_err(io::Error::other)?;
                         confirmed += 1;

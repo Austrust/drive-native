@@ -89,14 +89,14 @@ impl Store {
         Ok(node)
     }
     pub fn next_directory(&self) -> Result<Option<QueuedDirectory>> {
-        if self.next_namespace_kind()?.as_deref() != Some("mkdir") {
-            return Ok(None);
-        }
-        let (body,state):(String,String)=self.db.query_row("SELECT body,state FROM namespace_ops WHERE id NOT IN (SELECT operation FROM access_blocked_operations) AND state NOT IN ('committed','superseded') ORDER BY seq LIMIT 1",[],|r|Ok((r.get(0)?,r.get(1)?)))?;
-        Ok(Some(QueuedDirectory {
-            job: serde_json::from_str(&body)?,
-            state,
-        }))
+        self.namespace_body_for_kind("mkdir")?
+            .map(|(body, state)| {
+                Ok(QueuedDirectory {
+                    job: serde_json::from_str(&body)?,
+                    state,
+                })
+            })
+            .transpose()
     }
     pub fn mark_directory_started(&mut self, op: &str) -> Result<DirectoryJob> {
         let mut q = self

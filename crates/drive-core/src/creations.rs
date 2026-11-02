@@ -67,6 +67,12 @@ impl Store {
             return Err(Error::Io(std::io::Error::from_raw_os_error(libc::EEXIST)));
         }
         let blob = self.write_blob(&[])?;
+        let snapshot = std::fs::File::open(self.root.join("blobs").join(&blob))?;
+        snapshot.set_modified(
+            std::time::UNIX_EPOCH
+                + std::time::Duration::from_secs(n.metadata.as_ref().unwrap().mtime),
+        )?;
+        snapshot.sync_all()?;
         let op = uuid::Uuid::new_v4().to_string();
         let tx = self.db.transaction()?;
         tx.execute("INSERT INTO nodes(id,parent,name,remote_version,directory,local_version,blob,dirty_blob,base_version,dirty_generation) VALUES(?1,?2,?3,?4,0,?4,?5,?5,?4,1)",params![id,parent,name,CREATE_VERSION,blob])?;
@@ -76,6 +82,10 @@ impl Store {
             [&id],
         )?;
         tx.execute("INSERT INTO operations(id,node,kind,base,blob,generation) VALUES(?1,?2,'upload',?3,?4,1)",params![op,id,CREATE_VERSION,blob])?;
+        tx.execute(
+            "INSERT INTO upload_times(operation,mtime) VALUES(?1,?2)",
+            params![op, n.metadata.as_ref().unwrap().mtime],
+        )?;
         tx.commit()?;
         Ok(n)
     }

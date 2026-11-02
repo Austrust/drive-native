@@ -7,6 +7,10 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReplaceJob {
+    /// Explicit intent only for newly queued replacements; old uncertain jobs
+    /// retain the historical content-only confirmation contract.
+    #[serde(default)]
+    pub mtime: Option<u32>,
     /// Present only when the destination had no remote identity at submission.
     #[serde(default)]
     pub creation_origin: Option<crate::upload_origin::UploadOrigin>,
@@ -120,6 +124,7 @@ impl Store {
         let source_remote = remote_id(&self.db, &source.id)?;
         let target_remote = remote_id(&self.db, &target.id)?;
         let job = ReplaceJob {
+            mtime: Some(u32::try_from(source_record.mtime).map_err(|_| os(libc::EOVERFLOW))?),
             creation_origin: None,
             operation: uuid::Uuid::new_v4().to_string(),
             source: source.clone(),
@@ -162,14 +167,14 @@ impl Store {
         Ok(())
     }
     pub fn next_replace(&self) -> Result<Option<QueuedReplace>> {
-        if self.next_namespace_kind()?.as_deref() != Some("replace") {
-            return Ok(None);
-        }
-        let (body,state):(String,String)=self.db.query_row("SELECT body,state FROM namespace_ops WHERE id NOT IN (SELECT operation FROM access_blocked_operations) AND state NOT IN ('committed','superseded') ORDER BY seq LIMIT 1",[],|r|Ok((r.get(0)?,r.get(1)?)))?;
-        Ok(Some(QueuedReplace {
-            job: serde_json::from_str(&body)?,
-            state,
-        }))
+        self.namespace_body_for_kind("replace")?
+            .map(|(body, state)| {
+                Ok(QueuedReplace {
+                    job: serde_json::from_str(&body)?,
+                    state,
+                })
+            })
+            .transpose()
     }
     pub fn replacement_file(&self, job: &ReplaceJob) -> Result<std::fs::File> {
         if uuid::Uuid::parse_str(&job.blob).is_err() {
@@ -268,6 +273,12 @@ impl Store {
         )?;
         let mut job: ReplaceJob = serde_json::from_str(&body)?;
         if !matches!(state.as_str(), "inflight" | "uncertain")
+            || job.mtime.is_some_and(|v| {
+                confirmed
+                    .metadata
+                    .as_ref()
+                    .is_none_or(|m| m.mtime != u64::from(v))
+            })
             || confirmed.id != job.target.id
             || confirmed.directory
             || confirmed.parent != job.target.parent

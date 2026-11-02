@@ -100,6 +100,8 @@ mod peer {
         Create,
         Update,
         Events,
+        Stat,
+        StatCopy,
         Quit,
     }
     fn read<T: serde::de::DeserializeOwned>(reader: &mut impl BufRead) -> Result<T> {
@@ -292,6 +294,34 @@ mod peer {
             root(&client, home.view_id, LAB, &lab.file_id, lab.node_id).await?;
             trace.stage("command_scope_verify")?;
             root(&client, home.view_id, &path, &made.file_id, made.node_id).await?;
+            if matches!(command, Command::Stat | Command::StatCopy) {
+                trace.stage("stat_list")?;
+                let name = if matches!(command, Command::Stat) {
+                    "A.bin"
+                } else {
+                    "Copy.bin"
+                };
+                let entries = listing(&client, &watch).await?;
+                let mut selected = entries.iter().filter(|n| live(n, name, FileType::File));
+                let node = selected.next().ok_or("stat fixture absent")?;
+                if selected.next().is_some() {
+                    return Err("ambiguous stat fixture".into());
+                }
+                if matches!(command, Command::Stat)
+                    && !previous.as_ref().is_some_and(|p| p.file_id == node.file_id)
+                {
+                    return Err("stat fixture identity changed".into());
+                }
+                trace.stage("stat_reply")?;
+                // Private controller response. No durable write or change of
+                // the peer's mutation baseline: a later Update still requires
+                // the exact version that peer originally produced.
+                send(
+                    json!({"observed":true,"node_id":node.node_id,"file_id":node.file_id,
+                    "sync_id":node.sync_id,"max_id":node.max_id,"size":node.file_size,"mtime":node.mtime,"hash":node.hash}),
+                )?;
+                continue;
+            }
             if matches!(command, Command::Events) {
                 trace.stage("pull_events")?;
                 let batch = client.pull_events(&watch).await?;
@@ -421,6 +451,15 @@ mod peer {
         fn command_set_has_no_delete_or_path() {
             assert!(serde_json::from_str::<Command>("\"remove\"").is_err());
             assert!(serde_json::from_str::<Command>("{\"update\":\"/other\"}").is_err());
+            assert!(matches!(
+                serde_json::from_str::<Command>("\"stat\"").unwrap(),
+                Command::Stat
+            ));
+            assert!(matches!(
+                serde_json::from_str::<Command>("\"stat_copy\"").unwrap(),
+                Command::StatCopy
+            ));
+            assert!(serde_json::from_str::<Command>("{\"stat\":\"/other\"}").is_err());
         }
         #[test]
         fn bounded_pipe_frames() {

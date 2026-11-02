@@ -10,6 +10,9 @@ use std::sync::{
 
 const MAX_BYTES: usize = 64 * 1024 * 1024;
 const MAX_HANDLES: usize = 4096;
+const HOT_VIEWS: usize = 256;
+const HOT_BYTES: usize = 8 * 1024 * 1024;
+const HOT_VIEW_BYTES: usize = 128 * 1024;
 
 enum ViewOrigin {
     Authority,
@@ -28,7 +31,9 @@ impl View {
 }
 impl Drop for View {
     fn drop(&mut self) {
-        self.reclaimer.release(self.snapshot.take().unwrap());
+        if let Some(snapshot) = self.snapshot.take() {
+            self.reclaimer.release(snapshot);
+        }
     }
 }
 struct Reclaimer {
@@ -86,11 +91,18 @@ struct Table {
     next: u64,
     handles: HashMap<u64, Arc<View>>,
 }
+#[derive(Default)]
+struct Hot {
+    views: std::collections::VecDeque<(u64, DirectoryViewStamp, Arc<View>)>,
+    bytes: usize,
+    revision: Option<DirectoryViewStamp>,
+}
 pub(super) struct Views {
     table: Mutex<Table>,
     // Semantic commits conservatively invalidate all directories. Candidate
     // receipts and pure inode allocation leave reusable views alone.
     cached: Mutex<HashMap<u64, (DirectoryViewStamp, Weak<View>)>>,
+    hot: Mutex<Hot>,
     builder: Mutex<()>,
     charged: Arc<AtomicUsize>,
     allocated: Arc<AtomicUsize>,
@@ -107,6 +119,7 @@ impl Default for Views {
                 handles: HashMap::new(),
             }),
             cached: Mutex::new(HashMap::new()),
+            hot: Mutex::new(Hot::default()),
             builder: Mutex::new(()),
             charged,
             allocated,
@@ -115,8 +128,67 @@ impl Default for Views {
     }
 }
 impl Views {
+    // Closed small views can be reclaimed synchronously on a metadata worker.
+    // Held/in-flight views keep their original immutable cookies and charge.
+    fn evict(view: Arc<View>) {
+        if let Ok(mut view) = Arc::try_unwrap(view) {
+            let snapshot = view.snapshot.take().unwrap();
+            reclaim(snapshot, &view.reclaimer.charged, &view.reclaimer.allocated);
+        }
+    }
+    fn trim_hot(&self, revision: Option<&DirectoryViewStamp>) {
+        let removed = {
+            let mut hot = self.hot.lock().unwrap();
+            if revision.is_some() && hot.revision.as_ref() == revision {
+                return;
+            }
+            hot.revision = revision.cloned();
+            let mut removed = Vec::new();
+            let mut i = 0;
+            while i < hot.views.len() {
+                if revision.is_none_or(|r| r != &hot.views[i].1) {
+                    let (_, _, view) = hot.views.remove(i).unwrap();
+                    hot.bytes -= view.snapshot().bytes;
+                    removed.push(view);
+                } else {
+                    i += 1;
+                }
+            }
+            removed
+        };
+        for view in removed {
+            Self::evict(view);
+        }
+    }
+    fn retain_hot(&self, ino: u64, revision: DirectoryViewStamp, view: Arc<View>) {
+        if view.snapshot().bytes > HOT_VIEW_BYTES {
+            return;
+        }
+        let removed = {
+            let mut hot = self.hot.lock().unwrap();
+            let mut removed = Vec::new();
+            if let Some(index) = hot.views.iter().position(|(id, _, _)| *id == ino) {
+                let (_, _, old) = hot.views.remove(index).unwrap();
+                hot.bytes -= old.snapshot().bytes;
+                removed.push(old);
+            }
+            hot.bytes += view.snapshot().bytes;
+            hot.views.push_back((ino, revision, view));
+            while hot.views.len() > HOT_VIEWS || hot.bytes > HOT_BYTES {
+                let (_, _, old) = hot.views.pop_front().unwrap();
+                hot.bytes -= old.snapshot().bytes;
+                removed.push(old);
+            }
+            removed
+        };
+        for view in removed {
+            Self::evict(view);
+        }
+    }
     fn open(&self, store: &drive_core::SharedStore, ino: u64) -> Result<u64, i32> {
+        let wait = diagnostics::span(diagnostics::Stage::DirectoryBuilderWait);
         let _building = self.builder.lock().unwrap();
+        drop(wait);
         {
             let table = self.table.lock().unwrap();
             if table.handles.len() >= MAX_HANDLES || table.next == u64::MAX {
@@ -127,7 +199,9 @@ impl Views {
             // The stamp and cache selection must share one Store guard. Reading
             // an atomic stamp after dropping Store could race an ACL/namespace
             // commit whose publication has not reached that atomic yet.
+            let wait = diagnostics::span(diagnostics::Stage::DirectoryStoreWait);
             let store = store.lock().unwrap();
+            drop(wait);
             // One indexed preview lookup; do not compute file status on each
             // warm opendir/cache hit. Promotion removes the preview reservation.
             let authority = match store.preview_record_by_inode(ino) {
@@ -136,6 +210,7 @@ impl Views {
                 Err(e) => return Err(errno(&e)),
             };
             let revision = store.directory_view_stamp().map_err(|e| errno(&e))?;
+            self.trim_hot(Some(&revision));
             let cached = self
                 .cached
                 .lock()
@@ -147,8 +222,20 @@ impl Views {
                         .flatten()
                 });
             match cached {
-                Some(view) => view,
+                Some(view) => {
+                    diagnostics::count(diagnostics::Stage::DirectoryCacheHit);
+                    self.retain_hot(ino, revision, view.clone());
+                    view
+                }
                 None => {
+                    diagnostics::count(diagnostics::Stage::DirectoryCacheMiss);
+                    // Cached closed views cannot deny capacity to a new wide
+                    // directory. Only bounded hot objects are synchronously freed.
+                    if self.allocated.load(Ordering::Acquire) >= MAX_HANDLES
+                        || self.charged.load(Ordering::Acquire) > MAX_BYTES - HOT_BYTES
+                    {
+                        self.trim_hot(None);
+                    }
                     // The builder lock reserves the remaining slot/bytes across
                     // projection: no other builder can consume them. Failed builds
                     // roll back without publishing either a view or its charge.
@@ -156,19 +243,36 @@ impl Views {
                         return Err(libc::ENOMEM);
                     }
                     let remaining = MAX_BYTES.saturating_sub(self.charged.load(Ordering::Acquire));
-                    let (snapshot, origin) = if authority {
-                        (
-                            store
-                                .directory_snapshot(ino, remaining)
-                                .map_err(|e| errno(&e))?,
-                            ViewOrigin::Authority,
-                        )
-                    } else {
-                        let v = store
-                            .preview_directory_snapshot(ino, remaining)
-                            .map_err(|e| errno(&e))?;
-                        (v.snapshot, ViewOrigin::Preview(v.stamp))
+                    let projection = diagnostics::span(diagnostics::Stage::DirectoryProjection);
+                    let project = |budget| -> Result<_, i32> {
+                        if authority {
+                            let snapshot = if diagnostics::enabled() {
+                                let (snapshot, timings) = store
+                                    .directory_snapshot_measured(ino, budget)
+                                    .map_err(|e| errno(&e))?;
+                                diagnostics::directory(&timings);
+                                snapshot
+                            } else {
+                                store
+                                    .directory_snapshot(ino, budget)
+                                    .map_err(|e| errno(&e))?
+                            };
+                            Ok((snapshot, ViewOrigin::Authority))
+                        } else {
+                            let v = store
+                                .preview_directory_snapshot(ino, budget)
+                                .map_err(|e| errno(&e))?;
+                            Ok((v.snapshot, ViewOrigin::Preview(v.stamp)))
+                        }
                     };
+                    let (snapshot, origin) = match project(remaining) {
+                        Err(libc::ENOMEM) if !self.hot.lock().unwrap().views.is_empty() => {
+                            self.trim_hot(None);
+                            project(MAX_BYTES.saturating_sub(self.charged.load(Ordering::Acquire)))?
+                        }
+                        result => result?,
+                    };
+                    drop(projection);
                     let revision = store.directory_view_stamp().map_err(|e| errno(&e))?;
                     self.charged.fetch_add(snapshot.bytes, Ordering::AcqRel);
                     self.allocated.fetch_add(1, Ordering::AcqRel);
@@ -181,7 +285,11 @@ impl Views {
                     let mut cache = self.cached.lock().unwrap();
                     cache.retain(|_, (_, view)| view.strong_count() != 0);
                     if authority {
-                        cache.insert(ino, (revision, Arc::downgrade(&view)));
+                        cache.insert(ino, (revision.clone(), Arc::downgrade(&view)));
+                    }
+                    drop(cache);
+                    if authority {
+                        self.retain_hot(ino, revision, view.clone());
                     }
                     view
                 }
@@ -223,11 +331,14 @@ pub(super) fn open(fs: &mut CacheFilesystem, ino: u64, flags: i32, reply: ReplyO
     }
     let views = fs.directories.clone();
     let store = fs.store.clone();
-    fs.queue
-        .submit(Box::new(move || match views.open(&store, ino) {
+    let queued = diagnostics::span(diagnostics::Stage::OpendirQueue);
+    fs.queue.submit(Box::new(move || {
+        drop(queued);
+        match views.open(&store, ino) {
             Ok(fh) => reply.opened(fh, 0),
             Err(e) => reply.error(e),
-        }));
+        }
+    }));
 }
 pub(super) fn read(
     fs: &mut CacheFilesystem,
@@ -242,8 +353,10 @@ pub(super) fn read(
     };
     let views = fs.directories.clone();
     let store = fs.store.clone();
-    fs.read_queue
-        .submit(Box::new(move || match views.get(ino, fh) {
+    let queued = diagnostics::span(diagnostics::Stage::ReaddirQueue);
+    fs.read_queue.submit(Box::new(move || {
+        drop(queued);
+        match views.get(ino, fh) {
             Ok(view) => {
                 match &view.origin {
                     ViewOrigin::Authority => send_page(&view, offset, reply),
@@ -259,9 +372,11 @@ pub(super) fn read(
                 }
             }
             Err(e) => reply.error(e),
-        }));
+        }
+    }));
 }
 fn send_page(view: &View, offset: usize, mut reply: ReplyDirectory) {
+    let _span = diagnostics::span(diagnostics::Stage::ReaddirReply);
     if offset > view.snapshot().entries.len() {
         reply.error(libc::EINVAL);
         return;
@@ -279,6 +394,7 @@ fn send_page(view: &View, offset: usize, mut reply: ReplyDirectory) {
     reply.ok();
 }
 pub(super) fn release(fs: &mut CacheFilesystem, ino: u64, fh: u64, reply: ReplyEmpty) {
+    let _span = diagnostics::span(diagnostics::Stage::Releasedir);
     // Kernel close is not retried if a bounded work queue rejects its job.
     // Remove the handle directly so overload cannot permanently leak a view.
     // The final reference transfers the snapshot to its capacity-reserved
@@ -337,6 +453,8 @@ mod tests {
         views.release(1, next).unwrap();
         assert!(views.charged.load(Ordering::Acquire) > 0); // in-flight readers still own views
         drop((a, b, c));
+        // Closed authority views now have a separately bounded hot owner.
+        views.trim_hot(None);
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         while views.allocated.load(Ordering::Acquire) != 0 && std::time::Instant::now() < deadline {
             std::thread::yield_now();

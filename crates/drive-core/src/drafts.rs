@@ -106,7 +106,12 @@ impl Store {
         let Some(token) = token else { return Ok(None) };
         let mut file = File::open(self.draft_path(&token)?)?;
         file.sync_all()?;
-        Ok(Some(self.write_blob_reader(&mut file, None)?))
+        let modified = file.metadata()?.modified()?;
+        let blob = self.write_blob_reader(&mut file, None)?;
+        let snapshot = File::open(self.root.join("blobs").join(&blob))?;
+        snapshot.set_modified(modified)?;
+        snapshot.sync_all()?;
+        Ok(Some(blob))
     }
     pub fn open_dirty_draft(&self, id: &str) -> Result<Option<DraftHandle>> {
         self.draft_handle(id, true)
@@ -193,6 +198,16 @@ impl Store {
         self.editing_file(draft)?.set_len(size)?;
         Ok(())
     }
+    /// Existing handles retain the same working inode; the generation prevents
+    /// an older upload acknowledgement from clearing this timestamp edit.
+    pub fn draft_set_mtime(&mut self, draft: &DraftHandle, seconds: u32) -> Result<()> {
+        let file = self.editing_file(draft)?;
+        file.set_modified(
+            std::time::UNIX_EPOCH + std::time::Duration::from_secs(u64::from(seconds)),
+        )?;
+        file.sync_all()?;
+        Ok(())
+    }
     /// Local durability barrier. A failed snapshot leaves the durable draft intact
     /// and prevents an older snapshot being uploaded as the latest saved content.
     pub fn checkpoint_draft(&mut self, draft: &DraftHandle) -> Result<Option<String>> {
@@ -214,7 +229,7 @@ impl Store {
             return Ok(None);
         }
         f.seek(SeekFrom::Start(0))?;
-        let op = self.save_local_reader_from_version(&draft.node, &base, &mut f)?;
+        let op = self.save_draft_file_from_version(&draft.node, &base, &mut f)?;
         self.db.execute(
             "UPDATE drafts SET checkpoint=?3 WHERE node=?1 AND token=?2",
             params![draft.node, draft.token, generation],

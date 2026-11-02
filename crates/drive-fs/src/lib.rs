@@ -4,6 +4,7 @@
 //! No callback waits for the NAS, and unsupported writes are never acknowledged.
 #[cfg(test)]
 mod cached_close_tests;
+pub mod diagnostics;
 mod directory;
 #[cfg(test)]
 mod isolation_tests;
@@ -214,7 +215,9 @@ fn attr(record: &FileRecord, uid: u32, gid: u32) -> FileAttr {
         } else {
             record.size.div_ceil(512)
         },
-        atime: time,
+        atime: UNIX_EPOCH
+            .checked_add(Duration::new(record.atime, record.atime_nsec))
+            .unwrap_or(UNIX_EPOCH),
         mtime: time,
         ctime: time,
         crtime: UNIX_EPOCH,
@@ -235,6 +238,16 @@ fn attr(record: &FileRecord, uid: u32, gid: u32) -> FileAttr {
     }
 }
 impl Filesystem for CacheFilesystem {
+    fn init(
+        &mut self,
+        _req: &Request<'_>,
+        config: &mut fuser::KernelConfig,
+    ) -> Result<(), libc::c_int> {
+        config
+            .set_time_granularity(Duration::from_secs(1))
+            .map_err(|_| libc::EINVAL)?;
+        Ok(())
+    }
     fn destroy(&mut self) {
         // No new callbacks are dispatched after destroy. Cancel reads only;
         // accepted writes, namespace edits and fsync jobs must finish normally.
@@ -367,9 +380,15 @@ impl Filesystem for CacheFilesystem {
         };
         let store = self.store.clone();
         let (uid, gid) = (self.uid, self.gid);
+        let queued = diagnostics::span(diagnostics::Stage::LookupQueue);
         self.queue.submit(Box::new(move || {
+            drop(queued);
+            let wait = diagnostics::span(diagnostics::Stage::LookupStoreWait);
             let store = store.lock().unwrap();
+            drop(wait);
+            let projection = diagnostics::span(diagnostics::Stage::LookupProjection);
             let result = preview::lookup(&store, parent, &name);
+            drop(projection);
             match result {
                 Ok(record) => reply.entry(&TTL, &record.attr(uid, gid), 0),
                 Err(e) => reply.error(errno(&e)),
@@ -380,8 +399,16 @@ impl Filesystem for CacheFilesystem {
         let store = self.store.clone();
         let handles = self.handles.clone();
         let (uid, gid) = (self.uid, self.gid);
+        let queued = diagnostics::span(diagnostics::Stage::GetattrQueue);
         self.queue.submit(Box::new(move || {
-            let result = preview::metadata(&store.lock().unwrap(), ino);
+            drop(queued);
+            let wait = diagnostics::span(diagnostics::Stage::GetattrStoreWait);
+            let guard = store.lock().unwrap();
+            drop(wait);
+            let projection = diagnostics::span(diagnostics::Stage::GetattrProjection);
+            let result = preview::metadata(&guard, ino);
+            drop(projection);
+            drop(guard);
             match result {
                 Ok(preview::Metadata::Preview(record)) => {
                     if fh.is_some() {
@@ -391,7 +418,7 @@ impl Filesystem for CacheFilesystem {
                     }
                 }
                 Ok(preview::Metadata::Authority(record)) => {
-                    let mut a = attr(&record, uid, gid);
+                    let mut a = preview::posix_attr(&record, uid, gid);
                     if let Some(fh) = fh {
                         let content = {
                             let h = handles.lock().unwrap();

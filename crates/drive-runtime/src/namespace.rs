@@ -3,15 +3,23 @@ impl Bridge {
     /// Process the durable sequence. An uncertain head is queried, never resent.
     pub fn rename_pending(&self) -> io::Result<usize> {
         let _mutation = self.recovery_gate.read().unwrap();
-        if self.session_pending.load(Ordering::Acquire) { return Ok(0); }
-        if self.store.lock().unwrap().initialization_writeback_blocked().map_err(io::Error::other)? {
+        if self.session_pending.load(Ordering::Acquire) {
             return Ok(0);
         }
-        self.rename_pending_under_gate()
+        if self
+            .store
+            .lock()
+            .unwrap()
+            .initialization_writeback_blocked()
+            .map_err(io::Error::other)?
+        {
+            return Ok(0);
+        }
+        self.rename_pending_under_gate(usize::MAX)
     }
     // namespace_pending already holds the guard. Never recursively acquire an
     // RwLock read guard: a queued recovery writer could otherwise deadlock us.
-    fn rename_pending_under_gate(&self) -> io::Result<usize> {
+    fn rename_pending_under_gate(&self, limit: usize) -> io::Result<usize> {
         let rpc = self.connection();
         if !rpc.is_connected() {
             return Err(io::Error::new(
@@ -82,6 +90,9 @@ impl Bridge {
                             let _ = self.notifications.try_send(Invalidation::Inode(record.ino));
                         }
                         done += 1;
+                        if done >= limit {
+                            return Ok(done);
+                        }
                     }
                     Response::Conflict => {
                         store.conflict_rename(&op).map_err(io::Error::other)?;
@@ -108,37 +119,94 @@ impl Bridge {
 }
 
 impl Bridge {
-    /// Both operation kinds obey the same journal sequence. No uncertain head
-    /// is retransmitted, and a conflict remains visible instead of being skipped.
+    /// Preserve dependency order, while independent operations may pass a
+    /// retained uncertain/conflicting intent. Network mutation remains serial.
     pub fn namespace_pending(&self) -> io::Result<usize> {
         let _mutation = self.recovery_gate.read().unwrap();
-        if self.session_pending.load(Ordering::Acquire) { return Ok(0); }
+        if self.session_pending.load(Ordering::Acquire) {
+            return Ok(0);
+        }
         // Includes uncertain rename/remove/replace/mkdir reconciliation: its
         // local journal effects must not race an incomplete candidate either.
-        if self.store.lock().unwrap().initialization_writeback_blocked().map_err(io::Error::other)? {
+        if self
+            .store
+            .lock()
+            .unwrap()
+            .initialization_writeback_blocked()
+            .map_err(io::Error::other)?
+        {
             return Ok(0);
         }
         let mut done = 0;
-        loop {
-            let kind = self
+        for _ in 0..64 {
+            let selected = self
                 .store
                 .lock()
                 .unwrap()
-                .next_namespace_kind()
+                .next_namespace_operation()
                 .map_err(io::Error::other)?;
-            let count = match kind.as_deref() {
-                None => return Ok(done),
-                Some("rename") => self.rename_pending_under_gate()?,
-                Some("remove") => self.remove_pending()?,
-                Some("replace") => self.replace_pending()?,
-                Some("mkdir") => self.directory_pending()?,
+            let Some(selected) = selected else {
+                return Ok(done);
+            };
+            let outcome = match selected.kind.as_str() {
+                "rename" => self.rename_pending_under_gate(1),
+                "remove" => self.remove_pending(),
+                "replace" => self.replace_pending(),
+                "mkdir" => self.directory_pending(),
                 _ => return Err(io::Error::other("unknown namespace journal operation")),
             };
-            done += count;
-            if count == 0 {
-                return Ok(done);
+            let observation = if outcome.is_err() {
+                drive_core::namespace_schedule::NamespaceRecoveryObservation::TransportUnavailable
+            } else {
+                drive_core::namespace_schedule::NamespaceRecoveryObservation::CommitUnconfirmed
+            };
+            let count = match outcome {
+                Ok(count) => count,
+                Err(error) => {
+                    let retained = self
+                        .store
+                        .lock()
+                        .unwrap()
+                        .observe_namespace_unresolved(&selected.operation, observation)
+                        .map_err(io::Error::other)?;
+                    if !retained
+                        || !self.connection().is_connected()
+                        || error.kind() == io::ErrorKind::NotConnected
+                    {
+                        return Err(error);
+                    }
+                    *self.last_error.lock().unwrap() =
+                        Some("namespace commit result not confirmed; local intent retained".into());
+                    // The read-only reconciliation failed, but unrelated native
+                    // operations can still use the connected worker.
+                    0
+                }
+            };
+            if count > 0 {
+                self.store
+                    .lock()
+                    .unwrap()
+                    .clear_namespace_observation(&selected.operation);
+                done += count;
+            } else {
+                // Double observation after an error would distort retry counts.
+                let mut store = self.store.lock().unwrap();
+                if matches!(
+                    observation,
+                    drive_core::namespace_schedule::NamespaceRecoveryObservation::CommitUnconfirmed
+                ) {
+                    store
+                        .observe_namespace_unresolved(&selected.operation, observation)
+                        .map_err(io::Error::other)?;
+                }
+                let next = store.next_namespace_operation().map_err(io::Error::other)?;
+                if next.is_none_or(|next| next.operation == selected.operation) {
+                    return Ok(done);
+                }
             }
         }
+        self.signal_upload();
+        Ok(done)
     }
     fn remove_pending(&self) -> io::Result<usize> {
         let rpc = self.connection();

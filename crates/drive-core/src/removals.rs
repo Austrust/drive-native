@@ -89,17 +89,17 @@ impl Store {
         Ok(())
     }
     pub fn next_namespace_kind(&self) -> Result<Option<String>> {
-        Ok(self.db.query_row("SELECT kind FROM namespace_ops WHERE id NOT IN (SELECT operation FROM access_blocked_operations) AND state NOT IN ('committed','superseded') ORDER BY seq LIMIT 1", [], |r|r.get(0)).optional()?)
+        Ok(self.namespace_selection()?.map(|selection| selection.kind))
     }
     pub fn next_remove(&self) -> Result<Option<QueuedRemove>> {
-        if self.next_namespace_kind()?.as_deref() != Some("remove") {
-            return Ok(None);
-        }
-        let (body,state): (String,String) = self.db.query_row("SELECT body,state FROM namespace_ops WHERE id NOT IN (SELECT operation FROM access_blocked_operations) AND state NOT IN ('committed','superseded') ORDER BY seq LIMIT 1", [], |r|Ok((r.get(0)?,r.get(1)?)))?;
-        Ok(Some(QueuedRemove {
-            job: serde_json::from_str(&body)?,
-            state,
-        }))
+        self.namespace_body_for_kind("remove")?
+            .map(|(body, state)| {
+                Ok(QueuedRemove {
+                    job: serde_json::from_str(&body)?,
+                    state,
+                })
+            })
+            .transpose()
     }
     pub fn mark_remove_started(&mut self, id: &str) -> Result<()> {
         let head = self

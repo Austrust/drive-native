@@ -46,6 +46,69 @@ fn names(view: &View) -> Vec<String> {
 }
 
 #[test]
+fn closed_hot_view_reuses_allocations_and_semantic_commit_invalidates_it() {
+    let (_temp, store) = fixture();
+    let views = Views::default();
+    let (fh, first) = open(&views, &store);
+    let weak = Arc::downgrade(&first);
+    let bytes = first.snapshot().bytes;
+    drop(first);
+    views.release(1, fh).unwrap();
+    assert!(weak.upgrade().is_some());
+    let (fh, second) = open(&views, &store);
+    assert!(Arc::ptr_eq(&weak.upgrade().unwrap(), &second));
+    assert_eq!(views.charged.load(Ordering::Acquire), bytes);
+    drop(second);
+    views.release(1, fh).unwrap();
+    store
+        .lock()
+        .unwrap()
+        .create_local_directory("100", "added", 0o755)
+        .unwrap();
+    let (fh, current) = open(&views, &store);
+    assert!(weak.upgrade().is_none());
+    assert!(names(&current).contains(&"added".into()));
+    drop(current);
+    views.release(1, fh).unwrap();
+    views.trim_hot(None);
+    assert_eq!(views.charged.load(Ordering::Acquire), 0);
+}
+
+#[test]
+fn hot_cache_is_bounded_and_eviction_does_not_destroy_held_cookies() {
+    let (_temp, store) = fixture();
+    {
+        let mut s = store.lock().unwrap();
+        for i in 0..HOT_VIEWS + 12 {
+            s.create_local_directory("100", &format!("d{i:04}"), 0o755)
+                .unwrap();
+        }
+    }
+    let views = Views::default();
+    let (root, held) = open(&views, &store);
+    let children = held
+        .snapshot()
+        .entries
+        .iter()
+        .filter(|e| e.directory && e.name.starts_with('d'))
+        .map(|e| e.ino)
+        .collect::<Vec<_>>();
+    for ino in children {
+        let fh = views.open(&store, ino).unwrap();
+        views.release(ino, fh).unwrap();
+    }
+    let hot = views.hot.lock().unwrap();
+    assert!(hot.views.len() <= HOT_VIEWS);
+    assert!(hot.bytes <= HOT_BYTES);
+    drop(hot);
+    assert!(views.get(1, root).is_ok());
+    assert_eq!(held.snapshot().entries.len(), HOT_VIEWS + 16);
+    views.release(1, root).unwrap();
+    drop(held);
+    views.trim_hot(None);
+}
+
+#[test]
 fn candidate_receipts_and_inode_housekeeping_reuse_the_same_held_view() {
     let (_temp, store) = fixture();
     let views = Views::default();

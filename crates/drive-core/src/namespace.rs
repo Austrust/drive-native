@@ -319,17 +319,14 @@ impl Store {
         Ok(())
     }
     pub fn next_rename(&self) -> Result<Option<QueuedRename>> {
-        if self.next_namespace_kind()?.as_deref() != Some("rename") {
-            return Ok(None);
-        }
-        let row:Option<(String,String)>=self.db.query_row("SELECT body,state FROM namespace_ops WHERE id NOT IN (SELECT operation FROM access_blocked_operations) AND state NOT IN ('committed','superseded') ORDER BY seq LIMIT 1",[],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
-        row.map(|(body, state)| {
-            Ok(QueuedRename {
-                job: serde_json::from_str(&body)?,
-                state,
+        self.namespace_body_for_kind("rename")?
+            .map(|(body, state)| {
+                Ok(QueuedRename {
+                    job: serde_json::from_str(&body)?,
+                    state,
+                })
             })
-        })
-        .transpose()
+            .transpose()
     }
     pub fn mark_rename_started(&mut self, id: &str) -> Result<()> {
         let head = self

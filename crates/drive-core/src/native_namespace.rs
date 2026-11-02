@@ -341,13 +341,14 @@ impl NativeReadSession {
         }
         if reconcile {
             return self
-                .reconcile_with_origin(
+                .reconcile_with_origin_mtime(
                     &job.target,
                     &destination,
                     source,
                     sha256,
                     staging,
                     job.creation_origin.as_ref(),
+                    job.mtime,
                 )
                 .await;
         }
@@ -378,13 +379,14 @@ impl NativeReadSession {
             None if job.source.version == crate::creations::CREATE_VERSION => {}
             _ => return Err(Error::State("replacement source binding absent".into())),
         }
-        self.upload_with_origin(
+        self.upload_with_origin_mtime(
             &job.target,
             &destination,
             source,
             sha256,
             staging,
             job.creation_origin.as_ref(),
+            job.mtime,
         )
         .await
     }

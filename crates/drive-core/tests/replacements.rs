@@ -57,7 +57,9 @@ fn replace(s: &mut Store) {
 fn uploaded(s: &mut Store) -> String {
     let q = s.next_replace().unwrap().unwrap();
     s.mark_replace_started(&q.job.operation).unwrap();
-    s.confirm_replace_upload(&q.job.operation, &node("20", "A.doc", "t2"), "20")
+    let mut confirmed = node("20", "A.doc", "t2");
+    confirmed.metadata.as_mut().unwrap().mtime = u64::from(q.job.mtime.unwrap());
+    s.confirm_replace_upload(&q.job.operation, &confirmed, "20")
         .unwrap();
     q.job.operation
 }
@@ -144,7 +146,9 @@ fn unsent_source_never_creates_remote_temp_and_target_is_not_deleted() {
     let q = s.next_replace().unwrap().unwrap();
     assert!(q.job.source_remote.is_none());
     s.mark_replace_started(&q.job.operation).unwrap();
-    s.confirm_replace_upload(&q.job.operation, &node("20", "A.doc", "t2"), "20")
+    let mut confirmed = node("20", "A.doc", "t2");
+    confirmed.metadata.as_mut().unwrap().mtime = u64::from(q.job.mtime.unwrap());
+    s.confirm_replace_upload(&q.job.operation, &confirmed, "20")
         .unwrap();
     assert!(s.next_namespace_kind().unwrap().is_none());
     assert_eq!(s.local_identity("20").unwrap(), tmp.id);
@@ -164,6 +168,7 @@ fn two_unsent_files_become_one_server_creation_with_stable_source_inode() {
     s.mark_replace_started(&q.job.operation).unwrap();
     let mut confirmed = target.clone();
     confirmed.version = "created-v1".into();
+    confirmed.metadata.as_mut().unwrap().mtime = u64::from(q.job.mtime.unwrap());
     s.confirm_replace_upload(&q.job.operation, &confirmed, "999")
         .unwrap();
     assert_eq!(s.local_identity("999").unwrap(), src.id);
@@ -257,6 +262,7 @@ fn chained_offline_replacements_keep_sequence_and_rebase_second_destination() {
     s.mark_replace_started(&second.job.operation).unwrap();
     let mut receipt = second.job.target.clone();
     receipt.version = "t3".into();
+    receipt.metadata.as_mut().unwrap().mtime = u64::from(second.job.mtime.unwrap());
     s.confirm_replace_upload(&second.job.operation, &receipt, "20")
         .unwrap();
     assert!(s.next_replace().unwrap().is_none());

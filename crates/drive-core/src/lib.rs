@@ -11,6 +11,7 @@ pub mod shared_store;
 pub use shared_store::SharedStore;
 
 pub mod drafts;
+pub mod timestamps;
 
 pub mod upload_jobs;
 
@@ -18,6 +19,7 @@ pub mod creations;
 pub mod directories;
 
 pub mod namespace;
+pub mod namespace_schedule;
 
 pub mod removals;
 
