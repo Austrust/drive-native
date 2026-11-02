@@ -75,7 +75,7 @@ fn unknown_mkdir_keeps_children_and_drafts_but_independent_shared_parent_rename_
     s.rename_local("1", "A", "1", "renamed", false).unwrap();
     assert_eq!(s.next_namespace_operation().unwrap().unwrap().operation, op);
     defer(&mut s, &op);
-    let rename = s.next_rename().unwrap().unwrap();
+    let rename = s.scheduled_rename().unwrap().unwrap();
     assert_eq!(rename.job.node.id, "2");
     s.mark_rename_started(&rename.job.operation).unwrap();
     assert_eq!(
@@ -153,11 +153,54 @@ fn conflict_is_a_dependency_barrier_but_not_a_global_head_of_line_block() {
     s.conflict_directory(&op).unwrap();
     s.create_local_directory(&dir.id, "blocked", 0o700).unwrap();
     s.rename_local("1", "A", "1", "C", false).unwrap();
+    // Inspection retains the legacy conflict head even when independent work
+    // is executable. Reading that record is not permission to send it.
+    assert_eq!(s.next_namespace_kind().unwrap().as_deref(), Some("mkdir"));
+    assert_eq!(s.next_directory().unwrap().unwrap().state, "conflict");
+    assert!(s.next_rename().unwrap().is_none());
+    assert!(s.mark_directory_started(&op).is_err());
+    assert!(s.scheduled_directory().unwrap().is_none());
+    let rename = s.scheduled_rename().unwrap().unwrap();
     assert_eq!(
         s.next_namespace_operation().unwrap().unwrap().kind,
         "rename"
     );
     assert_eq!(s.queue_health().unwrap().namespace_uncertain, 0);
+    s.mark_rename_started(&rename.job.operation).unwrap();
+    assert_eq!(s.scheduled_rename().unwrap().unwrap().state, "inflight");
+}
+
+#[test]
+fn deferred_inspection_cannot_bypass_executable_mutation_gate() {
+    let (_d, mut s) = fixture();
+    let (_dir, op) = uncertain(&mut s);
+    defer(&mut s, &op);
+    assert_eq!(s.next_directory().unwrap().unwrap().job.operation, op);
+    assert_eq!(s.next_directory().unwrap().unwrap().state, "uncertain");
+    assert!(s.scheduled_directory().unwrap().is_none());
+    assert!(s.next_namespace_operation().unwrap().is_none());
+    assert!(s.mark_directory_started(&op).is_err());
+    assert!(
+        s.prepare_directory(
+            &op,
+            drive_core::directories::DirectoryOrigin {
+                cursor: "native-v1:12".into(),
+                committer: "b".repeat(64),
+                restore: "server".into()
+            }
+        )
+        .is_err()
+    );
+    assert_eq!(
+        s.next_directory()
+            .unwrap()
+            .unwrap()
+            .job
+            .origin
+            .unwrap()
+            .committer,
+        "a".repeat(64)
+    );
 }
 
 #[test]
@@ -200,7 +243,7 @@ fn malformed_and_unrecognized_intents_fail_closed_without_hiding_exact_counts() 
             _ => {
                 db.execute(
                     "UPDATE namespace_ops SET body=?2 WHERE id=?1",
-                    rusqlite::params![op, "x".repeat(1_048_577)],
+                    rusqlite::params![op, serde_json::to_string(&"x".repeat(1_048_577)).unwrap()],
                 )
                 .unwrap();
             }

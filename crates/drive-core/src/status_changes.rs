@@ -99,6 +99,10 @@ pub enum ChangePage {
 // Table, identity column, semantic columns, descendant propagation. Metadata
 // rows and operations are included so the source remains useful for attributes
 // and task state; inode/LRU/settings/receipt bodies deliberately are not.
+// This is not a complete POSIX-attribute change feed: explicit local_atimes
+// are read directly by getattr and do not affect directory entries or icons.
+// upload_times is immutable confirmation intent committed with operations/nodes;
+// those tables already publish the corresponding semantic transition.
 const SOURCES: &[(&str, &str, &[&str], bool)] = &[
     (
         "nodes",
@@ -306,8 +310,14 @@ pub(crate) fn replace_snapshot<T>(
     write: impl FnOnce(&Transaction<'_>) -> Result<T>,
 ) -> Result<T> {
     let tx = db.transaction()?;
-    if tx.execute("UPDATE dn_status_meta SET bulk=1 WHERE singleton=1 AND bulk=0", [])? != 1 {
-        return Err(Error::State("snapshot journal boundary is already active".into()));
+    if tx.execute(
+        "UPDATE dn_status_meta SET bulk=1 WHERE singleton=1 AND bulk=0",
+        [],
+    )? != 1
+    {
+        return Err(Error::State(
+            "snapshot journal boundary is already active".into(),
+        ));
     }
     let value = write(&tx)?;
     tx.execute("DELETE FROM dn_status_changes", [])?;
@@ -346,7 +356,9 @@ impl Store {
             }, r.get::<_, bool>(9)?))
         })?;
         if bulk {
-            return Err(Error::State("snapshot journal boundary is unconfirmed".into()));
+            return Err(Error::State(
+                "snapshot journal boundary is unconfirmed".into(),
+            ));
         }
         Ok(watermark)
     }

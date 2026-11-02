@@ -33,7 +33,7 @@ impl Bridge {
                 .store
                 .lock()
                 .unwrap()
-                .next_rename()
+                .scheduled_rename()
                 .map_err(io::Error::other)?
             else {
                 return Ok(done);
@@ -58,7 +58,7 @@ impl Bridge {
                 .store
                 .lock()
                 .unwrap()
-                .next_rename()
+                .scheduled_rename()
                 .map_err(io::Error::other)?
                 .ok_or_else(|| io::Error::other("rename disappeared"))?;
             if fresh.job.operation != op {
@@ -220,7 +220,7 @@ impl Bridge {
             .store
             .lock()
             .unwrap()
-            .next_remove()
+            .scheduled_remove()
             .map_err(io::Error::other)?
         else {
             return Ok(0);
@@ -295,7 +295,7 @@ impl Bridge {
             .store
             .lock()
             .unwrap()
-            .next_replace()
+            .scheduled_replace()
             .map_err(io::Error::other)?
         else {
             return Ok(0);
@@ -401,7 +401,7 @@ impl Bridge {
                         return Ok(0);
                     }
                     let q = s
-                        .next_replace()
+                        .scheduled_replace()
                         .map_err(io::Error::other)?
                         .ok_or_else(|| io::Error::other("replacement journal disappeared"))?;
                     if q.job.operation != op {
@@ -468,7 +468,7 @@ impl Bridge {
             .store
             .lock()
             .unwrap()
-            .next_directory()
+            .scheduled_directory()
             .map_err(io::Error::other)?
         else {
             return Ok(0);

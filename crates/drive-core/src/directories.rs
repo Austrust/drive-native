@@ -88,6 +88,7 @@ impl Store {
         tx.commit()?;
         Ok(node)
     }
+    /// Inspect the ordered journal, including conflicts; this does not authorize execution.
     pub fn next_directory(&self) -> Result<Option<QueuedDirectory>> {
         self.namespace_body_for_kind("mkdir")?
             .map(|(body, state)| {
@@ -98,9 +99,20 @@ impl Store {
             })
             .transpose()
     }
+    /// Select executable work under the bounded dependency and retry gates.
+    pub fn scheduled_directory(&self) -> Result<Option<QueuedDirectory>> {
+        self.scheduled_namespace_body_for_kind("mkdir")?
+            .map(|(body, state)| {
+                Ok(QueuedDirectory {
+                    job: serde_json::from_str(&body)?,
+                    state,
+                })
+            })
+            .transpose()
+    }
     pub fn mark_directory_started(&mut self, op: &str) -> Result<DirectoryJob> {
         let mut q = self
-            .next_directory()?
+            .scheduled_directory()?
             .ok_or_else(|| Error::State("directory not queue head".into()))?;
         if q.job.operation != op || q.state != "pending" {
             return Err(Error::State("directory requires reconciliation".into()));
@@ -123,7 +135,7 @@ impl Store {
     pub fn prepare_directory(&mut self, op: &str, origin: DirectoryOrigin) -> Result<()> {
         origin.validate()?;
         let mut q = self
-            .next_directory()?
+            .scheduled_directory()?
             .ok_or_else(|| Error::State("directory not queue head".into()))?;
         if q.job.operation != op
             || q.job.creation_contract != 1

@@ -89,8 +89,9 @@ impl Store {
         Ok(())
     }
     pub fn next_namespace_kind(&self) -> Result<Option<String>> {
-        Ok(self.namespace_selection()?.map(|selection| selection.kind))
+        Ok(self.db.query_row("SELECT kind FROM namespace_ops WHERE id NOT IN (SELECT operation FROM access_blocked_operations) AND state NOT IN ('committed','superseded') ORDER BY seq LIMIT 1", [], |r|r.get(0)).optional()?)
     }
+    /// Inspect the ordered journal, including conflicts; this does not authorize execution.
     pub fn next_remove(&self) -> Result<Option<QueuedRemove>> {
         self.namespace_body_for_kind("remove")?
             .map(|(body, state)| {
@@ -101,9 +102,20 @@ impl Store {
             })
             .transpose()
     }
+    /// Select executable work under the bounded dependency and retry gates.
+    pub fn scheduled_remove(&self) -> Result<Option<QueuedRemove>> {
+        self.scheduled_namespace_body_for_kind("remove")?
+            .map(|(body, state)| {
+                Ok(QueuedRemove {
+                    job: serde_json::from_str(&body)?,
+                    state,
+                })
+            })
+            .transpose()
+    }
     pub fn mark_remove_started(&mut self, id: &str) -> Result<()> {
         let head = self
-            .next_remove()?
+            .scheduled_remove()?
             .ok_or_else(|| Error::State("remove is not queue head".into()))?;
         if head.job.operation != id || head.state != "pending" {
             return Err(Error::State(
