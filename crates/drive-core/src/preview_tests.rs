@@ -406,7 +406,7 @@ fn schema21_migration_backs_up_private_candidates_and_future_reader_rejects() {
             p.file_name()
                 .unwrap()
                 .to_string_lossy()
-                .starts_with("state-before-v22-")
+                .starts_with(&format!("state-before-v{}-", crate::STATE_SCHEMA_VERSION))
         })
         .unwrap();
     let old = Connection::open(backup).unwrap();

@@ -344,7 +344,20 @@ impl Store {
             state: q.state,
         }))
     }
+    /// Legacy journal inspection must retain conflicts and deferred intents.
+    /// Runtime and mutation gates use scheduled_namespace_body_for_kind instead.
     pub(crate) fn namespace_body_for_kind(&self, kind: &str) -> Result<Option<(String, String)>> {
+        let row: Option<(String,String,String)> = self.db.query_row(
+            "SELECT kind,body,state FROM namespace_ops WHERE id NOT IN (SELECT operation FROM access_blocked_operations) AND state NOT IN ('committed','superseded') ORDER BY seq LIMIT 1",
+            [], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
+        Ok(row
+            .filter(|(actual, _, _)| actual == kind)
+            .map(|(_, body, state)| (body, state)))
+    }
+    pub(crate) fn scheduled_namespace_body_for_kind(
+        &self,
+        kind: &str,
+    ) -> Result<Option<(String, String)>> {
         Ok(self
             .namespace_selection()?
             .filter(|q| q.kind == kind)

@@ -166,8 +166,20 @@ impl Store {
         tx.commit()?;
         Ok(())
     }
+    /// Inspect the ordered journal, including conflicts; this does not authorize execution.
     pub fn next_replace(&self) -> Result<Option<QueuedReplace>> {
         self.namespace_body_for_kind("replace")?
+            .map(|(body, state)| {
+                Ok(QueuedReplace {
+                    job: serde_json::from_str(&body)?,
+                    state,
+                })
+            })
+            .transpose()
+    }
+    /// Select executable work under the bounded dependency and retry gates.
+    pub fn scheduled_replace(&self) -> Result<Option<QueuedReplace>> {
+        self.scheduled_namespace_body_for_kind("replace")?
             .map(|(body, state)| {
                 Ok(QueuedReplace {
                     job: serde_json::from_str(&body)?,
@@ -193,7 +205,7 @@ impl Store {
         sha256: &str,
     ) -> Result<()> {
         let mut head = self
-            .next_replace()?
+            .scheduled_replace()?
             .ok_or_else(|| Error::State("replacement not queue head".into()))?;
         if head.job.operation != id || head.state != "pending" || head.job.target_remote.is_some() {
             return Err(Error::State(
@@ -215,7 +227,7 @@ impl Store {
     }
     pub fn mark_replace_started(&mut self, id: &str) -> Result<()> {
         let head = self
-            .next_replace()?
+            .scheduled_replace()?
             .ok_or_else(|| Error::State("replacement not queue head".into()))?;
         if head.job.operation != id || head.state != "pending" {
             return Err(Error::State("replacement requires reconciliation".into()));
@@ -418,7 +430,7 @@ impl Store {
     }
     pub fn mark_replace_cleanup_started(&mut self, id: &str) -> Result<()> {
         let q = self
-            .next_replace()?
+            .scheduled_replace()?
             .ok_or_else(|| Error::State("replacement not head".into()))?;
         if q.job.operation != id || q.state != "cleanup_pending" {
             return Err(Error::State("cleanup must reconcile".into()));

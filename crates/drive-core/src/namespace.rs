@@ -318,6 +318,7 @@ impl Store {
         tx.commit()?;
         Ok(())
     }
+    /// Inspect the ordered journal, including conflicts; this does not authorize execution.
     pub fn next_rename(&self) -> Result<Option<QueuedRename>> {
         self.namespace_body_for_kind("rename")?
             .map(|(body, state)| {
@@ -328,9 +329,20 @@ impl Store {
             })
             .transpose()
     }
+    /// Select executable work under the bounded dependency and retry gates.
+    pub fn scheduled_rename(&self) -> Result<Option<QueuedRename>> {
+        self.scheduled_namespace_body_for_kind("rename")?
+            .map(|(body, state)| {
+                Ok(QueuedRename {
+                    job: serde_json::from_str(&body)?,
+                    state,
+                })
+            })
+            .transpose()
+    }
     pub fn mark_rename_started(&mut self, id: &str) -> Result<()> {
         let head = self
-            .next_rename()?
+            .scheduled_rename()?
             .ok_or_else(|| Error::State("namespace queue empty".into()))?;
         if head.job.operation != id || head.state != "pending" {
             return Err(Error::State(

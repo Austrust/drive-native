@@ -715,6 +715,13 @@ fn schema_inventory_requires_an_explicit_decision_for_new_tables_and_columns() {
         "fs_inodes",
         "upload_origins",
         "upload_paths",
+        // Explicit access time is neither namespace nor icon state. FUSE
+        // getattr reads it directly; directory snapshots have no atime field.
+        "local_atimes",
+        // Immutable write-confirmation intent, inserted in the same transaction
+        // as a journaled operations/nodes change; not a separate status atom.
+        // Cascading deletion accompanies the journaled operation deletion.
+        "upload_times",
         "cache_access",
         "cache_published",
         "engine_upload_stages",
@@ -771,6 +778,34 @@ fn schema_inventory_requires_an_explicit_decision_for_new_tables_and_columns() {
                 .unwrap();
         assert_eq!(actual, expected, "classify new columns in {table}");
     }
+}
+
+#[test]
+fn timestamp_sidecars_do_not_hide_semantic_changes_or_invalidate_namespace_for_atime() {
+    let (_dir, mut s) = fixture();
+    let ino = s.record("a").unwrap().ino;
+    let before = s.status_change_watermark().unwrap().cursor;
+    let directory = s.directory_view_stamp().unwrap();
+    let status = s.status("a").unwrap();
+    s.set_local_atime("a", 123, 456).unwrap();
+    assert_eq!(s.status_change_watermark().unwrap().cursor, before);
+    assert_eq!(s.directory_view_stamp().unwrap(), directory);
+    assert_eq!(s.status("a").unwrap(), status);
+    let attr = s.posix_record_by_inode(ino).unwrap();
+    assert_eq!((attr.atime, attr.atime_nsec), (123, 456));
+    let operation = s.save_local("a", b"new").unwrap();
+    assert!(s.upload_mtime(&operation).unwrap().is_some());
+    let changes = rows(&s, &before);
+    assert!(changes.iter().any(|c| c.source == "operations"
+        && c.operation == "INSERT"
+        && c.new_node.as_deref() == Some("a")));
+    assert!(
+        changes
+            .iter()
+            .any(|c| c.source == "nodes" && c.new_node.as_deref() == Some("a"))
+    );
+    assert_eq!(s.status("a").unwrap(), Status::PendingUpload);
+    consistent(&s);
 }
 
 #[test]
