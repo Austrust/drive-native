@@ -1,0 +1,59 @@
+{
+  "passed": true,
+  "mode": "lab-initializing",
+  "baseline_changed": false,
+  "paired_performance": false,
+  "initialization_event": {
+    "status": "passed",
+    "reason": "same_candidate_nonempty_event_fenced",
+    "matching_pages": 1,
+    "applied_sequence": 1,
+    "same_start_watermark": true,
+    "authoritative_cursor_after_fence": false
+  },
+  "timestamps": {
+    "touch_remote_mtime": true,
+    "cp_preserve_remote_mtime": true,
+    "unchanged_content": true,
+    "queue_settled": true,
+    "lab_only_writes": true
+  },
+  "scoped_file_events": 1,
+  "cached_unpinned_background_update": true,
+  "offline_new_version": true,
+  "actual_transport_hold": true,
+  "nas_cleanup": false,
+  "lab_only_writes": true,
+  "reconnect": true,
+  "final_stop": {
+    "exit": 0,
+    "requested": true,
+    "seconds": 0.1647245700005442,
+    "mount_remaining": false,
+    "root_probe": {
+      "quiesced": true,
+      "not_started": true
+    }
+  },
+  "peer_stop": {
+    "exit": 0,
+    "acknowledged": true
+  },
+  "relay_exit": -15,
+  "source_commit": "416cc41b11fce2774bc8eb1e899e100f3d896b8f",
+  "deb_sha256": "e89573f0fb88f731c365dbe631bb5d1bc68891896fb97e7b0d2e2e0cf238bb2c",
+  "ipc": 20,
+  "schema": 23,
+  "raw_result_sha256": "7f1b6d28d940547fded456ff2a12c855223e5ccdb55357d73d2d95344af0a61f",
+  "desktop_state_data_verified": true,
+  "nemo_visual_verified": false,
+  "development_intermediate": true,
+  "raw_evidence_uploaded": false,
+  "limits": [
+    "Fresh authorized synthetic Lab subtree only; not full Personal_Sync initialization.",
+    "File timestamps use second precision and complete native content upload; directory mtime remains unsupported.",
+    "Package tests and filesystem development were concurrent; no paired timing or long-term stability claim.",
+    "State queried through D-Bus, not a rendered Nemo desktop acceptance.",
+    "Owned payload-free relay terminated normally by the harness with SIGTERM after filesystem shutdown."
+  ]
+}
