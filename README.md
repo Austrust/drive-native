@@ -1,8 +1,8 @@
 # Drive Native
 
-下一开发批次为[停止恢复、多挂载界面与初始化修复](docs/ISSUES_20261102.md)，对应 issue #1／#2；测试与发布进行中。下面保留当前已发布 `.6` 的身份及验证范围。
+`.7` 已完成[停止恢复、多挂载界面与初始化修复](docs/ISSUES_20261102.md)及[包验证012](docs/validation/native-package-012/REPORT.md)。冻结源码 `c6f0a80f22180654d696830d7d4c47beaad9a6b5`，schema22／IPC18；751项Rust、96项GUI、debug／release各23项显式内核通过，隔离升级和重装保留未上传修改。发布状态见[Release](https://github.com/Austrust/drive-native/releases/tag/dev20261102.7)。
 
-当前开发包 `0.1.0~dev20261101.6` 已[发布](https://github.com/Austrust/drive-native/releases/tag/dev20261101.6)，冻结 `7683b36dcbce91b5e6143ef17bb8e97882f0453b`，schema22／IPC18。[冷启动目录预览](docs/INITIALIZATION_PREVIEW.md)让完整接收的目录先显示元数据，正文仍须等全局初始化完成；同时整合[已知目录局部重查](docs/INITIALIZATION_EVENT_EVIDENCE.md)与[目录视图缓存修复](docs/DIRECTORY_VIEW_STAMP.md)。[包验证011](docs/validation/native-package-011/REPORT.md)记录743项Rust、75项GUI，debug／release各20项显式内核测试，以及schema20→22迁移和未上传数据保留。新源码尚无NAS或配对性能实测。
+历史开发包 `0.1.0~dev20261101.6` 已[发布](https://github.com/Austrust/drive-native/releases/tag/dev20261101.6)，冻结 `7683b36dcbce91b5e6143ef17bb8e97882f0453b`，schema22／IPC18。[冷启动目录预览](docs/INITIALIZATION_PREVIEW.md)让完整接收的目录先显示元数据，正文仍须等全局初始化完成；同时整合[已知目录局部重查](docs/INITIALIZATION_EVENT_EVIDENCE.md)与[目录视图缓存修复](docs/DIRECTORY_VIEW_STAMP.md)。[包验证011](docs/validation/native-package-011/REPORT.md)记录743项Rust、75项GUI，debug／release各20项显式内核测试，以及schema20→22迁移和未上传数据保留。该冻结源码在发布时尚无NAS或配对性能实测；随后短时预览观察另行记录。
 
 历史开发包 `.5` 的[初始化事件依赖等待与有界恢复](docs/CANDIDATE_EVENT_COVERAGE.md)已[发布](https://github.com/Austrust/drive-native/releases/tag/dev20261101.5)。本包本次真实只读初始化未通过；受控重启续扫完成=True，状态查询异常0次。最终0.266秒正常停止且无遗留挂载；未写NAS。实测期间宿主仍有开发活动，远端变更负载未控制，不作与旧版配对性能或长期验收结论。
 
@@ -10,7 +10,7 @@
 
 面向 Linux Mint Cinnamon / Nemo 的 Synology Drive 原生协议按需同步客户端。使用 Rust、FUSE、SQLite、PySide6 和 Nemo 扩展；独立连接 Drive Server，不依赖 WebDAV 或官方客户端进程。
 
-**开发测试版本，尚未完成日常使用验收。** `.6` 已完成隔离Ubuntu安装、暂停接管、迁移备份、旧schema20 ELF拒绝及重装保留两份pending编辑与草稿；未覆盖旧初始化候选或未知提交升级。普通目录全量同步、运行时增量桌面状态、真实NAS首屏与完整收敛、配对性能、Mint及最终数据安全／7×24验收仍开放。完整goal保持活动，本包不是rc1。P0原窗口满足23小时时长，异常条件未通过，不拼接或重计。
+**开发测试版本，尚未完成日常使用验收。** `.7` 的真实只读观察通过约2.083秒根目录预览、暂停和重启续接；600秒内完整初始化未完成，诊断去重2次响应超时后继续枚举。事件接收／应用序号均0，不作为非空事件恢复证明。普通目录全量同步、持久历史、Mint及最终数据安全／7×24仍开放。完整目标未完成，长期goal当前暂停，本轮issue修复按用户新请求执行。
 
 ## 已实现
 
@@ -77,7 +77,7 @@ dpkg-buildpackage -b -us -uc
 | [docs/INITIALIZATION_PERSISTENCE.md](docs/INITIALIZATION_PERSISTENCE.md) | 私有候选事务、票据、写回门禁与生产调度器及待验边界 |
 | [docs/SNAPSHOT_CONVERGENCE.md](docs/SNAPSHOT_CONVERGENCE.md) | 扫描期间普通文件变化的局部重查、完整 fence 与保守回退；真实 NAS 性能待验证 |
 | [docs/SNAPSHOT_ERROR_CLASSIFICATION.md](docs/SNAPSHOT_ERROR_CLASSIFICATION.md) | 枚举失败的相关竞态验证；保留原一致性围栏 |
-| [docs/UPGRADE_RECOVERY.md](docs/UPGRADE_RECOVERY.md) | 暂停、正常升级接管、schema20迁移验证与保留边界 |
+| [docs/UPGRADE_RECOVERY.md](docs/UPGRADE_RECOVERY.md) | 暂停、正常升级接管、正常升级与历史迁移验证与保留边界 |
 | [docs/STATUS.md](docs/STATUS.md) | 验证范围、已知问题及后续工作 |
 | [docs/PROVENANCE.md](docs/PROVENANCE.md) | 源码归档来源和版本关系 |
 
