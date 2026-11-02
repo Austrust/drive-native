@@ -1,6 +1,6 @@
 # .7：停止恢复、统一窗口与初始化局部性能
 
-2026-11-02。开发包 `0.1.0~dev20261102.7`，冻结源码 `c6f0a80f22180654d696830d7d4c47beaad9a6b5`，schema22／IPC18。已完成构建和下列验证，发布状态以 [Release](https://github.com/Austrust/drive-native/releases/tag/dev20261102.7) 为准。完整门槛见 [DELIVERY_GATES](../../../DELIVERY_GATES.md)。
+2026-11-02。开发包 `0.1.0~dev20261102.7`，冻结源码 `c6f0a80f22180654d696830d7d4c47beaad9a6b5`，schema22／IPC18。已完成构建、下列验证及六项远端资产SHA256核验；已发布的 [Release](https://github.com/Austrust/drive-native/releases/tag/dev20261102.7) 提供安装包和源码。完整门槛见 [DELIVERY_GATES](../../../DELIVERY_GATES.md)。
 
 包 SHA256：`f25bc299640901cb3dc29219c6bd16a697b24464a394c5a0b9861738f48202a8`，53,816,748 bytes。
 

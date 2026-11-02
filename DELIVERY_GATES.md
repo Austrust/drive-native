@@ -20,7 +20,7 @@
 
 ## 当前整合工作
 
-2026-11-02，`.7` 已完成[包验证012](docs/validation/native-package-012/REPORT.md)：冻结c6f0a80，schema22／IPC18，751项Rust、96项GUI、debug／release各23项显式内核；同schema暂停接管、旧ELF读取及重装保留2份dirty／pending。真实600秒预览、暂停、重启通过，完整初始化未完成；去重2次响应超时后继续枚举。局部合成性能改善与真实整树收敛分别记录。发布状态见Release，完整目标和阶段表门槛均未关闭；长期goal仍暂停，本轮依用户新请求执行。
+2026-11-02，`.7` 已发布并完成[包验证012](docs/validation/native-package-012/REPORT.md)：冻结c6f0a80，schema22／IPC18，751项Rust、96项GUI、debug／release各23项显式内核；同schema暂停接管、旧ELF读取及重装保留2份dirty／pending。真实600秒预览、暂停、重启通过，完整初始化未完成；去重2次响应超时后继续枚举。局部合成性能改善与真实整树收敛分别记录。六项远端资产SHA256核验通过；详细证据未公开。完整目标和阶段表门槛均未关闭；长期goal仍暂停，本轮依用户新请求执行。
 
 以下为历史发布时的状态，当前以本节首段及阶段表为准。
 
