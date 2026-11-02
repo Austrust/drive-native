@@ -15,6 +15,13 @@ use std::{
 };
 pub const BUS_NAME: &str = "org.drivenative.Client1";
 pub const OBJECT_PATH: &str = "/org/drivenative/Client1";
+/// Available while shutdown checkpoints hold Store/control for local durability.
+pub fn shutdown_status(service: &Service) -> String {
+    serde_json::json!({"task_id":service.profile.task_id,
+        "shutdown":service.shutdown_diagnostics.snapshot(),
+        "mounted":service.mounted.load(Ordering::Acquire)})
+    .to_string()
+}
 
 #[derive(Clone, Serialize)]
 pub struct EntryState {
@@ -375,6 +382,7 @@ pub fn overview(service: &Service) -> io::Result<String> {
         "download_diagnostics":{"failures_seen":service.bridge.download_failures_seen.load(Ordering::Relaxed),
             "last_failure":service.bridge.last_download_failure.lock().unwrap().as_ref().map(|(kind,code)|serde_json::json!({"kind":kind,"server_code":code}))},
         "connection_diagnostics":service.diagnostics.snapshot(),
+        "shutdown":service.shutdown_diagnostics.snapshot(),
         "initialization":service.bridge.initialization.snapshot(),
         "host":service.profile.host,"username":service.profile.username,"scope_path":service.profile.scope.path}).to_string())
 }
@@ -683,6 +691,9 @@ impl Desktop {
     fn get_initialization(&self) -> String {
         initialization(&self.0)
     }
+    fn get_shutdown(&self) -> String {
+        shutdown_status(&self.0)
+    }
     async fn get_states(&self, paths: Vec<String>) -> zbus::fdo::Result<String> {
         let s = self.0.clone();
         local(move || states(&s, paths)).await
@@ -713,6 +724,11 @@ impl Desktop {
     }
     #[zbus(signal)]
     pub async fn status_changed(
+        emitter: &zbus::object_server::SignalEmitter<'_>,
+        revision: u64,
+    ) -> zbus::Result<()>;
+    #[zbus(signal)]
+    pub async fn shutdown_changed(
         emitter: &zbus::object_server::SignalEmitter<'_>,
         revision: u64,
     ) -> zbus::Result<()>;

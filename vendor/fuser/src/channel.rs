@@ -48,6 +48,64 @@ impl Channel {
         }
     }
 
+    /// Background sessions must not enter an uninterruptible read after poll.
+    // Linux fs/fuse/dev.c: only fuse_dev_do_read tests O_NONBLOCK;
+    // fuse_dev_do_write consumes a complete reply without a writable queue.
+    // Poll is always writable while connected. This does not make accepted
+    // FUSE replies best-effort or introduce socket-style partial writes.
+    pub(crate) fn set_nonblocking(&self) -> io::Result<()> {
+        let fd = self.0.as_raw_fd();
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+        if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    /// Wait for a kernel request or explicit session shutdown. Only this session
+    /// consumes the device, but an interrupted kernel request can disappear
+    /// between poll and read; O_NONBLOCK makes that race safe to retry.
+    pub(crate) fn receive_until(
+        &self,
+        buffer: &mut [u8],
+        stop: BorrowedFd<'_>,
+    ) -> io::Result<usize> {
+        let mut fds = [
+            libc::pollfd {
+                fd: self.0.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            },
+            libc::pollfd {
+                fd: stop.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            },
+        ];
+        loop {
+            let count = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as _, -1) };
+            if count < 0 {
+                let error = io::Error::last_os_error();
+                if error.kind() == io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return Err(error);
+            }
+            // EOF/HUP on the private wake socket requests normal destruction.
+            // Stop takes priority over more kernel requests; dispatched async
+            // work is drained by Filesystem::destroy, not killed here.
+            if fds[1].revents != 0 {
+                return Ok(0);
+            }
+            if fds[0].revents != 0 {
+                match self.receive(buffer) {
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
+                    result => return result,
+                }
+            }
+        }
+    }
+
     /// Returns a sender object for this channel. The sender object can be
     /// used to send to the channel. Multiple sender objects can be used
     /// and they can safely be sent to other threads.

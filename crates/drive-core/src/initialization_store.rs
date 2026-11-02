@@ -378,7 +378,7 @@ fn insert_node(db: &Connection, run: &str, node: &Node) -> Result<()> {
 // recursive edge and outer mutation retain the exact run boundary.
 const SUBTREE_TOTALS_SQL: &str = "WITH RECURSIVE tree(id) AS(SELECT ?2 UNION SELECT n.id FROM tree t CROSS JOIN initialization_entries n INDEXED BY initialization_parent WHERE n.run=?1 AND n.parent=t.id) SELECT count(*),coalesce(sum(bytes),0) FROM initialization_entries WHERE run=?1 AND id IN tree";
 const DELETE_SUBTREE_SQL: &str = "WITH RECURSIVE tree(id) AS(SELECT ?2 UNION SELECT n.id FROM tree t CROSS JOIN initialization_entries n INDEXED BY initialization_parent WHERE n.run=?1 AND n.parent=t.id) DELETE FROM initialization_entries WHERE run=?1 AND id IN tree";
-const INVALIDATE_SUBTREE_SQL: &str = "WITH RECURSIVE tree(id) AS(SELECT ?2 UNION SELECT n.id FROM tree t CROSS JOIN initialization_entries n INDEXED BY initialization_parent WHERE n.run=?1 AND n.parent=t.id) UPDATE initialization_directories SET state='pending',receipt_seq=NULL,receipt_hash=NULL WHERE run=?1 AND id IN tree";
+const INVALIDATE_SUBTREE_SQL: &str = "WITH RECURSIVE tree(id) AS(SELECT ?2 UNION SELECT n.id FROM tree t CROSS JOIN initialization_entries n INDEXED BY initialization_parent WHERE n.run=?1 AND n.parent=t.id) UPDATE initialization_directories SET state='pending',receipt_seq=NULL,receipt_hash=NULL WHERE run=?1 AND id IN tree AND (state!='pending' OR receipt_seq IS NOT NULL OR receipt_hash IS NOT NULL)";
 
 fn delete_subtree(db: &Connection, run: &str, id: &str) -> Result<()> {
     let (count, bytes): (i64, i64) = db.query_row(SUBTREE_TOTALS_SQL, params![run, id], |r| {
@@ -409,14 +409,20 @@ pub(crate) fn load_node(db: &Connection, run: &str, id: &str) -> Result<Node> {
     Ok(serde_json::from_str(&body)?)
 }
 fn invalidate(db: &Connection, run: &str, id: &str, recursive: bool) -> Result<()> {
-    let changed = if recursive {
-        db.execute(INVALIDATE_SUBTREE_SQL, params![run, id])?
-    } else {
-        db.execute("UPDATE initialization_directories SET state='pending',receipt_seq=NULL,receipt_hash=NULL WHERE run=?1 AND id=?2",params![run,id])?
-    };
-    if changed == 0 {
+    // An already-pending subtree is a valid invalidation, not absent coverage.
+    // Check the target independently so no-op UPDATEs can avoid WAL churn.
+    if !db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM initialization_directories WHERE run=?1 AND id=?2)",
+        params![run, id],
+        |r| r.get::<_, bool>(0),
+    )? {
         return Err(invalid("directory coverage absent"));
     }
+    if recursive {
+        db.execute(INVALIDATE_SUBTREE_SQL, params![run, id])?
+    } else {
+        db.execute("UPDATE initialization_directories SET state='pending',receipt_seq=NULL,receipt_hash=NULL WHERE run=?1 AND id=?2 AND (state!='pending' OR receipt_seq IS NOT NULL OR receipt_hash IS NOT NULL)",params![run,id])?
+    };
     clear_fence(db, run)
 }
 

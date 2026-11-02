@@ -10,6 +10,7 @@ use log::{info, warn};
 use nix::unistd::geteuid;
 use std::fmt;
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -143,6 +144,10 @@ impl<FS: Filesystem> Session<FS> {
     /// having multiple buffers (which take up much memory), but the filesystem methods
     /// may run concurrent by spawning threads.
     pub fn run(&mut self) -> io::Result<()> {
+        self.run_until(None)
+    }
+
+    fn run_until(&mut self, stop: Option<&UnixStream>) -> io::Result<()> {
         // Buffer for receiving requests from the kernel. Only one is allocated and
         // it is reused immediately after dispatching to conserve memory and allocations.
         let mut buffer = vec![0; BUFFER_SIZE];
@@ -153,7 +158,12 @@ impl<FS: Filesystem> Session<FS> {
         loop {
             // Read the next request from the given channel to kernel driver
             // The kernel driver makes sure that we get exactly one request per read
-            match self.ch.receive(buf) {
+            let received = match stop {
+                Some(stop) => self.ch.receive_until(buf, stop.as_fd()),
+                None => self.ch.receive(buf),
+            };
+            match received {
+                Ok(0) => break,
                 Ok(size) => match Request::new(self.ch.sender(), &buf[..size]) {
                     // Dispatch request
                     Some(req) => req.dispatch(self),
@@ -246,6 +256,7 @@ pub struct BackgroundSession {
     sender: ChannelSender,
     /// Ensures the filesystem is unmounted when the session ends
     _mount: Option<Mount>,
+    stop: UnixStream,
 }
 
 impl BackgroundSession {
@@ -253,28 +264,51 @@ impl BackgroundSession {
     /// session loop in a background thread. If the returned handle is dropped,
     /// the filesystem is unmounted and the given session ends.
     pub fn new<FS: Filesystem + Send + 'static>(se: Session<FS>) -> io::Result<BackgroundSession> {
+        let (stop, wake) = UnixStream::pair()?;
+        se.ch.set_nonblocking()?;
         let sender = se.ch.sender();
         // Take the fuse_session, so that we can unmount it
         let mount = std::mem::take(&mut *se.mount.lock().unwrap()).map(|(_, mount)| mount);
         let guard = thread::spawn(move || {
             let mut se = se;
-            se.run()
+            se.run_until(Some(&wake))
         });
         Ok(BackgroundSession {
             guard,
             sender,
             _mount: mount,
+            stop,
         })
     }
     /// Unmount the filesystem and join the background thread.
     pub fn join(self) {
+        self.join_result().unwrap();
+    }
+
+    /// Normal shutdown with observable stages and propagated thread errors.
+    /// A lazy unmount may leave references in open descriptors/namespaces. The
+    /// private wake socket ends our receive loop without waiting for ENODEV.
+    /// Destruction still runs and drains filesystem-owned asynchronous work.
+    pub fn join_result(self) -> io::Result<()> {
+        self.join_with_unmount(|| {})
+    }
+
+    /// The callback runs after the unmount attempt and before draining dispatch.
+    /// It must inspect actual mount state; an unmount attempt is not proof of success.
+    pub fn join_with_unmount(self, detached: impl FnOnce()) -> io::Result<()> {
         let Self {
             guard,
-            sender: _,
+            sender,
             _mount,
+            stop,
         } = self;
         drop(_mount);
-        guard.join().unwrap().unwrap();
+        detached();
+        drop(sender);
+        drop(stop);
+        guard
+            .join()
+            .map_err(|_| io::Error::other("FUSE session thread panicked"))?
     }
 
     /// Returns an object that can be used to send notifications to the kernel

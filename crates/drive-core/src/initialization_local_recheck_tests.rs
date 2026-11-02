@@ -2,6 +2,163 @@
 use super::*;
 use std::collections::BTreeMap;
 
+#[test]
+fn corrupt_directory_identity_still_rejects_unchanged_and_metadata_refresh() {
+    for metadata_change in [false, true] {
+        let (_temp, mut store, _binding, run) = prepared();
+        let protected = preserved(&store);
+        let before = store.initialization_status().unwrap().unwrap();
+        store.db.execute("UPDATE initialization_native_nodes SET digest='bad' WHERE run=?1 AND id='200'", [&run.run_id]).unwrap();
+        let mut changed = p();
+        if metadata_change { changed.metadata.as_mut().unwrap().mtime += 1; }
+        let ticket = store.begin_initialization_directory(&run, "100").unwrap();
+        let error = store.store_initialization_native_directory(&ticket, 1,
+            &[entry(file()),entry(changed),entry(q()),entry(unrelated())]).unwrap_err();
+        assert!(error.to_string().contains("identity digest mismatch"));
+        assert_eq!(store.initialization_node(&run,"200").unwrap(), p());
+        assert_eq!(store.initialization_node(&run,"211").unwrap(), child());
+        assert!(store.initialization_native_node_id(&run,"200").is_err());
+        let after = store.initialization_status().unwrap().unwrap();
+        assert_eq!((before.node_count,before.node_bytes,before.applied_cursor),
+                   (after.node_count,after.node_bytes,after.applied_cursor));
+        assert_eq!(protected,preserved(&store));
+        assert!(store.initialization_writeback_blocked().unwrap());
+    }
+}
+
+#[test]
+fn directory_metadata_refresh_retains_discovery_but_revokes_all_subtree_coverage() {
+    let (_temp, mut store, _binding, run) = prepared();
+    let before = preserved(&store);
+    let count = store.initialization_status().unwrap().unwrap().node_count;
+    let stale = store.begin_initialization_directory(&run, "211").unwrap();
+    let mut updated = p();
+    updated.version = node("200", Some("100"), "P", true, 12345, "server").version;
+    updated.metadata.as_mut().unwrap().mtime = 12345;
+    native_list(
+        &mut store,
+        &run,
+        "100",
+        vec![file(), updated.clone(), q(), unrelated()],
+    );
+    assert_eq!(store.initialization_node(&run, "200").unwrap(), updated);
+    assert_eq!(store.initialization_node(&run, "211").unwrap(), child());
+    assert_eq!(
+        store.initialization_native_node_id(&run, "200").unwrap(),
+        Some(71)
+    );
+    assert_eq!(
+        store.initialization_status().unwrap().unwrap().node_count,
+        count
+    );
+    let coverage = states(&store, &run);
+    for id in ["200", "210", "211", "220"] {
+        assert_eq!(coverage[id], "pending");
+    }
+    for id in ["100", "300", "400"] {
+        assert_eq!(coverage[id], "received");
+    }
+    assert!(
+        !store
+            .initialization_directory_ticket_current(&stale)
+            .unwrap()
+    );
+    assert!(
+        store
+            .store_initialization_native_directory(&stale, 1, &[])
+            .is_err()
+    );
+    let fence = store.begin_initialization_fence(&run).unwrap();
+    assert!(
+        store
+            .confirm_initialization_fence(&fence, fence.cursor())
+            .is_err()
+    );
+    let (recorded, actual):(i64,i64)=store.db.query_row("SELECT node_bytes,(SELECT sum(bytes) FROM initialization_entries WHERE run=?1) FROM initialization_run WHERE run_id=?1",[&run.run_id],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
+    assert_eq!(recorded, actual);
+    assert_eq!(preserved(&store), before);
+}
+
+#[test]
+fn directory_metadata_refresh_preserves_sticky_denial_and_rolls_back_atomically() {
+    let (_temp, mut store, _binding, run) = prepared();
+    let denied = store.begin_initialization_directory(&run, "211").unwrap();
+    store.store_initialization_denied(&denied, 1).unwrap();
+    let mut updated = p();
+    updated.metadata.as_mut().unwrap().mtime += 1;
+    let ticket = store.begin_initialization_directory(&run, "100").unwrap();
+    let before = store.initialization_status().unwrap().unwrap();
+    store.db.execute_batch("CREATE TEMP TRIGGER reject_directory_refresh BEFORE UPDATE OF body ON initialization_entries WHEN old.id='200' BEGIN SELECT RAISE(ABORT,'injected refresh failure'); END;").unwrap();
+    let entries = vec![
+        entry(file()),
+        entry(updated.clone()),
+        entry(q()),
+        entry(unrelated()),
+    ];
+    assert!(
+        store
+            .store_initialization_native_directory(&ticket, 1, &entries)
+            .is_err()
+    );
+    assert_eq!(store.initialization_node(&run, "200").unwrap(), p());
+    assert_eq!(
+        store.initialization_native_node_id(&run, "200").unwrap(),
+        Some(71)
+    );
+    let after = store.initialization_status().unwrap().unwrap();
+    assert_eq!(
+        (before.node_count, before.node_bytes),
+        (after.node_count, after.node_bytes)
+    );
+    store
+        .db
+        .execute_batch("DROP TRIGGER reject_directory_refresh;")
+        .unwrap();
+    store
+        .store_initialization_native_directory(&ticket, 1, &entries)
+        .unwrap();
+    assert_eq!(states(&store, &run)["211"], "pending");
+    assert!(
+        store
+            .db
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM preview_denied WHERE run=?1 AND id='211')",
+                [&run.run_id],
+                |r| r.get::<_, bool>(0)
+            )
+            .unwrap()
+    );
+}
+
+#[test]
+fn directory_replacement_or_rename_still_discards_old_discovery() {
+    for mode in ["native", "rename", "file"] {
+        let (_temp, mut store, _binding, run) = prepared();
+        let stale = store.begin_initialization_directory(&run, "211").unwrap();
+        let mut changed = entry(p());
+        match mode {
+            "native" => changed.native_node_id += 1,
+            "rename" => changed.node.name = "P-renamed".into(),
+            "file" => changed.node = node("200", Some("100"), "P", false, 8, "server"),
+            _ => unreachable!(),
+        }
+        let ticket = store.begin_initialization_directory(&run, "100").unwrap();
+        store
+            .store_initialization_native_directory(
+                &ticket,
+                1,
+                &[entry(file()), changed, entry(q()), entry(unrelated())],
+            )
+            .unwrap();
+        assert!(store.initialization_node(&run, "211").is_err(), "{mode}");
+        assert!(
+            !store
+                .initialization_directory_ticket_current(&stale)
+                .unwrap()
+        );
+    }
+}
+
 fn dir(id: &str, parent: &str, name: &str) -> Node {
     node(id, Some(parent), name, true, 7, "server")
 }

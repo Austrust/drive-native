@@ -1,3 +1,14 @@
+drive-native (0.1.0~dev20261102.7) unstable; urgency=medium
+
+  * Wake detached FUSE sessions during normal stop and expose shutdown stages.
+  * Retain discovered subtrees through same-identity directory metadata changes.
+  * Avoid rewriting already-pending initialization coverage on repeated recovery.
+  * Manage multiple mounts in one window with a tray and isolated task routing.
+  * Preserve the tracked upstream manifest during Debian package cleanup.
+  * Development build; persistent activity history and full-sync remain open.
+
+ -- Drive Native contributors <noreply@localhost>  Mon, 02 Nov 2026 10:00:00 +0800
+
 drive-native (0.1.0~dev20261101.6) unstable; urgency=medium
 
   * Show confirmed cold-start directory metadata before whole-tree readiness.

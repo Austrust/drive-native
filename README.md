@@ -1,5 +1,7 @@
 # Drive Native
 
+下一开发批次为[停止恢复、多挂载界面与初始化修复](docs/ISSUES_20261102.md)，对应 issue #1／#2；测试与发布进行中。下面保留当前已发布 `.6` 的身份及验证范围。
+
 当前开发包 `0.1.0~dev20261101.6` 已[发布](https://github.com/Austrust/drive-native/releases/tag/dev20261101.6)，冻结 `7683b36dcbce91b5e6143ef17bb8e97882f0453b`，schema22／IPC18。[冷启动目录预览](docs/INITIALIZATION_PREVIEW.md)让完整接收的目录先显示元数据，正文仍须等全局初始化完成；同时整合[已知目录局部重查](docs/INITIALIZATION_EVENT_EVIDENCE.md)与[目录视图缓存修复](docs/DIRECTORY_VIEW_STAMP.md)。[包验证011](docs/validation/native-package-011/REPORT.md)记录743项Rust、75项GUI，debug／release各20项显式内核测试，以及schema20→22迁移和未上传数据保留。新源码尚无NAS或配对性能实测。
 
 历史开发包 `.5` 的[初始化事件依赖等待与有界恢复](docs/CANDIDATE_EVENT_COVERAGE.md)已[发布](https://github.com/Austrust/drive-native/releases/tag/dev20261101.5)。本包本次真实只读初始化未通过；受控重启续扫完成=True，状态查询异常0次。最终0.266秒正常停止且无遗留挂载；未写NAS。实测期间宿主仍有开发活动，远端变更负载未控制，不作与旧版配对性能或长期验收结论。

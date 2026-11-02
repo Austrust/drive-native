@@ -10,6 +10,8 @@ mod isolation_tests;
 mod namespace;
 mod preview;
 mod read_requests;
+#[cfg(test)]
+mod shutdown_tests;
 mod writable;
 use drive_core::filesystem::FileRecord;
 use drive_core::{Error, Node, ReadHandle, Store};
@@ -66,12 +68,17 @@ impl LocalQueue {
         let _ = self.sender.as_ref().unwrap().try_send(job);
     }
 }
-impl Drop for LocalQueue {
-    fn drop(&mut self) {
+impl LocalQueue {
+    fn drain(&mut self) {
         self.sender.take();
         for t in self.threads.drain(..) {
             let _ = t.join();
         }
+    }
+}
+impl Drop for LocalQueue {
+    fn drop(&mut self) {
+        self.drain();
     }
 }
 #[derive(Clone)]
@@ -228,6 +235,18 @@ fn attr(record: &FileRecord, uid: u32, gid: u32) -> FileAttr {
     }
 }
 impl Filesystem for CacheFilesystem {
+    fn destroy(&mut self) {
+        // No new callbacks are dispatched after destroy. Cancel reads only;
+        // accepted writes, namespace edits and fsync jobs must finish normally.
+        self.reads.cancel_all();
+        self.queue.drain();
+        self.read_queue.drain();
+        // Only read_queue jobs clone this pool; all those jobs are now joined.
+        if let Some(network) = Arc::get_mut(&mut self.network_queue) {
+            network.drain();
+        }
+    }
+
     fn interrupt(&mut self, _req: &Request<'_>, unique: u64, reply: ReplyEmpty) {
         if self.reads.interrupt(unique) {
             reply.ignore_interrupt();

@@ -98,13 +98,85 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }.await;
     service.shutdown();
     progress_task.abort();
-    tokio::task::spawn_blocking(move || {
+    let shutdown_service = service.clone();
+    let mut shutdown = tokio::task::spawn_blocking(move || -> std::io::Result<()> {
+        use drive_runtime::shutdown::Phase;
+        let s = shutdown_service;
+        s.shutdown_diagnostics.phase(Phase::StoppingWorkers);
         tasks.join();
-        if let Some(session) = mounted {
-            session.join();
+        s.bridge.clear_notifier();
+        s.shutdown_diagnostics.phase(Phase::DetachingMount);
+        let session_result = if let Some(session) = mounted {
+            session.join_with_unmount(|| {
+                if let Ok(present) = drive_runtime::mount_registry::mount_present(&s.profile.mount)
+                {
+                    s.mounted.store(present, Ordering::Release);
+                }
+                s.shutdown_diagnostics.phase(Phase::DrainingFilesystem);
+            })
+        } else {
+            Ok(())
+        };
+        // Session destruction has drained all accepted write/fsync callbacks.
+        // Persist drafts even when applications kept their file descriptors open.
+        // This is a local checkpoint, never a server upload or cache clear.
+        s.shutdown_diagnostics.phase(Phase::CheckpointingLocal);
+        let checkpoint = s
+            .bridge
+            .store
+            .lock()
+            .unwrap()
+            .checkpoint_recovered_drafts()
+            .map_err(std::io::Error::other);
+        let present = drive_runtime::mount_registry::mount_present(&s.profile.mount);
+        if let Ok(value) = present.as_ref() {
+            s.mounted.store(*value, Ordering::Release);
         }
-    })
-    .await?;
+        let outcome = session_result.and(checkpoint.map(|_| ())).and_then(|_| {
+            if present? {
+                Err(std::io::Error::other(
+                    "mount remains after session shutdown",
+                ))
+            } else {
+                Ok(())
+            }
+        });
+        s.shutdown_diagnostics.phase(if outcome.is_ok() {
+            Phase::Complete
+        } else {
+            Phase::Failed
+        });
+        outcome
+    });
+    // Keep the local bus responsive and report the precise slow phase; never
+    // turn a timeout into SIGKILL or pretend an unfinished fsync succeeded.
+    let mut warning = tokio::time::interval(Duration::from_millis(500));
+    warning.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut shutdown_observed = None;
+    let mut warned_phase = None;
+    let stopped = loop {
+        tokio::select! {
+            done=&mut shutdown => break done?,
+            _=warning.tick()=>{
+                let snapshot=service.shutdown_diagnostics.snapshot();
+                let observed=(snapshot["phase"].clone(),snapshot["overdue"].clone(),service.mounted.load(Ordering::Acquire));
+                if shutdown_observed.as_ref()!=Some(&observed) {
+                    revision+=1;
+                    if let Ok(emitter)=zbus::object_server::SignalEmitter::new(&conn,OBJECT_PATH) {
+                        let _=Desktop::shutdown_changed(&emitter,revision).await;
+                        let _=Desktop::status_changed(&emitter,revision).await;
+                    }
+                    shutdown_observed=Some(observed);
+                }
+
+                if snapshot["overdue"]==true && warned_phase.as_ref()!=snapshot["phase"].as_str().map(|s|s.to_owned()).as_ref() {
+                    eprintln!("drive-native-fsd: shutdown overdue {}",snapshot);
+                    warned_phase=snapshot["phase"].as_str().map(str::to_owned);
+                }
+            }
+        }
+    };
     drop(registration);
+    stopped?;
     result
 }

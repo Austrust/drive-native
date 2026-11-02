@@ -2,6 +2,54 @@
 use super::*;
 use rusqlite::StatementStatus;
 
+#[test]
+fn repeated_pending_invalidation_skips_coverage_writes_but_clears_fence() {
+    let db = fixture(&["selected", "foreign"]);
+    branches(&db, "selected");
+    branches(&db, "foreign");
+    seal(&db);
+    db.execute_batch("CREATE TEMP TABLE coverage_writes(id TEXT); CREATE TEMP TRIGGER count_coverage_writes AFTER UPDATE ON initialization_directories BEGIN INSERT INTO coverage_writes VALUES(new.id); END;").unwrap();
+    invalidate(&db, "selected", "a", true).unwrap();
+    db.execute("DELETE FROM coverage_writes", []).unwrap();
+    db.execute(
+        "UPDATE initialization_run SET fenced='native-v1:9',fence_ticket=4 WHERE run_id='selected'",
+        [],
+    )
+    .unwrap();
+    invalidate(&db, "selected", "a", true).unwrap();
+    invalidate(&db, "selected", "a", false).unwrap();
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM coverage_writes", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    let fence: (Option<String>, Option<i64>) = db
+        .query_row(
+            "SELECT fenced,fence_ticket FROM initialization_run WHERE run_id='selected'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(fence, (None, None));
+    assert!(invalidate(&db, "selected", "absent", true).is_err());
+    assert!(pending(&db, "foreign").is_empty());
+    // Even a pending row with stale receipt evidence still needs a real write.
+    db.execute(
+        "UPDATE initialization_directories SET receipt_hash='old' WHERE run='selected' AND id='b'",
+        [],
+    )
+    .unwrap();
+    db.execute("DELETE FROM coverage_writes", []).unwrap();
+    invalidate(&db, "selected", "a", true).unwrap();
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM coverage_writes", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+}
+
 fn fixture(runs: &[&str]) -> Connection {
     let db = Connection::open_in_memory().unwrap();
     db.pragma_update(None, "foreign_keys", true).unwrap();

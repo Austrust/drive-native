@@ -59,5 +59,8 @@
     "src/mnt/mod.rs": "43581e23ca9bee71186db5cbdac8ecd1860986aad0a70a4af2753bd9af4bebf2",
     "src/mnt/mount_options.rs": "e55a6e9f88c486219865498b8cff892f6b01f6f2a39c0dca732084dbeec6d6aa"
   },
-  "patch": "drive-native-interrupt.patch"
+  "patch": "drive-native-interrupt.patch",
+  "additional_patches": [
+    "drive-native-session-stop.patch"
+  ]
 }

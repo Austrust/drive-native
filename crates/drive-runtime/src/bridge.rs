@@ -1,8 +1,8 @@
 use crate::{rpc::Rpc, wire::*};
-use drive_core::download_jobs::DownloadFailureKind;
-use drive_core::{Change, DownloadTicket, Node, ReadHandle};
 #[cfg(test)]
 use drive_core::Store;
+use drive_core::download_jobs::DownloadFailureKind;
+use drive_core::{Change, DownloadTicket, Node, ReadHandle};
 use std::{
     collections::HashMap,
     io,
@@ -30,7 +30,10 @@ impl WorkerProcess {
             .stderr(Stdio::inherit())
             .spawn()?;
         match Rpc::new(a) {
-            Ok(rpc) => Ok(Self { rpc: Arc::new(rpc), child }),
+            Ok(rpc) => Ok(Self {
+                rpc: Arc::new(rpc),
+                child,
+            }),
             Err(error) => {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -43,7 +46,10 @@ impl WorkerProcess {
         use std::os::unix::process::ExitStatusExt;
         match self.child.try_wait() {
             Ok(None) => ProcessState::Running,
-            Ok(Some(status)) => ProcessState::Exited { code: status.code(), signal: status.signal() },
+            Ok(Some(status)) => ProcessState::Exited {
+                code: status.code(),
+                signal: status.signal(),
+            },
             Err(_) => ProcessState::QueryFailed,
         }
     }
@@ -127,8 +133,12 @@ impl Bridge {
         let _mutation = self.recovery_gate.read().unwrap();
         let blocked = {
             let mut store = self.store.lock().unwrap();
-            store.bind_native_scope(restore, scope).map_err(io::Error::other)?;
-            store.initialization_writeback_blocked().map_err(io::Error::other)?
+            store
+                .bind_native_scope(restore, scope)
+                .map_err(io::Error::other)?;
+            store
+                .initialization_writeback_blocked()
+                .map_err(io::Error::other)?
         };
         let old = std::mem::replace(&mut *self.connection.lock().unwrap(), rpc);
         old.close();
@@ -139,7 +149,11 @@ impl Bridge {
         Ok(())
     }
 
-    pub fn connect(store: Arc<drive_core::SharedStore>, rpc: Arc<Rpc>, login: Login) -> io::Result<Self> {
+    pub fn connect(
+        store: Arc<drive_core::SharedStore>,
+        rpc: Arc<Rpc>,
+        login: Login,
+    ) -> io::Result<Self> {
         let scope = serde_json::to_string(&login.scope)?;
         let restore = Self::authenticate(&rpc, login)?;
         store
@@ -266,6 +280,10 @@ impl Bridge {
             initialization: Arc::new(crate::initialization::Tracker::default()),
         })
     }
+    /// Release the runtime's /dev/fuse sender once background producers stop.
+    pub fn clear_notifier(&self) {
+        self.notifier.lock().unwrap().take();
+    }
     pub fn set_notifier(&self, notifier: fuser::Notifier) {
         *self.notifier.lock().unwrap() = Some(notifier);
     }
@@ -297,7 +315,8 @@ impl Bridge {
             .phase(crate::initialization::Phase::CatchingUp);
         let _event = self.event_gate.lock().unwrap();
         if self.owner_candidate_pending()? {
-            return self.run_initialization_owner(crate::initialization::RecoveryReason::InitialIndex);
+            return self
+                .run_initialization_owner(crate::initialization::RecoveryReason::InitialIndex);
         }
         let cursor = self
             .store
@@ -598,19 +617,31 @@ impl Bridge {
         self.publish_content(node, flight, &rpc, &mut file, size, &sha256)
     }
     fn publish_content<R: io::Read>(
-        &self, node: &Node, flight: &Flight, rpc: &Arc<Rpc>, file: &mut R,
-        size: u64, sha256: &str,
+        &self,
+        node: &Node,
+        flight: &Flight,
+        rpc: &Arc<Rpc>,
+        file: &mut R,
+        size: u64,
+        sha256: &str,
     ) -> Result<(), (i32, DownloadFailureKind, Option<u32>)> {
         use DownloadFailureKind::*;
-        let ticket = DownloadTicket { id: node.id.clone(), version: node.version.clone() };
-        let preparation = self.store.lock().unwrap()
+        let ticket = DownloadTicket {
+            id: node.id.clone(),
+            version: node.version.clone(),
+        };
+        let preparation = self
+            .store
+            .lock()
+            .unwrap()
             .prepare_download(&ticket)
             .map_err(download_publication_error)?;
         // Body copying, hash validation and all body/directory fsyncs happen
         // without Store. The preparation's reservation protects it from GC.
-        let prepared = preparation.prepare(file, size, sha256, || {
-            !Arc::ptr_eq(rpc, &self.connection()) || self.download_abandoned(node, flight)
-        })
+        let prepared = preparation
+            .prepare(file, size, sha256, || {
+                !Arc::ptr_eq(rpc, &self.connection()) || self.download_abandoned(node, flight)
+            })
             .map_err(|error| match error {
                 drive_core::Error::Io(ref e) if e.kind() == io::ErrorKind::Interrupted => {
                     (libc::EINTR, Transport, None)
@@ -629,7 +660,9 @@ impl Bridge {
         if !Arc::ptr_eq(rpc, &self.connection()) {
             return Err((libc::ENETDOWN, Transport, None));
         }
-        store.publish_prepared_download(prepared).map_err(download_publication_error)?;
+        store
+            .publish_prepared_download(prepared)
+            .map_err(download_publication_error)?;
         let ino = store
             .record(&node.id)
             .map_err(|_| (libc::EIO, LocalStorage, None))?
@@ -901,10 +934,12 @@ impl Bridge {
 }
 fn download_publication_error(error: drive_core::Error) -> (i32, DownloadFailureKind, Option<u32>) {
     match error {
-        drive_core::Error::Db(_) if error.is_not_found() =>
-            (libc::ESTALE, DownloadFailureKind::InvalidContent, None),
-        drive_core::Error::Io(_) | drive_core::Error::Db(_) =>
-            (libc::EIO, DownloadFailureKind::LocalStorage, None),
+        drive_core::Error::Db(_) if error.is_not_found() => {
+            (libc::ESTALE, DownloadFailureKind::InvalidContent, None)
+        }
+        drive_core::Error::Io(_) | drive_core::Error::Db(_) => {
+            (libc::EIO, DownloadFailureKind::LocalStorage, None)
+        }
         _ => (libc::ESTALE, DownloadFailureKind::InvalidContent, None),
     }
 }
@@ -1065,11 +1100,19 @@ impl Bridge {
     /// Reconciliation sends only read queries. Unknown outcomes never re-upload.
     pub fn upload_pending(&self, reconcile: bool) -> io::Result<usize> {
         let _mutation = self.recovery_gate.read().unwrap();
-        if self.session_pending.load(Ordering::Acquire) { return Ok(0); }
+        if self.session_pending.load(Ordering::Acquire) {
+            return Ok(0);
+        }
         // A restored process has a fresh in-memory lock. Only the durable gate
         // prevents it from reconciling or submitting against an incomplete tree.
         // Reconciliation is read-only remotely but changes local operation state.
-        if self.store.lock().unwrap().initialization_writeback_blocked().map_err(io::Error::other)? {
+        if self
+            .store
+            .lock()
+            .unwrap()
+            .initialization_writeback_blocked()
+            .map_err(io::Error::other)?
+        {
             return Ok(0);
         }
         use sha2::Digest;
@@ -1248,7 +1291,10 @@ pub(crate) fn capacity_error(error: &io::Error) -> Option<&'static str> {
 fn operation_error(body: Response) -> io::Error {
     use crate::connection_diagnostics::Cause;
     if let Response::Failed { category } = &body {
-        if matches!(category.as_str(), "native_index_capacity" | "native_response_capacity") {
+        if matches!(
+            category.as_str(),
+            "native_index_capacity" | "native_response_capacity"
+        ) {
             return io::Error::new(io::ErrorKind::InvalidData, category.clone());
         }
     }
@@ -1263,12 +1309,24 @@ fn operation_error(body: Response) -> io::Error {
             "native_response_timeout" => Some(Cause::NativeResponseTimeout),
             _ => None,
         };
-        if let Some(cause) = timeout { return io::Error::new(io::ErrorKind::TimedOut, cause); }
-        if let Some(code) = category.strip_prefix("native_server_code:").and_then(|code| code.parse::<u32>().ok()) {
-            return io::Error::new(io::ErrorKind::InvalidData, Cause::NativeServerRejected(code));
+        if let Some(cause) = timeout {
+            return io::Error::new(io::ErrorKind::TimedOut, cause);
         }
-        if category == "session_expired" { return io::Error::new(io::ErrorKind::NotConnected, Cause::SessionExpired); }
-        if category == "native_cursor_reset" { return io::Error::new(io::ErrorKind::InvalidData, Cause::NativeCursorReset); }
+        if let Some(code) = category
+            .strip_prefix("native_server_code:")
+            .and_then(|code| code.parse::<u32>().ok())
+        {
+            return io::Error::new(
+                io::ErrorKind::InvalidData,
+                Cause::NativeServerRejected(code),
+            );
+        }
+        if category == "session_expired" {
+            return io::Error::new(io::ErrorKind::NotConnected, Cause::SessionExpired);
+        }
+        if category == "native_cursor_reset" {
+            return io::Error::new(io::ErrorKind::InvalidData, Cause::NativeCursorReset);
+        }
     }
     let kind = match body {
         Response::Failed { category }
@@ -1299,19 +1357,31 @@ mod connection_diagnostic_categories {
     fn staged_timeouts_preserve_event_and_download_retry_semantics() {
         for (category, expected) in [
             ("native_receive_idle", Cause::NativeReceiveIdle),
-            ("native_notification_setup_timeout", Cause::NativeSetupTimeout),
+            (
+                "native_notification_setup_timeout",
+                Cause::NativeSetupTimeout,
+            ),
             ("native_send_timeout", Cause::NativeSendTimeout),
             ("native_response_timeout", Cause::NativeResponseTimeout),
         ] {
-            let error = operation_error(Response::Failed { category: category.into() });
+            let error = operation_error(Response::Failed {
+                category: category.into(),
+            });
             assert!(retryable(&error));
             assert_eq!(Cause::from_io(&error), expected);
-            assert_eq!(download_failure_category(category), (DownloadFailureKind::Transport, None));
+            assert_eq!(
+                download_failure_category(category),
+                (DownloadFailureKind::Transport, None)
+            );
         }
-        let error = operation_error(Response::Failed { category: "native_server_code:32772".into() });
+        let error = operation_error(Response::Failed {
+            category: "native_server_code:32772".into(),
+        });
         assert!(!retryable(&error));
         assert_eq!(Cause::from_io(&error), Cause::NativeServerRejected(32772));
-        let error = operation_error(Response::Failed { category: "synthetic-private-input".into() });
+        let error = operation_error(Response::Failed {
+            category: "synthetic-private-input".into(),
+        });
         assert!(!error.to_string().contains("synthetic-private-input"));
         assert_eq!(Cause::from_io(&error), Cause::ProtocolOrLocal);
     }
@@ -1326,8 +1396,11 @@ fn download_failure_category(category: &str) -> (DownloadFailureKind, Option<u32
     }
     (
         match category {
-            "transport" | "native_receive_idle" | "native_notification_setup_timeout"
-                | "native_send_timeout" | "native_response_timeout" => Transport,
+            "transport"
+            | "native_receive_idle"
+            | "native_notification_setup_timeout"
+            | "native_send_timeout"
+            | "native_response_timeout" => Transport,
             "session_expired" => SessionExpired,
             _ => InvalidContent,
         },

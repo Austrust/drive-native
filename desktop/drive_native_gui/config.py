@@ -41,10 +41,10 @@ def load_profile(instance=None):
     return profile
 
 
-def _save_profile(profile):
+def _save_profile(profile, instance=None):
     if profile.get("schema") != 1 or "password" in profile:
         raise ValueError("配置格式不正确")
-    path = config_path()
+    path = config_path(instance)
     path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
     if (
         path.parent.is_symlink()
@@ -86,12 +86,12 @@ def binary(name):
     return str(target)
 
 
-def archive_profile(expected_task):
+def archive_profile(expected_task, instance=None):
     """Called only after the user service has stopped; keep all task data."""
-    current = load_profile()
+    current = load_profile(instance)
     if not current or current.get("task_id") != expected_task:
         raise ValueError("同步配置已经变化，请重新打开客户端。")
-    path = config_path()
+    path = config_path(instance)
     backup = path.with_name(f"profile-backup-{uuid.uuid4()}.json")
     os.rename(path, backup)
     directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
@@ -102,8 +102,8 @@ def archive_profile(expected_task):
     return backup
 
 
-def _restore_profile(backup):
-    path = config_path()
+def _restore_profile(backup, instance=None):
+    path = config_path(instance)
     # Exclusive restoration: never replace a newly configured task.
     os.link(backup, path)
     directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
@@ -170,15 +170,15 @@ def profile_lock():
         os.close(fd)
 
 
-def save_profile(profile):
+def save_profile(profile, instance=None):
     with profile_lock():
         validate_mount_overlap(profile)
-        return _save_profile(profile)
+        return _save_profile(profile, instance)
 
 
-def restore_profile(backup):
+def restore_profile(backup, instance=None):
     with profile_lock():
         with open(backup, encoding="utf-8") as stream:
             profile = json.load(stream)
         validate_mount_overlap(profile)
-        _restore_profile(backup)
+        _restore_profile(backup, instance)

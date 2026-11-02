@@ -26,8 +26,9 @@ from .credentials import secret_job
 class SetupWizard(QDialog):
     configured = Signal(dict, str)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, instance=None, new_name=None):
         super().__init__(parent)
+        self.instance = os.environ.get("DRIVE_NATIVE_INSTANCE", "") if instance is None else instance
         self.setWindowTitle("连接你的 Synology Drive")
         self.resize(680, 600)
         self.client = SetupClient(self)
@@ -80,8 +81,8 @@ class SetupWizard(QDialog):
         choose_layout.addWidget(self.tree, 1)
         self.tree.itemExpanded.connect(self.expand)
         location = QHBoxLayout()
-        name = os.environ.get("DRIVE_NATIVE_NEW_NAME", "Drive")
-        self.mount = QLineEdit(str(Path.home() / "DriveMounts" / name) if os.environ.get("DRIVE_NATIVE_INSTANCE") else str(Path.home() / name))
+        name = new_name or os.environ.get("DRIVE_NATIVE_NEW_NAME", "Drive")
+        self.mount = QLineEdit(str(Path.home() / "DriveMounts" / name) if self.instance else str(Path.home() / name))
         self.mount_name = QLineEdit(name)
         name_row = QHBoxLayout()
         name_row.addWidget(QLabel("挂载名称"))
@@ -266,7 +267,7 @@ class SetupWizard(QDialog):
                 "mount": str(mount.resolve()),
                 "writable": bool(selection.get("writable", False)),
             }
-            save_profile(profile)
+            save_profile(profile, self.instance)
             self.profile = profile
         except (OSError, ValueError) as error:
             self.message.setText(str(error))

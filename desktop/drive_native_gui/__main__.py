@@ -14,22 +14,23 @@ def main():
     parser.add_argument("--task")
     parser.add_argument("--new-name")
     args = parser.parse_args()
-    if args.task is not None:
-        instance = "" if args.task == "legacy" else args.task
-        from .config import config_path
-        config_path(instance)
-        os.environ["DRIVE_NATIVE_INSTANCE"] = instance
-        if args.new_name:
-            os.environ["DRIVE_NATIVE_NEW_NAME"] = args.new_name
     app = QApplication(sys.argv)
     from .theme import install_theme
     install_theme(app)
-    if args.task is not None or os.environ.get("DRIVE_NATIVE_INSTANCE"):
-        from .window import MainWindow
-        window = MainWindow()
-    else:
-        from .manager import MountManager
-        window = MountManager()
+    from .instance import GuiInstance
+    from .manager import MountManager
+    task = args.task or os.environ.get("DRIVE_NATIVE_INSTANCE", "")
+    instance = GuiInstance(app)
+    try:
+        if not instance.claim_or_activate(task, args.new_name or ""):
+            return 0
+    except (ValueError, RuntimeError) as error:
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.warning(None, "Drive Native", str(error))
+        return 1
+    window = MountManager()
+    window.activate(task, args.new_name or "")
+    instance.bind(window.activate)
     window.show()
     return app.exec()
 

@@ -48,7 +48,7 @@ class BackendUpgrade(QObject):
         self.detect_timer.start()
         self.bus.availability.connect(self._availability_changed)
         self.launcher.completed.connect(self._started)
-        QTimer.singleShot(0, self.check)
+        QTimer.singleShot(0, self, self.check)
 
     @property
     def pidfd(self):

@@ -14,7 +14,8 @@ export PYTHONPATH="$project/desktop"
 # synthetic tests; installed desktop/NAS probes remain explicit release gates.
 for module in gui_unit_tests cache_gui_tests conflict_gui_tests hidden_dialog_tests \
     lazy_gui_tests multi_mount_tests trust_gui_tests transfer_gui_tests theme_tests \
-    selector_gui_tests backend_upgrade_test pause_handover_test initialization_gui_tests; do
+    selector_gui_tests backend_upgrade_test pause_handover_test initialization_gui_tests \
+    unified_manager_tests gui_instance_test; do
     printf 'GUI regression: %s\n' "$module"
     "$GUI_PYTHON" "$project/desktop/tests/$module.py"
 done
