@@ -1,6 +1,6 @@
 # 文件时间与原生写回
 
-本批开发源码为 schema 23、IPC 20。以下是实现契约；当前尚待统一构建、Linux 内核测试和授权实验目录中的真实 NAS 核验，不能据此宣称已经修复实机问题。
+本批开发源码为 schema 23、IPC 20。冻结416cc41的[中间包013](validation/native-package-013/REPORT.md)已通过构建、Linux内核及升级测试，[Lab004](validation/native-lab-004/REPORT.md)实际核对了原生写回后的 `touch` 和 `cp -p` 时间与内容；尚未发布，后续FS修改须保持这些契约并通过对应门禁。
 
 ## 文件 mtime
 
