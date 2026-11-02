@@ -1,0 +1,240 @@
+{
+  "benchmark": {
+    "complete": true,
+    "baseline_commit": "036dbeaa98377fe32d26cba681c0254d6cdd8312",
+    "fixed_commit": "a9b424733c2962b950e638fd804837a3a2e447c2",
+    "binaries": {
+      "baseline": "da0174bc8e264aaae29f9029fbfd77cd6ad46c7d895ee49a77b073c541184225",
+      "fixed": "7a076432142001722675ecee4a67be8328b38fa555eb91bef6a62b177988303e",
+      "fsearch": "f69ae223158d77caee697c23bf4c2016571e8b766673c0985b2976877adb5ca5",
+      "audit": "468cd2202eb1fafaa811cfbed201e7151a1510470f92916ba73b2f550db2a0de"
+    },
+    "inputs_sha256": {
+      "summary.json": "3a72d97814d5a828b1c41547e1833d20f2127cee82c9afda503f809383fc6a2a",
+      "manifest.json": "efcdf0f63c265ee6a8ef8d3e585733395c39054bd8c5b9b228dcbf9a5823e564",
+      "result.json": "6821a8d36bdd9b18aa77385c1c64fd1b016d632d3fe4f0a6a0c01d7762a62621"
+    },
+    "verified_scans": 18,
+    "indexed_items_each": 102130,
+    "files": 100064,
+    "directories_including_root": 2066,
+    "missing_extra_duplicate_or_attribute_errors": 0,
+    "hydration_attempts": 0,
+    "timings": {
+      "baseline_first": {
+        "seconds": [
+          172.01096509000126,
+          168.76093903699802,
+          170.16133752500173
+        ],
+        "median_seconds": 170.16133752500173,
+        "min_seconds": 168.76093903699802,
+        "max_seconds": 172.01096509000126
+      },
+      "baseline_repeat": {
+        "seconds": [
+          162.43490484200083,
+          161.59743258300296,
+          163.3553758019989
+        ],
+        "median_seconds": 162.43490484200083,
+        "min_seconds": 161.59743258300296,
+        "max_seconds": 163.3553758019989
+      },
+      "fixed_first": {
+        "seconds": [
+          76.86850015800155,
+          79.67574901300031,
+          78.77267209099955
+        ],
+        "median_seconds": 78.77267209099955,
+        "min_seconds": 76.86850015800155,
+        "max_seconds": 79.67574901300031
+      },
+      "fixed_repeat": {
+        "seconds": [
+          70.05155459300295,
+          70.12263023600099,
+          69.6035145240021
+        ],
+        "median_seconds": 70.05155459300295,
+        "min_seconds": 69.6035145240021,
+        "max_seconds": 70.12263023600099
+      },
+      "local_first": {
+        "seconds": [
+          0.46487255499960156,
+          0.4649463599998853,
+          0.5153996570006711
+        ],
+        "median_seconds": 0.4649463599998853,
+        "min_seconds": 0.46487255499960156,
+        "max_seconds": 0.5153996570006711
+      },
+      "local_repeat": {
+        "seconds": [
+          0.4649685160002264,
+          0.5150405150016013,
+          0.4649814040021738
+        ],
+        "median_seconds": 0.4649814040021738,
+        "min_seconds": 0.4649685160002264,
+        "max_seconds": 0.5150405150016013
+      }
+    },
+    "relative_to_self_built_baseline": {
+      "first": {
+        "baseline_over_fixed_median": 2.1601569809442087,
+        "elapsed_reduction_fraction": 0.5370706810562915
+      },
+      "repeat": {
+        "baseline_over_fixed_median": 2.3187908646102415,
+        "elapsed_reduction_fraction": 0.5687407539583837
+      }
+    },
+    "limits": [
+      "synthetic single-mount original FSearch CLI; no NAS or official client timing",
+      "first means fresh mount/profile, not host page-cache cold; repeat uses same mount/profile",
+      "local is a separate reference filesystem, not a surrogate served to FSearch",
+      "no claim that broader issue5 functional and official-client criteria are complete",
+      "no concurrent WSL compilation, NAS tests or other scans were scheduled; small Windows code/document reads, writes and git checks/commits occurred; host was not entirely idle"
+    ]
+  },
+  "functional": {
+    "complete": true,
+    "input_sha256": "507e03fe9dacd260647c1f12b3e3bf01bdc358ccdcf6799519033088b2f0689e",
+    "source_commit": "416cc41b11fce2774bc8eb1e899e100f3d896b8f",
+    "cancel": {
+      "method": "SIGTERM to own private scan process group; not GUI cancel button",
+      "observed_opendirs": 3,
+      "exit_code": -15,
+      "other_mount_responses": 14,
+      "other_mount_max_seconds": 0.013670046999322949
+    },
+    "hydrations": 0,
+    "local_draft_retained": true,
+    "normal_stops": [
+      {
+        "case": "other",
+        "exit_code": 0,
+        "mount_remaining": false
+      },
+      {
+        "case": "main",
+        "exit_code": 0,
+        "mount_remaining": false
+      }
+    ],
+    "scans": {
+      "restart_full_scan": {
+        "exit_code": 0,
+        "elapsed_seconds": 12.691269101000216,
+        "fresh_index_save_verified": true,
+        "indexed_count": 11630,
+        "missing": 0,
+        "extra": 0,
+        "duplicates": 0,
+        "invalid": 0,
+        "attribute_mismatches": 0,
+        "diagnostic_deltas": {
+          "LookupProjection": {
+            "count": 14210,
+            "total_us": 2389728
+          },
+          "GetattrProjection": {
+            "count": 26973,
+            "total_us": 2326608
+          },
+          "OpendirQueue": {
+            "count": 566,
+            "total_us": 26774
+          },
+          "Releasedir": {
+            "count": 566,
+            "total_us": 1931
+          },
+          "DirectoryCacheHit": {
+            "count": 3,
+            "total_us": 0
+          },
+          "DirectoryCacheMiss": {
+            "count": 563,
+            "total_us": 0
+          },
+          "DirectoryCommit": {
+            "count": 563,
+            "total_us": 2109720
+          }
+        }
+      },
+      "local_changes_full_scan": {
+        "exit_code": 0,
+        "elapsed_seconds": 10.586919203000434,
+        "fresh_index_save_verified": true,
+        "indexed_count": 11630,
+        "missing": 0,
+        "extra": 0,
+        "duplicates": 0,
+        "invalid": 0,
+        "attribute_mismatches": 0,
+        "diagnostic_deltas": {
+          "LookupProjection": {
+            "count": 14210,
+            "total_us": 2462626
+          },
+          "GetattrProjection": {
+            "count": 26973,
+            "total_us": 2357542
+          },
+          "OpendirQueue": {
+            "count": 566,
+            "total_us": 27452
+          },
+          "Releasedir": {
+            "count": 566,
+            "total_us": 1924
+          },
+          "DirectoryCacheHit": {
+            "count": 0,
+            "total_us": 0
+          },
+          "DirectoryCacheMiss": {
+            "count": 566,
+            "total_us": 0
+          },
+          "DirectoryCommit": {
+            "count": 566,
+            "total_us": 3516
+          }
+        }
+      }
+    },
+    "limits": [
+      "functional run overlapped package compilation; timings are not performance comparison",
+      "process-group SIGTERM tested, not FSearch GUI cancel button",
+      "ACL, preview and remote-event freshness are not exercised by original FSearch in this run"
+    ]
+  },
+  "package_source": "416cc41b11fce2774bc8eb1e899e100f3d896b8f",
+  "byte_identity_verification": {
+    "from": "a9b424733c2962b950e638fd804837a3a2e447c2",
+    "to": "416cc41b11fce2774bc8eb1e899e100f3d896b8f",
+    "paths": [
+      "crates/drive-core/src",
+      "crates/drive-fs/src",
+      "crates/sproto/src"
+    ],
+    "git_diff_exit_code": 0
+  },
+  "issue5_status": "open",
+  "failure_history": [
+    {
+      "run": "fixture build 001",
+      "result": "fixed default-feature build failed due missing OptionalExtension import; successful baseline preserved; build002 used corrected frozen source"
+    },
+    {
+      "run": "functional001",
+      "result": "tool source hash loop tried to read __pycache__ directory; failed before any fixture or scan; immutable evidence retained and corrected functional002 passed"
+    }
+  ]
+}
