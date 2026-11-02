@@ -199,7 +199,7 @@ impl Channel {
     /// frames are consumed and their array fields merged into the first frame
     /// before returning.
     pub async fn recv(&mut self) -> Result<PObject> {
-        let mut obj = self.recv_single().await?;
+        let mut obj = self.recv_single(false).await?;
         error::check_server_error(&obj)?;
         let mut frames = 1usize;
         let mut metadata_bytes = metadata_weight(&obj);
@@ -212,7 +212,7 @@ impl Channel {
             if frames > 256 {
                 return Err(Error::Decode("too many continuation frames".into()));
             }
-            let cont = self.recv_single().await?;
+            let cont = self.recv_single(true).await?;
             error::check_server_error(&cont)?;
             metadata_bytes += metadata_weight(&cont);
             if metadata_bytes > 32 * 1024 * 1024 {
@@ -232,10 +232,13 @@ impl Channel {
     }
 
     /// Receive a single `PObject` frame, skipping keep-alives.
-    async fn recv_single(&mut self) -> Result<PObject> {
+    async fn recv_single(&mut self, continuation: bool) -> Result<PObject> {
         loop {
-            let obj = pstream::decode_from(&mut self.reader, None).await?;
-            if !pstream::is_keep_alive(&obj) {
+            let obj =
+                crate::diagnostics::decode(pstream::decode_from(&mut self.reader, None)).await?;
+            let keepalive = pstream::is_keep_alive(&obj);
+            crate::diagnostics::frame(keepalive, continuation && !keepalive);
+            if !keepalive {
                 return Ok(obj);
             }
         }
@@ -259,14 +262,23 @@ impl Channel {
         obj: &PObject,
         deadline: Duration,
     ) -> Result<PObject> {
-        tokio::time::timeout(deadline, self.exchange(scmd, obj))
-            .await
-            .map_err(|_| Error::Timeout("native response"))?
+        crate::diagnostics::request(crate::diagnostics::RequestKind::of(obj), async {
+            tokio::time::timeout(deadline, self.exchange(scmd, obj))
+                .await
+                .map_err(|_| Error::Timeout("native response"))?
+        })
+        .await
     }
 
     async fn exchange(&mut self, scmd: u8, obj: &PObject) -> Result<PObject> {
-        self.send(scmd, obj).await?;
-        let response = self.recv().await?;
+        {
+            let _span = crate::diagnostics::phase(crate::diagnostics::RequestPhase::Send);
+            self.send(scmd, obj).await?;
+        }
+        let response = {
+            let _span = crate::diagnostics::phase(crate::diagnostics::RequestPhase::Receive);
+            self.recv().await?
+        };
         error::check_server_error(&response)?;
         Ok(response)
     }
@@ -280,14 +292,21 @@ impl Channel {
         obj: &PObject,
         idle: Duration,
     ) -> Result<PObject> {
-        tokio::time::timeout(Duration::from_secs(30), self.send(scmd, obj))
-            .await
-            .map_err(|_| Error::Timeout("native request send"))??;
-        let clock = self.reader.get_ref().clock();
-        clock
-            .timeout(idle, self.recv())
-            .await
-            .map_err(|_| Error::Timeout("native receive idle"))?
+        crate::diagnostics::request(crate::diagnostics::RequestKind::of(obj), async {
+            {
+                let _span = crate::diagnostics::phase(crate::diagnostics::RequestPhase::Send);
+                tokio::time::timeout(Duration::from_secs(30), self.send(scmd, obj))
+                    .await
+                    .map_err(|_| Error::Timeout("native request send"))??;
+            }
+            let clock = self.reader.get_ref().clock();
+            let _span = crate::diagnostics::phase(crate::diagnostics::RequestPhase::Receive);
+            clock
+                .timeout(idle, self.recv())
+                .await
+                .map_err(|_| Error::Timeout("native receive idle"))?
+        })
+        .await
     }
 
     /// Receive a download response, streaming any inline file data to `dest`.

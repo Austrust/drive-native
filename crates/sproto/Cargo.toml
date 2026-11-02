@@ -25,6 +25,7 @@ required-features = ["protocol-research"]
 bytes = "1"
 macon = "1"
 tracing = "0.1"
+serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 tempfile = "3"
 md4 = "0.10"

@@ -106,13 +106,19 @@ fn team_catalog_fields() -> PObject {
 }
 
 fn parse_team_catalog(response: &PObject, user: &PObject) -> Result<Vec<ShareInfo>> {
-    let teams = response.get("view_list").and_then(PObject::as_array)
+    let teams = response
+        .get("view_list")
+        .and_then(PObject::as_array)
         .ok_or_else(|| Error::Decode("missing team view_list".into()))?;
-    let views = user.get("view_list").and_then(PObject::as_array)
+    let views = user
+        .get("view_list")
+        .and_then(PObject::as_array)
         .ok_or_else(|| Error::Decode("missing sync view_list".into()))?;
     let mut identities = BTreeMap::new();
     for view in views {
-        let map = view.as_map().ok_or_else(|| Error::Decode("invalid sync view".into()))?;
+        let map = view
+            .as_map()
+            .ok_or_else(|| Error::Decode("invalid sync view".into()))?;
         let id = required_int(map, "view_id")?;
         if identities.insert(id, map).is_some() {
             return Err(Error::Decode("duplicate sync view identity".into()));
@@ -141,7 +147,6 @@ fn parse_team_catalog(response: &PObject, user: &PObject) -> Result<Vec<ShareInf
     }
     Ok(shares)
 }
-
 
 /// List directory contents using `list_sync_to_device`.
 /// Returns all children (no pagination) + a cursor for change detection.
@@ -172,6 +177,7 @@ pub(crate) async fn list_sync_to_device(
     }
     let request = client.build_request("list_sync_to_device", fields);
     let resp = ch.request(frame::SCMD_LIST, &request).await?;
+    let _parse = crate::diagnostics::parsing();
 
     let new_cursor = resp
         .get("cursor")
@@ -185,12 +191,14 @@ pub(crate) async fn list_sync_to_device(
             nodes.push(parse_node_info(node)?);
         }
     } else if resp.get("node_list").is_none() && cursor == Some(new_cursor.as_str()) {
+        crate::diagnostics::page(0);
         return Ok(DirectoryListing::Unchanged { cursor: new_cursor });
     } else {
         return Err(Error::Decode(
             "missing node_list for a changed directory".into(),
         ));
     }
+    crate::diagnostics::page(nodes.len());
     Ok(DirectoryListing::Snapshot {
         nodes,
         cursor: new_cursor,
@@ -231,6 +239,7 @@ pub(crate) async fn list(
             },
         );
         let resp = ch.request(frame::SCMD_LIST, &request).await?;
+        let parsing = crate::diagnostics::parsing();
 
         let node_list = resp
             .get("node_list")
@@ -270,6 +279,8 @@ pub(crate) async fn list(
             }
             all_nodes.push(node);
         }
+        crate::diagnostics::page(node_list.len());
+        drop(parsing);
 
         #[cfg(feature = "protocol-research")]
         super::list_observer::at_page(super::list_observer::PageBoundary {
@@ -434,43 +445,71 @@ mod recorded_snapshot_pages {
 #[cfg(test)]
 mod team_catalog_tests {
     use super::*;
-    fn team(id:u64, write:bool) -> PObject {
+    fn team(id: u64, write: bool) -> PObject {
         pmap! {"view_id"=>id,"file_id"=>format!("file-{id}"),"name"=>"team",
-            "disable_download"=>0u64,"capabilities"=>pmap!{
-                "can_write"=>write,"can_sync"=>true,"can_download"=>true}}
+        "disable_download"=>0u64,"capabilities"=>pmap!{
+            "can_write"=>write,"can_sync"=>true,"can_download"=>true}}
     }
-    fn view(id:u64, node:u64, privilege:&str) -> PObject {
+    fn view(id: u64, node: u64, privilege: &str) -> PObject {
         pmap! {"view_id"=>id,"node_id"=>node,"privilege"=>privilege,"disable_download"=>0u64}
     }
-    fn list(items:Vec<PObject>)->PObject {pmap!{"view_list"=>PObject::Array(items)}}
+    fn list(items: Vec<PObject>) -> PObject {
+        pmap! {"view_list"=>PObject::Array(items)}
+    }
     #[test]
     fn unlimited_catalog_omits_zero_limit_like_official_linux() {
-        let fields=team_catalog_fields();
+        let fields = team_catalog_fields();
         assert!(fields.get("limit").is_none());
         assert!(fields.get("offset").is_none());
-        assert_eq!(fields.get("sort_by").and_then(PObject::as_str),Some("name"));
+        assert_eq!(
+            fields.get("sort_by").and_then(PObject::as_str),
+            Some("name")
+        );
     }
     #[test]
     fn separate_native_responses_join_by_view_not_order_or_name() {
-        let teams=list(vec![team(14,false),team(12,true)]);
-        let views=list(vec![view(12,71,"read-write"),view(999,9,"denied"),view(14,82,"read-write")]);
-        let result=parse_team_catalog(&teams,&views).unwrap();
-        assert_eq!(result.len(),2);
-        assert_eq!(result[0].node_id,Some(82));assert!(!result[0].writable);
-        assert_eq!(result[1].node_id,Some(71));assert!(result[1].writable);
-        assert!(result.iter().all(|s|s.can_download&&s.can_sync));
+        let teams = list(vec![team(14, false), team(12, true)]);
+        let views = list(vec![
+            view(12, 71, "read-write"),
+            view(999, 9, "denied"),
+            view(14, 82, "read-write"),
+        ]);
+        let result = parse_team_catalog(&teams, &views).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].node_id, Some(82));
+        assert!(!result[0].writable);
+        assert_eq!(result[1].node_id, Some(71));
+        assert!(result[1].writable);
+        assert!(result.iter().all(|s| s.can_download && s.can_sync));
     }
     #[test]
     fn missing_denied_and_readonly_views_never_gain_write_access() {
-        let result=parse_team_catalog(&list(vec![team(1,true),team(2,true),team(3,true)]),
-            &list(vec![view(2,7,"denied"),view(3,8,"read-only")])).unwrap();
-        assert!(result.iter().all(|s|!s.writable));
-        assert!(!result[0].can_sync);assert!(!result[1].can_sync);assert!(result[2].can_sync);
-        assert_eq!(result[0].node_id,None);
+        let result = parse_team_catalog(
+            &list(vec![team(1, true), team(2, true), team(3, true)]),
+            &list(vec![view(2, 7, "denied"), view(3, 8, "read-only")]),
+        )
+        .unwrap();
+        assert!(result.iter().all(|s| !s.writable));
+        assert!(!result[0].can_sync);
+        assert!(!result[1].can_sync);
+        assert!(result[2].can_sync);
+        assert_eq!(result[0].node_id, None);
     }
     #[test]
     fn ambiguous_view_identity_is_rejected() {
-        assert!(parse_team_catalog(&list(vec![team(1,true)]),&list(vec![view(1,2,"read-write"),view(1,3,"read-write")])).is_err());
-        assert!(parse_team_catalog(&list(vec![team(1,true),team(1,true)]),&list(vec![view(1,2,"read-write")])).is_err());
+        assert!(
+            parse_team_catalog(
+                &list(vec![team(1, true)]),
+                &list(vec![view(1, 2, "read-write"), view(1, 3, "read-write")])
+            )
+            .is_err()
+        );
+        assert!(
+            parse_team_catalog(
+                &list(vec![team(1, true), team(1, true)]),
+                &list(vec![view(1, 2, "read-write")])
+            )
+            .is_err()
+        );
     }
 }

@@ -310,7 +310,18 @@ pub async fn serve(socket: UnixStream) -> io::Result<()> {
                             // Metadata travels as one bounded, checksummed FD
                             // payload, never as lossy IndexProgress messages.
                             // The common command gate rejects incoming FDs.
-                            let reply = session.initialization(request).await?;
+                            let capture = sproto::diagnostics::Capture::new();
+                            let reply = sproto::diagnostics::scope(capture.clone(), session.initialization(request)).await;
+                            // Reliable before success OR failure. No payload, IDs
+                            // or credentials; this message is not a checkpoint.
+                            let diagnostics = capture.snapshot();
+                            let diagnostics_output = output.clone();
+                            tokio::task::spawn_blocking(move || diagnostics_output.send((
+                                Envelope { version: VERSION, id: request_id,
+                                    body: Response::InitializationDiagnostics(diagnostics) }, None)))
+                                .await.map_err(|_| drive_core::Error::State("diagnostics task failed".into()))?
+                                .map_err(|_| drive_core::Error::State("IPC output closed".into()))?;
+                            let reply = reply?;
                             let payload = tokio::task::spawn_blocking(move || {
                                 initialization_payload(&reply, staging.path(), 512 * 1024 * 1024)
                             }).await.map_err(|_| drive_core::Error::State("initialization payload task failed".into()))??;

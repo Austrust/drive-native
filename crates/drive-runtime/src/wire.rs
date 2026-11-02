@@ -1,6 +1,6 @@
 use drive_core::{Batch, Node, native::Scope};
 use serde::{Deserialize, Serialize};
-pub const VERSION: u16 = 18;
+pub const VERSION: u16 = 19;
 // 30 s channel acquisition + 30 s send + 600 s receive idle + 30 s IPC margin.
 pub const NOTIFICATION_IDLE: std::time::Duration = std::time::Duration::from_secs(690);
 // Deliberately no Debug: authentication material must not enter diagnostics.
@@ -67,6 +67,7 @@ pub enum Command {
 }
 #[derive(Serialize, Deserialize)]
 pub enum Response {
+    InitializationDiagnostics(sproto::diagnostics::Snapshot),
     IndexProgress(drive_core::snapshot_progress::Progress),
     /// Actual received bytes only. CLOCK_MONOTONIC is shared by these local
     /// processes; queued notifications cannot manufacture fresh activity.

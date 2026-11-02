@@ -6,6 +6,9 @@ use std::{
 };
 use tokio::io::AsyncWrite;
 use uuid::Uuid;
+#[cfg(test)]
+#[path = "diagnostics_client_tests.rs"]
+mod diagnostics_tests;
 
 use crate::{
     Error, actions,
@@ -326,9 +329,12 @@ impl Client {
 
     /// List directory contents using the `list` action (paginated).
     pub async fn list_dir(&self, view_id: u64, path: &str) -> Result<Vec<actions::list::NodeInfo>> {
-        let mut guard = self.pool.acquire().await?;
-        let result = actions::list::list(guard.channel(), self, view_id, path).await;
-        guard.poison_on_err(result)
+        crate::diagnostics::directory(async {
+            let mut guard = self.pool.acquire().await?;
+            let result = actions::list::list(guard.channel(), self, view_id, path).await;
+            guard.poison_on_err(result)
+        })
+        .await
     }
 
     /// List directory contents for sync using `list_sync_to_device`.

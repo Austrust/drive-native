@@ -185,6 +185,7 @@ fn translate_initialization(
     batch: EventBatch,
 ) -> Result<Option<InitializationEventPage>> {
     let Some((batch, hints)) = translate_events(scope, restore, from, batch, true)? else {
+        sproto::diagnostics::record_pull_projection(None);
         return Ok(None);
     };
     let page = InitializationEventPage {
@@ -194,6 +195,7 @@ fn translate_initialization(
         restore: restore.into(),
     };
     page.validate()?;
+    sproto::diagnostics::record_pull_projection(Some(page.batch.events.len()));
     Ok(Some(page))
 }
 
@@ -528,6 +530,55 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+    #[tokio::test]
+    async fn stationary_events_are_observed_as_nonempty_not_as_missing_subscription() {
+        let capture = sproto::diagnostics::Capture::new();
+        sproto::diagnostics::scope(capture.clone(), async {
+            let batch = batch(event(), 5);
+            // Emulate the validated parser observation, then exercise the real
+            // initialization translator without altering its None contract.
+            sproto::diagnostics::record_pull_response(batch.events.len(), false, false);
+            assert!(
+                translate_initialization(&scope(), "s", "native-v1:5", batch)
+                    .unwrap()
+                    .is_none()
+            );
+        })
+        .await;
+        let snapshot = capture.snapshot();
+        assert!(snapshot.valid());
+        assert_eq!(snapshot.pull.raw_event_count, 1);
+        assert_eq!(snapshot.pull.raw_empty_responses, 0);
+        assert_eq!(snapshot.pull.no_advance_results, 1);
+        assert_eq!(snapshot.pull.projected_pages, 0);
+    }
+    #[tokio::test]
+    async fn advancing_empty_initialization_page_counts_projection_once() {
+        let capture = sproto::diagnostics::Capture::new();
+        sproto::diagnostics::scope(capture.clone(), async {
+            sproto::diagnostics::record_pull_response(0, true, false);
+            let page = translate_initialization(
+                &scope(),
+                "s",
+                "native-v1:4",
+                EventBatch {
+                    events: vec![],
+                    next: EventCursor(5),
+                    recovery_required: false,
+                },
+            )
+            .unwrap()
+            .unwrap();
+            assert!(page.batch.events.is_empty());
+        })
+        .await;
+        let snapshot = capture.snapshot();
+        assert!(snapshot.valid());
+        assert_eq!(snapshot.pull.responses, 1);
+        assert_eq!(snapshot.pull.projected_pages, 1);
+        assert_eq!(snapshot.pull.projected_empty_pages, 1);
+        assert_eq!(snapshot.pull.no_advance_results, 0);
     }
     #[test]
     fn unknown_recovery_scope_and_symlinks_fail_closed() {

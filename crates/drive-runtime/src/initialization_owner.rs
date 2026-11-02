@@ -1,8 +1,10 @@
 //! FSD-owned initialization. Replies are repeatable reads, not checkpoints;
 //! the next request is issued only after the prior receipt is committed locally.
 use super::*;
+use crate::initialization_metrics::{Counter, Stage};
+#[cfg(test)]
+use drive_core::Batch;
 use drive_core::{
-    Batch,
     initialization_events::InitializationEventPage,
     initialization_store::{
         InitializationApplyResult, InitializationBinding, InitializationBudget, InitializationRun,
@@ -47,6 +49,14 @@ fn number(cursor: &str) -> io::Result<u64> {
 }
 
 impl Bridge {
+    fn initialization_store(&self) -> drive_core::shared_store::StoreGuard<'_> {
+        let _span = self.initialization.work.span(Stage::StoreWait);
+        self.store.lock().unwrap()
+    }
+    fn initialization_writer(&self) -> std::sync::RwLockWriteGuard<'_, ()> {
+        let _span = self.initialization.work.span(Stage::RecoveryWait);
+        self.recovery_gate.write().unwrap()
+    }
     pub(crate) fn enable_initialization_owner(&self, task: &str) -> io::Result<()> {
         uuid::Uuid::parse_str(task).map_err(|_| invalid("invalid initialization task identity"))?;
         let mut current = self.initialization_task.lock().unwrap();
@@ -76,11 +86,11 @@ impl Bridge {
         }
         // Never hold Service::Control here: Pause must be able to cancel the old
         // RPC while a mutation drains. No network operation holds this writer.
-        let _writes = self.recovery_gate.write().unwrap();
+        let _writes = self.initialization_writer();
         if !rpc.is_connected() {
             return Err(io::ErrorKind::NotConnected.into());
         }
-        let mut store = self.store.lock().unwrap();
+        let mut store = self.initialization_store();
         if let Some((old_restore, old_scope)) =
             store.native_scope_binding().map_err(io::Error::other)?
         {
@@ -130,7 +140,7 @@ impl Bridge {
             return Ok(false);
         }
         let session = self.session()?;
-        let store = self.store.lock().unwrap();
+        let store = self.initialization_store();
         Ok(store
             .initialization_writeback_blocked()
             .map_err(io::Error::other)?
@@ -143,10 +153,10 @@ impl Bridge {
         if self.initialization_task.lock().unwrap().is_none() {
             return Ok(());
         }
-        let _writes = self.recovery_gate.write().unwrap();
+        let _writes = self.initialization_writer();
         self.current(rpc)?;
         let session = self.session()?;
-        let store = self.store.lock().unwrap();
+        let store = self.initialization_store();
         if store
             .initialization_writeback_blocked()
             .map_err(io::Error::other)?
@@ -167,7 +177,7 @@ impl Bridge {
         let reason = if self.owner_candidate_pending()? {
             Some(crate::initialization::RecoveryReason::InitialIndex)
         } else {
-            let store = self.store.lock().unwrap();
+            let store = self.initialization_store();
             if store.cursor().map_err(io::Error::other)?.is_empty() {
                 Some(crate::initialization::RecoveryReason::InitialIndex)
             } else if store.inaccessible_count().map_err(io::Error::other)? > 0 {
@@ -202,7 +212,20 @@ impl Bridge {
                 )
             })?
             .min(Duration::from_secs(900));
-        let response = rpc.call(Command::Initialization(request), timeout)?;
+        let stage = match &request {
+            Request::Seed => Stage::RpcSeed,
+            Request::Root => Stage::RpcRoot,
+            Request::Directory { .. } => Stage::RpcDirectory,
+            Request::Pull { .. } => Stage::RpcPull,
+        };
+        let timer = self.initialization.work.span(stage);
+        let tracker = self.initialization.clone();
+        let response = rpc.call_initialization(
+            request,
+            timeout,
+            Arc::new(move |snapshot| tracker.work.native(snapshot)),
+        )?;
+        drop(timer);
         let (size, hash) = match response.body {
             Response::Initialization { size, sha256 } if size <= 512 * 1024 * 1024 => {
                 (size, sha256)
@@ -227,6 +250,7 @@ impl Bridge {
         let descriptor = response
             .descriptor
             .ok_or_else(|| invalid("initialization descriptor absent"))?;
+        let decode = self.initialization.work.span(Stage::PayloadDecode);
         let reply = decode_reply(std::fs::File::from(descriptor), size, &hash)?;
         if reply.scope != session.scope || reply.restore != session.restore {
             return Err(invalid("initialization response session mismatch"));
@@ -240,6 +264,18 @@ impl Bridge {
             page.validate().map_err(io::Error::other)?;
         }
         self.current(rpc)?;
+        drop(decode);
+        match &reply.body {
+            // No watermark advancement; this is not proof of an empty wire page.
+            Body::Events(None) => self.initialization.work.count(Counter::PullNoAdvance, 1),
+            Body::Events(Some(page)) => {
+                self.initialization.work.count(Counter::PullPages, 1);
+                self.initialization
+                    .work
+                    .count(Counter::PullEvents, page.batch.events.len() as u64);
+            }
+            _ => {}
+        }
         Ok(reply.body)
     }
 
@@ -250,11 +286,12 @@ impl Bridge {
         batch: Option<InitializationEventPage>,
         directory_race: bool,
     ) -> io::Result<bool> {
-        let _writes = self.recovery_gate.write().unwrap();
+        let _writes = self.initialization_writer();
         self.current(rpc)?;
-        let mut store = self.store.lock().unwrap();
+        let mut store = self.initialization_store();
         let mut changed = false;
         if let Some(batch) = batch {
+            let _span = self.initialization.work.span(Stage::EventCollect);
             let status = store
                 .initialization_status()
                 .map_err(io::Error::other)?
@@ -276,6 +313,7 @@ impl Bridge {
         // Crash after receipt before apply is safe: replay the saved body before
         // requesting another page, never skip to a fresh server watermark.
         let awaiting = loop {
+            let _span = self.initialization.work.span(Stage::EventApply);
             let pending = store
                 .initialization_next_pending_sequence(run)
                 .map_err(io::Error::other)?;
@@ -292,11 +330,15 @@ impl Bridge {
             };
             match applied.map_err(io::Error::other)? {
                 InitializationApplyResult::AwaitingCoverage => {
+                    self.initialization.work.count(Counter::AwaitingCoverage, 1);
                     // Do not retry the same durable batch under the Store lock.
                     // Enumerate before attempting application again.
                     break true;
                 }
-                InitializationApplyResult::Applied => changed = true,
+                InitializationApplyResult::Applied => {
+                    self.initialization.work.count(Counter::AppliedPages, 1);
+                    changed = true;
+                }
                 InitializationApplyResult::AlreadyApplied => {
                     return Err(invalid("candidate pending event already applied"));
                 }
@@ -341,9 +383,9 @@ impl Bridge {
                     if !crate::connection_diagnostics::retryable(&error)
                         && self.current(&rpc).is_ok()
                     {
-                        let _writes = self.recovery_gate.write().unwrap();
+                        let _writes = self.initialization_writer();
                         self.current(&rpc)?;
-                        let mut store = self.store.lock().unwrap();
+                        let mut store = self.initialization_store();
                         if let Some(status) =
                             store.initialization_status().map_err(io::Error::other)?
                         {
@@ -386,18 +428,16 @@ impl Bridge {
         coverage_escapes: &mut usize,
     ) -> io::Result<()> {
         let existing = self
-            .store
-            .lock()
-            .unwrap()
+            .initialization_store()
             .initialization_status()
             .map_err(io::Error::other)?;
         let resume = existing.as_ref().is_some_and(|state| {
             state.state != "ready" && !restart && state.binding.restore == session.restore
         });
         let (run, resumed) = if resume {
-            let _writes = self.recovery_gate.write().unwrap();
+            let _writes = self.initialization_writer();
             self.current(rpc)?;
-            let mut store = self.store.lock().unwrap();
+            let mut store = self.initialization_store();
             let state = existing.as_ref().unwrap();
             if state.binding.task_id != session.task
                 || state.binding.scope != serde_json::to_value(&session.scope)?
@@ -419,9 +459,9 @@ impl Bridge {
                     _ => return Err(invalid("expected initialization seed")),
                 };
             self.initialization.activity();
-            let _writes = self.recovery_gate.write().unwrap();
+            let _writes = self.initialization_writer();
             self.current(rpc)?;
-            let mut store = self.store.lock().unwrap();
+            let mut store = self.initialization_store();
             let expected_cursor = store.cursor().map_err(io::Error::other)?;
             let binding = InitializationBinding {
                 task_id: session.task.clone(),
@@ -462,7 +502,7 @@ impl Bridge {
             }
         };
         let (status, same_restore) = {
-            let store = self.store.lock().unwrap();
+            let store = self.initialization_store();
             (
                 store
                     .initialization_status()
@@ -489,9 +529,9 @@ impl Bridge {
                 deadline,
             ) {
                 Err(error) if matches!(recheck(&error), Some(Recheck::Cursor)) => {
-                    let _writes = self.recovery_gate.write().unwrap();
+                    let _writes = self.initialization_writer();
                     self.current(rpc)?;
-                    let mut store = self.store.lock().unwrap();
+                    let mut store = self.initialization_store();
                     let base = store
                         .native_scope_binding()
                         .map_err(io::Error::other)?
@@ -510,12 +550,24 @@ impl Bridge {
             }
         }
         if resumed {
+            self.initialization.work.count(Counter::Resumed, 1);
             self.refresh_candidate_root(rpc, session, &run, deadline)?;
+        } else {
+            self.initialization.work.count(Counter::Restarted, 1);
         }
         let mut awaiting_coverage = self.apply_candidate_events(rpc, &run, None, false)?;
         let mut directories = 0u64;
         let mut pages = 0usize;
         loop {
+            if self.initialization.work.queue_due() {
+                let store = self.initialization_store();
+                let _span = self.initialization.work.span(Stage::QueueSample);
+                self.initialization.work.queue(
+                    store
+                        .initialization_queue_summary(&run)
+                        .map_err(io::Error::other)?,
+                );
+            }
             // Native events, not a periodic full-tree scan. Interleave durable
             // catchup with a bounded amount of directory work.
             self.initialization
@@ -527,9 +579,7 @@ impl Bridge {
                     break;
                 }
                 let state = self
-                    .store
-                    .lock()
-                    .unwrap()
+                    .initialization_store()
                     .initialization_status()
                     .map_err(io::Error::other)?
                     .ok_or_else(|| invalid("candidate absent"))?;
@@ -554,9 +604,7 @@ impl Bridge {
                 }
             }
             let state = self
-                .store
-                .lock()
-                .unwrap()
+                .initialization_store()
                 .initialization_status()
                 .map_err(io::Error::other)?
                 .ok_or_else(|| invalid("candidate absent"))?;
@@ -564,143 +612,15 @@ impl Bridge {
                 self.refresh_candidate_root(rpc, session, &run, deadline)?;
             }
             let directories_before = directories;
-            let mut coverage_race = false;
-            for _ in 0..4 {
-                let jobs = {
-                    let _writes = self.recovery_gate.write().unwrap();
-                    self.current(rpc)?;
-                    let mut store = self.store.lock().unwrap();
-                    let nodes = store
-                        .initialization_pending_directories(&run, 4)
-                        .map_err(io::Error::other)?;
-                    let mut jobs = Vec::new();
-                    for node in nodes {
-                        let path = store
-                            .initialization_directory_path(&run, &node.id)
-                            .map_err(io::Error::other)?;
-                        let ticket = store
-                            .begin_initialization_directory(&run, &node.id)
-                            .map_err(io::Error::other)?;
-                        jobs.push((node, path, ticket));
-                    }
-                    jobs
-                };
-                if jobs.is_empty() {
-                    break;
-                }
-                self.initialization
-                    .phase(crate::initialization::Phase::Enumerating);
-                // At most four network reads; the sole owner commits receipts.
-                // No Store/recovery guard is held across network waits. Events
-                // are applied only between these bounded groups of requests.
-                let receipts = std::thread::scope(|threads| {
-                    let mut pending = Vec::new();
-                    for (node, path, mut ticket) in jobs {
-                        let run = &run;
-                        pending.push(threads.spawn(move || {
-                            let result = (|| {
-                                for attempt in 0..3 {
-                                    match self.initialization_read(
-                                        rpc,
-                                        session,
-                                        Request::Directory {
-                                            node: node.clone(),
-                                            path: path.clone(),
-                                        },
-                                        deadline,
-                                    ) {
-                                        Err(error)
-                                            if matches!(
-                                                recheck(&error),
-                                                Some(Recheck::Directory)
-                                            ) && attempt < 2 =>
-                                        {
-                                            let _writes = self.recovery_gate.write().unwrap();
-                                            self.current(rpc)?;
-                                            ticket = self
-                                                .store
-                                                .lock()
-                                                .unwrap()
-                                                .begin_initialization_directory(run, &node.id)
-                                                .map_err(io::Error::other)?;
-                                        }
-                                        result => return result,
-                                    }
-                                }
-                                unreachable!()
-                            })();
-                            (node, ticket, result)
-                        }));
-                    }
-                    pending
-                        .into_iter()
-                        .map(|thread| {
-                            thread
-                                .join()
-                                .map_err(|_| io::Error::other("initialization read task failed"))
-                        })
-                        .collect::<io::Result<Vec<_>>>()
-                })?;
-                for (node, ticket, result) in receipts {
-                    let count = {
-                        let _writes = self.recovery_gate.write().unwrap();
-                        self.current(rpc)?;
-                        let mut store = self.store.lock().unwrap();
-                        if !store
-                            .initialization_directory_ticket_current(&ticket)
-                            .map_err(io::Error::other)?
-                        {
-                            continue;
-                        }
-                        let body = match result {
-                            Err(error)
-                                if awaiting_coverage
-                                    && matches!(recheck(&error), Some(Recheck::Directory)) =>
-                            {
-                                coverage_race = true;
-                                continue;
-                            }
-                            other => other?,
-                        };
-                        let (identity, children, denied) = match body {
-                            Body::Directory {
-                                identity,
-                                children,
-                                denied,
-                            } => (identity, children, denied),
-                            _ => return Err(invalid("expected directory receipt")),
-                        };
-                        if identity != node.id || (denied && !children.is_empty()) {
-                            return Err(invalid("directory receipt identity mismatch"));
-                        }
-                        if denied {
-                            store
-                                .store_initialization_denied(&ticket, 1)
-                                .map_err(io::Error::other)?;
-                        } else {
-                            store
-                                .store_initialization_native_directory(&ticket, 1, &children)
-                                .map_err(io::Error::other)?;
-                        }
-                        store
-                            .initialization_status()
-                            .map_err(io::Error::other)?
-                            .ok_or_else(|| invalid("candidate absent"))?
-                            .node_count
-                    };
-                    directories += 1;
-                    self.initialization.index(Progress {
-                        attempt,
-                        phase: Phase::Enumerate,
-                        units: directories,
-                        items: count,
-                        retry_reason: None,
-                    });
-                }
-                if coverage_race {
-                    break;
-                }
-            }
+            let coverage_race = self.initialization_directory_window(
+                rpc,
+                session,
+                &run,
+                deadline,
+                awaiting_coverage,
+                attempt,
+                &mut directories,
+            )?;
             if coverage_race {
                 // All reads in this group have joined. Invalidate after their
                 // receipts so none can overwrite the newly scheduled recheck.
@@ -708,6 +628,7 @@ impl Bridge {
                     return Err(invalid("initialization coverage race budget exceeded"));
                 }
                 *coverage_escapes += 1;
+                self.initialization.work.count(Counter::CoverageRace, 1);
                 awaiting_coverage = self.apply_candidate_events(rpc, &run, None, true)?;
                 continue;
             }
@@ -724,9 +645,7 @@ impl Bridge {
                 continue;
             }
             if !self
-                .store
-                .lock()
-                .unwrap()
+                .initialization_store()
                 .initialization_pending_directories(&run, 1)
                 .map_err(io::Error::other)?
                 .is_empty()
@@ -734,11 +653,11 @@ impl Bridge {
                 continue;
             }
             let ticket = {
-                let _writes = self.recovery_gate.write().unwrap();
+                self.initialization.work.count(Counter::FenceAttempts, 1);
+                let _writes = self.initialization_writer();
                 self.current(rpc)?;
-                self.store
-                    .lock()
-                    .unwrap()
+                let _span = self.initialization.work.span(Stage::FinalCheck);
+                self.initialization_store()
                     .begin_initialization_fence(&run)
                     .map_err(io::Error::other)?
             };
@@ -761,11 +680,12 @@ impl Bridge {
                 _ => return Err(invalid("expected initialization fence")),
             }
             let invalidations = {
-                let _writes = self.recovery_gate.write().unwrap();
+                let _writes = self.initialization_writer();
                 self.current(rpc)?;
                 self.initialization
                     .phase(crate::initialization::Phase::Importing);
-                let mut store = self.store.lock().unwrap();
+                let mut store = self.initialization_store();
+                let _span = self.initialization.work.span(Stage::FinalCommit);
                 store
                     .confirm_initialization_fence(&ticket, ticket.cursor())
                     .map_err(io::Error::other)?;
@@ -775,6 +695,7 @@ impl Bridge {
                     .map_err(io::Error::other)?;
                 invalidations.extend(store.snapshot_invalidations().map_err(io::Error::other)?);
                 self.session_pending.store(false, Ordering::Release);
+                self.initialization.work.count(Counter::Checkpoints, 1);
                 invalidations
             };
             for (inode, parent, name) in invalidations {
@@ -790,6 +711,253 @@ impl Bridge {
             return Ok(());
         }
     }
+    /// Four network reads, as before, but completed receipts commit immediately
+    /// and refill the freed slot. Each event window admits at most sixteen jobs.
+    /// Network waits never hold the Store; events still apply between windows.
+    fn initialization_directory_window(
+        &self,
+        rpc: &Arc<Rpc>,
+        session: &Session,
+        run: &InitializationRun,
+        deadline: Instant,
+        awaiting_coverage: bool,
+        attempt: u8,
+        directories: &mut u64,
+    ) -> io::Result<bool> {
+        use drive_core::initialization_store::InitializationDirectoryClaim;
+        let mut coverage_race = false;
+        let mut first_error = None;
+        std::thread::scope(|threads| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let mut in_flight = 0usize;
+            let mut admitted = 0usize;
+            let mut handles = Vec::new();
+            loop {
+                if first_error.is_none() && !coverage_race && admitted < 16 && in_flight < 4 {
+                    let mut after = None;
+                    // Bound each lock hold and yield between indexed pages. An
+                    // exhausted scan is not coverage: the existing fence checks
+                    // every directory after the window has drained.
+                    loop {
+                        let page = (|| {
+                            let _writes = self.initialization_writer();
+                            self.current(rpc)?;
+                            let mut store = self.initialization_store();
+                            let _span = self.initialization.work.span(Stage::Scheduling);
+                            store
+                                .claim_initialization_directories(
+                                    run,
+                                    (4 - in_flight).min(16 - admitted),
+                                    after.as_ref(),
+                                )
+                                .map_err(io::Error::other)
+                        })();
+                        let page = match page {
+                            Ok(page) => page,
+                            Err(error) => {
+                                first_error = Some(error);
+                                break;
+                            }
+                        };
+                        let work = &self.initialization.work;
+                        work.count(Counter::ClaimPages, 1);
+                        work.count(Counter::ClaimExamined, page.stats.examined as u64);
+                        work.count(
+                            Counter::ClaimAncestorPromotions,
+                            page.stats.ancestor_promotions as u64,
+                        );
+                        work.count(Counter::ClaimCoalesced, page.stats.coalesced as u64);
+                        work.count(
+                            Counter::ClaimBlockedLoading,
+                            page.stats.blocked_loading as u64,
+                        );
+                        work.count(
+                            Counter::ClaimPreviouslyClaimed,
+                            page.stats.previously_claimed as u64,
+                        );
+                        work.count(
+                            Counter::ClaimNew,
+                            page.jobs
+                                .len()
+                                .saturating_sub(page.stats.previously_claimed)
+                                as u64,
+                        );
+                        let found = !page.jobs.is_empty();
+                        if found {
+                            self.initialization
+                                .phase(crate::initialization::Phase::Enumerating);
+                        }
+                        for job in page.jobs {
+                            let tx = tx.clone();
+                            admitted += 1;
+                            in_flight += 1;
+                            handles.push(threads.spawn(move || {
+                                let InitializationDirectoryClaim {
+                                    node,
+                                    path,
+                                    mut ticket,
+                                } = job;
+                                let result =
+                                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                        for retry in 0..3 {
+                                            match self.initialization_read(
+                                                rpc,
+                                                session,
+                                                Request::Directory {
+                                                    node: node.clone(),
+                                                    path: path.clone(),
+                                                },
+                                                deadline,
+                                            ) {
+                                                Err(error)
+                                                    if matches!(
+                                                        recheck(&error),
+                                                        Some(Recheck::Directory)
+                                                    ) && retry < 2 =>
+                                                {
+                                                    self.initialization
+                                                        .work
+                                                        .count(Counter::DirectoryRetry, 1);
+                                                    let _writes = self.initialization_writer();
+                                                    self.current(rpc)?;
+                                                    ticket = self
+                                                        .initialization_store()
+                                                        .begin_initialization_directory(
+                                                            run, &node.id,
+                                                        )
+                                                        .map_err(io::Error::other)?;
+                                                }
+                                                result => return result,
+                                            }
+                                        }
+                                        unreachable!()
+                                    }))
+                                    .unwrap_or_else(|_| {
+                                        Err(io::Error::other("initialization read task failed"))
+                                    });
+                                let _ = tx.send((node, ticket, result));
+                            }));
+                        }
+                        if found || page.next.is_none() {
+                            break;
+                        }
+                        after = page.next;
+                        work.count(Counter::ClaimScanYields, 1);
+                        if Instant::now() >= deadline {
+                            first_error = Some(io::Error::new(
+                                io::ErrorKind::TimedOut,
+                                "initialization work budget exhausted",
+                            ));
+                            break;
+                        }
+                        // Do not scan a large blocked prefix while there are
+                        // completed/in-flight requests waiting to be committed.
+                        if in_flight > 0 {
+                            break;
+                        }
+                        std::thread::yield_now();
+                    }
+                }
+                if in_flight == 0 {
+                    break;
+                }
+                let (node, ticket, result) = match rx.recv() {
+                    Ok(result) => result,
+                    Err(_) => {
+                        first_error =
+                            Some(io::Error::other("initialization completion channel closed"));
+                        break;
+                    }
+                };
+                in_flight -= 1;
+                let committed = (|| {
+                    let _writes = self.initialization_writer();
+                    self.current(rpc)?;
+                    let mut store = self.initialization_store();
+                    let _span = self.initialization.work.span(Stage::DirectoryCommit);
+                    if !store
+                        .initialization_directory_ticket_current(&ticket)
+                        .map_err(io::Error::other)?
+                    {
+                        self.initialization.work.count(Counter::StaleReceipt, 1);
+                        return Ok(None);
+                    }
+                    let body = match result {
+                        Err(error)
+                            if awaiting_coverage
+                                && matches!(recheck(&error), Some(Recheck::Directory)) =>
+                        {
+                            coverage_race = true;
+                            return Ok(None);
+                        }
+                        other => other?,
+                    };
+                    let (identity, children, denied) = match body {
+                        Body::Directory {
+                            identity,
+                            children,
+                            denied,
+                        } => (identity, children, denied),
+                        _ => return Err(invalid("expected directory receipt")),
+                    };
+                    if identity != node.id || (denied && !children.is_empty()) {
+                        return Err(invalid("directory receipt identity mismatch"));
+                    }
+                    if denied {
+                        store
+                            .store_initialization_denied(&ticket, 1)
+                            .map_err(io::Error::other)?;
+                        self.initialization.work.count(Counter::DirectoryDenied, 1);
+                    } else {
+                        store
+                            .store_initialization_native_directory(&ticket, 1, &children)
+                            .map_err(io::Error::other)?;
+                    }
+                    self.initialization
+                        .work
+                        .count(Counter::DirectoryCommitted, 1);
+                    Ok(Some(
+                        store
+                            .initialization_status()
+                            .map_err(io::Error::other)?
+                            .ok_or_else(|| invalid("candidate absent"))?
+                            .node_count,
+                    ))
+                })();
+                match committed {
+                    Ok(Some(count)) => {
+                        *directories += 1;
+                        self.initialization.index(Progress {
+                            attempt,
+                            phase: Phase::Enumerate,
+                            units: *directories,
+                            items: count,
+                            retry_reason: None,
+                        });
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        if first_error.is_none() {
+                            first_error = Some(error);
+                        }
+                    }
+                }
+                // On one failed read, drain and persist other verified receipts
+                // before reconnecting. Never discard their completed work.
+            }
+            for handle in handles {
+                if handle.join().is_err() && first_error.is_none() {
+                    first_error = Some(io::Error::other("initialization read task failed"));
+                }
+            }
+        });
+        if let Some(error) = first_error {
+            Err(error)
+        } else {
+            Ok(coverage_race)
+        }
+    }
+
     fn refresh_candidate_root(
         &self,
         rpc: &Arc<Rpc>,
@@ -798,11 +966,9 @@ impl Bridge {
         deadline: Instant,
     ) -> io::Result<()> {
         let ticket = {
-            let _writes = self.recovery_gate.write().unwrap();
+            let _writes = self.initialization_writer();
             self.current(rpc)?;
-            self.store
-                .lock()
-                .unwrap()
+            self.initialization_store()
                 .begin_initialization_root_refresh(run)
                 .map_err(io::Error::other)?
         };
@@ -810,11 +976,10 @@ impl Bridge {
             Body::Root { node } => node,
             _ => return Err(invalid("expected current root")),
         };
-        let _writes = self.recovery_gate.write().unwrap();
+        let _writes = self.initialization_writer();
         self.current(rpc)?;
-        self.store
-            .lock()
-            .unwrap()
+        let _span = self.initialization.work.span(Stage::RootCommit);
+        self.initialization_store()
             .refresh_initialization_root(&ticket, &node)
             .map_err(io::Error::other)?;
         self.initialization.activity();

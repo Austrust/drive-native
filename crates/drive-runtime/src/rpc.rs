@@ -1,4 +1,7 @@
 use crate::{transport, wire::*};
+#[cfg(test)]
+#[path = "rpc_initialization_diagnostics_tests.rs"]
+mod initialization_diagnostics_tests;
 use std::{
     collections::HashMap,
     io,
@@ -16,6 +19,7 @@ pub struct Reply {
     pub descriptor: Option<OwnedFd>,
 }
 struct PendingRequest {
+    initialization: Option<(crate::initialization_metrics::Observer, bool)>,
     reply: mpsc::Sender<io::Result<Reply>>,
     wait: Option<Arc<Mutex<crate::wait_activity::WaitClock>>>,
     index: Option<(
@@ -102,6 +106,21 @@ impl Rpc {
                         );
                         if expect_fd != fd.is_some() {
                             break;
+                        }
+                        if let Response::InitializationDiagnostics(snapshot) = env.body {
+                            if !snapshot.valid() { break; }
+                            let observer = {
+                                let mut requests = p.lock().unwrap();
+                                if let Some(request) = requests.get_mut(&env.id) {
+                                    let Some((observer, received)) = &mut request.initialization else { break; };
+                                    if *received { break; }
+                                    *received = true;
+                                    Some(observer.clone())
+                                } else { None }
+                            };
+                            if let Some(observer) = observer { observer(snapshot); }
+                            // This never completes the command or extends its deadline.
+                            continue;
                         }
                         if let Response::IndexProgress(progress) = env.body {
                             let observer = {
@@ -195,7 +214,7 @@ impl Rpc {
         timeout: Duration,
         descriptor: Option<OwnedFd>,
     ) -> io::Result<Reply> {
-        self.call_controlled(body, timeout, descriptor, None, None)
+        self.call_controlled(body, timeout, descriptor, None, None, None)
     }
     pub fn call_cancellable(
         &self,
@@ -203,7 +222,7 @@ impl Rpc {
         timeout: Duration,
         cancelled: &dyn Fn() -> bool,
     ) -> io::Result<Reply> {
-        self.call_controlled(body, timeout, None, Some(cancelled), None)
+        self.call_controlled(body, timeout, None, Some(cancelled), None, None)
     }
     pub fn call_index(
         &self,
@@ -216,7 +235,12 @@ impl Rpc {
             None,
             None,
             Some(observer),
+            None,
         )
+    }
+    pub fn call_initialization(&self, request: drive_core::native::InitializationRequest,
+        timeout: Duration, observer: crate::initialization_metrics::Observer) -> io::Result<Reply> {
+        self.call_controlled(Command::Initialization(request), timeout, None, None, None, Some(observer))
     }
     fn call_controlled(
         &self,
@@ -225,6 +249,7 @@ impl Rpc {
         descriptor: Option<OwnedFd>,
         cancelled: Option<&dyn Fn() -> bool>,
         index: Option<drive_core::snapshot_progress::Observer>,
+        initialization: Option<crate::initialization_metrics::Observer>,
     ) -> io::Result<Reply> {
         if cancelled.is_some_and(|f| f()) {
             return Err(io::ErrorKind::Interrupted.into());
@@ -251,9 +276,14 @@ impl Rpc {
                 .then(|| Arc::new(|_| {}) as drive_core::snapshot_progress::Observer)
         });
         let (tx, rx) = mpsc::channel();
+        let initialization = initialization.or_else(|| {
+            matches!(&body, Command::Initialization(_))
+                .then(|| Arc::new(|_| {}) as crate::initialization_metrics::Observer)
+        });
         self.pending.lock().unwrap().insert(
             id,
             PendingRequest {
+                initialization: initialization.map(|observer| (observer, false)),
                 reply: tx,
                 wait: wait_clock.clone(),
                 index: index.map(|observer| (observer, None)),

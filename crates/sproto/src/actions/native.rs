@@ -323,13 +323,51 @@ fn parse_events(r: &PObject, cursor: EventCursor) -> Result<EventBatch> {
             removed,
         });
     }
-    Ok(EventBatch {
+    let batch = EventBatch {
         events,
         next: EventCursor(next),
         recovery_required: ["rescan_later", "merge_mode"]
             .iter()
             .any(|key| !matches!(r.get(key), None | Some(PObject::Integer(0)))),
-    })
+    };
+    crate::diagnostics::record_pull_response(
+        batch.events.len(),
+        next > cursor.0,
+        batch.recovery_required,
+    );
+    Ok(batch)
+}
+
+#[cfg(test)]
+mod pull_diagnostic_tests {
+    use super::*;
+    #[tokio::test]
+    async fn real_parser_observes_stationary_nonempty_and_advancing_empty_responses() {
+        let capture = crate::diagnostics::Capture::new();
+        crate::diagnostics::scope(capture.clone(),async{
+            let event=pmap!{"path"=>"/selected/A","type"=>"modify","sync_id"=>10u64,"file_id"=>"7",
+                "file"=>pmap!{"parent_id"=>"6","file_type"=>"file","is_removed"=>0u64,
+                    "max_id"=>10u64,"file_size"=>0u64,"file_hash"=>"private-hash","mtime"=>0u64}};
+            let stationary=parse_events(&pmap!{"next_sync_id"=>10u64,"event_list"=>PObject::Array(vec![event])},EventCursor(10)).unwrap();
+            assert_eq!(stationary.events.len(),1);
+            let advanced=parse_events(&pmap!{"next_sync_id"=>11u64,"event_list"=>PObject::Array(vec![])},EventCursor(10)).unwrap();
+            assert!(advanced.events.is_empty());
+            assert!(parse_events(&pmap!{"next_sync_id"=>12u64},EventCursor(11)).is_err());
+        }).await;
+        let snapshot = capture.snapshot();
+        assert!(snapshot.valid());
+        assert_eq!(snapshot.pull.responses, 2);
+        assert_eq!(snapshot.pull.raw_event_count, 1);
+        assert_eq!(snapshot.pull.raw_empty_responses, 1);
+        assert_eq!(snapshot.pull.cursor_advanced_responses, 1);
+        assert_eq!(snapshot.pull.cursor_unchanged_responses, 1);
+        assert_eq!(snapshot.pull.projected_pages, 0);
+        assert!(
+            !serde_json::to_string(&snapshot)
+                .unwrap()
+                .contains("private-hash")
+        );
+    }
 }
 
 fn parse_committer(event: &PObject) -> Result<Option<String>> {
