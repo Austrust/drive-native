@@ -28,12 +28,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().collect();
     if args.len() != 6 {
         return Err(
-            "usage: fsearch_fixture RUN_DIR fuse|local GROUPS FILES_PER_GROUP WIDE_FILES".into(),
+            "usage: fsearch_fixture RUN_DIR fuse|fuse-writable|local GROUPS FILES_PER_GROUP WIDE_FILES".into(),
         );
     }
     let run = PathBuf::from(&args[1]);
     let local = args[2] == "local";
-    if !local && args[2] != "fuse" {
+    let writable = args[2] == "fuse-writable";
+    if !local && !writable && args[2] != "fuse" {
         return Err("invalid mode".into());
     }
     if run.exists() {
@@ -134,10 +135,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "synthetic",
         )?;
         let shared = Arc::new(drive_core::SharedStore::new(store));
-        let fs = CacheFilesystem::new(shared, "root", unsafe { libc::getuid() }, unsafe {
+        let mut fs = CacheFilesystem::new(shared, "root", unsafe { libc::getuid() }, unsafe {
             libc::getgid()
         })?
         .with_hydrator(no_network.clone());
+        // Only the explicit functional-test mode accepts local edits.
+        // Default paired scans retain the original read-only behavior.
+        if writable {
+            fs = fs.with_writes_enabled();
+        }
         session = Some(fuser::spawn_mount2(
             fs,
             &mount,
