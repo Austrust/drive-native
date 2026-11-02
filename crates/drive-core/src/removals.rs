@@ -1,7 +1,7 @@
 //! Local unlink is durable before the path disappears. Native deletion is a
 //! separate, ordered operation and requires an identity-specific tombstone.
 use crate::{Error, Node, Result, Store};
-use rusqlite::{OptionalExtension, params};
+use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -66,6 +66,8 @@ impl Store {
         if exists {
             return Err(Error::Io(std::io::Error::from_raw_os_error(libc::EEXIST)));
         }
+        let mtime = u32::try_from(n.metadata.as_ref().unwrap().mtime)
+            .map_err(|_| Error::Io(std::io::Error::from_raw_os_error(libc::EOVERFLOW)))?;
         let blob = self.write_blob(&[])?;
         let snapshot = std::fs::File::open(self.root.join("blobs").join(&blob))?;
         snapshot.set_modified(
@@ -84,7 +86,7 @@ impl Store {
         tx.execute("INSERT INTO operations(id,node,kind,base,blob,generation) VALUES(?1,?2,'upload',?3,?4,1)",params![op,id,CREATE_VERSION,blob])?;
         tx.execute(
             "INSERT INTO upload_times(operation,mtime) VALUES(?1,?2)",
-            params![op, n.metadata.as_ref().unwrap().mtime],
+            params![op, mtime],
         )?;
         tx.commit()?;
         Ok(n)

@@ -51,10 +51,10 @@ impl Store {
         if self.is_inaccessible(id)? {
             return Err(rusqlite::Error::QueryReturnedNoRows.into());
         }
-        let (directory, size, mtime, mode, blob, dirty, conflict, deleted, draft, draft_base, remote, unlinked, local_atime, local_atime_nsec):
-            (bool, Option<i64>, Option<i64>, Option<u32>, Option<String>, bool, bool, bool, Option<String>, Option<String>, String, bool, Option<i64>, Option<i64>) =
-            self.db.prepare_cached("SELECT n.directory,m.size,m.mtime,COALESCE(l.mode,m.mode),COALESCE(n.dirty_blob,n.blob),n.dirty_blob IS NOT NULL,n.conflict,n.deleted,d.token,d.base,n.remote_version,u.node IS NOT NULL,a.seconds,a.nanoseconds FROM nodes n LEFT JOIN node_metadata m ON m.node=n.id LEFT JOIN local_modes l ON l.node=n.id LEFT JOIN drafts d ON d.node=n.id AND d.dirty=1 LEFT JOIN local_unlinks u ON u.node=n.id LEFT JOIN local_atimes a ON a.node=n.id WHERE n.id=?1 AND (n.deleted=0 OR (?2 AND u.node IS NOT NULL))")?
-            .query_row(params![id,orphan], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?,r.get(8)?,r.get(9)?,r.get(10)?,r.get(11)?,r.get(12)?,r.get(13)?)))?;
+        let (directory, size, mtime, mode, blob, dirty, draft, unlinked, local_atime, local_atime_nsec):
+            (bool, Option<i64>, Option<i64>, Option<u32>, Option<String>, bool, Option<String>, bool, Option<i64>, Option<i64>) =
+            self.db.prepare_cached("SELECT n.directory,m.size,m.mtime,COALESCE(l.mode,m.mode),COALESCE(n.dirty_blob,n.blob),n.dirty_blob IS NOT NULL,d.token,u.node IS NOT NULL,a.seconds,a.nanoseconds FROM nodes n LEFT JOIN node_metadata m ON m.node=n.id LEFT JOIN local_modes l ON l.node=n.id LEFT JOIN drafts d ON d.node=n.id AND d.dirty=1 LEFT JOIN local_unlinks u ON u.node=n.id LEFT JOIN local_atimes a ON a.node=n.id WHERE n.id=?1 AND (n.deleted=0 OR (?2 AND u.node IS NOT NULL))")?
+            .query_row(params![id,orphan], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?,r.get(8)?,r.get(9)?)))?;
         let unsigned =
             |n: i64| u64::try_from(n).map_err(|_| Error::State("negative POSIX metadata".into()));
         if size.is_none() && blob.is_none() && !directory {
@@ -77,14 +77,9 @@ impl Store {
             size = stat.len();
             // Same timestamp precedence as FileRecord, without computing pin,
             // cache/version sync state or opening/registering a DraftHandle.
-            let draft_conflict = draft.is_some()
-                && !unlinked
-                && (draft_base.as_deref() != Some(remote.as_str()) || deleted);
-            if !conflict
-                && !draft_conflict
-                && !deleted
-                && (dirty || draft.is_some() || crate::namespace::blocks_upload(&self.db, id)?)
-            {
+            // Namespace-only pending work does not modify the file's body.
+            // A dirty body keeps its own time even when it has a conflict.
+            if dirty {
                 mtime = modified(&stat)?;
             }
         }

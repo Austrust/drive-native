@@ -311,10 +311,10 @@ impl Store {
             mtime: 0,
             mode: if node.directory { 0o755 } else { 0o644 },
         });
-        let blob: Option<String> = self.db.query_row(
-            "SELECT COALESCE(dirty_blob,blob) FROM nodes WHERE id=?1",
+        let (blob, dirty): (Option<String>, bool) = self.db.query_row(
+            "SELECT COALESCE(dirty_blob,blob),dirty_blob IS NOT NULL FROM nodes WHERE id=?1",
             [id],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )?;
         if blob.is_none() && node.metadata.is_none() && !node.directory {
             return Err(Error::State(
@@ -326,7 +326,8 @@ impl Store {
         if let Some(blob) = blob {
             let stat = std::fs::metadata(self.root.join("blobs").join(blob))?;
             size = stat.len();
-            if self.status(id)? == Status::PendingUpload {
+            // A pending rename alone does not change the cached file's mtime.
+            if dirty {
                 mtime = stat
                     .modified()?
                     .duration_since(std::time::UNIX_EPOCH)
