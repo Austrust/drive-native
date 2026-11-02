@@ -2,6 +2,16 @@
 //! dependencies under verified existing parents. Native identities are prior
 //! list observations, not proof of the current path. Re-list affected parents
 //! and subtrees; never copy event metadata into entries.
+//!
+//! Unknown Modify directories may form a page-local unique-ID/name DAG. Only
+//! edges connected to an existing, non-denied native anchor are admitted; the
+//! first edge must be absent, not a same-name replacement. Real parent listings
+//! create identities and pending children. Planning is bounded to 4096 events,
+//! 64 directory events and depth 128, and commits with the applied cursor.
+//! Uncovered live-file parents, cycles, ambiguous names/IDs and unsupported
+//! event kinds retain conservative recovery. Unknown Remove is deliberately
+//! NOT localized: tombstones currently lack verified historical parent identity
+//! or proof that the old parent's own metadata is current at the event fence.
 use super::*;
 use crate::Event;
 
@@ -13,8 +23,10 @@ pub(super) struct LocalDirectoryPlan {
 /// A page-local dependency, NOT a candidate identity. Only the already observed
 /// parent is scheduled; its native listing must discover (or disprove) this ID.
 pub(super) struct UnknownDirectoryPlan {
+    /// The real candidate anchor whose listing is the durable obligation.
     pub parent: String,
     path: String,
+    depth: usize,
 }
 
 pub(super) fn plan_unknown_directory(
@@ -76,9 +88,63 @@ pub(super) fn plan_unknown_directory(
     if collision {
         return Ok(None);
     }
+    let orphan: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM initialization_entries WHERE run=?1 AND parent=?2)",
+        params![s.run.run_id, node.id],
+        |row| row.get(0),
+    )?;
+    if orphan || chain.len() > 128 {
+        return Ok(None);
+    }
     Ok(Some(UnknownDirectoryPlan {
         parent: parent.clone(),
         path: expected,
+        depth: chain.len(),
+    }))
+}
+
+/// Extend only a page-local dependency whose ancestor was already proved.
+/// This never supplies a Node/native ID to the candidate. The first real parent
+/// listing creates a pending directory; later real listings discover this edge.
+/// An unresolved cycle or missing edge cannot bootstrap itself into a plan.
+pub(super) fn plan_nested_unknown_directory(
+    db: &Connection,
+    s: &InitializationStatus,
+    node: &Node,
+    hint: Option<&InitializationEventHint>,
+    parent_plan: &UnknownDirectoryPlan,
+) -> Result<Option<UnknownDirectoryPlan>> {
+    let Some(hint) = hint else {
+        return Ok(None);
+    };
+    if !node.directory
+        || node.id == root_id(&s.binding)?
+        || hint.kind != InitializationEventKind::Modify
+        || hint.metadata_removed
+        || hint.destination_path.is_some()
+        || node.parent.is_none()
+        || hint.metadata_parent_id != node.parent
+        || s.root_needs_refresh
+        || parent_plan.depth >= 128
+    {
+        return Ok(None);
+    }
+    let expected = format!("{}/{}", parent_plan.path.trim_end_matches('/'), node.name);
+    if hint.event_path != expected {
+        return Ok(None);
+    }
+    // A missing ID with existing children would violate the closed-tree proof.
+    // Likewise never walk through an existing same-name, different-ID object.
+    let conflict: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM initialization_entries WHERE run=?1 AND parent=?2) OR EXISTS(SELECT 1 FROM initialization_entries WHERE run=?1 AND parent=?3 AND name=?4)",
+        params![s.run.run_id,node.id,node.parent,node.name],|row|row.get(0))?;
+    if conflict {
+        return Ok(None);
+    }
+    Ok(Some(UnknownDirectoryPlan {
+        parent: parent_plan.parent.clone(),
+        path: expected,
+        depth: parent_plan.depth + 1,
     }))
 }
 

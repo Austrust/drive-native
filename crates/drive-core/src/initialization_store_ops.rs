@@ -564,18 +564,33 @@ impl Store {
                 <= 64
         {
             let mut occurrences = HashMap::<&str, usize>::new();
+            let mut buckets = HashMap::<(&str, &str), usize>::new();
             for event in &batch.events {
                 let id = match &event.change {
                     Change::Upsert(n) => n.id.as_str(),
                     Change::Delete { id } => id.as_str(),
                 };
                 *occurrences.entry(id).or_default() += 1;
+                if let Change::Upsert(node) = &event.change {
+                    if node.directory {
+                        if let Some(parent) = node.parent.as_deref() {
+                            *buckets.entry((parent, node.name.as_str())).or_default() += 1;
+                        }
+                    }
+                }
             }
+            let mut unknown_nodes = Vec::new();
             for (ordinal, event) in batch.events.iter().enumerate() {
                 let Change::Upsert(node) = &event.change else {
                     continue;
                 };
-                if !node.directory || occurrences.get(node.id.as_str()) != Some(&1) {
+                if !node.directory
+                    || occurrences.get(node.id.as_str()) != Some(&1)
+                    || node
+                        .parent
+                        .as_deref()
+                        .is_none_or(|parent| buckets.get(&(parent, node.name.as_str())) != Some(&1))
+                {
                     continue;
                 }
                 match load_node(&tx, &run.run_id, &node.id) {
@@ -583,6 +598,7 @@ impl Store {
                     Err(e) if e.is_not_found() => {}
                     Err(e) => return Err(e),
                 }
+                unknown_nodes.push((ordinal, node));
                 if let Some(plan) = local_recheck::plan_unknown_directory(
                     &tx,
                     &s,
@@ -590,6 +606,38 @@ impl Store {
                     page.as_ref().and_then(|p| p.hint(ordinal)),
                 )? {
                     unknown_directories.insert(node.id.as_str(), plan);
+                }
+            }
+            // Bounded fixed point, independent of event order. Only a chain
+            // already connected to a real native anchor can admit another ID.
+            // Cycles, ambiguous names and chains with missing page evidence
+            // remain unsupported and trigger the existing complete recheck.
+            for _ in 0..unknown_nodes.len() {
+                let mut progress = false;
+                for &(ordinal, node) in &unknown_nodes {
+                    if unknown_directories.contains_key(node.id.as_str()) {
+                        continue;
+                    }
+                    let Some(parent_plan) = node
+                        .parent
+                        .as_deref()
+                        .and_then(|parent| unknown_directories.get(parent))
+                    else {
+                        continue;
+                    };
+                    if let Some(plan) = local_recheck::plan_nested_unknown_directory(
+                        &tx,
+                        &s,
+                        node,
+                        page.as_ref().and_then(|p| p.hint(ordinal)),
+                        parent_plan,
+                    )? {
+                        unknown_directories.insert(node.id.as_str(), plan);
+                        progress = true;
+                    }
+                }
+                if !progress {
+                    break;
                 }
             }
         }

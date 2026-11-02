@@ -1,6 +1,9 @@
 //! Unknown directory events are dependencies on real parent lists, not nodes.
 use super::*;
 
+#[path = "initialization_nested_directory_tests.rs"]
+mod nested;
+
 fn new_dir() -> Node {
     dir("999", "300", "New")
 }

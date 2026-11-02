@@ -43,6 +43,32 @@
 
 ## 如何读取诊断
 
+### 未知目录与同页嵌套依赖的重列义务
+
+[`initialization_local_recheck`](../crates/drive-core/src/initialization_local_recheck.rs) 对部分未知目录事件安排局部重列。事件页中的目录身份只作为待核对的依赖，不会直接写成候选节点，也不会授予访问权限：
+
+1. 仅处理规范 scope 内的 `Modify` 目录。该 ID 在候选中必须缺失，不能有以它为父的孤儿项；该 ID 在整页必须唯一，目录事件的 `(parent,name)` 关系也必须唯一。
+2. 若父目录已存在，核验候选父链、原生 numeric identity 与节点摘要的绑定、路径、覆盖状态和 sticky deny。事件路径必须等于当前父路径加名称；同名不同 ID 的既有项不能当作缺失边。
+3. 若父目录也未知，只有同页存在可闭合的目录依赖时才继续：每一边的父 ID、metadata parent 与路径／名称均需一致，最终连接到上述真实祖先。与祖先尚未连接的环或缺边不能自行成为合法计划；事件顺序不会决定能否闭合。
+4. 同页缺父文件必须精确引用已闭合的目录依赖，并通过文件路径、名称及 metadata parent 核验。一般未知父的活文件不能仅凭历史路径消耗事件，仍按原等待或保守恢复处理。
+
+计划只把真实祖先的**直接列表**标记为 pending。真正的列表回执负责创建第一层身份和新的 pending 子目录，后续列表再发现更深层级。未知 ID 没有可沿用的已有候选子树，因此不需要从提示中构造中间节点。既有目录事件仍安排其必要子树及源／目标父列表重查；混合页中任何未覆盖的风险仍可使整页退回保守全树重查。
+
+该优化最多处理 4096 个事件、64 个目录事件，目录深度上限为 128；超预算继续既有保守路径。重列义务与候选 applied cursor 在同一事务提交；`Applied` 表示义务已持久化，**不表示列表完成或产品游标已提交**。父列表缺项、同名替换、权限拒绝、迟到票据和进程恢复继续由现有候选规则处理。独立 fence、完整覆盖和最终安装门禁不变。
+
+**未知 Remove 仍保留全树回退。** 当前 tombstone 解码没有可验证的历史旧父身份；即使目标 ID 已不在候选中，也不能据此证明远处旧父自身的版本或修改时间已经更新。历史路径仅能提名核对位置，不能冒充旧父身份，更不能据它删除同名替代对象。`Move`／`Modify` 投影出的 Delete 也没有获得新的局部豁免。
+
+这是本客户端的局部协调策略，不是已确认的 Windows 内部算法。上述源码机制及测试入口不代表真实 NAS 上所有事件页已经收敛，也不表示已消除所有整树重查。
+
+### 事件应用计划诊断
+
+核心兼容 API 仍返回 `InitializationApplyResult`；`apply_initialization_events_diagnosed` 额外返回固定结构摘要。runtime 只在 API 成功返回后累计：
+
+- `event_local_parent_plans`、`event_local_subtree_plans`、`event_unknown_directory_dependency_plans` 是成功事务的计划数量，不是实际改变的行数；重叠计划或已 pending 项可能使 SQL 更新量更小。
+- `event_full_recheck_*` 使用固定原因。多项同时出现时优先级为 `root`、`directory_race`、`type_mismatch`、`unsupported_directory`、`unknown_delete`、`missing_parent`。全树回退的局部计划计数为零。
+- `event_awaiting_missing_file_parent` 表示此次观察仍等待文件父覆盖，同一未完成页可能重复计数；它不代表提交了重列计划。
+- 已应用页的重复调用返回零摘要；事务失败不返回成功摘要。诊断不另扫目录树，也不参与正确性判定。
+
 初始化快照的 `work` 来自 [`initialization_metrics`](../crates/drive-runtime/src/initialization_metrics.rs)，是当前后台进程生命周期内的观察值；普通网络重连不会清零。它不参与覆盖判定、权限判断或游标提交。
 
 | 字段 | 含义与使用边界 |
@@ -89,6 +115,8 @@
 
 - [核心队列回归](../crates/drive-core/src/initialization_scheduler_tests.rs)：祖先去重后的补足、loading 前缀续页、原子回滚、generation 溢出、不可用祖先、跨 epoch 游标、空页与 fence，以及固定 pending 页的 SQLite VM 工作量。
 - [依赖优先级回归](../crates/drive-core/src/initialization_priority_tests.rs)：计划复用、原子领取、权限与身份变化、损坏证据、页／依赖预算、旧 epoch、无提示页和危险混合页退回普通调度。
+- [未知目录局部重列回归](../crates/drive-core/src/initialization_unknown_directory_tests.rs)：事件顺序、真实列表创建身份、权限／替换、失败回滚、重启及固定诊断摘要。
+- [同页嵌套依赖回归](../crates/drive-core/src/initialization_nested_directory_tests.rs)：依赖顺序排列、环／缺边／同名冲突、已存在于其他位置的 ID、父移动双序、真实列表缺项／拒绝／替换，以及未知 Remove 仍保守。
 - [owner 回归](../crates/drive-runtime/src/initialization_owner_tests.rs)：独立回包与慢请求、80个后代的阻塞前缀、超时后的成功回执保留／重开复用、兄弟目录移动后的旧路径重试拒绝，使用本地 Unix RPC 和 SCM_RIGHTS。
 - [公开合成 replay](../crates/drive-core/examples/initialization_claim_replay.rs)：`legacy` 与 `batched` 在新建隔离 Store 上处理相同的 64 个待枚举目录，仅累计 claim 调用时间；准备数据和写回目录回执不计入该指标。
 
