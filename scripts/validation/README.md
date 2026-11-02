@@ -6,6 +6,10 @@
 
 [upgrade_pause_probe.py](upgrade_pause_probe.py) 在私有 `dbus-run-session` 与全新目录运行两个安装包的合成 FUSE 接管探针；不使用 NAS 或钥匙环。`--fixed-handover --new-binaries <dir>` 可用隔离开发二进制覆盖新包组件，验证旧版暂停标记迁移与再次升级；该模式导入 GUI 的暂停标记函数，应设置 `PYTHONPATH=desktop`。组件覆盖测试不等于最终安装包验收。
 
+## 原版 FSearch 完整扫描
+
+[FSearch 复放入口](FSEARCH.md)固定未修改的上游0.3.1、实际合成FUSE夹具及保存索引审计器，核对全部路径与POSIX属性。计时、诊断和功能验收分别记录；原始结果保留仓库外。
+
 ## 实际安装文件与 managed 用户服务接管
 
 [managed_upgrade_probe.py](managed_upgrade_probe.py) 已用于[`.4` 实际安装接管验证](../../docs/validation/native-package-004/REPORT.md)。它要求宿主有可用的 systemd 用户总线、FUSE 和 PySide6；使用与新包对应的公开 GUI 源码、公开 `multi_mount_fixture` 构建器，以及一个已安装旧 `.3` 的独立 chroot 根。测试用户需要读取和执行 chroot 中的安装文件。不要使用 `dbus-run-session`，因为本测试使用宿主用户 manager 的总线。
