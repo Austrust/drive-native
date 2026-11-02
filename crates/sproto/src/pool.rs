@@ -120,12 +120,15 @@ impl Pool {
         reason = "mutex is never held across a panic"
     )]
     pub async fn acquire(&self) -> Result<Guard> {
+        let mut waiting = crate::diagnostics::pool_wait();
         let permit = self
             .semaphore
             .clone()
             .acquire_owned()
             .await
             .map_err(|_| Error::ConnectionClosed)?;
+        waiting.acquired = true;
+        drop(waiting);
 
         // Pop channels until we find one that hasn't expired, discarding stale ones.
         let existing = {
@@ -141,6 +144,12 @@ impl Pool {
             }
         };
 
+        crate::diagnostics::pool_acquired(
+            existing.is_none(),
+            self.config
+                .max_channels
+                .saturating_sub(self.semaphore.available_permits()),
+        );
         let channel = if let Some(ch) = existing {
             tracing::debug!("pool: reusing idle channel");
             ch
@@ -216,16 +225,22 @@ pub fn agent_map(device_uuid: &str, restore_id: &str) -> PObject {
 
 /// Open a new channel and perform the connect handshake.
 async fn connect_channel(config: &Config) -> Result<Channel> {
-    let mut ch = Channel::connect(
-        &config.host,
-        config.port,
-        config.tls_server_name.as_deref(),
-        config.tls,
-        config.tls_config.as_ref(),
-    )
-    .await?;
-    handshake(&mut ch, config).await?;
-    Ok(ch)
+    let mut span = crate::diagnostics::setup();
+    let result = async {
+        let mut ch = Channel::connect(
+            &config.host,
+            config.port,
+            config.tls_server_name.as_deref(),
+            config.tls,
+            config.tls_config.as_ref(),
+        )
+        .await?;
+        handshake(&mut ch, config).await?;
+        Ok(ch)
+    }
+    .await;
+    span.outcome = Some(result.is_ok());
+    result
 }
 
 /// Perform the `connect` handshake on a newly created channel.

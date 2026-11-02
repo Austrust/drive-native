@@ -121,7 +121,9 @@ fn normalize_root_roundtrip(
     if !current_matches || !root_roundtrip(scope, batch) {
         return Err(Error::RootUnavailable);
     }
+    let before = batch.events.len();
     batch.events.retain(|e| root_event(scope, e).is_ok());
+    sproto::diagnostics::record_root_roundtrip_filtered(before - batch.events.len());
     Ok(())
 }
 
@@ -190,6 +192,39 @@ mod tests {
 #[cfg(test)]
 mod history_tests {
     use super::*;
+    #[tokio::test]
+    async fn only_successful_verified_root_normalization_counts_filtered_events() {
+        let scope = super::super::tests::scope();
+        let mut away = super::super::tests::event();
+        away.file_id = scope.file_id.clone();
+        away.path = scope.path.clone();
+        away.file_type = FileType::Dir;
+        away.kind = EventKind::Move {
+            destination: "/lab/moved".into(),
+            parent_id: "parent".into(),
+        };
+        let mut back = away.clone();
+        back.path = "/lab/moved".into();
+        back.kind = EventKind::Move {
+            destination: scope.path.clone(),
+            parent_id: "parent".into(),
+        };
+        let mut batch = super::super::tests::batch(away, 6);
+        batch.events.push(back);
+        let capture = sproto::diagnostics::Capture::new();
+        sproto::diagnostics::scope(capture.clone(), async {
+            sproto::diagnostics::record_pull_response(2, true, false);
+            assert!(normalize_root_roundtrip(&scope, &mut batch, false).is_err());
+            assert_eq!(capture.snapshot().pull.root_roundtrip_filtered_count, 0);
+            normalize_root_roundtrip(&scope, &mut batch, true).unwrap();
+        })
+        .await;
+        let snapshot = capture.snapshot();
+        assert!(snapshot.valid());
+        assert_eq!(snapshot.pull.raw_event_count, 2);
+        assert_eq!(snapshot.pull.root_roundtrip_filtered_count, 1);
+        assert_eq!(batch.events.len(), 1);
+    }
     #[test]
     fn historical_move_requires_current_identity_and_a_return_event() {
         let scope = super::super::tests::scope();

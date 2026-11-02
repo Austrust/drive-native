@@ -92,6 +92,33 @@ pub struct InitializationCoverage {
     pub state: String,
     pub generation: u64,
 }
+/// Diagnostic aggregate only. Never substitutes for coverage/fence validation.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InitializationQueueSummary {
+    pub nodes: u64, pub pending: u64, pub loading: u64, pub received: u64,
+    pub denied: u64, pub failed: u64, pub received_sequence: u64,
+    pub applied_sequence: u64,
+}
+impl Store {
+    /// Scans directory states; call sparingly off the filesystem/read path.
+    pub fn initialization_queue_summary(&self, run: &InitializationRun) -> Result<InitializationQueueSummary> {
+        let state = checked(&self.db, run, true)?;
+        let mut result = InitializationQueueSummary { nodes: state.node_count,
+            received_sequence: state.received_sequence, applied_sequence: state.applied_sequence,
+            ..Default::default() };
+        let mut query = self.db.prepare("SELECT state,COUNT(*) FROM initialization_directories WHERE run=?1 GROUP BY state")?;
+        let mut rows = query.query([&run.run_id])?;
+        while let Some(row) = rows.next()? {
+            let count = read_counter(row, 1)?;
+            match row.get::<_, String>(0)?.as_str() {
+                "pending" => result.pending=count, "loading" => result.loading=count,
+                "received" => result.received=count, "denied" => result.denied=count,
+                "failed" => result.failed=count, _ => return Err(invalid("unknown coverage state")),
+            }
+        }
+        Ok(result)
+    }
+}
 
 pub(crate) fn migrate(db: &Connection) -> Result<()> {
     db.execute_batch(
@@ -765,6 +792,12 @@ mod evidence;
 mod local_recheck;
 #[path = "initialization_store_ops.rs"]
 mod ops;
+#[path = "initialization_scheduler.rs"]
+mod scheduler;
+pub use scheduler::{
+    InitializationClaimPage, InitializationClaimStats, InitializationDirectoryClaim,
+    InitializationScanCursor,
+};
 pub(crate) use evidence::read_native_identity as preview_native_identity;
 use evidence::{
     encode_event_page, read_event_receipt, read_native_identity, store_native_identity,

@@ -37,6 +37,7 @@ impl Clock {
             return;
         }
         *self.0.lock().unwrap() = Instant::now();
+        crate::diagnostics::received(bytes);
         // No payload or paths cross this observer boundary.
         let _ = OBSERVER.try_with(|observer| observer(bytes));
     }

@@ -3,6 +3,7 @@ mod connection_diagnostics;
 pub mod desktop;
 mod index_progress;
 pub mod initialization;
+pub mod initialization_metrics;
 pub mod mount_registry;
 pub mod rpc;
 pub mod service;

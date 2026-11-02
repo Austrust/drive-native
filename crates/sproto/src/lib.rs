@@ -25,5 +25,6 @@ pub mod trust;
 #[cfg(feature = "protocol-research")]
 pub mod trust_relay;
 
+pub mod diagnostics;
 pub mod flow;
 pub mod receive_activity;

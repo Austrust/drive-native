@@ -5,6 +5,8 @@ mod event_coverage;
 mod hint_store;
 #[path = "initialization_local_recheck_tests.rs"]
 mod local_recheck;
+#[path = "initialization_scheduler_tests.rs"]
+mod scheduler_tests;
 use super::*;
 use crate::{
     Event, NodeMetadata,

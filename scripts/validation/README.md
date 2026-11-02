@@ -2,6 +2,8 @@
 
 内容判定脚本不导入客户端代码。当前提供静止、隔离夹具的内容/命名空间/指定草稿和操作记录比较；不是已经完成的故障注入体系。
 
+[network_hold_relay.py](network_hold_relay.py) 是新增的单任务持续断网注入器：仅转发不解密 TLS 字节，`hold` 关闭当前连接并阻止重连，`release` 恢复。配置必须保留原服务器证书名和 CA；监听只允许 loopback。其 [3 个纯本地 socket 测试](test_network_hold_relay.py) 已在 WSL 通过，覆盖现存连接、新重连和正在建立的上游连接。独立原生写入探针 [native_validation_peer](../../crates/drive-runtime/examples/native_validation_peer.rs) 只在服务端个人根下已有 `DriveNative-Lab` 的随机新子树创建/更新合成 `A.bin`，不删除或重试未知提交；尚待独立编译和真实联调结果。工具合成测试不等于 NAS 断网或写回验收通过。
+
 [upgrade_pause_probe.py](upgrade_pause_probe.py) 在私有 `dbus-run-session` 与全新目录运行两个安装包的合成 FUSE 接管探针；不使用 NAS 或钥匙环。`--fixed-handover --new-binaries <dir>` 可用隔离开发二进制覆盖新包组件，验证旧版暂停标记迁移与再次升级；该模式导入 GUI 的暂停标记函数，应设置 `PYTHONPATH=desktop`。组件覆盖测试不等于最终安装包验收。
 
 ## 实际安装文件与 managed 用户服务接管

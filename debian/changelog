@@ -1,3 +1,13 @@
+drive-native (0.1.0~dev20261102.8) unstable; urgency=medium
+
+  * Commit completed initialization directories without waiting for a slow peer.
+  * Refill the same bounded concurrency window and batch durable directory claims.
+  * Expose bounded native request, event, queue and local-stage diagnostics.
+  * Preserve initialization checkpoints, cached data and pending modifications.
+  * Development build; full initialization and event acceptance require run evidence.
+
+ -- Drive Native contributors <noreply@localhost>  Mon, 02 Nov 2026 17:00:00 +0800
+
 drive-native (0.1.0~dev20261102.7) unstable; urgency=medium
 
   * Wake detached FUSE sessions during normal stop and expose shutdown stages.

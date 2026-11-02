@@ -47,6 +47,9 @@ pub struct Span {
 }
 #[derive(Serialize)]
 pub struct Snapshot {
+    /// Process-lifetime counters survive ordinary network reconnection. They
+    /// are observations, independent of the persistent completion checkpoint.
+    pub work: crate::initialization_metrics::Snapshot,
     pub active: bool,
     pub attempt: u64,
     pub started_unix_ms: u64,
@@ -300,12 +303,14 @@ impl State {
     }
 }
 pub struct Tracker {
+    pub work: crate::initialization_metrics::Metrics,
     state: Mutex<State>,
     revision: AtomicU64,
 }
 impl Default for Tracker {
     fn default() -> Self {
         Self {
+            work: crate::initialization_metrics::Metrics::default(),
             state: Mutex::new(State::new(0, false)),
             revision: AtomicU64::new(0),
         }
@@ -412,6 +417,7 @@ impl Tracker {
             totals.push((s.phase, elapsed));
         }
         Snapshot {
+            work: self.work.snapshot(),
             active: s.active,
             attempt: s.attempt,
             started_unix_ms: s.started_unix_ms,

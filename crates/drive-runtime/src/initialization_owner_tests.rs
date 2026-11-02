@@ -320,6 +320,183 @@ fn bridge(store: Store, peer: &Peer, restore: &str) -> Arc<Bridge> {
     bridge
 }
 
+// A read loop independent of response delivery: one response can stay held while
+// siblings complete over the same real framed Unix socket. This deliberately
+// avoids the serial Peer::new callback hiding a batch-join regression.
+struct WindowPeer {
+    peer: Peer,
+    release: Arc<(Mutex<bool>, std::sync::Condvar)>,
+    requests: mpsc::Receiver<String>,
+    peak: Arc<std::sync::atomic::AtomicUsize>,
+}
+impl WindowPeer {
+    fn release(&self) {
+        *self.release.0.lock().unwrap() = true;
+        self.release.1.notify_all();
+    }
+    fn new(data: RemoteSnapshot, hold: bool) -> Self {
+        let (socket, mut remote) = UnixStream::pair().unwrap();
+        let rpc = Arc::new(Rpc::new(socket).unwrap());
+        let writer = Arc::new(Mutex::new(remote.try_clone().unwrap()));
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let requests_log = log.clone();
+        let release = Arc::new((Mutex::new(!hold), std::sync::Condvar::new()));
+        let gate = release.clone();
+        let (request_tx, requests) = mpsc::channel();
+        let active = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let peak = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let peak_thread = peak.clone();
+        let thread = std::thread::spawn(move || {
+            std::thread::scope(|threads| {
+                while let Ok((request, _)) = transport::receive::<Envelope<Command>>(&mut remote) {
+                    if matches!(request.body, Command::Cancel { .. }) { continue; }
+                    let Command::Initialization(Request::Directory { node, path }) = request.body else {
+                        panic!("window fixture received non-directory command");
+                    };
+                    assert_eq!(path, format!("/Lab/{}", node.name));
+                    requests_log.lock().unwrap().push(format!("directory:{}", node.id));
+                    let outstanding = active.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak_thread.fetch_max(outstanding, Ordering::SeqCst);
+                    request_tx.send(node.id.clone()).unwrap();
+                    let writer = writer.clone();
+                    let gate = gate.clone();
+                    let active = active.clone();
+                    let reply = InitializationReply {
+                        scope: data.scope.clone(), restore: data.restore.clone(),
+                        body: Body::Directory { identity: node.id.clone(), denied:false, children:fixture_children(&data,&node.id) },
+                    };
+                    threads.spawn(move || {
+                        if node.id == "200" {
+                            let open = gate.0.lock().unwrap();
+                            let (open, timeout) = gate.1.wait_timeout_while(open, Duration::from_secs(15), |open| !*open).unwrap();
+                            assert!(*open && !timeout.timed_out(), "test failed to release held reply");
+                        }
+                        let bytes = serde_json::to_vec(&reply).unwrap();
+                        let mut file = tempfile::tempfile().unwrap();
+                        file.write_all(&bytes).unwrap();
+                        file.seek(SeekFrom::Start(0)).unwrap();
+                        let descriptor = OwnedFd::from(file);
+                        let mut writer = writer.lock().unwrap();
+                        active.fetch_sub(1, Ordering::SeqCst);
+                        // A timed-out request's late reply is expected and must
+                        // not be confused with an owner receipt/checkpoint.
+                        let _ = transport::send(&mut writer, &Envelope {
+                            version:VERSION, id:request.id,
+                            body:Response::Initialization { size:bytes.len() as u64, sha256:drive_core::sha256(&bytes) },
+                        }, Some(&descriptor));
+                    });
+                }
+            });
+        });
+        Self { peer:Peer { rpc,log,thread:Some(thread) }, release,requests,peak }
+    }
+}
+impl Drop for WindowPeer {
+    fn drop(&mut self) { self.release(); }
+}
+
+fn window_candidate(path: &std::path::Path, siblings: usize) -> (Store, RemoteSnapshot, InitializationRun, serde_json::Value) {
+    let mut store = complete_store(path, 7, true);
+    let protected_before = protected(&store);
+    let mut data = snapshot("server", 8);
+    let prototype = data.nodes[3].clone();
+    data.nodes.truncate(3);
+    for index in 0..siblings {
+        let mut node = prototype.clone();
+        node.id = (200 + index).to_string();
+        node.name = format!("Directory{index:02}");
+        let mut version: serde_json::Value = serde_json::from_str(&node.version).unwrap();
+        version["file"] = node.id.clone().into();
+        node.version = version.to_string();
+        data.nodes.push(node);
+    }
+    let binding = InitializationBinding {
+        task_id:TASK.into(), scope:serde_json::to_value(&data.scope).unwrap(), restore:data.restore.clone(),
+        start_cursor:data.cursor.clone(), expected_cursor:"native-v1:7".into(),
+    };
+    let run = store.begin_initialization(&binding,&data.nodes[0],InitializationBudget::default()).unwrap();
+    let ticket = store.begin_initialization_directory(&run,"100").unwrap();
+    store.store_initialization_native_directory(&ticket,1,&fixture_children(&data,"100")).unwrap();
+    (store,data,run,protected_before)
+}
+
+#[test]
+fn directory_window_commits_and_refills_while_one_independent_response_is_held() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store,data,run,before) = window_candidate(dir.path(),24);
+    let peer = WindowPeer::new(data,true);
+    let bridge = bridge(store,&peer.peer,"server");
+    let owner = bridge.clone();
+    let run_for_owner = run.clone();
+    let work = std::thread::spawn(move || {
+        let mut completed = 0;
+        let result = owner.initialization_directory_window(&owner.connection(),&owner.session().unwrap(),
+            &run_for_owner,Instant::now()+Duration::from_secs(10),false,1,&mut completed);
+        (result,completed)
+    });
+    let mut requests = Vec::new();
+    while requests.len() < 5 {
+        match peer.requests.recv_timeout(Duration::from_secs(3)) {
+            Ok(id) => requests.push(id), Err(_) => break,
+        }
+    }
+    let coverage_before_release = bridge.store.lock().unwrap().initialization_coverage(&run).unwrap();
+    let protected_before_release = protected(&bridge.store.lock().unwrap());
+    peer.release();
+    let (result,completed) = work.join().unwrap();
+    assert_eq!(requests.len(),5,"a held first response blocked completed siblings and refill");
+    assert!(coverage_before_release.iter().any(|c| c.directory!="100" && c.directory!="200" && c.state=="received"));
+    assert_eq!(protected_before_release,before);
+    assert!(result.is_ok(),"{result:?}");
+    assert_eq!(completed,16,"one event window must not admit more than sixteen directories");
+    assert_eq!(peer.peer.log.lock().unwrap().len(),16);
+    assert!(peer.peak.load(Ordering::SeqCst)<=4,"network concurrency exceeded existing bound");
+    let store = bridge.store.lock().unwrap();
+    assert_eq!(protected(&store),before);
+    assert!(store.initialization_writeback_blocked().unwrap());
+    assert_ne!(store.initialization_status().unwrap().unwrap().state,"ready");
+}
+
+#[test]
+fn directory_window_timeout_keeps_other_receipts_and_reopen_reuses_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let (store,data,run,before) = window_candidate(dir.path(),8);
+    let peer = WindowPeer::new(data.clone(),true);
+    let bridge = bridge(store,&peer.peer,"server");
+    let mut completed = 0;
+    let result = bridge.initialization_directory_window(&peer.peer.rpc,&bridge.session().unwrap(),
+        &run,Instant::now()+Duration::from_secs(5),false,1,&mut completed);
+    assert!(result.is_err(),"held request must actually time out");
+    assert_eq!(result.unwrap_err().kind(),io::ErrorKind::TimedOut);
+    let received = {
+        let store = bridge.store.lock().unwrap();
+        assert_eq!(protected(&store),before);
+        assert!(store.initialization_writeback_blocked().unwrap());
+        store.initialization_coverage(&run).unwrap().into_iter()
+            .filter(|c|c.directory!="100" && c.state=="received").map(|c|c.directory).collect::<Vec<_>>()
+    };
+    peer.release();
+    assert_eq!(received.len(),7,"one timeout discarded other successful directory receipts");
+    assert_eq!(completed,7);
+    drop(bridge);
+    drop(peer);
+    let mut reopened = Store::open(dir.path()).unwrap();
+    let recovered = reopened.initialization_status().unwrap().unwrap();
+    let next_run = reopened.resume_initialization(&recovered.run,&recovered.binding).unwrap();
+    assert!(next_run.epoch>run.epoch);
+    let peer = WindowPeer::new(data,false);
+    let bridge = self::bridge(reopened,&peer.peer,"server");
+    let mut completed = 0;
+    assert!(!bridge.initialization_directory_window(&peer.peer.rpc,&bridge.session().unwrap(),
+        &next_run,Instant::now()+Duration::from_secs(5),false,1,&mut completed).unwrap());
+    assert_eq!(completed,1);
+    assert_eq!(*peer.peer.log.lock().unwrap(),vec!["directory:200"]);
+    let store = bridge.store.lock().unwrap();
+    assert_eq!(protected(&store),before);
+    assert!(store.initialization_writeback_blocked().unwrap());
+    assert_ne!(store.initialization_status().unwrap().unwrap().state,"ready");
+}
+
 #[test]
 fn cold_owner_uses_reliable_steps_and_commits_only_after_separate_fence() {
     let dir = tempfile::tempdir().unwrap();
