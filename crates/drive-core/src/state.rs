@@ -148,7 +148,7 @@ impl Drop for ReadHandle {
 }
 
 /// Version of the durable state contract, including journal semantics.
-pub const STATE_SCHEMA_VERSION: i64 = 23;
+pub const STATE_SCHEMA_VERSION: i64 = 24;
 
 impl Store {
     /// One store per account + sync root. Independent accounts never share event IDs or cursors.
@@ -187,7 +187,7 @@ impl Store {
         db.execute_batch("
             BEGIN IMMEDIATE;
             CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-            INSERT OR IGNORE INTO metadata VALUES ('received_cursor',''),('committed_cursor','');
+            INSERT OR IGNORE INTO metadata VALUES ('received_cursor',''),('committed_cursor',''),('write_policy_revision','0');
             CREATE TABLE IF NOT EXISTS inbox (seq INTEGER PRIMARY KEY, body TEXT UNIQUE NOT NULL, done INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS seen (id TEXT PRIMARY KEY, body TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS nodes (
@@ -222,6 +222,7 @@ impl Store {
             CREATE TABLE IF NOT EXISTS upload_origins(operation TEXT PRIMARY KEY,body TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS upload_paths(operation TEXT PRIMARY KEY,path TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS local_unlinks(node TEXT PRIMARY KEY,confirmed INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS directory_permissions(node TEXT PRIMARY KEY,permission TEXT NOT NULL CHECK(permission IN ('allowed','denied','unknown')),origin TEXT NOT NULL,updated INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS cache_access(seq INTEGER PRIMARY KEY AUTOINCREMENT,node TEXT UNIQUE NOT NULL);
             CREATE TABLE IF NOT EXISTS cache_published(node TEXT PRIMARY KEY,at INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS local_modes(node TEXT PRIMARY KEY,mode INTEGER NOT NULL CHECK(mode>=0 AND mode<=511));

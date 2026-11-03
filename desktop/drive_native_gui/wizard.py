@@ -266,6 +266,9 @@ class SetupWizard(QDialog):
                 "scope": selection["scope"],
                 "mount": str(mount.resolve()),
                 "writable": bool(selection.get("writable", False)),
+                # This bit is derived from the remote space capability observed
+                # during setup; it is not a local user read-only preference.
+                "writable_source": "remote_share",
             }
             save_profile(profile, self.instance)
             self.profile = profile

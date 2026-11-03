@@ -725,6 +725,9 @@ fn schema_inventory_requires_an_explicit_decision_for_new_tables_and_columns() {
         "cache_access",
         "cache_published",
         "engine_upload_stages",
+        // Write-permission policy is consumed by the FUSE write gate and mount
+        // policy. It never changes a status atom, icon source or namespace row.
+        "directory_permissions",
         // Private candidates are not the published tree or an icon source.
         // Atomic final install uses the existing snapshot reset transaction.
         "initialization_run",

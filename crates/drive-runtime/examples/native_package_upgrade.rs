@@ -147,6 +147,7 @@ async fn main() -> Result<()> {
         },
         mount: mount.clone(),
         writable: true,
+        writable_source: drive_runtime::service::WritableSource::RemoteShare,
     };
     let config = base.join("profile.json");
     let mut old_profile = serde_json::to_value(&profile)?;

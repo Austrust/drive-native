@@ -14,7 +14,11 @@ mod read_requests;
 #[cfg(test)]
 mod shutdown_tests;
 mod writable;
+#[cfg(test)]
+#[path = "write_policy_tests.rs"]
+mod write_policy_tests;
 use drive_core::filesystem::FileRecord;
+use drive_core::write_permissions::WritePermission;
 use drive_core::{Error, Node, ReadHandle, Store};
 use fuser::{
     FileAttr, FileType, Filesystem, ReplyAttr, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry,
@@ -114,9 +118,18 @@ pub trait Hydrator: Send + Sync {
         self.hydrate(node)
     }
 }
+/// How this mount decides write requests. `ReadOnly` is the user's explicit
+/// whole-mount read-only choice and keeps the kernel-visible EROFS contract.
+/// `PerDirectory` mounts RW and resolves the effective permission of the
+/// target node/parent; `fallback` applies where no explicit decision exists.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WritePolicy {
+    ReadOnly,
+    PerDirectory { fallback: WritePermission },
+}
 pub struct CacheFilesystem {
     storage: Arc<std::fs::File>,
-    writable: bool,
+    write_policy: WritePolicy,
     store: Arc<drive_core::SharedStore>,
     handles: Arc<Mutex<Handles>>,
     // Serializes registration/promotion/namespace barriers, never held by reads.
@@ -132,9 +145,55 @@ pub struct CacheFilesystem {
     gid: u32,
 }
 impl CacheFilesystem {
+    /// Compatibility helper for writable fixtures: every path is allowed until
+    /// a per-directory decision says otherwise.
     pub fn with_writes_enabled(mut self) -> Self {
-        self.writable = true;
+        self.write_policy = WritePolicy::PerDirectory {
+            fallback: WritePermission::Allowed,
+        };
         self
+    }
+
+    pub fn with_write_policy(mut self, policy: WritePolicy) -> Self {
+        self.write_policy = policy;
+        self
+    }
+
+    pub fn write_policy(&self) -> WritePolicy {
+        self.write_policy
+    }
+
+    /// Errno for a write that targets `ino` (a file) or `ino`'s parent (for
+    /// namespace mutations). Explicit read-only mounts keep EROFS; a denied or
+    /// still-unknown directory permission is EACCES, never a generic EIO.
+    pub(crate) fn write_denial(&self, ino: u64) -> Option<i32> {
+        let fallback = match self.write_policy {
+            WritePolicy::ReadOnly => return Some(libc::EROFS),
+            WritePolicy::PerDirectory { fallback } => fallback,
+        };
+        let effective = {
+            let store = self.store.lock().unwrap();
+            match preview::authoritative(&store, ino, libc::EACCES) {
+                Ok(record) => store.effective_write_permission(&record.node.id).ok(),
+                Err(_) => None,
+            }
+        };
+        // An unresolvable target never borrows a permissive mount default.
+        let Some(effective) = effective else {
+            return Some(libc::EACCES);
+        };
+        match effective.permission {
+            WritePermission::Allowed => None,
+            WritePermission::Denied => Some(libc::EACCES),
+            // Only an absent decision may fall back to the mount default; an
+            // explicit `unknown` decision stays conservative.
+            WritePermission::Unknown
+                if effective.source.is_none() && fallback == WritePermission::Allowed =>
+            {
+                None
+            }
+            WritePermission::Unknown => Some(libc::EACCES),
+        }
     }
 
     pub fn with_hydrator(mut self, hydrator: Arc<dyn Hydrator>) -> Self {
@@ -165,7 +224,7 @@ impl CacheFilesystem {
         )?);
         Ok(Self {
             storage,
-            writable: false,
+            write_policy: WritePolicy::ReadOnly,
             store,
             handles: Arc::new(Mutex::new(Handles {
                 next: 1,
@@ -283,8 +342,8 @@ impl Filesystem for CacheFilesystem {
         umask: u32,
         reply: ReplyEntry,
     ) {
-        if !self.writable {
-            reply.error(libc::EROFS);
+        if let Some(errno) = self.write_denial(parent) {
+            reply.error(errno);
             return;
         }
         let Some(name) = name.to_str().map(str::to_owned) else {

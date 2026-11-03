@@ -370,11 +370,18 @@ pub fn overview(service: &Service) -> io::Result<String> {
     let pending = store.pending_operations().map_err(|_| other())?
         + store.pending_namespace_operations().map_err(|_| other())?;
     let preview_only = preview::active(&store, &service.profile.scope.file_id)?;
+    let directory_allowed = store
+        .has_allowed_directory_permission(&service.profile.scope.file_id)
+        .map_err(io::Error::other)?;
+    let write_policy = service.profile.write_policy(directory_allowed);
+    let writable_mount = write_policy != drive_fs::WritePolicy::ReadOnly;
     Ok(serde_json::json!({"schema":1,"task_id":service.profile.task_id,"mount":service.profile.mount,
         "connection":state,"error":error,"background_error":*service.bridge.last_error.lock().unwrap(),
         "upload_block":*service.bridge.upload_block.lock().unwrap(),
-        "mounted":service.mounted.load(Ordering::Acquire),"writable":service.profile.writable && !preview_only,
-        "configured_writable":service.profile.writable,"preview_only":preview_only,
+        "mounted":service.mounted.load(Ordering::Acquire),"writable":writable_mount && !preview_only,
+        "configured_writable":service.profile.writable,"writable_source":service.profile.effective_writable_source(),
+        "write_policy_revision":store.write_policy_revision().map_err(|_|other())?,
+        "preview_only":preview_only,
         "skipped_symlinks":store.skipped_symlink_count().map_err(|_|other())?,
         "skipped_permission_directories":store.inaccessible_count().map_err(|_|other())?,
         "pending_operations":pending,"revision":revision,"local_revision":store.local_revision(),

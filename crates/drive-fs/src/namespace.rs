@@ -8,8 +8,11 @@ pub(super) fn rename(
     flags: u32,
     reply: ReplyEmpty,
 ) {
-    if !fs.writable {
-        reply.error(libc::EROFS);
+    if let Some(errno) = fs
+        .write_denial(parent)
+        .or_else(|| fs.write_denial(new_parent))
+    {
+        reply.error(errno);
         return;
     }
     if flags & !(libc::RENAME_NOREPLACE as u32) != 0 {
@@ -69,8 +72,8 @@ pub(super) fn remove(
     directory: bool,
     reply: ReplyEmpty,
 ) {
-    if !fs.writable {
-        reply.error(libc::EROFS);
+    if let Some(errno) = fs.write_denial(parent) {
+        reply.error(errno);
         return;
     }
     let Some(name) = name.to_str().map(str::to_owned) else {

@@ -157,7 +157,10 @@ fn schema22_upgrade_does_not_invent_mtime_for_uncertain_requests() {
             p.file_name()
                 .unwrap()
                 .to_string_lossy()
-                .starts_with("state-before-v23-")
+                .starts_with(&format!(
+                    "state-before-v{}-",
+                    drive_core::STATE_SCHEMA_VERSION
+                ))
         })
         .unwrap();
     let db = rusqlite::Connection::open(backup).unwrap();

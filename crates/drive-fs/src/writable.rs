@@ -87,9 +87,11 @@ fn draft(
 }
 pub(super) fn open(fs: &mut CacheFilesystem, ino: u64, flags: i32, reply: ReplyOpen) {
     let writable = flags & libc::O_ACCMODE != libc::O_RDONLY;
-    if (writable || flags & libc::O_TRUNC != 0) && !fs.writable {
-        reply.error(libc::EROFS);
-        return;
+    if writable || flags & libc::O_TRUNC != 0 {
+        if let Some(errno) = fs.write_denial(ino) {
+            reply.error(errno);
+            return;
+        }
     }
     if flags & libc::O_TRUNC != 0 && !writable {
         reply.error(libc::EACCES);
@@ -174,8 +176,8 @@ pub(super) fn write(
     bytes: &[u8],
     reply: ReplyWrite,
 ) {
-    if !fs.writable {
-        reply.error(libc::EROFS);
+    if let Some(errno) = fs.write_denial(ino) {
+        reply.error(errno);
         return;
     }
     if offset < 0 || bytes.len() > 1024 * 1024 {
@@ -363,8 +365,8 @@ pub(super) fn setattr(
     flags: Option<u32>,
     reply: ReplyAttr,
 ) {
-    if !fs.writable {
-        reply.error(libc::EROFS);
+    if let Some(errno) = fs.write_denial(ino) {
+        reply.error(errno);
         return;
     }
     // This mount belongs to one ordinary user. Restoring the same owner is
@@ -485,8 +487,8 @@ pub(super) fn create(
     flags: i32,
     reply: fuser::ReplyCreate,
 ) {
-    if !fs.writable {
-        reply.error(libc::EROFS);
+    if let Some(errno) = fs.write_denial(parent) {
+        reply.error(errno);
         return;
     }
     let Some(name) = name.to_str().map(str::to_owned) else {

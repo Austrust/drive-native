@@ -18,6 +18,20 @@ use std::{
     time::Duration,
 };
 
+/// Where the profile's whole-scope `writable` bit came from. Legacy profiles
+/// did not record it: an old `false` is preserved as an explicit read-only
+/// choice instead of being silently promoted to writable.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WritableSource {
+    #[default]
+    Legacy,
+    /// The user explicitly chose a read-only mount.
+    User,
+    /// Derived from the selected space's remote write capability.
+    RemoteShare,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Profile {
@@ -32,8 +46,49 @@ pub struct Profile {
     pub scope: Scope,
     pub mount: PathBuf,
     pub writable: bool,
+    #[serde(default)]
+    pub writable_source: WritableSource,
 }
 impl Profile {
+    /// Legacy migration. An old `writable=false` stays read-only and is marked
+    /// user-explicit; an old `writable=true` stays writable and its capability
+    /// is attributed to the remote space.
+    pub fn normalize_writable_source(&mut self) {
+        if self.writable_source == WritableSource::Legacy {
+            self.writable_source = if self.writable {
+                WritableSource::RemoteShare
+            } else {
+                WritableSource::User
+            };
+        }
+    }
+    pub fn effective_writable_source(&self) -> WritableSource {
+        match self.writable_source {
+            WritableSource::Legacy if self.writable => WritableSource::RemoteShare,
+            WritableSource::Legacy => WritableSource::User,
+            source => source,
+        }
+    }
+    /// Mount policy. An explicit user read-only choice stays a RO mount with
+    /// EROFS. A remote-inferred scope stays RO unless a directory inside it is
+    /// explicitly writable; then the mount is RW and each write is resolved
+    /// against its target directory.
+    pub fn write_policy(&self, directory_allowed: bool) -> drive_fs::WritePolicy {
+        if self.effective_writable_source() == WritableSource::User {
+            return drive_fs::WritePolicy::ReadOnly;
+        }
+        if self.writable {
+            drive_fs::WritePolicy::PerDirectory {
+                fallback: drive_core::write_permissions::WritePermission::Allowed,
+            }
+        } else if directory_allowed {
+            drive_fs::WritePolicy::PerDirectory {
+                fallback: drive_core::write_permissions::WritePermission::Denied,
+            }
+        } else {
+            drive_fs::WritePolicy::ReadOnly
+        }
+    }
     pub fn read(path: &Path) -> io::Result<Self> {
         use std::io::Read;
         let file = fs::OpenOptions::new()
@@ -55,8 +110,9 @@ impl Profile {
         if text.len() > 65536 {
             return Err(io::Error::other("profile exceeds size limit"));
         }
-        let profile: Self =
+        let mut profile: Self =
             serde_json::from_str(&text).map_err(|_| io::Error::other("invalid profile format"))?;
+        profile.normalize_writable_source();
         profile.validate()?;
         Ok(profile)
     }
@@ -591,14 +647,21 @@ impl Service {
             Err(e) => return Err(io::Error::other(e)),
         }
         .with_hydrator(self.bridge.clone());
-        if self.profile.writable {
-            fs = fs.with_writes_enabled();
-        }
+        let directory_allowed = self
+            .bridge
+            .store
+            .lock()
+            .unwrap()
+            .has_allowed_directory_permission(&self.profile.scope.file_id)
+            .map_err(io::Error::other)?;
+        let write_policy = self.profile.write_policy(directory_allowed);
+        let writable_mount = write_policy != drive_fs::WritePolicy::ReadOnly;
+        let fs = fs.with_write_policy(write_policy);
         let session = fuser::spawn_mount2(
             fs,
             &self.profile.mount,
             &[
-                if self.profile.writable {
+                if writable_mount {
                     fuser::MountOption::RW
                 } else {
                     fuser::MountOption::RO
@@ -791,3 +854,7 @@ impl Service {
 #[cfg(test)]
 #[path = "trust_service_tests.rs"]
 mod trust_service_tests;
+
+#[cfg(test)]
+#[path = "writable_policy_tests.rs"]
+mod writable_policy_tests;

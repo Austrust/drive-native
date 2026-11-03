@@ -23,6 +23,8 @@ pub mod namespace_schedule;
 
 pub mod removals;
 
+pub mod write_permissions;
+
 pub mod replacements;
 
 pub mod download_jobs;

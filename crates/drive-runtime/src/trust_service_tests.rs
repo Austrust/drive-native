@@ -20,6 +20,7 @@ fn profile() -> Profile {
         },
         mount: PathBuf::from("/tmp/trust-fault-test-unused"),
         writable: false,
+        writable_source: WritableSource::User,
     }
 }
 fn fixture() -> (tempfile::TempDir, Arc<Service>) {

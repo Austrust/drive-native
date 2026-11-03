@@ -99,6 +99,7 @@ async fn main() -> Result<()> {
         },
         mount: mount.clone(),
         writable: true,
+        writable_source: drive_runtime::service::WritableSource::RemoteShare,
     };
     let config = scratch.path().join("profile.json");
     std::fs::write(&config, serde_json::to_vec(&profile)?)?;
