@@ -14,6 +14,8 @@ mod inline_metadata_tests;
 mod isolation_tests;
 mod namespace;
 mod preview;
+pub mod publication;
+pub use publication::NotifyHub;
 mod read_requests;
 #[cfg(test)]
 mod shutdown_tests;
@@ -132,6 +134,9 @@ pub struct CacheFilesystem {
     reads: ReadRequests,
     network_queue: Arc<LocalQueue>,
     hydrator: Option<Arc<dyn Hydrator>>,
+    // Metadata publication gate + kernel invalidation delivery (see
+    // publication.rs). Inert until a session notifier is installed.
+    notify: NotifyHub,
     uid: u32,
     gid: u32,
 }
@@ -144,6 +149,25 @@ impl CacheFilesystem {
     pub fn with_hydrator(mut self, hydrator: Arc<dyn Hydrator>) -> Self {
         self.hydrator = Some(hydrator);
         self
+    }
+
+    /// Install the mount's publication/invalidation hub. Mount owners must call
+    /// [`NotifyHub::install`] with `BackgroundSession::notifier()` after the
+    /// session exists; until then replies carry zero TTL.
+    pub fn with_notify_hub(mut self, hub: NotifyHub) -> Self {
+        self.notify = hub;
+        self
+    }
+
+    /// Override the metadata TTL (0 disables caching). The default comes from
+    /// `DRIVE_NATIVE_FS_TTL_MS` (2000 ms).
+    pub fn with_metadata_ttl_ms(mut self, ttl_ms: u64) -> Self {
+        self.notify = NotifyHub::with_ttl_ms(ttl_ms);
+        self
+    }
+
+    pub fn notify_hub(&self) -> NotifyHub {
+        self.notify.clone()
     }
 
     pub fn new(
@@ -190,6 +214,7 @@ impl CacheFilesystem {
             reads: ReadRequests::default(),
             network_queue: Arc::new(LocalQueue::new()),
             hydrator: None,
+            notify: NotifyHub::from_env(),
             uid,
             gid,
         })
@@ -305,6 +330,7 @@ impl Filesystem for CacheFilesystem {
         };
         let store = self.store.clone();
         let hydrator = self.hydrator.clone();
+        let notify = self.notify.clone();
         let (uid, gid) = (self.uid, self.gid);
         self.queue.submit(Box::new(move || {
             let result = (|| -> drive_core::Result<_> {
@@ -318,6 +344,10 @@ impl Filesystem for CacheFilesystem {
                     if let Some(h) = hydrator {
                         h.local_saved();
                     }
+                    // Queue after the commit: the worker takes the publication
+                    // gate before writing anything to the kernel.
+                    notify.invalidate_entry(parent, &name);
+                    notify.invalidate_inode(record.ino);
                     reply.entry(&TTL, &attr(&record, uid, gid), 0)
                 }
                 Err(e) => reply.error(errno(&e)),
@@ -390,6 +420,10 @@ impl Filesystem for CacheFilesystem {
             reply.error(libc::ENOENT);
             return;
         };
+        // Publication permit: held from before projecting until the reply is
+        // written, so an invalidation for a state change can never be delivered
+        // before a stale answer (see publication.rs).
+        let inline_publication = self.notify.reply_guard();
         // Cheap authoritative metadata is answered on the dispatcher thread; the
         // single-statement projection owns its result before the reply is
         // written. Busy Store, negative and candidate-preview lookups keep the
@@ -401,13 +435,17 @@ impl Filesystem for CacheFilesystem {
                 Ok(attr) => reply.entry(&TTL, &attr, 0),
                 Err(e) => reply.error(e),
             }
+            drop(inline_publication);
             return;
         }
+        drop(inline_publication);
         let store = self.store.clone();
+        let notify = self.notify.clone();
         let (uid, gid) = (self.uid, self.gid);
         let queued = diagnostics::span(diagnostics::Stage::LookupQueue);
         self.queue.submit(Box::new(move || {
             drop(queued);
+            let publication = notify.reply_guard();
             let wait = diagnostics::span(diagnostics::Stage::LookupStoreWait);
             let store = store.lock().unwrap();
             drop(wait);
@@ -423,9 +461,11 @@ impl Filesystem for CacheFilesystem {
                 Ok(record) => reply.entry(&TTL, &record.attr(uid, gid), 0),
                 Err(e) => reply.error(errno(&e)),
             }
+            drop(publication);
         }));
     }
     fn getattr(&mut self, _req: &Request<'_>, ino: u64, fh: Option<u64>, reply: ReplyAttr) {
+        let inline_publication = self.notify.reply_guard();
         if let Some(result) = preview::try_inline_getattr(
             &self.store,
             &self.handles,
@@ -438,14 +478,18 @@ impl Filesystem for CacheFilesystem {
                 Ok(attr) => reply.attr(&TTL, &attr),
                 Err(e) => reply.error(e),
             }
+            drop(inline_publication);
             return;
         }
+        drop(inline_publication);
         let store = self.store.clone();
         let handles = self.handles.clone();
+        let notify = self.notify.clone();
         let (uid, gid) = (self.uid, self.gid);
         let queued = diagnostics::span(diagnostics::Stage::GetattrQueue);
         self.queue.submit(Box::new(move || {
             drop(queued);
+            let publication = notify.reply_guard();
             let wait = diagnostics::span(diagnostics::Stage::GetattrStoreWait);
             let guard = store.lock().unwrap();
             drop(wait);
@@ -509,6 +553,7 @@ impl Filesystem for CacheFilesystem {
                 }
                 Err(e) => reply.error(errno(&e)),
             }
+            drop(publication);
         }));
     }
     fn opendir(&mut self, _req: &Request<'_>, ino: u64, flags: i32, reply: ReplyOpen) {

@@ -188,6 +188,7 @@ pub(super) fn write(
     let hydrator = fs.hydrator.clone();
     let network = fs.network_queue.clone();
     let data = bytes.to_vec();
+    let notify = fs.notify.clone();
     fs.queue.submit(Box::new(move || {
         let (id, body, flags) = {
             let h = handles.lock().unwrap();
@@ -214,7 +215,10 @@ pub(super) fn write(
                         .map_err(|e| errno(&e))
                 });
             match result {
-                Ok(n) => reply.written(n as u32),
+                Ok(n) => {
+                    notify.invalidate_inode(ino);
+                    reply.written(n as u32)
+                }
                 Err(e) => reply.error(e),
             }
         });
@@ -297,6 +301,7 @@ pub(super) fn sync(fs: &mut CacheFilesystem, ino: u64, fh: u64, release: bool, r
     let store = fs.store.clone();
     let handles = fs.handles.clone();
     let hydrator = fs.hydrator.clone();
+    let notify = fs.notify.clone();
     // The slow path must observe any promotion when it actually executes.
     // Its cleanup also runs if the metadata queue rejects the release job.
     let cleanup = release.then(|| ReleaseCleanup {
@@ -333,6 +338,7 @@ pub(super) fn sync(fs: &mut CacheFilesystem, ino: u64, fh: u64, release: bool, r
                 if let Some(h) = hydrator {
                     h.local_saved()
                 }
+                notify.invalidate_inode(ino);
                 reply.ok()
             }
             Err(e) => reply.error(e),
@@ -389,6 +395,7 @@ pub(super) fn setattr(
     let Some(size) = size else {
         let store = fs.store.clone();
         let handles = fs.handles.clone();
+        let notify = fs.notify.clone();
         let (uid, gid) = (fs.uid, fs.gid);
         fs.queue.submit(Box::new(move || {
             if let Some(fh) = fh {
@@ -412,7 +419,10 @@ pub(super) fn setattr(
                 s.record_by_inode(ino)
             })();
             match result {
-                Ok(record) => reply.attr(&TTL, &attr(&record, uid, gid)),
+                Ok(record) => {
+                    notify.invalidate_inode(record.ino);
+                    reply.attr(&TTL, &attr(&record, uid, gid))
+                }
                 Err(e) => reply.error(errno(&e)),
             }
         }));
@@ -428,6 +438,7 @@ pub(super) fn setattr(
     let handles = fs.handles.clone();
     let hydrator = fs.hydrator.clone();
     let network = fs.network_queue.clone();
+    let notify = fs.notify.clone();
     let (uid, gid) = (fs.uid, fs.gid);
     let updates = fs.handle_updates.clone();
     fs.queue.submit(Box::new(move || {
@@ -467,6 +478,7 @@ pub(super) fn setattr(
                     if let Some(h) = hydrator {
                         h.local_saved()
                     }
+                    notify.invalidate_inode(record.ino);
                     reply.attr(&TTL, &attr(&record, uid, gid))
                 }
                 Err(e) => reply.error(e),
@@ -495,6 +507,7 @@ pub(super) fn create(
     };
     let store = fs.store.clone();
     let handles = fs.handles.clone();
+    let notify = fs.notify.clone();
     let (uid, gid) = (fs.uid, fs.gid);
     let updates = fs.handle_updates.clone();
     fs.queue.submit(Box::new(move || {
@@ -529,6 +542,9 @@ pub(super) fn create(
                         content: OpenContent::Draft(draft),
                     },
                 );
+                notify.invalidate_entry(parent, &name);
+                notify.invalidate_inode(parent);
+                notify.invalidate_inode(record.ino);
                 reply.created(
                     &TTL,
                     &attr(&record, uid, gid),
