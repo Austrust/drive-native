@@ -126,10 +126,16 @@ impl Store {
             "commit_uncertain"
         } else if directory_plan.is_some() {
             "directory_creation_conflict"
-        } else if namespace || node.directory || self.locally_unlinked(id)? {
+        } else if namespace || (node.directory && !bound_identity) || self.locally_unlinked(id)? {
             "namespace_conflict"
         } else if !parent_live {
             "parent_unavailable"
+        } else if node.directory {
+            // A directory bound to a remote identity with no ancestor namespace
+            // pressure, deletion, or unresolved commit has no recoverable
+            // action. Its stale conflict flag must not be reported as an
+            // unrecoverable namespace conflict (issue #6 follow-up).
+            return Ok(None);
         } else if !has_local {
             "local_content_unavailable"
         } else if busy {

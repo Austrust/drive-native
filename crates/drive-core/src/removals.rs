@@ -23,6 +23,101 @@ pub(crate) fn is_unlinked(db: &rusqlite::Connection, id: &str) -> Result<bool> {
         |r| r.get(0),
     )?)
 }
+/// A pending remove intent that an upload must wait for because it owns the
+/// upload target: the same identity, an ancestor identity, or an overlapping
+/// path. Unrelated removes (for example freedesktop trash entries) never
+/// appear here.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UploadRemoveBarrier {
+    pub operation: String,
+    pub path: String,
+}
+fn path_related(a: &str, b: &str) -> bool {
+    a == b
+        || a.strip_prefix(b).is_some_and(|rest| rest.starts_with('/'))
+        || b.strip_prefix(a).is_some_and(|rest| rest.starts_with('/'))
+}
+/// Current path of a possibly deleted node. Live ancestor names are walked so
+/// a queued ancestor rename cannot hide the dependency behind a captured path.
+fn live_path(db: &rusqlite::Connection, id: &str) -> Result<Option<String>> {
+    let mut parts = Vec::new();
+    let mut current = id.to_owned();
+    let mut seen = std::collections::HashSet::new();
+    loop {
+        if !seen.insert(current.clone()) {
+            return Err(Error::State("remove path cycle".into()));
+        }
+        let row: Option<(Option<String>, String)> = db
+            .query_row("SELECT parent,name FROM nodes WHERE id=?1", [&current], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .optional()?;
+        let Some((parent, name)) = row else {
+            return Ok(None);
+        };
+        match parent {
+            // The task root's own name is not part of relative paths.
+            Some(parent) => {
+                parts.push(name);
+                current = parent
+            }
+            None => break,
+        }
+    }
+    parts.reverse();
+    Ok(Some(parts.join("/")))
+}
+/// Scope the remove barrier to dependencies of one upload target. The previous
+/// global barrier let any unfinished remove, including an uncertain trash entry,
+/// stop every ordinary upload.
+pub(crate) fn upload_remove_barrier(
+    db: &rusqlite::Connection,
+    node: &str,
+    path: &str,
+) -> Result<Option<UploadRemoveBarrier>> {
+    let rows: Vec<(String, String, String)> = {
+        let mut q = db.prepare("SELECT id,node,body FROM namespace_ops WHERE kind='remove' AND id NOT IN (SELECT operation FROM access_blocked_operations) AND state NOT IN ('committed','superseded') ORDER BY seq")?;
+        q.query_map([], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?
+    };
+    if rows.is_empty() {
+        return Ok(None);
+    }
+    // Identity ancestry must be checked independently of captured paths: a
+    // deleted ancestor remains a dependency even if its path was rebound.
+    let mut ancestors = std::collections::HashSet::new();
+    let mut current = Some(node.to_owned());
+    while let Some(id) = current {
+        if ancestors.len() >= 256 || !ancestors.insert(id.clone()) {
+            return Err(Error::State("upload dependency ancestry invalid".into()));
+        }
+        current = db
+            .query_row("SELECT parent FROM nodes WHERE id=?1", [&id], |r| {
+                r.get::<_, Option<String>>(0)
+            })
+            .optional()?
+            .flatten();
+    }
+    for (operation, remove_node, body) in rows {
+        let job: RemoveJob = serde_json::from_str(&body)
+            .map_err(|_| Error::State("unreadable remove intent".into()))?;
+        if job.operation != operation {
+            return Err(Error::State("remove intent identity mismatch".into()));
+        }
+        let remove_path = live_path(db, &remove_node)
+            .map_err(|_| Error::State("remove path unreadable".into()))?
+            .unwrap_or_else(|| job.path.clone());
+        if ancestors.contains(&remove_node) || path_related(path, &remove_path) {
+            return Ok(Some(UploadRemoveBarrier {
+                operation,
+                path: remove_path,
+            }));
+        }
+    }
+    Ok(None)
+}
 fn os(code: i32) -> Error {
     Error::Io(std::io::Error::from_raw_os_error(code))
 }
@@ -180,5 +275,21 @@ impl Store {
         // orphan working copies is deliberately separate from NAS deletion.
         tx.commit()?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod upload_remove_scope_tests {
+    use super::path_related;
+
+    #[test]
+    fn only_same_or_nested_paths_are_related() {
+        assert!(path_related("a/b", "a/b"));
+        assert!(path_related("a/b/c", "a/b"));
+        assert!(path_related("a/b", "a/b/c"));
+        assert!(!path_related("a/bc", "a/b"));
+        assert!(!path_related("a/b", "a/bc"));
+        assert!(!path_related("x/a", "a"));
+        assert!(!path_related("a", "b/a"));
     }
 }

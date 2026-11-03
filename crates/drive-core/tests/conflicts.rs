@@ -206,3 +206,29 @@ fn issue_pages_are_bounded_and_do_not_skip_boundary_identity() {
         .collect();
     assert_eq!(ids.len(), 260);
 }
+
+/// A committed directory with a remote identity has no namespace action left.
+/// A stale conflict flag used to surface it as an unrecoverable
+/// `namespace_conflict`, hiding which operation actually blocked descendants.
+#[test]
+fn committed_directory_with_remote_alias_is_not_a_namespace_conflict_issue() {
+    let (d, mut s) = fixture();
+    let db = rusqlite::Connection::open(d.path().join("state.sqlite")).unwrap();
+    db.execute(
+        "INSERT INTO nodes(id,parent,name,remote_version,directory) VALUES('folder','root','folder','v-folder',1)",
+        [],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO remote_aliases(remote,node) VALUES('900','folder')",
+        [],
+    )
+    .unwrap();
+    db.execute("UPDATE nodes SET conflict=1 WHERE id='folder'", [])
+        .unwrap();
+    drop(db);
+    assert!(
+        s.sync_issue("root", "folder").unwrap().is_none(),
+        "bound committed directory must not need namespace recovery"
+    );
+}

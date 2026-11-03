@@ -861,6 +861,112 @@ fn replacement_origin_roundtrip(lose_preparation: bool) {
     server.join().unwrap();
 }
 
+#[test]
+fn unrelated_pending_remove_does_not_stall_upload_queue() {
+    use std::io::Read;
+    let (a, mut b) = UnixStream::pair().unwrap();
+    let server = std::thread::spawn(move || {
+        handshake(&mut b);
+        let (req, fd) = crate::transport::receive::<Envelope<Command>>(&mut b).unwrap();
+        let mtime = match req.body {
+            Command::Upload {
+                path,
+                reconcile,
+                mtime,
+                ..
+            } => {
+                assert_eq!(path, "/lab/A.doc");
+                assert!(!reconcile);
+                mtime
+            }
+            _ => panic!("expected upload intent"),
+        };
+        let mut body = Vec::new();
+        std::fs::File::from(fd.unwrap())
+            .read_to_end(&mut body)
+            .unwrap();
+        assert_eq!(body, b"new");
+        let mut confirmed = node("v2");
+        confirmed.metadata.as_mut().unwrap().mtime = u64::from(mtime.unwrap());
+        crate::transport::send(
+            &mut b,
+            &Envelope {
+                version: VERSION,
+                id: req.id,
+                body: Response::Committed { node: confirmed },
+            },
+            None,
+        )
+        .unwrap();
+    });
+    let (_dir, store, bridge) = fixture(a);
+    {
+        let mut s = store.lock().unwrap();
+        s.ensure_fs_root("1").unwrap();
+        s.receive(&drive_core::Batch {
+            from: "1".into(),
+            to: "2".into(),
+            events: vec![drive_core::Event {
+                id: "peer".into(),
+                change: drive_core::Change::Upsert(Node {
+                    id: "3".into(),
+                    parent: Some("1".into()),
+                    name: "B.doc".into(),
+                    version: "v-3".into(),
+                    directory: false,
+                    metadata: Some(NodeMetadata {
+                        size: 3,
+                        mtime: 1,
+                        mode: 0o644,
+                    }),
+                }),
+            }],
+        })
+        .unwrap();
+        s.drain().unwrap();
+        s.unlink_local("1", "B.doc", "3", false).unwrap();
+        assert_eq!(s.next_remove().unwrap().unwrap().job.path, "B.doc");
+    }
+    // The remove above is unrelated to A.doc, so it must not gate its upload.
+    assert_eq!(bridge.upload_pending(false).unwrap(), 1);
+    assert!(bridge.upload_block.lock().unwrap().is_none());
+    assert_eq!(
+        store.lock().unwrap().status("2").unwrap(),
+        Status::LocalComplete
+    );
+    server.join().unwrap();
+}
+
+#[test]
+fn blocked_upload_surfaces_the_dependency_reason() {
+    let (a, mut b) = UnixStream::pair().unwrap();
+    b.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    let server = std::thread::spawn(move || {
+        handshake(&mut b);
+        // A gated upload sends no mutation; the peer only observes the close.
+        assert!(crate::transport::receive::<Envelope<Command>>(&mut b).is_err());
+    });
+    let (_dir, store, bridge) = fixture(a);
+    {
+        let mut s = store.lock().unwrap();
+        s.ensure_fs_root("1").unwrap();
+        s.rename_local("1", "A.doc", "1", "B.doc", false).unwrap();
+    }
+    assert_eq!(bridge.upload_pending(false).unwrap(), 0);
+    let reason = bridge.upload_block.lock().unwrap().clone().unwrap();
+    assert!(
+        reason.contains("namespace operation precedes upload"),
+        "unexpected reason: {reason}"
+    );
+    assert_eq!(
+        store.lock().unwrap().upload_operations("pending").unwrap().len(),
+        1,
+        "the blocked upload must stay pending"
+    );
+    bridge.connection().close();
+    server.join().unwrap();
+}
+
 // These existing protocol fixtures deliberately advance reconciliation without
 // wall-clock waits. The scheduler-specific tests below exercise real backoff.
 fn namespace_without_backoff(
