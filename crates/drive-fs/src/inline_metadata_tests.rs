@@ -45,21 +45,27 @@ fn inline_authority_lookup_and_getattr_answer_without_writes() {
     let (_temp, store) = shared();
     let handles = empty_handles();
     let revision = store.lock().unwrap().local_revision();
-    let lookup = preview::try_inline_lookup(&store, 1000, 1000, 1, "a")
+    let (lookup, lookup_cacheable) = preview::try_inline_lookup(&store, 1000, 1000, 1, "a")
         .expect("authority lookup should be served inline")
         .expect("lookup");
+    assert!(lookup_cacheable);
     assert_eq!(lookup.size, 3);
     assert!(lookup.ino > 1);
     assert_eq!(lookup.perm, 0o644);
-    let getattr = preview::try_inline_getattr(&store, &handles, 1000, 1000, lookup.ino, None)
-        .expect("authority getattr should be served inline")
-        .expect("getattr");
+    let (getattr, getattr_cacheable) =
+        preview::try_inline_getattr(&store, &handles, 1000, 1000, lookup.ino, None)
+            .expect("authority getattr should be served inline")
+            .expect("getattr");
+    assert!(getattr_cacheable);
     assert_eq!(getattr.ino, lookup.ino);
     assert_eq!(getattr.size, 3);
     // The directory parent also projects inline.
-    let dir = preview::try_inline_lookup(&store, 1000, 1000, 1, "d")
+    let (dir, dir_cacheable) = preview::try_inline_lookup(&store, 1000, 1000, 1, "d")
         .expect("directory lookup inline")
         .expect("directory");
+    // Directories are cacheable authority metadata: their attributes are what
+    // the kernel uses for parent permission checks.
+    assert!(dir_cacheable);
     assert_eq!(dir.kind, FileType::Directory);
     assert_eq!(dir.perm, 0o755);
     // Both projections are read-only.
@@ -88,7 +94,7 @@ fn inline_path_defers_missing_names_and_inodes_to_the_offloaded_routing() {
     assert!(preview::try_inline_getattr(&store, &handles, 1000, 1000, 999, None).is_none());
     // A non-directory parent keeps its authority error inline, exactly as the
     // offloaded path would report it.
-    let file = preview::try_inline_lookup(&store, 1000, 1000, 1, "a")
+    let (file, _) = preview::try_inline_lookup(&store, 1000, 1000, 1, "a")
         .unwrap()
         .unwrap();
     let result = preview::try_inline_lookup(&store, 1000, 1000, file.ino, "child")
@@ -99,7 +105,7 @@ fn inline_path_defers_missing_names_and_inodes_to_the_offloaded_routing() {
 #[test]
 fn inline_getattr_reports_open_handle_state_like_the_offloaded_path() {
     let (_temp, store) = shared();
-    let file = preview::try_inline_lookup(&store, 1000, 1000, 1, "a")
+    let (file, _) = preview::try_inline_lookup(&store, 1000, 1000, 1, "a")
         .unwrap()
         .unwrap();
     let handles = empty_handles();
@@ -124,7 +130,7 @@ fn inline_getattr_reports_open_handle_state_like_the_offloaded_path() {
         libc::EBADF
     );
     // A matching missing-content handle replies the projected attributes.
-    let attr = preview::try_inline_getattr(&store, &handles, 1000, 1000, file.ino, Some(7))
+    let (attr, _) = preview::try_inline_getattr(&store, &handles, 1000, 1000, file.ino, Some(7))
         .unwrap()
         .unwrap();
     assert_eq!(attr.size, 3);

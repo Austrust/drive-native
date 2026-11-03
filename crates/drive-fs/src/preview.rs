@@ -22,6 +22,32 @@ impl Metadata {
             Self::Preview(r) => preview_attr(r, uid, gid),
         }
     }
+    /// Only authoritative, mutable-body-independent metadata may be cached in
+    /// the kernel; candidate previews stay zero-TTL.
+    pub(super) fn cacheable(&self) -> bool {
+        match self {
+            Self::Authority(r) => r.cacheable,
+            Self::Preview(_) => false,
+        }
+    }
+}
+
+/// (entry TTL, attr TTL) for one positive entry.
+///
+/// `cache_entry` is false for candidate-preview answers: they must stay
+/// zero-TTL. For authoritative entries the name is cacheable (namespace changes
+/// are invalidated), while attributes fall back to zero for dirty, drafted or
+/// unlinked identities.
+pub(super) fn reply_ttls(
+    hub: &NotifyHub,
+    cacheable: bool,
+    cache_entry: bool,
+) -> (Duration, Duration) {
+    let ttl = hub.ttl();
+    if ttl.is_zero() || !cache_entry {
+        return (Duration::ZERO, Duration::ZERO);
+    }
+    (ttl, if cacheable { ttl } else { Duration::ZERO })
 }
 pub(super) fn metadata(s: &Store, ino: u64) -> drive_core::Result<Metadata> {
     match s.posix_record_by_inode(ino) {
@@ -58,7 +84,7 @@ pub(super) fn try_inline_lookup(
     gid: u32,
     parent: u64,
     name: &str,
-) -> Option<Result<FileAttr, i32>> {
+) -> Option<Result<(FileAttr, bool), i32>> {
     let guard = match store.try_lock() {
         Ok(guard) => guard,
         // A held Store is exactly the case the pool exists for.
@@ -74,9 +100,10 @@ pub(super) fn try_inline_lookup(
     match result {
         Ok(record) => {
             let attr = posix_attr(&record, uid, gid);
+            let cacheable = record.cacheable;
             // The projection is fully owned; do not hold Store across the reply.
             drop(guard);
-            Some(Ok(attr))
+            Some(Ok((attr, cacheable)))
         }
         Err(e) if e.is_not_found() => {
             drop(guard);
@@ -98,7 +125,7 @@ pub(super) fn try_inline_getattr(
     gid: u32,
     ino: u64,
     fh: Option<u64>,
-) -> Option<Result<FileAttr, i32>> {
+) -> Option<Result<(FileAttr, bool), i32>> {
     let guard = match store.try_lock() {
         Ok(guard) => guard,
         Err(std::sync::TryLockError::WouldBlock) => return None,
@@ -155,7 +182,7 @@ pub(super) fn try_inline_getattr(
             None => return Some(Err(libc::EBADF)),
         }
     }
-    Some(Ok(attr))
+    Some(Ok((attr, record.cacheable)))
 }
 /// Caller holds the Store guard through its subsequent mutation. Preview nodes
 /// cannot acquire content handles; after atomic promotion new calls use authority.
@@ -234,5 +261,42 @@ pub(super) fn preview_attr(r: &PreviewRecord, uid: u32, gid: u32) -> FileAttr {
         rdev: 0,
         blksize: 4096,
         flags: 0,
+    }
+}
+
+#[cfg(test)]
+mod ttl_tests {
+    use super::*;
+
+    #[test]
+    fn bounded_ttl_policy_is_authority_only_and_attribute_gated() {
+        let inactive = NotifyHub::with_ttl_ms(2000);
+        assert_eq!(
+            reply_ttls(&inactive, true, true),
+            (Duration::ZERO, Duration::ZERO)
+        );
+        inactive.activate_ttl_for_tests(2000);
+        // Authority positive entry: name and clean attributes cacheable.
+        assert_eq!(
+            reply_ttls(&inactive, true, true),
+            (Duration::from_millis(2000), Duration::from_millis(2000))
+        );
+        // Dirty/drafted/unlinked authority: name cached, attributes revalidate.
+        assert_eq!(
+            reply_ttls(&inactive, false, true),
+            (Duration::from_millis(2000), Duration::ZERO)
+        );
+        // Candidate preview never caches.
+        assert_eq!(
+            reply_ttls(&inactive, true, false),
+            (Duration::ZERO, Duration::ZERO)
+        );
+        // Explicit TTL=0 disables everything (safe-stage equivalence).
+        let disabled = NotifyHub::with_ttl_ms(0);
+        disabled.activate_ttl_for_tests(0);
+        assert_eq!(
+            reply_ttls(&disabled, true, true),
+            (Duration::ZERO, Duration::ZERO)
+        );
     }
 }

@@ -370,6 +370,7 @@ impl Bridge {
         };
         let event_count = batch.events.len();
         let mut invalidations = Vec::new();
+        let mut invalidated_inodes = Vec::new();
         let mut store = self.store.lock().unwrap();
         for event in &batch.events {
             let id = match &event.change {
@@ -377,9 +378,13 @@ impl Bridge {
                 Change::Delete { id } => id,
             };
             if let Ok(old) = store.local_identity(id).and_then(|id| store.record(&id)) {
+                // The old name, the changed object's attributes and the old
+                // parent directory's attributes are all possibly cached.
+                invalidated_inodes.push(old.ino);
                 if let Some(p) = old.node.parent.as_deref() {
                     if let Ok(p) = store.local_identity(p).and_then(|p| store.record(&p)) {
-                        invalidations.push((p.ino, old.node.name))
+                        invalidated_inodes.push(p.ino);
+                        invalidations.push((p.ino, old.node.name));
                     }
                 }
             }
@@ -387,10 +392,21 @@ impl Bridge {
         store.receive(&batch).map_err(io::Error::other)?;
         store.drain().map_err(io::Error::other)?;
         for event in &batch.events {
-            if let Change::Upsert(n) = &event.change {
-                if let Some(p) = n.parent.as_deref() {
-                    if let Ok(p) = store.local_identity(p).and_then(|p| store.record(&p)) {
-                        invalidations.push((p.ino, n.name.clone()))
+            match &event.change {
+                Change::Upsert(n) => {
+                    if let Ok(record) = store.record(&n.id) {
+                        invalidated_inodes.push(record.ino);
+                    }
+                    if let Some(p) = n.parent.as_deref() {
+                        if let Ok(p) = store.local_identity(p).and_then(|p| store.record(&p)) {
+                            invalidated_inodes.push(p.ino);
+                            invalidations.push((p.ino, n.name.clone()));
+                        }
+                    }
+                }
+                Change::Delete { id } => {
+                    if let Ok(record) = store.record(id) {
+                        invalidated_inodes.push(record.ino);
                     }
                 }
             }
@@ -399,6 +415,9 @@ impl Bridge {
         drop(receipt);
         self.initialization
             .pulled(true, event_count, changed_notification);
+        for ino in invalidated_inodes {
+            let _ = self.notifications.try_send(Invalidation::Inode(ino));
+        }
         for (p, name) in invalidations {
             let _ = self.notifications.try_send(Invalidation::Entry(p, name));
         }

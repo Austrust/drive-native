@@ -60,6 +60,9 @@ fn online_cached_dirty_and_unlinked_attributes_match_without_mutating_queues() {
     let (_temp, mut store) = fixture();
     let first = store.posix_lookup("root", "a").unwrap();
     assert_eq!(first.blocks, 0);
+    // A clean, online-only authority entry is the only cacheable state.
+    assert!(first.cacheable);
+    assert!(store.posix_lookup("root", "d").unwrap().cacheable);
     let revision = store.local_revision();
     for _ in 0..20 {
         assert_eq!(store.posix_record_by_inode(first.ino).unwrap(), first);
@@ -75,20 +78,28 @@ fn online_cached_dirty_and_unlinked_attributes_match_without_mutating_queues() {
             &crate::sha256(b"abc"),
         )
         .unwrap();
-    assert_eq!(same(&store, "a").blocks, 1);
+    let cached = same(&store, "a");
+    assert_eq!(cached.blocks, 1);
+    // A clean cached body is still authoritative metadata and cacheable.
+    assert!(cached.cacheable);
     let draft = store.begin_draft("a", "v1", None).unwrap();
     let body = b"uncheckpointed local content";
     store.draft_write(&draft, 0, body, false).unwrap();
     let active_handles = store.handles.lock().unwrap().clone();
     let revision = store.local_revision();
-    assert_eq!(same(&store, "a").size, body.len() as u64);
+    let drafted = same(&store, "a");
+    assert_eq!(drafted.size, body.len() as u64);
+    // An open dirty draft must never be advertised as cacheable metadata.
+    assert!(!drafted.cacheable);
     assert_eq!(*store.handles.lock().unwrap(), active_handles);
     assert_eq!(store.local_revision(), revision);
     store.set_local_mode("a", 0o600).unwrap();
     assert_eq!(same(&store, "a").mode, 0o600);
     store.unlink_local("root", "a", "a", false).unwrap();
     assert!(store.posix_lookup("root", "a").is_err());
-    assert!(same(&store, "a").unlinked);
+    let unlinked = same(&store, "a");
+    assert!(unlinked.unlinked);
+    assert!(!unlinked.cacheable);
     store
         .draft_write(&draft, body.len() as u64, b"!", false)
         .unwrap();

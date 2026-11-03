@@ -432,7 +432,13 @@ impl Filesystem for CacheFilesystem {
             preview::try_inline_lookup(&self.store, self.uid, self.gid, parent, &name)
         {
             match result {
-                Ok(attr) => reply.entry(&TTL, &attr, 0),
+                Ok((attr, cacheable)) => {
+                    let (entry_ttl, attr_ttl) =
+                        preview::reply_ttls(&self.notify, cacheable, true);
+                    diagnostics::ttls(Some(entry_ttl), Some(attr_ttl));
+                    self.notify.apply_reply_delay();
+                    reply.entry_with_timeouts(&entry_ttl, &attr_ttl, &attr, 0);
+                }
                 Err(e) => reply.error(e),
             }
             drop(inline_publication);
@@ -458,7 +464,15 @@ impl Filesystem for CacheFilesystem {
                 drop(store);
             }
             match result {
-                Ok(record) => reply.entry(&TTL, &record.attr(uid, gid), 0),
+                Ok(record) => {
+                    let cache_entry = matches!(&record, preview::Metadata::Authority(_));
+                    let cacheable = record.cacheable();
+                    let (entry_ttl, attr_ttl) =
+                        preview::reply_ttls(&notify, cacheable, cache_entry);
+                    diagnostics::ttls(Some(entry_ttl), Some(attr_ttl));
+                    notify.apply_reply_delay();
+                    reply.entry_with_timeouts(&entry_ttl, &attr_ttl, &record.attr(uid, gid), 0);
+                }
                 Err(e) => reply.error(errno(&e)),
             }
             drop(publication);
@@ -475,7 +489,16 @@ impl Filesystem for CacheFilesystem {
             fh,
         ) {
             match result {
-                Ok(attr) => reply.attr(&TTL, &attr),
+                Ok((attr, cacheable)) => {
+                    let (_, mut attr_ttl) = preview::reply_ttls(&self.notify, cacheable, true);
+                    if fh.is_some() {
+                        // Attributes adjusted from an open handle must revalidate.
+                        attr_ttl = Duration::ZERO;
+                    }
+                    diagnostics::ttls(None, Some(attr_ttl));
+                    self.notify.apply_reply_delay();
+                    reply.attr(&attr_ttl, &attr);
+                }
                 Err(e) => reply.error(e),
             }
             drop(inline_publication);
@@ -502,10 +525,17 @@ impl Filesystem for CacheFilesystem {
                     if fh.is_some() {
                         reply.error(libc::EBADF);
                     } else {
+                        // Candidate previews never publish a cacheable answer.
+                        diagnostics::ttls(None, Some(Duration::ZERO));
+                        notify.apply_reply_delay();
                         reply.attr(&TTL, &preview::preview_attr(&record, uid, gid));
                     }
                 }
                 Ok(preview::Metadata::Authority(record)) => {
+                    let (_, mut attr_ttl) = preview::reply_ttls(&notify, record.cacheable, true);
+                    if fh.is_some() {
+                        attr_ttl = Duration::ZERO;
+                    }
                     let mut a = preview::posix_attr(&record, uid, gid);
                     if let Some(fh) = fh {
                         let content = {
@@ -549,7 +579,9 @@ impl Filesystem for CacheFilesystem {
                             }
                         }
                     }
-                    reply.attr(&TTL, &a)
+                    diagnostics::ttls(None, Some(attr_ttl));
+                    notify.apply_reply_delay();
+                    reply.attr(&attr_ttl, &a)
                 }
                 Err(e) => reply.error(errno(&e)),
             }
