@@ -420,9 +420,9 @@ impl Filesystem for CacheFilesystem {
             reply.error(libc::ENOENT);
             return;
         };
-        // Publication permit: held from before projecting until the reply is
-        // written, so an invalidation for a state change can never be delivered
-        // before a stale answer (see publication.rs).
+        // Observation only (never a lock): reply paths must not block on
+        // invalidation delivery; the bounded TTL and the authoritative Store are
+        // the correctness contract (see publication.rs).
         let inline_publication = self.notify.reply_guard();
         // Cheap authoritative metadata is answered on the dispatcher thread; the
         // single-statement projection owns its result before the reply is
