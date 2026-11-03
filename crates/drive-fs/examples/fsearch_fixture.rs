@@ -135,16 +135,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "synthetic",
         )?;
         let shared = Arc::new(drive_core::SharedStore::new(store));
+        // Metadata caching is active only after the session notifier is
+        // installed; the default TTL is DRIVE_NATIVE_FS_TTL_MS (2 s).
+        let notify = drive_fs::NotifyHub::from_env();
         let mut fs = CacheFilesystem::new(shared, "root", unsafe { libc::getuid() }, unsafe {
             libc::getgid()
         })?
-        .with_hydrator(no_network.clone());
+        .with_hydrator(no_network.clone())
+        .with_notify_hub(notify.clone());
         // Only the explicit functional-test mode accepts local edits.
         // Default paired scans retain the original read-only behavior.
         if writable {
             fs = fs.with_writes_enabled();
         }
-        session = Some(fuser::spawn_mount2(
+        let mounted = fuser::spawn_mount2(
             fs,
             &mount,
             &[
@@ -153,7 +157,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 fuser::MountOption::NoSuid,
                 fuser::MountOption::FSName("drive-native-fsearch-synthetic".into()),
             ],
-        )?);
+        )?;
+        notify.install(mounted.notifier());
+        session = Some(mounted);
     }
     emit(
         serde_json::json!({"ready":true,"mode":args[2],"files":entries.iter().filter(|(_,n)|!n.directory).count(),"directories_including_root":entries.iter().filter(|(_,n)|n.directory).count()}),

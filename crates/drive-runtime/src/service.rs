@@ -574,6 +574,9 @@ impl Service {
                 Err(_) => return Err(io::Error::other("cached root cannot be loaded")),
             }
         }
+        // One hub owns the publication gate and invalidation delivery for both
+        // the FUSE replies and the runtime's state-change notifications.
+        let notify = drive_fs::NotifyHub::from_env();
         let mut fs = match drive_fs::CacheFilesystem::new(
             self.bridge.store.clone(),
             &self.profile.scope.file_id,
@@ -590,7 +593,8 @@ impl Service {
             }
             Err(e) => return Err(io::Error::other(e)),
         }
-        .with_hydrator(self.bridge.clone());
+        .with_hydrator(self.bridge.clone())
+        .with_notify_hub(notify.clone());
         if self.profile.writable {
             fs = fs.with_writes_enabled();
         }
@@ -609,7 +613,8 @@ impl Service {
                 fuser::MountOption::FSName("drive-native".into()),
             ],
         )?;
-        self.bridge.set_notifier(session.notifier());
+        notify.install(session.notifier());
+        self.bridge.set_notify_hub(notify);
         self.mounted.store(true, Ordering::Release);
         self.control.lock().unwrap().revision += 1;
         Ok(Some(session))

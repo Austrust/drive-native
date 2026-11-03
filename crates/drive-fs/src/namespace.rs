@@ -30,6 +30,7 @@ pub(super) fn rename(
     let handles = fs.handles.clone();
     let updates = fs.handle_updates.clone();
     let network = fs.network_queue.clone();
+    let notify = fs.notify.clone();
     fs.queue.submit(Box::new(move || {
         let result = (|| -> drive_core::Result<Option<(String, String, String, String)>> {
             let mut s = store.lock().unwrap();
@@ -48,13 +49,17 @@ pub(super) fn rename(
         })();
         match result {
             Ok(Some((p, np, source, target))) => replace_prepared(
-                store, handles, updates, hydrator, network, p, name, np, new_name, source, target,
-                reply,
+                store, handles, updates, hydrator, network, notify, parent, name, new_parent,
+                new_name, p, np, source, target, reply,
             ),
             Ok(None) => {
                 if let Some(h) = hydrator {
                     h.local_saved();
                 }
+                notify.invalidate_entry(parent, &name);
+                notify.invalidate_entry(new_parent, &new_name);
+                notify.invalidate_inode(parent);
+                notify.invalidate_inode(new_parent);
                 reply.ok()
             }
             Err(e) => reply.error(errno(&e)),
@@ -77,14 +82,16 @@ pub(super) fn remove(
         reply.error(libc::EINVAL);
         return;
     };
+    let parent_ino = parent;
     let store = fs.store.clone();
     let handles = fs.handles.clone();
     let updates = fs.handle_updates.clone();
     let hydrator = fs.hydrator.clone();
     let network = fs.network_queue.clone();
+    let notify = fs.notify.clone();
     fs.queue.submit(Box::new(move|| {
         let identity=(||->drive_core::Result<(String,String)>{
-            let s=store.lock().unwrap();let parent=preview::authoritative(&s, parent, libc::EROFS)?.node.id;let id=s.lookup(&parent,&name)?.node.id;Ok((parent,id))
+            let s=store.lock().unwrap();let parent=preview::authoritative(&s, parent_ino, libc::EROFS)?.node.id;let id=s.lookup(&parent,&name)?.node.id;Ok((parent,id))
         })();
         let (parent,id)=match identity {Ok(v)=>v,Err(e)=>{reply.error(errno(&e));return;}};
         network.submit(Box::new(move|| {
@@ -97,7 +104,11 @@ pub(super) fn remove(
                     if current.node.id!=id {return Err(libc::EAGAIN);}
                     let missing=handles.lock().unwrap().entries.values().filter(|h|h.node==id).find_map(|h|match &h.content{OpenContent::Missing(n)=>Some(n.clone()),_=>None});
                     let Some(missing)=missing else {
+                        let ino=store.lock().unwrap().record(&id).map_err(|e|errno(&e))?.ino;
                         store.lock().unwrap().unlink_local(&parent,&name,&id,directory).map_err(|e|errno(&e))?;
+                        notify.invalidate_entry(parent_ino, &name);
+                        notify.invalidate_inode(parent_ino);
+                        notify.invalidate_inode(ino);
                         return Ok(());
                     };
                     drop(update);
@@ -117,16 +128,20 @@ pub(super) fn remove(
     }));
 }
 
+#[allow(clippy::too_many_arguments)]
 fn replace_prepared(
     store: Arc<drive_core::SharedStore>,
     handles: Arc<Mutex<Handles>>,
     updates: Arc<Mutex<()>>,
     hydrator: Option<Arc<dyn Hydrator>>,
     network: Arc<LocalQueue>,
-    parent: String,
+    notify: NotifyHub,
+    parent_ino: u64,
     name: String,
-    new_parent: String,
+    new_parent_ino: u64,
     new_name: String,
+    parent: String,
+    new_parent: String,
     source: String,
     target: String,
     reply: ReplyEmpty,
@@ -145,7 +160,12 @@ fn replace_prepared(
                 None=>match s.open_cached(&source){Ok(_)=>None,Err(Error::Offline)=>Some(src.node.clone()),Err(e)=>return Err(errno(&e))},
             };
             let Some(missing)=missing else {
-                s.replace_local(&parent,&name,&new_parent,&new_name,&source,&target).map_err(|e|errno(&e))?;return Ok(());
+                s.replace_local(&parent,&name,&new_parent,&new_name,&source,&target).map_err(|e|errno(&e))?;
+                notify.invalidate_entry(parent_ino, &name);
+                notify.invalidate_entry(new_parent_ino, &new_name);
+                notify.invalidate_inode(parent_ino);
+                notify.invalidate_inode(new_parent_ino);
+                return Ok(());
             };
             drop(s);drop(update);
             let body=hydrator.as_ref().ok_or(libc::ENETDOWN)?.hydrate(&missing)?;

@@ -82,3 +82,17 @@ fn mount_initialization_keeps_an_already_complete_mapping_untouched() {
         0
     );
 }
+
+#[test]
+fn a_mount_without_an_installed_notifier_stays_at_zero_ttl() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = store_with_nodes(&temp);
+    let shared = Arc::new(SharedStore::new(store));
+    // Even an explicitly configured TTL stays inert until the session notifier
+    // is installed, so mount creation cannot publish a cacheable answer.
+    let filesystem = CacheFilesystem::new(shared, "root", 1000, 1000)
+        .unwrap()
+        .with_metadata_ttl_ms(2000);
+    assert!(filesystem.notify_hub().ttl().is_zero());
+    assert!(!filesystem.notify_hub().is_caching());
+}
