@@ -373,6 +373,7 @@ pub fn overview(service: &Service) -> io::Result<String> {
     Ok(serde_json::json!({"schema":1,"task_id":service.profile.task_id,"mount":service.profile.mount,
         "connection":state,"error":error,"background_error":*service.bridge.last_error.lock().unwrap(),
         "upload_block":*service.bridge.upload_block.lock().unwrap(),
+        "recovery_actions":{"recheck_issues":true},
         "mounted":service.mounted.load(Ordering::Acquire),"writable":service.profile.writable && !preview_only,
         "configured_writable":service.profile.writable,"preview_only":preview_only,
         "skipped_symlinks":store.skipped_symlink_count().map_err(|_|other())?,
@@ -642,6 +643,10 @@ impl Desktop {
     async fn get_issues(&self, after: String) -> zbus::fdo::Result<String> {
         let s = self.0.clone();
         local(move || issues(&s, &after)).await
+    }
+    async fn recheck_issues(&self) -> zbus::fdo::Result<String> {
+        let s = self.0.clone();
+        local(move || Ok(serde_json::to_string(&s.recheck_issues()?)?)).await
     }
     async fn keep_both(
         &self,

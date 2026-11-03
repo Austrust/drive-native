@@ -56,4 +56,6 @@ class Tests(unittest.TestCase):
         self.dialog.table.setCurrentItem(self.dialog.table.topLevelItem(0))
         self.assertTrue(self.dialog.name.text().startswith('folder.v1 ('))
         self.assertEqual(self.dialog.name.placeholderText(),'本地文件夹的新名称')
+from issue_recovery_gui_tests import RecoveryTests
+
 if __name__=='__main__':unittest.main()

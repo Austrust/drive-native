@@ -9,6 +9,7 @@
 - [pause_handover_test.py](pause_handover_test.py)：首次旧版升级所用任务暂停标记的原子持久化、属主/权限与符号链接校验。
 - [conflict_gui_live.py](conflict_gui_live.py)
 - [conflict_gui_tests.py](conflict_gui_tests.py)
+- [issue_recovery_gui_tests.py](issue_recovery_gui_tests.py)：可执行恢复、上传阻塞、异步父目录定位、旧后台兼容和诊断脱敏；由冲突套件自动包含。
 - [gui_unit_tests.py](gui_unit_tests.py)
 - [initialization_gui_tests.py](initialization_gui_tests.py)：阶段与真实计数、正常等待、Overview悬挂时独立刷新且不触发目录查询。
 - [hidden_dialog_tests.py](hidden_dialog_tests.py)：隐藏设置页的重连、在途分页和已排队定时器回归。

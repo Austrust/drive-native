@@ -35,9 +35,9 @@ impl Metadata {
 /// (entry TTL, attr TTL) for one positive entry.
 ///
 /// `cache_entry` is false for candidate-preview answers: they must stay
-/// zero-TTL. For authoritative entries the name is cacheable (namespace changes
-/// are invalidated), while attributes fall back to zero for dirty, drafted or
-/// unlinked identities.
+/// zero-TTL. Positive names always revalidate: an old kernel dentry must not
+/// redirect a new path-based open after a remote move. Only clean authority
+/// attributes may use the independently configured TTL.
 pub(super) fn reply_ttls(
     hub: &NotifyHub,
     cacheable: bool,
@@ -47,7 +47,7 @@ pub(super) fn reply_ttls(
     if ttl.is_zero() || !cache_entry {
         return (Duration::ZERO, Duration::ZERO);
     }
-    (ttl, if cacheable { ttl } else { Duration::ZERO })
+    (Duration::ZERO, if cacheable { ttl } else { Duration::ZERO })
 }
 pub(super) fn metadata(s: &Store, ino: u64) -> drive_core::Result<Metadata> {
     match s.posix_record_by_inode(ino) {
@@ -269,22 +269,22 @@ mod ttl_tests {
     use super::*;
 
     #[test]
-    fn bounded_ttl_policy_is_authority_only_and_attribute_gated() {
+    fn entry_ttl_is_always_zero_and_only_clean_authority_attributes_cache() {
         let inactive = NotifyHub::with_ttl_ms(2000);
         assert_eq!(
             reply_ttls(&inactive, true, true),
             (Duration::ZERO, Duration::ZERO)
         );
         inactive.activate_ttl_for_tests(2000);
-        // Authority positive entry: name and clean attributes cacheable.
+        // Configured TTL applies only to clean attributes, never names.
         assert_eq!(
             reply_ttls(&inactive, true, true),
-            (Duration::from_millis(2000), Duration::from_millis(2000))
+            (Duration::ZERO, Duration::from_millis(2000))
         );
-        // Dirty/drafted/unlinked authority: name cached, attributes revalidate.
+        // Dirty/drafted/unlinked authority: both fields revalidate.
         assert_eq!(
             reply_ttls(&inactive, false, true),
-            (Duration::from_millis(2000), Duration::ZERO)
+            (Duration::ZERO, Duration::ZERO)
         );
         // Candidate preview never caches.
         assert_eq!(
@@ -300,3 +300,24 @@ mod ttl_tests {
         );
     }
 }
+
+/// Serialize a candidate directory reply with ACL, generation and promotion
+/// checks. A zero-nodeid dirent still discloses a name; it is not an ACL bypass.
+/// The callback must send one bounded reply and must not re-enter Store.
+pub(super) fn publish_view(
+    store: &drive_core::SharedStore,
+    stamp: &drive_core::preview::PreviewStamp,
+    send: impl FnOnce(drive_core::Result<()>),
+) {
+    match store.lock() {
+        Ok(guard) => {
+            send(guard.preview_validate_view(stamp));
+            drop(guard);
+        }
+        Err(_) => send(Err(Error::Io(std::io::Error::from_raw_os_error(libc::EIO)))),
+    }
+}
+
+#[cfg(test)]
+#[path = "preview_publication_tests.rs"]
+mod publication_tests;

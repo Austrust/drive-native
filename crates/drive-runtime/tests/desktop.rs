@@ -64,6 +64,46 @@ fn get(s: &Service, path: &str) -> serde_json::Value {
         .clone()
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "run under a dedicated dbus-run-session; no network worker or NAS"]
+async fn recovery_action_real_dbus_preserves_unknown_queue_and_user_pause() {
+    assert!(std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some());
+    let (_dir, service) = fixture();
+    {
+        let mut store = service.bridge.store.lock().unwrap();
+        let op = store.save_local("one", b"must survive recovery request").unwrap();
+        store.mark_upload_started(&op).unwrap();
+        store.mark_upload_uncertain(&op).unwrap();
+    }
+    let name = format!("org.drivenative.RecoveryTest.t{}", uuid::Uuid::new_v4().simple());
+    let server = zbus::connection::Builder::session()
+        .name(name.as_str())
+        .serve_at(desktop::OBJECT_PATH, desktop::Desktop(service.clone()))
+        .build().await.unwrap();
+    let client = zbus::Connection::session().await.unwrap();
+    let proxy = zbus::Proxy::new(&client, name.as_str(), desktop::OBJECT_PATH, desktop::BUS_NAME).await.unwrap();
+    let overview: String = proxy.call("GetOverview", &()).await.unwrap();
+    let overview: serde_json::Value = serde_json::from_str(&overview).unwrap();
+    assert_eq!(overview["recovery_actions"]["recheck_issues"], true);
+    let initial: String = proxy.call("RecheckIssues", &()).await.unwrap();
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&initial).unwrap()["message_code"], "login_required");
+    let _: () = proxy.call("Unlock", &("synthetic-not-sent",)).await.unwrap();
+    service.control.lock().unwrap().state = ConnectionState::Online;
+    let queued: String = proxy.call("RecheckIssues", &()).await.unwrap();
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&queued).unwrap()["message_code"], "queued");
+    let _: () = proxy.call("Pause", &()).await.unwrap();
+    let paused: String = proxy.call("RecheckIssues", &()).await.unwrap();
+    let paused: serde_json::Value = serde_json::from_str(&paused).unwrap();
+    assert_eq!(paused["message_code"], "paused");
+    assert_eq!(paused["accepted"], false);
+    let store = service.bridge.store.lock().unwrap();
+    assert!(store.sync_paused().unwrap());
+    assert_eq!(store.queue_health().unwrap().upload_uncertain, 1);
+    assert_eq!(store.pending_operations().unwrap(), 1);
+    drop(store);
+    drop(proxy);drop(client);drop(server);
+}
+
 #[test]
 fn overview_reports_exact_unknown_commits_without_running_dependency_scheduler() {
     let (_d, service) = fixture();

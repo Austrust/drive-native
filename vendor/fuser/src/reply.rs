@@ -212,8 +212,8 @@ impl ReplyEntry {
             ll::INodeNo(attr.ino),
             ll::Generation(generation),
             &attr.into(),
-            *entry_ttl,
             *attr_ttl,
+            *entry_ttl,
         ));
     }
 
@@ -918,6 +918,62 @@ mod test {
             blksize: 0xbb,
         };
         reply.entry(&ttl, &attr, 0xaa);
+    }
+
+    struct AssertTtlSender {
+        entry: Duration,
+        attr: Duration,
+        sent: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+    impl super::ReplySender for AssertTtlSender {
+        fn send(&self, data: &[IoSlice<'_>]) -> std::io::Result<()> {
+            let bytes = data.iter().flat_map(|s| s.iter().copied()).collect::<Vec<_>>();
+            // fuse_out_header (16 bytes), then fuse_entry_out. Test the actual
+            // wire fields independently of the serializer's argument order.
+            assert!(bytes.len() >= 56);
+            assert_eq!(i32::from_ne_bytes(bytes[4..8].try_into().unwrap()), 0);
+            assert_eq!(u64::from_ne_bytes(bytes[32..40].try_into().unwrap()), self.entry.as_secs());
+            assert_eq!(u64::from_ne_bytes(bytes[40..48].try_into().unwrap()), self.attr.as_secs());
+            assert_eq!(u32::from_ne_bytes(bytes[48..52].try_into().unwrap()), self.entry.subsec_nanos());
+            assert_eq!(u32::from_ne_bytes(bytes[52..56].try_into().unwrap()), self.attr.subsec_nanos());
+            self.sent.store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+        #[cfg(feature = "abi-7-40")]
+        fn open_backing(&self, _fd: BorrowedFd<'_>) -> std::io::Result<BackingId> {
+            unreachable!()
+        }
+    }
+    fn unequal_ttl_wire(plus: bool) {
+        let attr = FileAttr {
+            ino: 17, size: 3, blocks: 1, atime: UNIX_EPOCH, mtime: UNIX_EPOCH,
+            ctime: UNIX_EPOCH, crtime: UNIX_EPOCH, kind: FileType::RegularFile,
+            perm: 0o644, nlink: 1, uid: 1000, gid: 1000, rdev: 0, flags: 0, blksize: 4096,
+        };
+        for (entry, attr_ttl) in [
+            (Duration::ZERO, Duration::new(30, 123_456_789)),
+            (Duration::new(2, 7), Duration::new(5, 11)),
+        ] {
+            let sent = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let sender = AssertTtlSender { entry, attr: attr_ttl, sent: sent.clone() };
+            if plus {
+                let mut reply = ReplyDirectoryPlus::new(1, sender, 4096);
+                assert!(!reply.add_with_timeouts(attr.ino, 1, "file", &entry, &attr_ttl, &attr, 0));
+                reply.ok();
+            } else {
+                let reply: ReplyEntry = Reply::new(1, sender);
+                reply.entry_with_timeouts(&entry, &attr_ttl, &attr, 0);
+            }
+            assert!(sent.load(std::sync::atomic::Ordering::SeqCst));
+        }
+    }
+    #[test]
+    fn reply_entry_unequal_ttls_reach_the_correct_wire_fields() {
+        unequal_ttl_wire(false);
+    }
+    #[test]
+    fn reply_directory_plus_unequal_ttls_reach_the_correct_wire_fields() {
+        unequal_ttl_wire(true);
     }
 
     #[test]

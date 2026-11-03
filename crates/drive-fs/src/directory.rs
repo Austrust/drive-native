@@ -450,14 +450,7 @@ pub(super) fn read_plus(
                         if !stable {
                             entry_ttl = Duration::ZERO;
                         }
-                        diagnostics::ttls(
-                            Some(entry_ttl),
-                            Some(if entry_ttl.is_zero() {
-                                Duration::ZERO
-                            } else {
-                                attr_ttl
-                            }),
-                        );
+                        diagnostics::ttls(Some(entry_ttl), Some(attr_ttl));
                         if reply.add_with_timeouts(
                             entry.ino,
                             cookie,
@@ -478,40 +471,33 @@ pub(super) fn read_plus(
                 }
             }
             ViewOrigin::Preview(stamp) => {
-                // The same no-wait rule applies: a busy Store degrades to
-                // zero-TTL placeholders for this continuation instead of
-                // stalling the directory stream; nothing is cached either way
-                // for preview views.
-                match store.try_lock() {
-                    Ok(guard) => {
-                        if let Err(e) = guard.preview_validate_view(stamp) {
-                            reply.error(errno(&e));
-                            drop(publication);
-                            return;
-                        }
-                    }
-                    Err(std::sync::TryLockError::WouldBlock) => {}
-                    Err(std::sync::TryLockError::Poisoned(_)) => {
-                        reply.error(libc::EIO);
-                        drop(publication);
+                // Candidate names are revocable metadata. Even a dirent-only
+                // reply must validate its stamp under the same Store guard
+                // through send; the authority busy-Store fallback is unsafe here.
+                preview::publish_view(&store, stamp, |valid| {
+                    if let Err(e) = valid {
+                        reply.error(errno(&e));
                         return;
                     }
-                }
-                for (position, entry) in entries[offset..].iter().enumerate() {
-                    let kind = if entry.directory {
-                        FileType::Directory
-                    } else {
-                        FileType::RegularFile
-                    };
-                    if reply.add_without_lookup(
-                        entry.ino,
-                        (offset + position + 1) as i64,
-                        &entry.name,
-                        kind,
-                    ) {
-                        break;
+                    for (position, entry) in entries[offset..].iter().enumerate() {
+                        let kind = if entry.directory {
+                            FileType::Directory
+                        } else {
+                            FileType::RegularFile
+                        };
+                        if reply.add_without_lookup(
+                            entry.ino,
+                            (offset + position + 1) as i64,
+                            &entry.name,
+                            kind,
+                        ) {
+                            break;
+                        }
                     }
-                }
+                    reply.ok();
+                });
+                drop(publication);
+                return;
             }
         }
         reply.ok();

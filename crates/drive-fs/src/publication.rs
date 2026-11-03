@@ -1,40 +1,23 @@
-//! Bounded metadata caching and kernel invalidation.
+//! Bounded attribute caching and asynchronous kernel invalidation.
 //!
-//! Authoritative metadata may be cached by the kernel for a bounded TTL. The
-//! correctness contract is **bounded staleness**: a cached name/attribute can be
-//! up to `t` (+ an in-flight reply window) stale after a change. Data access
-//! (`open`/`read`/`write`) and permission decisions still consult the
-//! authoritative Store on every operation, so stale metadata cannot make a
-//! deleted, renamed or revoked object's data readable.
+//! Positive entry TTL is always zero, including LOOKUP and READDIRPLUS. A
+//! bounded name cache can otherwise redirect a new open to an object moved to
+//! another path; an inode-only OPEN cannot recheck the caller's original name.
+//! Optional kernel INC_EPOCH and directory quieting do not prove all late
+//! dentry revalidation/PLUS replies safe on supported Linux kernels.
 //!
-//! Invalidation delivery is asynchronous and **non-blocking for FUSE reply
-//! paths**: a dedicated thread writes strict `INVAL_ENTRY`/`INVAL_INODE`
-//! notifications directly, holding no lock that a reply path or kernel callback
-//! could wait for. There is intentionally no user-space publication lock:
-//! user-space write order does not prove kernel-side cache-install order (the
-//! kernel installs a reply's TTL after waking the waiting FUSE task), and a
-//! blocking lock lets a kernel notification (which may wait for an in-flight
-//! reply) deadlock against the reply path.
+//! Only clean authoritative attributes use the configured TTL. Attribute
+//! invalidation relies on the kernel attr_version protection; preview, dirty
+//! bodies and handle-adjusted attributes remain uncached. Cached attributes may
+//! remain visible until notification delivery or TTL expiry. Existing open
+//! handles retain their POSIX identity/content semantics; reads are not a new
+//! path-based authorization check.
 //!
-//! Kernel-side protection differs per cache kind:
-//! - attribute TTL is guarded by the kernel's `attr_version`: an `INVAL_INODE`
-//!   bumps it and older GETATTR replies are discarded, so attr changes must
-//!   always send `INVAL_INODE`;
-//! - positive entry TTL has no equivalent guard on the kernels this product
-//!   targets (Mint 22.x ships 6.8/6.11/6.14; `FUSE_NOTIFY_INC_EPOCH` exists only
-//!   from 6.16), hence the bounded contract above and the directory quieting
-//!   period used by READDIRPLUS.
-//!
-//! A full invalidation queue or a real delivery failure fails the mount closed:
-//! `ttl()` becomes zero and later replies carry zero TTL, so earlier cached
-//! answers age out within the previous bound. The kernel's benign "nothing
-//! cached" ENOENT is not a failure. `NotifyStats` and the
-//! `TtlPublishedReplies`/`TtlDelivered`/`TtlInvalidations`/`TtlFailures`
-//! diagnostics expose backlog and fallback behaviour.
-//!
-//! The hub is inert until a session notifier is installed. Replies written
-//! before that point carry zero TTL, so the window between mount creation and
-//! notifier installation cannot publish a cacheable answer.
+//! Delivery runs without a lock that a FUSE reply needs: a notification may
+//! wait for a kernel operation which is itself waiting for that reply. Queue
+//! overflow or a hard notification failure stops new attribute leases; it does
+//! not retroactively revoke outstanding leases. Both the runtime feeder and
+//! this hub must propagate loss. The hub is inert until a notifier is installed.
 use fuser::Notifier;
 use std::{
     collections::HashMap,
@@ -47,9 +30,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// Environment override for the metadata TTL. `0` disables caching entirely.
+/// Attribute TTL override; entry TTL remains zero for every value. `0` disables both.
 pub const TTL_ENV: &str = "DRIVE_NATIVE_FS_TTL_MS";
-/// Approved default: bounded ~1 s metadata freshness.
+/// Default bounded attribute freshness; never a positive-name lease.
 pub const DEFAULT_TTL_MS: u64 = 1_000;
 const INVALIDATION_QUEUE: usize = 65_536;
 
@@ -150,7 +133,7 @@ fn fail_closed(shared: &Shared) {
 }
 
 impl NotifyHub {
-    /// Read the configured TTL: `DRIVE_NATIVE_FS_TTL_MS`, default 1 s.
+    /// Read attribute TTL: `DRIVE_NATIVE_FS_TTL_MS`, default 1 s; entry TTL is zero.
     pub fn from_env() -> Self {
         let ttl_ms = std::env::var(TTL_ENV)
             .ok()
@@ -335,6 +318,11 @@ impl NotifyHub {
         self.shared.published.fetch_add(1, Ordering::Relaxed);
         crate::diagnostics::count(crate::diagnostics::Stage::TtlPublishedReplies);
         Some(ReplyPermit)
+    }
+    /// An upstream queue lost a committed invalidation. Stop all new attribute
+    /// leases; existing kernel leases still have their previously granted bound.
+    pub fn invalidate_delivery_failed(&self) {
+        fail_closed(&self.shared);
     }
     pub fn invalidate_entry(&self, parent_ino: u64, name: &str) {
         self.mark_directory_touched(parent_ino);

@@ -1,3 +1,16 @@
+drive-native (0.1.0~dev20261103.9) unstable; urgency=medium
+
+  * Reduce repeated directory SQL preparation and inode completeness queries.
+  * Reuse bounded directory views and separate name from attribute cache lifetimes.
+  * Correct FUSE entry/attribute timeout ordering; revalidate path-based opens.
+  * Guard preview publication and propagate invalidation queue failures.
+  * Scope pending remove dependencies so unrelated uploads can progress.
+  * Add actionable, asynchronous issue recovery without discarding local data.
+  * Keep schema 23 and preserve pause, unknown commits and cached content.
+  * Development build; performance and compatibility claims require test evidence.
+
+ -- Drive Native contributors <noreply@localhost>  Tue, 03 Nov 2026 23:00:00 +0800
+
 drive-native (0.1.0~dev20261102.8) unstable; urgency=medium
 
   * Commit completed initialization directories without waiting for a slow peer.

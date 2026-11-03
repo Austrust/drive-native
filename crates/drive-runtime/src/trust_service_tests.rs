@@ -96,6 +96,71 @@ fn assert_cached(s: &Service) {
     assert_eq!(store.pending_operations().unwrap(), 0);
 }
 #[test]
+fn issue_recheck_preserves_pause_and_authentication_attention() {
+    let (_d, s) = fixture();
+    assert_eq!(s.recheck_issues().unwrap().message_code, "login_required");
+    s.unlock("synthetic-not-sent".into()).unwrap();
+    s.pause().unwrap();
+    let generation = s.control.lock().unwrap().generation;
+    let result = s.recheck_issues().unwrap();
+    assert!(!result.accepted && result.paused_preserved);
+    assert_eq!(result.message_code, "paused");
+    assert_eq!(s.control.lock().unwrap().generation, generation);
+    assert!(s.bridge.store.lock().unwrap().sync_paused().unwrap());
+    s.resume().unwrap();
+    {
+        let mut c = s.control.lock().unwrap();
+        c.attention = true;
+        c.error = Some("authentication_or_protocol_rejected");
+        c.state = ConnectionState::NeedsAttention;
+    }
+    assert_eq!(s.recheck_issues().unwrap().message_code, "login_required");
+    assert!(s.control.lock().unwrap().attention);
+    assert_cached(&s);
+}
+#[test]
+fn issue_recheck_never_bypasses_trust_durability_or_restarts_a_stopping_mount() {
+    let (_d, s) = fixture();
+    s.unlock("synthetic-not-sent".into()).unwrap();
+    {
+        let mut c = s.control.lock().unwrap();
+        c.trust_pending_durability = true;
+        c.attention = true;
+        c.error = Some("trust_settings_not_durable");
+        c.state = ConnectionState::NeedsAttention;
+    }
+    assert_eq!(s.recheck_issues().unwrap().message_code, "settings_required");
+    assert!(s.control.lock().unwrap().trust_pending_durability);
+    s.shutdown();
+    assert_eq!(s.recheck_issues().unwrap().message_code, "stopping");
+    assert_eq!(s.control.lock().unwrap().state, ConnectionState::Stopping);
+    assert_cached(&s);
+}
+#[test]
+fn issue_recheck_queues_without_store_lock_and_reconnects_without_clearing_state() {
+    let (_d, s) = fixture();
+    s.unlock("synthetic-not-sent".into()).unwrap();
+    s.control.lock().unwrap().state = ConnectionState::Online;
+    // A queued recovery remains responsive while the metadata owner is busy.
+    let store = s.bridge.store.lock().unwrap();
+    assert_eq!(s.recheck_issues().unwrap().message_code, "queued");
+    assert_eq!(s.recheck_issues().unwrap().message_code, "already_queued");
+    drop(store);
+    {
+        let mut c = s.control.lock().unwrap();
+        c.state = ConnectionState::Offline;
+        c.error = Some("network_unavailable");
+    }
+    let result = s.recheck_issues().unwrap();
+    assert!(result.accepted && result.paused_preserved);
+    assert_eq!(result.message_code, "reconnecting");
+    assert_eq!(s.control.lock().unwrap().state, ConnectionState::Connecting);
+    assert!(!s.bridge.store.lock().unwrap().sync_paused().unwrap());
+    assert_cached(&s);
+    let overview: serde_json::Value = serde_json::from_str(&crate::desktop::overview(&s).unwrap()).unwrap();
+    assert_eq!(overview["recovery_actions"]["recheck_issues"], true);
+}
+#[test]
 fn pre_rename_sync_failure_preserves_old_settings_and_connection_generation() {
     let (d, s) = fixture();
     let old = s.trust_settings();
@@ -343,4 +408,27 @@ fn installed_worker_replacement_keeps_old_executable_inode() {
 fn missing_worker_image_cannot_fall_back_to_replaced_path() {
     let (_d, service) = fixture();
     assert_eq!(service.worker_executable().unwrap_err().kind(), io::ErrorKind::InvalidInput);
+}
+
+#[test]
+fn issue_recheck_reports_busy_without_waiting_for_control_or_store() {
+    let (_d, service) = fixture();
+    let control = service.control.lock().unwrap();
+    let generation = control.generation;
+    let revision = control.revision;
+    let store = service.bridge.store.lock().unwrap();
+    let (send, receive) = std::sync::mpsc::channel();
+    let reader = service.clone();
+    let thread = std::thread::spawn(move || send.send(reader.recheck_issues()).unwrap());
+    let result = receive.recv_timeout(std::time::Duration::from_secs(1));
+    assert_eq!(control.generation, generation);
+    assert_eq!(control.revision, revision);
+    drop(store);
+    drop(control);
+    thread.join().unwrap();
+    let result = result.expect("recovery must answer while Control and Store are busy").unwrap();
+    assert!(!result.accepted);
+    assert_eq!(result.message_code, "busy");
+    assert!(result.paused_preserved);
+    assert_cached(&service);
 }
