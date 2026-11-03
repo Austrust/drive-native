@@ -7,6 +7,10 @@ mod cached_close_tests;
 pub mod diagnostics;
 mod directory;
 #[cfg(test)]
+mod inode_backfill_tests;
+#[cfg(test)]
+mod inline_metadata_tests;
+#[cfg(test)]
 mod isolation_tests;
 mod namespace;
 mod preview;
@@ -386,6 +390,19 @@ impl Filesystem for CacheFilesystem {
             reply.error(libc::ENOENT);
             return;
         };
+        // Cheap authoritative metadata is answered on the dispatcher thread; the
+        // single-statement projection owns its result before the reply is
+        // written. Busy Store, negative and candidate-preview lookups keep the
+        // original offloaded path.
+        if let Some(result) =
+            preview::try_inline_lookup(&self.store, self.uid, self.gid, parent, &name)
+        {
+            match result {
+                Ok(attr) => reply.entry(&TTL, &attr, 0),
+                Err(e) => reply.error(e),
+            }
+            return;
+        }
         let store = self.store.clone();
         let (uid, gid) = (self.uid, self.gid);
         let queued = diagnostics::span(diagnostics::Stage::LookupQueue);
@@ -397,6 +414,11 @@ impl Filesystem for CacheFilesystem {
             let projection = diagnostics::span(diagnostics::Stage::LookupProjection);
             let result = preview::lookup(&store, parent, &name);
             drop(projection);
+            // Authority results are owned; preview replies keep the Store
+            // boundary through publication.
+            if !matches!(&result, Ok(preview::Metadata::Preview(_))) {
+                drop(store);
+            }
             match result {
                 Ok(record) => reply.entry(&TTL, &record.attr(uid, gid), 0),
                 Err(e) => reply.error(errno(&e)),
@@ -404,6 +426,20 @@ impl Filesystem for CacheFilesystem {
         }));
     }
     fn getattr(&mut self, _req: &Request<'_>, ino: u64, fh: Option<u64>, reply: ReplyAttr) {
+        if let Some(result) = preview::try_inline_getattr(
+            &self.store,
+            &self.handles,
+            self.uid,
+            self.gid,
+            ino,
+            fh,
+        ) {
+            match result {
+                Ok(attr) => reply.attr(&TTL, &attr),
+                Err(e) => reply.error(e),
+            }
+            return;
+        }
         let store = self.store.clone();
         let handles = self.handles.clone();
         let (uid, gid) = (self.uid, self.gid);

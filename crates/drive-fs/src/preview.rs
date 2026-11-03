@@ -1,5 +1,13 @@
 //! Explicit metadata-only candidate routing. Never turn a candidate into a Node
 //! accepted by the hydration or mutation paths.
+//!
+//! Authority metadata is cheap enough to answer on the FUSE dispatcher thread:
+//! the single-statement projections below replace a submit + channel wakeup +
+//! worker projection + reply round trip. The inline path only runs while the
+//! Store lock is immediately available; it releases the lock before writing the
+//! reply and never touches the candidate namespace (preview mounts and preview
+//! fallbacks stay on the offloaded path, which owns the reply-while-locked
+//! publication contract).
 use super::*;
 use drive_core::preview::PreviewRecord;
 
@@ -30,10 +38,124 @@ pub(super) fn lookup(s: &Store, parent: u64, name: &str) -> drive_core::Result<M
         Ok(r) => Ok(Metadata::Authority(r)),
         Err(e) if e.is_not_found() => match s.preview_record_by_inode(parent) {
             Ok(_) => s.preview_lookup(parent, name).map(Metadata::Preview),
-            Err(_) => Err(e),
+            // Keep the candidate-namespace error code (ESTALE/EACCES/...) that
+            // the old metadata(parent) routing propagated instead of flattening
+            // a stale preview parent into ENOENT.
+            Err(pe) => Err(pe),
         },
         Err(e) => Err(e),
     }
+}
+
+/// Try to answer a POSIX lookup on the dispatcher thread.
+///
+/// `None` means the request must be handed to the metadata pool: the Store is
+/// busy, the parent may be a candidate-preview directory, or the child does not
+/// exist (negative lookups also probe the candidate namespace).
+pub(super) fn try_inline_lookup(
+    store: &drive_core::SharedStore,
+    uid: u32,
+    gid: u32,
+    parent: u64,
+    name: &str,
+) -> Option<Result<FileAttr, i32>> {
+    let guard = match store.try_lock() {
+        Ok(guard) => guard,
+        // A held Store is exactly the case the pool exists for.
+        Err(std::sync::TryLockError::WouldBlock) => return None,
+        // Poisoned stores recover in the offloaded path, which reports a single
+        // request result; never swallow the poison inline.
+        Err(std::sync::TryLockError::Poisoned(_)) => return None,
+    };
+    diagnostics::count(diagnostics::Stage::LookupInline);
+    let projection = diagnostics::span(diagnostics::Stage::LookupProjection);
+    let result = guard.posix_lookup_by_inode(parent, name);
+    drop(projection);
+    match result {
+        Ok(record) => {
+            let attr = posix_attr(&record, uid, gid);
+            // The projection is fully owned; do not hold Store across the reply.
+            drop(guard);
+            Some(Ok(attr))
+        }
+        Err(e) if e.is_not_found() => {
+            drop(guard);
+            None
+        }
+        Err(e) => {
+            drop(guard);
+            Some(Err(errno(&e)))
+        }
+    }
+}
+
+/// Try to answer a POSIX getattr on the dispatcher thread. Missing inodes fall
+/// back to the pool so the candidate-preview routing keeps its own contract.
+pub(super) fn try_inline_getattr(
+    store: &drive_core::SharedStore,
+    handles: &Mutex<Handles>,
+    uid: u32,
+    gid: u32,
+    ino: u64,
+    fh: Option<u64>,
+) -> Option<Result<FileAttr, i32>> {
+    let guard = match store.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => return None,
+        Err(std::sync::TryLockError::Poisoned(_)) => return None,
+    };
+    diagnostics::count(diagnostics::Stage::GetattrInline);
+    let projection = diagnostics::span(diagnostics::Stage::GetattrProjection);
+    let result = guard.posix_record_by_inode(ino);
+    drop(projection);
+    let record = match result {
+        Ok(record) => record,
+        Err(e) if e.is_not_found() => {
+            drop(guard);
+            return None;
+        }
+        Err(e) => {
+            drop(guard);
+            return Some(Err(errno(&e)));
+        }
+    };
+    let mut attr = posix_attr(&record, uid, gid);
+    // Same order as the offloaded handler: Store first, then the handle table,
+    // and neither is held while the reply is written.
+    drop(guard);
+    if let Some(fh) = fh {
+        let content = {
+            let h = handles.lock().unwrap();
+            h.entries
+                .get(&fh)
+                .filter(|h| h.ino == ino)
+                .map(|h| h.content.clone())
+        };
+        match content {
+            Some(content) => {
+                if let OpenContent::Draft(d) = &content {
+                    match d.size() {
+                        Ok(size) => {
+                            attr.size = size;
+                            attr.blocks = size.div_ceil(512);
+                        }
+                        Err(e) => return Some(Err(e.raw_os_error().unwrap_or(libc::EIO))),
+                    }
+                }
+                if let OpenContent::Cached(content) = &content {
+                    match content.size() {
+                        Ok(s) => {
+                            attr.size = s;
+                            attr.blocks = s.div_ceil(512)
+                        }
+                        Err(e) => return Some(Err(e.raw_os_error().unwrap_or(libc::EIO))),
+                    }
+                }
+            }
+            None => return Some(Err(libc::EBADF)),
+        }
+    }
+    Some(Ok(attr))
 }
 /// Caller holds the Store guard through its subsequent mutation. Preview nodes
 /// cannot acquire content handles; after atomic promotion new calls use authority.
