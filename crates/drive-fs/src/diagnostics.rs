@@ -57,8 +57,12 @@ pub enum Stage {
     AttrTtlZero,
     /// Replies that could publish at least one non-zero TTL (cache effective).
     CacheableReplies,
+    /// One READDIRPLUS reply served from a warm authoritative view.
+    ReaddirPlusQueue,
+    /// One bounded attribute page projection for READDIRPLUS.
+    ReaddirPlusProjection,
 }
-const STAGES: [Stage; 33] = [
+const STAGES: [Stage; 35] = [
     Stage::LookupQueue,
     Stage::LookupStoreWait,
     Stage::LookupProjection,
@@ -92,6 +96,8 @@ const STAGES: [Stage; 33] = [
     Stage::AttrTtlNonZero,
     Stage::AttrTtlZero,
     Stage::CacheableReplies,
+    Stage::ReaddirPlusQueue,
+    Stage::ReaddirPlusProjection,
 ];
 struct Aggregate {
     count: AtomicU64,
@@ -109,7 +115,7 @@ impl Aggregate {
         }
     }
 }
-static TOTALS: [Aggregate; 33] = [const { Aggregate::new() }; 33];
+static TOTALS: [Aggregate; 35] = [const { Aggregate::new() }; 35];
 static ENABLED: OnceLock<bool> = OnceLock::new();
 pub(crate) fn enabled() -> bool {
     *ENABLED

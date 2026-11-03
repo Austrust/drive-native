@@ -340,6 +340,183 @@ pub(super) fn open(fs: &mut CacheFilesystem, ino: u64, flags: i32, reply: ReplyO
         }
     }));
 }
+// Attribute chunks are computed until the reply buffer is full; 128 keeps
+// wasted rows bounded while amortizing the per-chunk Store statement.
+const PLUS_PAGE: usize = 128;
+
+fn plus_placeholder(
+    entry: &drive_core::filesystem::DirectoryEntry,
+    uid: u32,
+    gid: u32,
+) -> FileAttr {
+    // Placeholder for a slot whose identity no longer matches the view: the
+    // entry is published with zero TTLs so the kernel re-looks it up. `perm` is
+    // deliberately 0 (deny) rather than optimistic.
+    FileAttr {
+        ino: entry.ino,
+        size: 0,
+        blocks: 0,
+        atime: UNIX_EPOCH,
+        mtime: UNIX_EPOCH,
+        ctime: UNIX_EPOCH,
+        crtime: UNIX_EPOCH,
+        kind: if entry.directory {
+            FileType::Directory
+        } else {
+            FileType::RegularFile
+        },
+        perm: 0,
+        nlink: if entry.directory { 2 } else { 1 },
+        uid,
+        gid,
+        rdev: 0,
+        blksize: 4096,
+        flags: 0,
+    }
+}
+
+/// READDIRPLUS: names/cookies come from the immutable directory view, bounded
+/// attribute pages from one Store statement. Attributes use the same policy as
+/// GETATTR (attr changes are invalidated with INVAL_INODE); positive entry TTLs
+/// are suppressed while the directory was touched by a recent change, which
+/// compresses the readdirplus late-install window. Preview views publish
+/// zero-TTL placeholder entries only.
+pub(super) fn read_plus(
+    fs: &mut CacheFilesystem,
+    ino: u64,
+    fh: u64,
+    offset: i64,
+    mut reply: fuser::ReplyDirectoryPlus,
+) {
+    let Ok(offset) = usize::try_from(offset) else {
+        reply.error(libc::EINVAL);
+        return;
+    };
+    let views = fs.directories.clone();
+    let store = fs.store.clone();
+    let notify = fs.notify.clone();
+    let (uid, gid) = (fs.uid, fs.gid);
+    let queued = diagnostics::span(diagnostics::Stage::ReaddirPlusQueue);
+    fs.read_queue.submit(Box::new(move || {
+        drop(queued);
+        let view = match views.get(ino, fh) {
+            Ok(view) => view,
+            Err(e) => {
+                reply.error(e);
+                return;
+            }
+        };
+        let publication = notify.reply_guard();
+        let entries = &view.snapshot().entries;
+        if offset > entries.len() {
+            reply.error(libc::EINVAL);
+            return;
+        }
+        match &view.origin {
+            ViewOrigin::Authority => {
+                let mut index = offset;
+                while index < entries.len() {
+                    let end = (index + PLUS_PAGE).min(entries.len());
+                    let slots = entries[index..end]
+                        .iter()
+                        .map(|entry| drive_core::filesystem::DirectorySlot {
+                            ino: entry.ino,
+                            name: &entry.name,
+                            directory: entry.directory,
+                        })
+                        .collect::<Vec<_>>();
+                    let projection = diagnostics::span(diagnostics::Stage::ReaddirPlusProjection);
+                    let result = store.lock().unwrap().directory_posix_page(ino, &slots);
+                    drop(projection);
+                    let records = match result {
+                        Ok(records) => records,
+                        Err(e) => {
+                            reply.error(errno(&e));
+                            drop(publication);
+                            return;
+                        }
+                    };
+                    let stable = !notify.directory_unstable(ino);
+                    let mut full = false;
+                    for (position, entry) in entries[index..end].iter().enumerate() {
+                        let (attr, entry_ttl, attr_ttl) = match &records[position] {
+                            Some(record) => {
+                                let attr = preview::posix_attr(record, uid, gid);
+                                let (mut entry_ttl, attr_ttl) =
+                                    preview::reply_ttls(&notify, record.cacheable, true);
+                                if !stable {
+                                    entry_ttl = Duration::ZERO;
+                                }
+                                (attr, entry_ttl, attr_ttl)
+                            }
+                            None => (
+                                plus_placeholder(entry, uid, gid),
+                                Duration::ZERO,
+                                Duration::ZERO,
+                            ),
+                        };
+                        diagnostics::ttls(
+                            Some(entry_ttl),
+                            Some(if entry_ttl.is_zero() {
+                                Duration::ZERO
+                            } else {
+                                attr_ttl
+                            }),
+                        );
+                        let cookie = (index + position + 1) as i64;
+                        if reply.add_with_timeouts(
+                            entry.ino,
+                            cookie,
+                            &entry.name,
+                            &entry_ttl,
+                            &attr_ttl,
+                            &attr,
+                            0,
+                        ) {
+                            full = true;
+                            break;
+                        }
+                    }
+                    if full {
+                        break;
+                    }
+                    index = end;
+                }
+            }
+            ViewOrigin::Preview(stamp) => {
+                {
+                    let guard = store.lock().unwrap();
+                    match guard.preview_validate_view(stamp) {
+                        Ok(()) => {}
+                        Err(e) => {
+                            reply.error(errno(&e));
+                            drop(publication);
+                            return;
+                        }
+                    }
+                }
+                for (position, entry) in entries[offset..].iter().enumerate() {
+                    let attr = plus_placeholder(entry, uid, gid);
+                    let zero = Duration::ZERO;
+                    if reply.add_with_timeouts(
+                        entry.ino,
+                        (offset + position + 1) as i64,
+                        &entry.name,
+                        &zero,
+                        &zero,
+                        &attr,
+                        0,
+                    ) {
+                        break;
+                    }
+                }
+            }
+        }
+        reply.ok();
+        drop(publication);
+    }));
+}
+
 pub(super) fn read(
     fs: &mut CacheFilesystem,
     ino: u64,

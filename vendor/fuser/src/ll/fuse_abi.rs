@@ -414,6 +414,9 @@ pub enum fuse_notify_code {
     FUSE_NOTIFY_STORE = 4,
     FUSE_NOTIFY_RETRIEVE = 5,
     FUSE_NOTIFY_DELETE = 6,
+    /// Mainline FUSE protocol 7.45 / kernel >= 6.16. Older kernels reject it
+    /// with EINVAL, which callers must treat as "unsupported", not as failure.
+    FUSE_NOTIFY_INC_EPOCH = 8,
 }
 
 impl TryFrom<u32> for fuse_notify_code {
@@ -427,6 +430,7 @@ impl TryFrom<u32> for fuse_notify_code {
             4 => Ok(fuse_notify_code::FUSE_NOTIFY_STORE),
             5 => Ok(fuse_notify_code::FUSE_NOTIFY_RETRIEVE),
             6 => Ok(fuse_notify_code::FUSE_NOTIFY_DELETE),
+            8 => Ok(fuse_notify_code::FUSE_NOTIFY_INC_EPOCH),
 
             _ => Err(InvalidNotifyCodeError),
         }

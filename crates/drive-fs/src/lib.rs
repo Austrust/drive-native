@@ -23,8 +23,8 @@ mod writable;
 use drive_core::filesystem::FileRecord;
 use drive_core::{Error, Node, ReadHandle, Store};
 use fuser::{
-    FileAttr, FileType, Filesystem, ReplyAttr, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry,
-    ReplyOpen, Request,
+    FileAttr, FileType, Filesystem, ReplyAttr, ReplyData, ReplyDirectory, ReplyDirectoryPlus,
+    ReplyEmpty, ReplyEntry, ReplyOpen, Request,
 };
 pub use read_requests::ReadCancellation;
 use read_requests::{ReadReply, ReadRequests};
@@ -283,6 +283,11 @@ impl Filesystem for CacheFilesystem {
         config
             .set_time_granularity(Duration::from_secs(1))
             .map_err(|_| libc::EINVAL)?;
+        // Only request READDIRPLUS when a bounded TTL is configured; with
+        // caching disabled the mount keeps the safe-stage request profile.
+        if self.notify.configured_ttl_ms() > 0 {
+            let _ = config.enable_readdirplus();
+        }
         Ok(())
     }
     fn destroy(&mut self) {
@@ -600,6 +605,16 @@ impl Filesystem for CacheFilesystem {
         reply: ReplyDirectory,
     ) {
         directory::read(self, ino, fh, offset, reply)
+    }
+    fn readdirplus(
+        &mut self,
+        _req: &Request<'_>,
+        ino: u64,
+        fh: u64,
+        offset: i64,
+        reply: ReplyDirectoryPlus,
+    ) {
+        directory::read_plus(self, ino, fh, offset, reply)
     }
     fn releasedir(
         &mut self,

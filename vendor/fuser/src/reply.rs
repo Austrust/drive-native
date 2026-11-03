@@ -631,15 +631,30 @@ impl ReplyDirectoryPlus {
         attr: &FileAttr,
         generation: u64,
     ) -> bool {
+        self.add_with_timeouts(ino, offset, name, ttl, ttl, attr, generation)
+    }
+
+    /// Add an entry with separate positive-entry and attribute lifetimes.
+    #[must_use]
+    pub fn add_with_timeouts<T: AsRef<OsStr>>(
+        &mut self,
+        ino: u64,
+        offset: i64,
+        name: T,
+        entry_ttl: &Duration,
+        attr_ttl: &Duration,
+        attr: &FileAttr,
+        generation: u64,
+    ) -> bool {
         let name = name.as_ref();
         self.buf.push(&DirEntryPlus::new(
             INodeNo(ino),
             Generation(generation),
             DirEntOffset(offset),
             name,
-            *ttl,
+            *entry_ttl,
             attr.into(),
-            *ttl,
+            *attr_ttl,
         ))
     }
 
