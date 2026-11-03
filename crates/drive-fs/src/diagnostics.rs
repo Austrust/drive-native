@@ -29,8 +29,13 @@ pub enum Stage {
     DirectoryInodes,
     DirectoryCollect,
     DirectoryCommit,
+    /// Rows written into `fs_inodes` by one directory projection. `total_us`
+    /// aggregates rows, not microseconds (0 = snapshot install preallocated).
+    DirectoryInodeWrites,
+    /// One opendir whose projection committed without writing any WAL frame.
+    DirectoryCommitNoop,
 }
-const STAGES: [Stage; 20] = [
+const STAGES: [Stage; 22] = [
     Stage::LookupQueue,
     Stage::LookupStoreWait,
     Stage::LookupProjection,
@@ -51,6 +56,8 @@ const STAGES: [Stage; 20] = [
     Stage::DirectoryInodes,
     Stage::DirectoryCollect,
     Stage::DirectoryCommit,
+    Stage::DirectoryInodeWrites,
+    Stage::DirectoryCommitNoop,
 ];
 struct Aggregate {
     count: AtomicU64,
@@ -68,7 +75,7 @@ impl Aggregate {
         }
     }
 }
-static TOTALS: [Aggregate; 20] = [const { Aggregate::new() }; 20];
+static TOTALS: [Aggregate; 22] = [const { Aggregate::new() }; 22];
 static ENABLED: OnceLock<bool> = OnceLock::new();
 pub(crate) fn enabled() -> bool {
     *ENABLED
@@ -95,10 +102,16 @@ pub(crate) fn directory(t: &drive_core::filesystem::DirectoryBuildTimings) {
             (Stage::DirectoryIdentity, t.identity_us),
             (Stage::DirectoryCount, t.count_us),
             (Stage::DirectoryInodes, t.inode_allocation_us),
+            (Stage::DirectoryInodeWrites, t.inode_writes),
             (Stage::DirectoryCollect, t.collect_us),
             (Stage::DirectoryCommit, t.commit_us),
         ] {
             record(stage, us);
+        }
+        // A projection that wrote no inode rows commits no WAL frame, so the
+        // first-scan per-directory fsync is gone. Count those commits directly.
+        if t.inode_writes == 0 {
+            count(Stage::DirectoryCommitNoop);
         }
     }
 }

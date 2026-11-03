@@ -3,8 +3,11 @@ use crate::{Error, Node, NodeMetadata, Result, Status, Store};
 use rusqlite::{OptionalExtension, params};
 use serde::Serialize;
 
+#[path = "filesystem_inodes.rs"]
+mod inodes;
 #[path = "filesystem_posix.rs"]
 mod posix;
+pub(crate) use inodes::allocate_namespace_inodes;
 pub use posix::PosixRecord;
 
 #[derive(Debug, Clone, Serialize)]
@@ -40,6 +43,10 @@ pub struct DirectoryBuildTimings {
     pub identity_us: u64,
     pub count_us: u64,
     pub inode_allocation_us: u64,
+    /// Rows the projection had to insert into `fs_inodes`. `0` means the
+    /// snapshot install (or mount backfill) already allocated this directory,
+    /// so its commit carries no WAL frames.
+    pub inode_writes: u64,
     pub collect_us: u64,
     pub commit_us: u64,
 }
@@ -140,11 +147,15 @@ impl Store {
         if let Some(t) = timings.as_deref_mut() {
             t.count_us = elapsed();
         }
+        // Snapshot install allocates the whole namespace in its own transaction
+        // (and mount initialization backfills older stores), so these statements
+        // usually insert zero rows and the commit below appends no WAL frame.
+        let mut inode_writes = 0u64;
         let parent_ino = match node.parent.as_deref() {
             None => 1,
             Some(parent) => {
                 self.node(parent)?;
-                tx.execute("INSERT INTO fs_inodes(node) SELECT ?1 WHERE NOT EXISTS(SELECT 1 FROM fs_inodes WHERE node=?1)", [parent])?;
+                inode_writes += tx.execute("INSERT INTO fs_inodes(node) SELECT ?1 WHERE NOT EXISTS(SELECT 1 FROM fs_inodes WHERE node=?1)", [parent])? as u64;
                 tx.query_row("SELECT ino FROM fs_inodes WHERE node=?1", [parent], |r| {
                     read_unsigned(r, 0)
                 })?
@@ -153,9 +164,10 @@ impl Store {
         let insert = format!(
             "INSERT INTO fs_inodes(node) SELECT n.id FROM nodes n WHERE {VISIBLE_CHILDREN} AND NOT EXISTS(SELECT 1 FROM fs_inodes i WHERE i.node=n.id) ORDER BY n.name,n.id"
         );
-        tx.execute(&insert, [&id])?;
+        inode_writes += tx.execute(&insert, [&id])? as u64;
         if let Some(t) = timings.as_deref_mut() {
             t.inode_allocation_us = elapsed();
+            t.inode_writes = inode_writes;
         }
         let mut entries = Vec::with_capacity(count);
         entries.push(DirectoryEntry {

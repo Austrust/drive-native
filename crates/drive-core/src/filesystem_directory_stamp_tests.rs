@@ -50,7 +50,8 @@ fn inode_allocations_and_private_metadata_do_not_change_directory_stamp() {
     let old_total = store.local_revision();
     store.ensure_fs_root("root").unwrap();
     names(&store, 1);
-    store.record("b").unwrap(); // child of another directory, not yet allocated
+    // Instance install already allocated every identity; this only projects.
+    store.record("b").unwrap();
     store
         .claim_extension_marker("test:unrelated", "value")
         .unwrap();
