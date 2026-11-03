@@ -36,6 +36,7 @@ pub(super) fn set_times(
     };
     let store = fs.store.clone();
     let handles = fs.handles.clone();
+    let notify = fs.notify.clone();
     let updates = fs.handle_updates.clone();
     let hydrator = fs.hydrator.clone();
     let network = fs.network_queue.clone();
@@ -84,7 +85,10 @@ pub(super) fn set_times(
         };
         let Some(body) = body else {
             match store.lock().unwrap().record_for_handle(&id) {
-                Ok(record) => reply.attr(&TTL, &attr(&record, uid, gid)),
+                Ok(record) => {
+                    notify.invalidate_inode(record.ino);
+                    reply.attr(&TTL, &attr(&record, uid, gid))
+                }
                 Err(e) => reply.error(errno(&e)),
             }
             return;
@@ -110,6 +114,7 @@ pub(super) fn set_times(
                     if let Some(h) = hydrator {
                         h.local_saved();
                     }
+                    notify.invalidate_inode(record.ino);
                     reply.attr(&TTL, &attr(&record, uid, gid));
                 }
                 Err(e) => reply.error(e),

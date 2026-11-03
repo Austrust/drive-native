@@ -519,6 +519,9 @@ impl Store {
                         conflict=CASE WHEN nodes.dirty_blob IS NOT NULL AND nodes.base_version!=excluded.remote_version AND NOT EXISTS(SELECT 1 FROM local_unlinks WHERE node=nodes.id) THEN 1 ELSE nodes.conflict END",
                         params![n.id,n.parent,n.name,n.version,n.directory])?;
                         crate::filesystem::write_metadata(&tx, n)?;
+                        // The next mount must backfill any node this event
+                        // created; the O(1) hint is only a hint.
+                        crate::filesystem::mark_inode_map_incomplete(&tx)?;
                     }
                     Change::Delete { id } => {
                         tx.execute("WITH RECURSIVE subtree(id) AS (SELECT ?1 UNION SELECT n.id FROM nodes n JOIN subtree s ON n.parent=s.id)
@@ -1106,6 +1109,7 @@ impl Store {
         if roots.len() != 1 || !roots[0].directory {
             return Err(Error::State("snapshot needs one directory root".into()));
         }
+        let root_id = roots[0].id.clone();
         let mut denied_unique = HashSet::new();
         for id in &inaccessible {
             if !denied_unique.insert(id)
@@ -1214,8 +1218,20 @@ impl Store {
             )?;
             tx.execute("INSERT INTO metadata(key,value) VALUES('server_restore_id',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[server])?;
             if let Some(initialization) = initialization {
+                // Preview promotion runs inside this boundary and owns the
+                // inode numbers already handed to readers, so batch allocation
+                // must come after it to observe those mappings.
                 crate::initialization_store::finish_in_transaction(tx, initialization, cursor)?;
             }
+            // Stable filesystem inode identities for the whole installed
+            // namespace, in the same transaction that installs the nodes.
+            // `fs_inodes` is derived, reconstructible state: a crash before
+            // this commit loses no node/content/operation data and the next
+            // mount backfills the mapping. Doing it here keeps first-scan
+            // `opendir` read-only instead of paying one synchronous=FULL WAL
+            // commit per directory.
+            crate::filesystem::allocate_namespace_inodes(tx, &root_id)?;
+            crate::filesystem::mark_inode_map_complete(tx)?;
             tx.execute_batch("DROP TABLE recovery_ids;")?;
             Ok(())
         })

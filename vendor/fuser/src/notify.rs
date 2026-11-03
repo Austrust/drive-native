@@ -62,6 +62,29 @@ impl Notifier {
         self.send(notify_code::FUSE_POLL, &notif)
     }
 
+    /// Bump the connection epoch (FUSE protocol 7.45 / kernel >= 6.16). Every
+    /// dentry installed by an older epoch is revalidated on next use. Kernels
+    /// without the notification return EINVAL/ENOSYS; callers must treat those
+    /// as "unsupported" rather than as a delivery failure.
+    pub fn inc_epoch(&self) -> io::Result<()> {
+        let notif = Notification::new_inc_epoch();
+        self.send(notify_code::FUSE_NOTIFY_INC_EPOCH, &notif)
+    }
+
+    /// Invalidate the kernel cache for a given directory entry, reporting
+    /// every error. Callers that publish bounded metadata must use this variant:
+    /// the non-strict one deliberately swallows ENOENT.
+    pub fn inval_entry_strict(&self, parent: u64, name: &OsStr) -> io::Result<()> {
+        let notif = Notification::new_inval_entry(parent, name).map_err(Self::too_big_err)?;
+        self.send(notify_code::FUSE_NOTIFY_INVAL_ENTRY, &notif)
+    }
+
+    /// Strict form of [`Notifier::inval_inode`]; see `inval_entry_strict`.
+    pub fn inval_inode_strict(&self, ino: u64, offset: i64, len: i64) -> io::Result<()> {
+        let notif = Notification::new_inval_inode(ino, offset, len);
+        self.send(notify_code::FUSE_NOTIFY_INVAL_INODE, &notif)
+    }
+
     /// Invalidate the kernel cache for a given directory entry
     pub fn inval_entry(&self, parent: u64, name: &OsStr) -> io::Result<()> {
         let notif = Notification::new_inval_entry(parent, name).map_err(Self::too_big_err)?;

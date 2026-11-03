@@ -104,6 +104,11 @@ impl<'a> Notification<'a> {
         Ok(Self::from_struct_with_name(&r, name.as_bytes()))
     }
 
+    /// Notification with no payload: zero-length request body.
+    pub(crate) fn new_inc_epoch() -> Self {
+        Self::Bare(NotificationBuf::new())
+    }
+
     pub(crate) fn new_poll(kh: u64) -> Self {
         let r = abi::fuse_notify_poll_wakeup_out { kh };
         Self::from_struct(&r)

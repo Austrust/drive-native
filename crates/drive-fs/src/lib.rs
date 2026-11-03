@@ -7,9 +7,15 @@ mod cached_close_tests;
 pub mod diagnostics;
 mod directory;
 #[cfg(test)]
+mod inode_backfill_tests;
+#[cfg(test)]
+mod inline_metadata_tests;
+#[cfg(test)]
 mod isolation_tests;
 mod namespace;
 mod preview;
+pub mod publication;
+pub use publication::NotifyHub;
 mod read_requests;
 #[cfg(test)]
 mod shutdown_tests;
@@ -17,8 +23,8 @@ mod writable;
 use drive_core::filesystem::FileRecord;
 use drive_core::{Error, Node, ReadHandle, Store};
 use fuser::{
-    FileAttr, FileType, Filesystem, ReplyAttr, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry,
-    ReplyOpen, Request,
+    FileAttr, FileType, Filesystem, ReplyAttr, ReplyData, ReplyDirectory, ReplyDirectoryPlus,
+    ReplyEmpty, ReplyEntry, ReplyOpen, Request,
 };
 pub use read_requests::ReadCancellation;
 use read_requests::{ReadReply, ReadRequests};
@@ -128,6 +134,16 @@ pub struct CacheFilesystem {
     reads: ReadRequests,
     network_queue: Arc<LocalQueue>,
     hydrator: Option<Arc<dyn Hydrator>>,
+    // Metadata publication gate + kernel invalidation delivery (see
+    // publication.rs). Inert until a session notifier is installed.
+    notify: NotifyHub,
+    // Request READDIRPLUS at FUSE_INIT. FUSE_INIT necessarily happens before
+    // the session (and therefore the notifier) exists, so "notifier installed"
+    // cannot be observed here; `with_notify_hub` is the mount owner's
+    // declaration that it will install one. Without that declaration the mount
+    // keeps the plain READDIR profile (e.g. kernel tests that never install a
+    // notifier).
+    readdirplus: bool,
     uid: u32,
     gid: u32,
 }
@@ -142,6 +158,28 @@ impl CacheFilesystem {
         self
     }
 
+    /// Install the mount's publication/invalidation hub. Mount owners must call
+    /// [`NotifyHub::install`] with `BackgroundSession::notifier()` after the
+    /// session exists; until then replies carry zero TTL.
+    pub fn with_notify_hub(mut self, hub: NotifyHub) -> Self {
+        self.notify = hub;
+        // The owner promises to install the session notifier right after the
+        // session exists, which is the earliest point the API allows.
+        self.readdirplus = true;
+        self
+    }
+
+    /// Override the metadata TTL (0 disables caching). The default comes from
+    /// `DRIVE_NATIVE_FS_TTL_MS` (2000 ms).
+    pub fn with_metadata_ttl_ms(mut self, ttl_ms: u64) -> Self {
+        self.notify = NotifyHub::with_ttl_ms(ttl_ms);
+        self
+    }
+
+    pub fn notify_hub(&self) -> NotifyHub {
+        self.notify.clone()
+    }
+
     pub fn new(
         store: Arc<drive_core::SharedStore>,
         root: &str,
@@ -151,7 +189,15 @@ impl CacheFilesystem {
         {
             let s = store.lock().unwrap();
             match s.node(root) {
-                Ok(_) => s.ensure_fs_root(root)?,
+                Ok(_) => {
+                    s.ensure_fs_root(root)?;
+                    // Upgrade path: databases installed before batch inode
+                    // allocation get their `fs_inodes` mapping backfilled in one
+                    // transaction here, while mount initialization still
+                    // serializes Store access. Idempotent and writes nothing
+                    // (no WAL frame, no fsync) when the mapping is complete.
+                    s.ensure_filesystem_inodes(root)?;
+                }
                 Err(e) if e.is_not_found() => {
                     if s.preview_mount_root(root)?.is_none() {
                         return Err(e);
@@ -178,6 +224,8 @@ impl CacheFilesystem {
             reads: ReadRequests::default(),
             network_queue: Arc::new(LocalQueue::new()),
             hydrator: None,
+            notify: NotifyHub::from_env(),
+            readdirplus: false,
             uid,
             gid,
         })
@@ -246,6 +294,12 @@ impl Filesystem for CacheFilesystem {
         config
             .set_time_granularity(Duration::from_secs(1))
             .map_err(|_| libc::EINVAL)?;
+        // READDIRPLUS pays off only with a bounded TTL and only when the mount
+        // owner declared that it installs an invalidation notifier (see the
+        // `readdirplus` field); otherwise the mount keeps the safe-stage profile.
+        if self.readdirplus && self.notify.configured_ttl_ms() > 0 {
+            let _ = config.enable_readdirplus();
+        }
         Ok(())
     }
     fn destroy(&mut self) {
@@ -293,6 +347,7 @@ impl Filesystem for CacheFilesystem {
         };
         let store = self.store.clone();
         let hydrator = self.hydrator.clone();
+        let notify = self.notify.clone();
         let (uid, gid) = (self.uid, self.gid);
         self.queue.submit(Box::new(move || {
             let result = (|| -> drive_core::Result<_> {
@@ -306,6 +361,10 @@ impl Filesystem for CacheFilesystem {
                     if let Some(h) = hydrator {
                         h.local_saved();
                     }
+                    // Queue after the commit: the worker takes the publication
+                    // gate before writing anything to the kernel.
+                    notify.invalidate_entry(parent, &name);
+                    notify.invalidate_inode(record.ino);
                     reply.entry(&TTL, &attr(&record, uid, gid), 0)
                 }
                 Err(e) => reply.error(errno(&e)),
@@ -378,30 +437,99 @@ impl Filesystem for CacheFilesystem {
             reply.error(libc::ENOENT);
             return;
         };
+        // Observation only (never a lock): reply paths must not block on
+        // invalidation delivery; the bounded TTL and the authoritative Store are
+        // the correctness contract (see publication.rs).
+        let inline_publication = self.notify.reply_guard();
+        // Cheap authoritative metadata is answered on the dispatcher thread; the
+        // single-statement projection owns its result before the reply is
+        // written. Busy Store, negative and candidate-preview lookups keep the
+        // original offloaded path.
+        if let Some(result) =
+            preview::try_inline_lookup(&self.store, self.uid, self.gid, parent, &name)
+        {
+            match result {
+                Ok((attr, cacheable)) => {
+                    let (entry_ttl, attr_ttl) =
+                        preview::reply_ttls(&self.notify, cacheable, true);
+                    diagnostics::ttls(Some(entry_ttl), Some(attr_ttl));
+                    self.notify.apply_reply_delay();
+                    reply.entry_with_timeouts(&entry_ttl, &attr_ttl, &attr, 0);
+                }
+                Err(e) => reply.error(e),
+            }
+            drop(inline_publication);
+            return;
+        }
+        drop(inline_publication);
         let store = self.store.clone();
+        let notify = self.notify.clone();
         let (uid, gid) = (self.uid, self.gid);
         let queued = diagnostics::span(diagnostics::Stage::LookupQueue);
         self.queue.submit(Box::new(move || {
             drop(queued);
+            let publication = notify.reply_guard();
             let wait = diagnostics::span(diagnostics::Stage::LookupStoreWait);
             let store = store.lock().unwrap();
             drop(wait);
             let projection = diagnostics::span(diagnostics::Stage::LookupProjection);
             let result = preview::lookup(&store, parent, &name);
             drop(projection);
+            // Authority results are owned; preview replies keep the Store
+            // boundary through publication.
+            if !matches!(&result, Ok(preview::Metadata::Preview(_))) {
+                drop(store);
+            }
             match result {
-                Ok(record) => reply.entry(&TTL, &record.attr(uid, gid), 0),
+                Ok(record) => {
+                    let cache_entry = matches!(&record, preview::Metadata::Authority(_));
+                    let cacheable = record.cacheable();
+                    let (entry_ttl, attr_ttl) =
+                        preview::reply_ttls(&notify, cacheable, cache_entry);
+                    diagnostics::ttls(Some(entry_ttl), Some(attr_ttl));
+                    notify.apply_reply_delay();
+                    reply.entry_with_timeouts(&entry_ttl, &attr_ttl, &record.attr(uid, gid), 0);
+                }
                 Err(e) => reply.error(errno(&e)),
             }
+            drop(publication);
         }));
     }
     fn getattr(&mut self, _req: &Request<'_>, ino: u64, fh: Option<u64>, reply: ReplyAttr) {
+        let inline_publication = self.notify.reply_guard();
+        if let Some(result) = preview::try_inline_getattr(
+            &self.store,
+            &self.handles,
+            self.uid,
+            self.gid,
+            ino,
+            fh,
+        ) {
+            match result {
+                Ok((attr, cacheable)) => {
+                    let (_, mut attr_ttl) = preview::reply_ttls(&self.notify, cacheable, true);
+                    if fh.is_some() {
+                        // Attributes adjusted from an open handle must revalidate.
+                        attr_ttl = Duration::ZERO;
+                    }
+                    diagnostics::ttls(None, Some(attr_ttl));
+                    self.notify.apply_reply_delay();
+                    reply.attr(&attr_ttl, &attr);
+                }
+                Err(e) => reply.error(e),
+            }
+            drop(inline_publication);
+            return;
+        }
+        drop(inline_publication);
         let store = self.store.clone();
         let handles = self.handles.clone();
+        let notify = self.notify.clone();
         let (uid, gid) = (self.uid, self.gid);
         let queued = diagnostics::span(diagnostics::Stage::GetattrQueue);
         self.queue.submit(Box::new(move || {
             drop(queued);
+            let publication = notify.reply_guard();
             let wait = diagnostics::span(diagnostics::Stage::GetattrStoreWait);
             let guard = store.lock().unwrap();
             drop(wait);
@@ -414,10 +542,17 @@ impl Filesystem for CacheFilesystem {
                     if fh.is_some() {
                         reply.error(libc::EBADF);
                     } else {
+                        // Candidate previews never publish a cacheable answer.
+                        diagnostics::ttls(None, Some(Duration::ZERO));
+                        notify.apply_reply_delay();
                         reply.attr(&TTL, &preview::preview_attr(&record, uid, gid));
                     }
                 }
                 Ok(preview::Metadata::Authority(record)) => {
+                    let (_, mut attr_ttl) = preview::reply_ttls(&notify, record.cacheable, true);
+                    if fh.is_some() {
+                        attr_ttl = Duration::ZERO;
+                    }
                     let mut a = preview::posix_attr(&record, uid, gid);
                     if let Some(fh) = fh {
                         let content = {
@@ -461,10 +596,13 @@ impl Filesystem for CacheFilesystem {
                             }
                         }
                     }
-                    reply.attr(&TTL, &a)
+                    diagnostics::ttls(None, Some(attr_ttl));
+                    notify.apply_reply_delay();
+                    reply.attr(&attr_ttl, &a)
                 }
                 Err(e) => reply.error(errno(&e)),
             }
+            drop(publication);
         }));
     }
     fn opendir(&mut self, _req: &Request<'_>, ino: u64, flags: i32, reply: ReplyOpen) {
@@ -479,6 +617,16 @@ impl Filesystem for CacheFilesystem {
         reply: ReplyDirectory,
     ) {
         directory::read(self, ino, fh, offset, reply)
+    }
+    fn readdirplus(
+        &mut self,
+        _req: &Request<'_>,
+        ino: u64,
+        fh: u64,
+        offset: i64,
+        reply: ReplyDirectoryPlus,
+    ) {
+        directory::read_plus(self, ino, fh, offset, reply)
     }
     fn releasedir(
         &mut self,
