@@ -197,6 +197,26 @@ impl ReplyEntry {
         ));
     }
 
+    /// Reply to a request with separate positive-entry and attribute lifetimes.
+    /// A zero entry TTL keeps the kernel from caching the name while still
+    /// letting the attributes returned by this same reply satisfy a following
+    /// stat(2), which is what bounded metadata caching needs.
+    pub fn entry_with_timeouts(
+        self,
+        entry_ttl: &Duration,
+        attr_ttl: &Duration,
+        attr: &FileAttr,
+        generation: u64,
+    ) {
+        self.reply.send_ll(&ll::Response::new_entry(
+            ll::INodeNo(attr.ino),
+            ll::Generation(generation),
+            &attr.into(),
+            *entry_ttl,
+            *attr_ttl,
+        ));
+    }
+
     /// Reply to a request with the given error code
     pub fn error(self, err: c_int) {
         self.reply.error(err);

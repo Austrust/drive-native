@@ -62,6 +62,20 @@ impl Notifier {
         self.send(notify_code::FUSE_POLL, &notif)
     }
 
+    /// Invalidate the kernel cache for a given directory entry, reporting
+    /// every error. Callers that publish bounded metadata must use this variant:
+    /// the non-strict one deliberately swallows ENOENT.
+    pub fn inval_entry_strict(&self, parent: u64, name: &OsStr) -> io::Result<()> {
+        let notif = Notification::new_inval_entry(parent, name).map_err(Self::too_big_err)?;
+        self.send(notify_code::FUSE_NOTIFY_INVAL_ENTRY, &notif)
+    }
+
+    /// Strict form of [`Notifier::inval_inode`]; see `inval_entry_strict`.
+    pub fn inval_inode_strict(&self, ino: u64, offset: i64, len: i64) -> io::Result<()> {
+        let notif = Notification::new_inval_inode(ino, offset, len);
+        self.send(notify_code::FUSE_NOTIFY_INVAL_INODE, &notif)
+    }
+
     /// Invalidate the kernel cache for a given directory entry
     pub fn inval_entry(&self, parent: u64, name: &OsStr) -> io::Result<()> {
         let notif = Notification::new_inval_entry(parent, name).map_err(Self::too_big_err)?;

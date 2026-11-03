@@ -11,6 +11,11 @@ drive-core = { path = "../drive-core" }
 fuser = { version = "=0.16.0", default-features = false, features = ["abi-7-31"] }
 libc = "0.2"
 
+[features]
+# Test-only seams (deterministic late-reply injection). Never enabled in
+# release/packaging builds.
+test-seams = []
+
 [dev-dependencies]
 tempfile = "3"
 serde_json = "1"

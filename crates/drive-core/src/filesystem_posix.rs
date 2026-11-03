@@ -25,6 +25,9 @@ pub struct PosixRecord {
     pub mode: u32,
     pub unlinked: bool,
     pub blocks: u64,
+    /// Safe to cache in the kernel for a bounded TTL: the attributes do not
+    /// depend on a mutable local body, an open draft, or an unlinked identity.
+    pub cacheable: bool,
 }
 
 /// True when the filesystem root marker exists (the mount was initialized).
@@ -243,6 +246,9 @@ impl Projection {
         let mut size = unsigned(self.size.unwrap_or(0))?;
         let mut mtime = unsigned(self.mtime.unwrap_or(0))?;
         let allocated = self.blob.is_some() || self.draft.is_some();
+        // Bounded kernel caching is only allowed for authoritative metadata
+        // that does not depend on mutable local content.
+        let cacheable = !self.unlinked && self.draft.is_none() && !self.dirty;
         let modified = |stat: &std::fs::Metadata| -> Result<u64> {
             Ok(stat
                 .modified()?
@@ -306,6 +312,7 @@ impl Projection {
             mode: self.mode.unwrap_or(if self.directory { 0o755 } else { 0o644 }) & 0o777,
             unlinked: self.unlinked,
             blocks: if allocated { size.div_ceil(512) } else { 0 },
+            cacheable,
         })
     }
 }
