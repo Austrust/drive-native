@@ -23,14 +23,16 @@ pub(super) fn metadata(s: &Store, ino: u64) -> drive_core::Result<Metadata> {
     }
 }
 pub(super) fn lookup(s: &Store, parent: u64, name: &str) -> drive_core::Result<Metadata> {
-    match metadata(s, parent)? {
-        Metadata::Authority(p) => {
-            if !p.directory {
-                return Err(Error::Io(std::io::Error::from_raw_os_error(libc::ENOTDIR)));
-            }
-            s.posix_lookup(&p.id, name).map(Metadata::Authority)
-        }
-        Metadata::Preview(_) => s.preview_lookup(parent, name).map(Metadata::Preview),
+    // One statement resolves the authority parent, ENOTDIR and the child
+    // projection. Only a missing authority answer can be a cold preview parent,
+    // and that fallback keeps the original candidate-namespace errors.
+    match s.posix_lookup_by_inode(parent, name) {
+        Ok(r) => Ok(Metadata::Authority(r)),
+        Err(e) if e.is_not_found() => match s.preview_record_by_inode(parent) {
+            Ok(_) => s.preview_lookup(parent, name).map(Metadata::Preview),
+            Err(_) => Err(e),
+        },
+        Err(e) => Err(e),
     }
 }
 /// Caller holds the Store guard through its subsequent mutation. Preview nodes

@@ -151,7 +151,15 @@ impl CacheFilesystem {
         {
             let s = store.lock().unwrap();
             match s.node(root) {
-                Ok(_) => s.ensure_fs_root(root)?,
+                Ok(_) => {
+                    s.ensure_fs_root(root)?;
+                    // Upgrade path: databases installed before batch inode
+                    // allocation get their `fs_inodes` mapping backfilled in one
+                    // transaction here, while mount initialization still
+                    // serializes Store access. Idempotent and writes nothing
+                    // (no WAL frame, no fsync) when the mapping is complete.
+                    s.ensure_filesystem_inodes(root)?;
+                }
                 Err(e) if e.is_not_found() => {
                     if s.preview_mount_root(root)?.is_none() {
                         return Err(e);

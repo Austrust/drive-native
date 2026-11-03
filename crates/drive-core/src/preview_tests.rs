@@ -685,3 +685,48 @@ fn rejected_durable_root_event_commits_only_revocation_not_coverage_or_cursor() 
         assert!(store.initialization_writeback_blocked().unwrap());
     }
 }
+
+#[test]
+fn promotion_keeps_preview_inos_and_batch_allocation_skips_reserved_rows() {
+    let (_temp, mut store, _binding, run) = setup();
+    store.preview_mount_root("100").unwrap();
+    ready_root(&mut store, &run);
+    list(&mut store, &run, "200", &[]);
+    let file = store.preview_lookup(1, "A.doc").unwrap();
+    let dir = store.preview_lookup(1, "Dir").unwrap();
+    finish(&mut store, &run);
+    store.complete_initialization(&run).unwrap();
+    // Reader-visible identities survive promotion; the batch allocation runs
+    // after promotion and must not hand out a second mapping for a node.
+    assert_eq!(store.record_by_inode(1).unwrap().node.id, "100");
+    assert_eq!(store.record_by_inode(file.ino).unwrap().node.id, "101");
+    assert_eq!(store.record_by_inode(dir.ino).unwrap().node.id, "200");
+    assert_eq!(store.posix_record_by_inode(file.ino).unwrap().id, "101");
+    let missing: i64 = store
+        .db
+        .query_row(
+            "SELECT count(*) FROM nodes n WHERE n.deleted=0 AND NOT EXISTS(SELECT 1 FROM fs_inodes i WHERE i.node=n.id)",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(missing, 0);
+    let reserved: i64 = store
+        .db
+        .query_row(
+            "SELECT count(*) FROM fs_inodes WHERE node LIKE '%drive-native-preview:%'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(reserved, 0);
+    let total: i64 = store
+        .db
+        .query_row("SELECT count(*) FROM fs_inodes", [], |r| r.get(0))
+        .unwrap();
+    let unique: i64 = store
+        .db
+        .query_row("SELECT count(DISTINCT ino) FROM fs_inodes", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(total, unique);
+}

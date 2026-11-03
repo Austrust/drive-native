@@ -14,9 +14,11 @@ fn directory_projection_is_bounded_and_does_not_inspect_body_or_status() {
         db.query_row("SELECT count(*) FROM fs_inodes", [], |r| r.get::<_, i64>(0))
             .unwrap()
     };
-    assert_eq!(inodes(), 1);
+    // Snapshot install allocates the whole namespace in its own transaction.
+    assert_eq!(inodes(), 2001);
     assert!(store.directory_snapshot(1, 64).is_err());
-    assert_eq!(inodes(), 1);
+    // A rejected projection adds no inode rows.
+    assert_eq!(inodes(), 2001);
     store
         .publish_download(
             &DownloadTicket {

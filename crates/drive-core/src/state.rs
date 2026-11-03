@@ -1096,6 +1096,7 @@ impl Store {
         if roots.len() != 1 || !roots[0].directory {
             return Err(Error::State("snapshot needs one directory root".into()));
         }
+        let root_id = roots[0].id.clone();
         let mut denied_unique = HashSet::new();
         for id in &inaccessible {
             if !denied_unique.insert(id)
@@ -1204,8 +1205,19 @@ impl Store {
             )?;
             tx.execute("INSERT INTO metadata(key,value) VALUES('server_restore_id',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[server])?;
             if let Some(initialization) = initialization {
+                // Preview promotion runs inside this boundary and owns the
+                // inode numbers already handed to readers, so batch allocation
+                // must come after it to observe those mappings.
                 crate::initialization_store::finish_in_transaction(tx, initialization, cursor)?;
             }
+            // Stable filesystem inode identities for the whole installed
+            // namespace, in the same transaction that installs the nodes.
+            // `fs_inodes` is derived, reconstructible state: a crash before
+            // this commit loses no node/content/operation data and the next
+            // mount backfills the mapping. Doing it here keeps first-scan
+            // `opendir` read-only instead of paying one synchronous=FULL WAL
+            // commit per directory.
+            crate::filesystem::allocate_namespace_inodes(tx, &root_id)?;
             tx.execute_batch("DROP TABLE recovery_ids;")?;
             Ok(())
         })
