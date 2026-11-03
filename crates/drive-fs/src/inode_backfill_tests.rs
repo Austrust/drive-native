@@ -43,8 +43,10 @@ fn mount_initialization_backfills_a_state_directory_installed_without_mappings()
     // Model a database installed by a build without batch allocation: the root
     // was mapped at mount, everything else only on first access.
     let db = rusqlite::Connection::open(temp.path().join("state.sqlite")).unwrap();
-    db.execute("DELETE FROM fs_inodes WHERE ino!=1", [])
-        .unwrap();
+    db.execute_batch(
+        "DELETE FROM fs_inodes WHERE ino!=1; DELETE FROM metadata WHERE key='fs_inodes_complete'",
+    )
+    .unwrap();
     drop(db);
     let shared = Arc::new(SharedStore::new(Store::open(temp.path()).unwrap()));
     let filesystem = CacheFilesystem::new(shared.clone(), "root", 1000, 1000).unwrap();

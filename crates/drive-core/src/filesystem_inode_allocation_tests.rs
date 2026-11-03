@@ -143,10 +143,13 @@ fn mount_backfill_repairs_an_older_install_once() {
         .unwrap();
     store.ensure_fs_root("root").unwrap();
     // Model a database installed by a build without batch allocation: the root
-    // was mapped at mount, the rest only on first access (or not at all).
+    // was mapped at mount, the rest only on first access (or not at all), and
+    // the O(1) completeness hint did not exist yet.
     store
         .db
-        .execute("DELETE FROM fs_inodes WHERE ino!=1", [])
+        .execute_batch(
+            "DELETE FROM fs_inodes WHERE ino!=1; DELETE FROM metadata WHERE key='fs_inodes_complete'",
+        )
         .unwrap();
     assert_eq!(inode_count(&store), 1);
     assert_eq!(store.ensure_filesystem_inodes("root").unwrap(), 3);
@@ -194,7 +197,9 @@ fn concurrent_mount_backfills_are_serialized_and_allocate_each_missing_node_once
     store.ensure_fs_root("root").unwrap();
     store
         .db
-        .execute("DELETE FROM fs_inodes WHERE ino!=1", [])
+        .execute_batch(
+            "DELETE FROM fs_inodes WHERE ino!=1; DELETE FROM metadata WHERE key='fs_inodes_complete'",
+        )
         .unwrap();
     let shared = std::sync::Arc::new(SharedStore::new(store));
     let mut threads = Vec::new();
@@ -226,4 +231,79 @@ fn concurrent_mount_backfills_are_serialized_and_allocate_each_missing_node_once
             .unwrap(),
         1
     );
+}
+
+#[test]
+fn completeness_marker_is_set_by_install_and_cleared_by_node_inserts() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut store = Store::open(temp.path()).unwrap();
+    store
+        .install_remote_snapshot(&snapshot(), "1", "server")
+        .unwrap();
+    store.ensure_fs_root("root").unwrap();
+    let marker = |store: &Store| -> String {
+        store
+            .db
+            .query_row(
+                "SELECT value FROM metadata WHERE key='fs_inodes_complete'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+    };
+    assert_eq!(marker(&store), "1");
+    // Steady-state mount probe is O(1) and writes nothing.
+    let revision = store.local_revision();
+    assert_eq!(store.ensure_filesystem_inodes("root").unwrap(), 0);
+    assert_eq!(store.local_revision(), revision);
+    // A locally created node clears the hint; the next mount backfills it in one
+    // transaction instead of leaving it to a per-entry lazy allocation.
+    let created = store.create_local_file("d", "created", 0o644).unwrap();
+    assert_eq!(marker(&store), "0");
+    assert_eq!(store.ensure_filesystem_inodes("root").unwrap(), 1);
+    assert_eq!(marker(&store), "1");
+    assert!(ino_of(&store, &created.id).is_some());
+    // An older store without the marker is probed once and then hinted.
+    store
+        .db
+        .execute("DELETE FROM metadata WHERE key='fs_inodes_complete'", [])
+        .unwrap();
+    assert_eq!(store.ensure_filesystem_inodes("root").unwrap(), 0);
+    assert_eq!(marker(&store), "1");
+}
+
+#[test]
+fn remote_event_inserts_clear_the_completeness_marker() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut store = Store::open(temp.path()).unwrap();
+    store
+        .install_remote_snapshot(&snapshot(), "1", "server")
+        .unwrap();
+    store.ensure_fs_root("root").unwrap();
+    assert_eq!(store.ensure_filesystem_inodes("root").unwrap(), 0);
+    let mut incoming = node("incoming", Some("d"), false);
+    incoming.name = "incoming".into();
+    store
+        .receive(&crate::Batch {
+            from: "1".into(),
+            to: "2".into(),
+            events: vec![crate::Event {
+                id: "e1".into(),
+                change: crate::Change::Upsert(incoming.clone()),
+            }],
+        })
+        .unwrap();
+    store.drain().unwrap();
+    let marker: String = store
+        .db
+        .query_row(
+            "SELECT value FROM metadata WHERE key='fs_inodes_complete'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(marker, "0");
+    // The mount-time backfill allocates the event-created node once.
+    assert_eq!(store.ensure_filesystem_inodes("root").unwrap(), 1);
+    assert!(ino_of(&store, "incoming").is_some());
 }

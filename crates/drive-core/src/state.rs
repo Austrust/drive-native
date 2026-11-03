@@ -519,6 +519,9 @@ impl Store {
                         conflict=CASE WHEN nodes.dirty_blob IS NOT NULL AND nodes.base_version!=excluded.remote_version AND NOT EXISTS(SELECT 1 FROM local_unlinks WHERE node=nodes.id) THEN 1 ELSE nodes.conflict END",
                         params![n.id,n.parent,n.name,n.version,n.directory])?;
                         crate::filesystem::write_metadata(&tx, n)?;
+                        // The next mount must backfill any node this event
+                        // created; the O(1) hint is only a hint.
+                        crate::filesystem::mark_inode_map_incomplete(&tx)?;
                     }
                     Change::Delete { id } => {
                         tx.execute("WITH RECURSIVE subtree(id) AS (SELECT ?1 UNION SELECT n.id FROM nodes n JOIN subtree s ON n.parent=s.id)
@@ -1218,6 +1221,7 @@ impl Store {
             // `opendir` read-only instead of paying one synchronous=FULL WAL
             // commit per directory.
             crate::filesystem::allocate_namespace_inodes(tx, &root_id)?;
+            crate::filesystem::mark_inode_map_complete(tx)?;
             tx.execute_batch("DROP TABLE recovery_ids;")?;
             Ok(())
         })

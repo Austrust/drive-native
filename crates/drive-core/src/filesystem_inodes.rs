@@ -15,6 +15,13 @@
 use super::*;
 use rusqlite::{Connection, OptionalExtension};
 
+/// O(1) mount hint: the whole namespace was batch-allocated and no code path
+/// has inserted a node without an identity since. It is a hint, never a
+/// correctness dependency: a stale marker can only skip a backfill for nodes
+/// that were inserted later, and those are still allocated lazily on their
+/// first projection.
+const COMPLETE_KEY: &str = "fs_inodes_complete";
+
 /// Give the mount root its fixed identity (`ino=1`) when the mapping is absent.
 ///
 /// A different node already owning inode 1 is left untouched: `ensure_fs_root`
@@ -62,6 +69,30 @@ pub(crate) fn allocate_namespace_inodes(db: &Connection, root: &str) -> Result<u
     Ok(written)
 }
 
+/// Record that a transaction may introduce nodes without inode identities.
+pub(crate) fn mark_inode_map_incomplete(db: &Connection) -> Result<()> {
+    db.execute(
+        "INSERT OR REPLACE INTO metadata(key,value) VALUES('fs_inodes_complete','0')",
+        [],
+    )?;
+    Ok(())
+}
+
+/// Record that every live node of the committed namespace has an identity.
+pub(crate) fn mark_inode_map_complete(db: &Connection) -> Result<()> {
+    db.execute(
+        "INSERT OR REPLACE INTO metadata(key,value) VALUES('fs_inodes_complete','1')",
+        [],
+    )?;
+    Ok(())
+}
+
+fn completeness_marker(db: &Connection) -> Result<bool> {
+    Ok(db
+        .prepare_cached("SELECT EXISTS(SELECT 1 FROM metadata WHERE key=?1 AND value='1')")?
+        .query_row([COMPLETE_KEY], |r| r.get(0))?)
+}
+
 impl Store {
     /// One-time backfill for a database whose snapshot was installed before
     /// batch inode allocation existed.
@@ -71,6 +102,11 @@ impl Store {
     /// already complete performs only the two bounded checks and writes nothing
     /// (no WAL frames, no fsync). Returns the number of rows written.
     pub fn ensure_filesystem_inodes(&self, root: &str) -> Result<u64> {
+        // Steady state (and every mount of a store installed by this build):
+        // one indexed metadata probe, no namespace scan.
+        if completeness_marker(&self.db)? {
+            return Ok(0);
+        }
         let root_ok: bool = self
             .db
             .query_row("SELECT node FROM fs_inodes WHERE ino=1", [], |r| {
@@ -84,10 +120,16 @@ impl Store {
             |r| r.get(0),
         )?;
         if root_ok && !missing {
+            // One-time upgrade probe on an already complete old store: record
+            // the hint so later mounts are O(1).
+            let tx = self.db.unchecked_transaction()?;
+            mark_inode_map_complete(&tx)?;
+            tx.commit()?;
             return Ok(0);
         }
         let tx = self.db.unchecked_transaction()?;
         let written = allocate_namespace_inodes(&tx, root)?;
+        mark_inode_map_complete(&tx)?;
         tx.commit()?;
         Ok(written)
     }
