@@ -372,6 +372,7 @@ pub fn overview(service: &Service) -> io::Result<String> {
     let preview_only = preview::active(&store, &service.profile.scope.file_id)?;
     Ok(serde_json::json!({"schema":1,"task_id":service.profile.task_id,"mount":service.profile.mount,
         "connection":state,"error":error,"background_error":*service.bridge.last_error.lock().unwrap(),
+        "upload_block":*service.bridge.upload_block.lock().unwrap(),
         "mounted":service.mounted.load(Ordering::Acquire),"writable":service.profile.writable && !preview_only,
         "configured_writable":service.profile.writable,"preview_only":preview_only,
         "skipped_symlinks":store.skipped_symlink_count().map_err(|_|other())?,
