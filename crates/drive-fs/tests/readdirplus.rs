@@ -218,3 +218,41 @@ fn display(name: &OsStr) -> String {
 fn result_io() -> io::Result<()> {
     Ok(())
 }
+
+#[test]
+#[ignore = "requires ordinary Linux user and /dev/fuse; run explicitly"]
+fn readdirplus_continuation_does_not_wait_for_a_busy_store() {
+    // Kernel regression for the directory continuation contract: READDIRPLUS
+    // attribute pages must degrade to dirent-only entries, never block on the
+    // authoritative Store (in-flight commits/indexing can hold it for seconds).
+    let mut entries = vec![node("root", None, true, 0)];
+    for index in 0..2000 {
+        entries.push(node(&format!("item-{index:04}"), Some("root"), false, 0));
+    }
+    let mount = Mount::new(&entries);
+    let root = mount.root();
+    // Open the directory stream before the Store is busy: OPENDIR itself takes
+    // the Store lock; the continuation contract is about getdents.
+    let mut directory = std::fs::read_dir(&root).unwrap();
+    let mut names = (0..5)
+        .map(|_| directory.next().unwrap().unwrap().file_name())
+        .collect::<Vec<_>>();
+    let guard = mount.store.lock().unwrap();
+    let started = Instant::now();
+    names.extend(
+        directory
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<Vec<_>>(),
+    );
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed < Duration::from_secs(3),
+        "readdirplus continuation blocked on the Store for {elapsed:?}"
+    );
+    assert_eq!(names.len(), 2000);
+    drop(guard);
+    // With the Store available the same stream is complete and consistent.
+    let again = std::fs::read_dir(&root).unwrap().count();
+    assert_eq!(again, 2000);
+    assert_eq!(mount.hub.stats().failures, 0);
+}
