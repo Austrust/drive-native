@@ -92,7 +92,7 @@ pub struct Bridge {
     initialization_session: Mutex<Option<initialization_owner::Session>>,
     session_pending: AtomicBool,
     flights: Mutex<HashMap<(String, String), Arc<Flight>>>,
-    notifier: Arc<Mutex<Option<fuser::Notifier>>>,
+    notify_hub: Arc<Mutex<Option<drive_fs::NotifyHub>>>,
     notifications: std::sync::mpsc::SyncSender<Invalidation>,
     pub downloads: AtomicUsize,
     pub download_failures_seen: AtomicUsize,
@@ -247,20 +247,19 @@ impl Bridge {
         Ok(())
     }
     fn from_connection(store: Arc<drive_core::SharedStore>, rpc: Arc<Rpc>) -> io::Result<Self> {
-        let notifier: Arc<Mutex<Option<fuser::Notifier>>> = Arc::new(Mutex::new(None));
-        let target = notifier.clone();
+        let notify_hub: Arc<Mutex<Option<drive_fs::NotifyHub>>> = Arc::new(Mutex::new(None));
+        let target = notify_hub.clone();
         let (notifications, rx) = std::sync::mpsc::sync_channel(1024);
         std::thread::spawn(move || {
             for message in rx {
-                if let Some(n) = target.lock().unwrap().as_ref() {
-                    match message {
-                        Invalidation::Inode(ino) => {
-                            let _ = n.inval_inode(ino, 0, 0);
-                        }
-                        Invalidation::Entry(parent, name) => {
-                            let _ = n.inval_entry(parent, std::ffi::OsStr::new(&name));
-                        }
-                    }
+                // The hub owns the publication gate, the kernel notifier and the
+                // fail-closed fallback; delivery order is decided there.
+                let Some(hub) = target.lock().unwrap().clone() else {
+                    continue;
+                };
+                match message {
+                    Invalidation::Inode(ino) => hub.invalidate_inode(ino),
+                    Invalidation::Entry(parent, name) => hub.invalidate_entry(parent, &name),
                 }
             }
         });
@@ -273,7 +272,7 @@ impl Bridge {
             session_pending: AtomicBool::new(false),
             connection: Mutex::new(rpc),
             flights: Mutex::new(HashMap::new()),
-            notifier,
+            notify_hub,
             notifications,
             downloads: AtomicUsize::new(0),
             download_failures_seen: AtomicUsize::new(0),
@@ -285,12 +284,23 @@ impl Bridge {
             initialization: Arc::new(crate::initialization::Tracker::default()),
         })
     }
-    /// Release the runtime's /dev/fuse sender once background producers stop.
+    /// Stop publishing cacheable metadata once background producers stop.
     pub fn clear_notifier(&self) {
-        self.notifier.lock().unwrap().take();
+        if let Some(hub) = self.notify_hub.lock().unwrap().take() {
+            hub.deactivate();
+        }
     }
+    /// Compatibility for mounts that do not share the FUSE filesystem's hub:
+    /// caching stays disabled because the filesystem hub is never installed.
     pub fn set_notifier(&self, notifier: fuser::Notifier) {
-        *self.notifier.lock().unwrap() = Some(notifier);
+        let hub = drive_fs::NotifyHub::from_env();
+        hub.install(notifier);
+        *self.notify_hub.lock().unwrap() = Some(hub);
+    }
+    /// Share the mount's hub so invalidation delivery is ordered against the
+    /// FUSE replies that publish cached metadata.
+    pub fn set_notify_hub(&self, hub: drive_fs::NotifyHub) {
+        *self.notify_hub.lock().unwrap() = Some(hub);
     }
     /// Resume persistent candidates before ordinary events. Recheck quarantined
     /// permissions at explicit session boundaries; transport retries otherwise
@@ -365,6 +375,7 @@ impl Bridge {
         };
         let event_count = batch.events.len();
         let mut invalidations = Vec::new();
+        let mut invalidated_inodes = Vec::new();
         let mut store = self.store.lock().unwrap();
         for event in &batch.events {
             let id = match &event.change {
@@ -372,9 +383,13 @@ impl Bridge {
                 Change::Delete { id } => id,
             };
             if let Ok(old) = store.local_identity(id).and_then(|id| store.record(&id)) {
+                // The old name, the changed object's attributes and the old
+                // parent directory's attributes are all possibly cached.
+                invalidated_inodes.push(old.ino);
                 if let Some(p) = old.node.parent.as_deref() {
                     if let Ok(p) = store.local_identity(p).and_then(|p| store.record(&p)) {
-                        invalidations.push((p.ino, old.node.name))
+                        invalidated_inodes.push(p.ino);
+                        invalidations.push((p.ino, old.node.name));
                     }
                 }
             }
@@ -382,10 +397,21 @@ impl Bridge {
         store.receive(&batch).map_err(io::Error::other)?;
         store.drain().map_err(io::Error::other)?;
         for event in &batch.events {
-            if let Change::Upsert(n) = &event.change {
-                if let Some(p) = n.parent.as_deref() {
-                    if let Ok(p) = store.local_identity(p).and_then(|p| store.record(&p)) {
-                        invalidations.push((p.ino, n.name.clone()))
+            match &event.change {
+                Change::Upsert(n) => {
+                    if let Ok(record) = store.record(&n.id) {
+                        invalidated_inodes.push(record.ino);
+                    }
+                    if let Some(p) = n.parent.as_deref() {
+                        if let Ok(p) = store.local_identity(p).and_then(|p| store.record(&p)) {
+                            invalidated_inodes.push(p.ino);
+                            invalidations.push((p.ino, n.name.clone()));
+                        }
+                    }
+                }
+                Change::Delete { id } => {
+                    if let Ok(record) = store.record(id) {
+                        invalidated_inodes.push(record.ino);
                     }
                 }
             }
@@ -394,6 +420,9 @@ impl Bridge {
         drop(receipt);
         self.initialization
             .pulled(true, event_count, changed_notification);
+        for ino in invalidated_inodes {
+            let _ = self.notifications.try_send(Invalidation::Inode(ino));
+        }
         for (p, name) in invalidations {
             let _ = self.notifications.try_send(Invalidation::Entry(p, name));
         }

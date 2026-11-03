@@ -60,6 +60,9 @@ fn online_cached_dirty_and_unlinked_attributes_match_without_mutating_queues() {
     let (_temp, mut store) = fixture();
     let first = store.posix_lookup("root", "a").unwrap();
     assert_eq!(first.blocks, 0);
+    // A clean, online-only authority entry is the only cacheable state.
+    assert!(first.cacheable);
+    assert!(store.posix_lookup("root", "d").unwrap().cacheable);
     let revision = store.local_revision();
     for _ in 0..20 {
         assert_eq!(store.posix_record_by_inode(first.ino).unwrap(), first);
@@ -75,20 +78,28 @@ fn online_cached_dirty_and_unlinked_attributes_match_without_mutating_queues() {
             &crate::sha256(b"abc"),
         )
         .unwrap();
-    assert_eq!(same(&store, "a").blocks, 1);
+    let cached = same(&store, "a");
+    assert_eq!(cached.blocks, 1);
+    // A clean cached body is still authoritative metadata and cacheable.
+    assert!(cached.cacheable);
     let draft = store.begin_draft("a", "v1", None).unwrap();
     let body = b"uncheckpointed local content";
     store.draft_write(&draft, 0, body, false).unwrap();
     let active_handles = store.handles.lock().unwrap().clone();
     let revision = store.local_revision();
-    assert_eq!(same(&store, "a").size, body.len() as u64);
+    let drafted = same(&store, "a");
+    assert_eq!(drafted.size, body.len() as u64);
+    // An open dirty draft must never be advertised as cacheable metadata.
+    assert!(!drafted.cacheable);
     assert_eq!(*store.handles.lock().unwrap(), active_handles);
     assert_eq!(store.local_revision(), revision);
     store.set_local_mode("a", 0o600).unwrap();
     assert_eq!(same(&store, "a").mode, 0o600);
     store.unlink_local("root", "a", "a", false).unwrap();
     assert!(store.posix_lookup("root", "a").is_err());
-    assert!(same(&store, "a").unlinked);
+    let unlinked = same(&store, "a");
+    assert!(unlinked.unlinked);
+    assert!(!unlinked.cacheable);
     store
         .draft_write(&draft, body.len() as u64, b"!", false)
         .unwrap();
@@ -153,4 +164,61 @@ fn broken_body_or_missing_metadata_is_not_reported_as_successful_stat() {
         .unwrap();
     std::fs::remove_file(temp.path().join("blobs").join(blob)).unwrap();
     assert!(store.posix_record_by_inode(ino).is_err());
+}
+
+#[test]
+fn bounded_directory_page_matches_single_record_projection() {
+    let (_temp, store) = fixture();
+    let snapshot = store.directory_snapshot(1, 1 << 20).unwrap();
+    let slots = snapshot
+        .entries
+        .iter()
+        .map(|entry| crate::filesystem::DirectorySlot {
+            ino: entry.ino,
+            name: &entry.name,
+            directory: entry.directory,
+        })
+        .collect::<Vec<_>>();
+    let page = store.directory_posix_page(1, &slots).unwrap();
+    assert_eq!(page.len(), slots.len());
+    // `.`, `..` and every live child resolve to their single-record projection.
+    assert_eq!(page[0].as_ref().unwrap().ino, 1);
+    assert!(page[1].is_some());
+    let a = slots.iter().position(|slot| slot.name == "a").unwrap();
+    assert_eq!(
+        page[a].as_ref().unwrap(),
+        &store.posix_record_by_inode(slots[a].ino).unwrap()
+    );
+    let d = slots.iter().position(|slot| slot.name == "d").unwrap();
+    // `d` resolves, but `b` (a child of `d`) is not part of the root view.
+    assert_eq!(
+        page[d].as_ref().unwrap(),
+        &store.posix_record_by_inode(slots[d].ino).unwrap()
+    );
+    let d_ino = slots[d].ino;
+    let foreign = [crate::filesystem::DirectorySlot {
+        ino: d_ino,
+        name: "b",
+        directory: false,
+    }];
+    assert_eq!(
+        store.directory_posix_page(1, &foreign).unwrap(),
+        vec![None],
+        "a slot naming another directory is stale"
+    );
+    // An empty page is valid and allocates nothing.
+    assert!(store.directory_posix_page(1, &[]).unwrap().is_empty());
+    // A stale slot (wrong name for the inode) yields None, never another object.
+    let renamed = [crate::filesystem::DirectorySlot {
+        ino: slots[a].ino,
+        name: "not-a",
+        directory: false,
+    }];
+    assert_eq!(
+        store.directory_posix_page(1, &renamed).unwrap(),
+        vec![None]
+    );
+    let revision = store.local_revision();
+    store.directory_posix_page(1, &slots).unwrap();
+    assert_eq!(store.local_revision(), revision);
 }

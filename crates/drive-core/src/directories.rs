@@ -72,6 +72,7 @@ impl Store {
             "INSERT INTO nodes(id,parent,name,remote_version,directory) VALUES(?1,?2,?3,?4,1)",
             params![node.id, parent, name, CREATE_VERSION],
         )?;
+        crate::filesystem::mark_inode_map_incomplete(&tx)?;
         crate::filesystem::write_metadata(&tx, &node)?;
         tx.execute(
             "INSERT INTO local_creations(node,ready) VALUES(?1,1)",

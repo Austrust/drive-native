@@ -29,8 +29,40 @@ pub enum Stage {
     DirectoryInodes,
     DirectoryCollect,
     DirectoryCommit,
+    /// Rows written into `fs_inodes` by one directory projection. `total_us`
+    /// aggregates rows, not microseconds (0 = snapshot install preallocated).
+    DirectoryInodeWrites,
+    /// One opendir whose projection committed without writing any WAL frame.
+    DirectoryCommitNoop,
+    /// One lookup answered on the FUSE dispatcher thread (no queue wakeup).
+    LookupInline,
+    /// One getattr answered on the FUSE dispatcher thread (no queue wakeup).
+    GetattrInline,
+    /// Metadata replies published under a non-zero TTL (publication permit).
+    TtlPublishedReplies,
+    /// Invalidation deliveries attempted past the publication gate.
+    TtlDelivered,
+    /// Invalidations queued (may lag delivery).
+    TtlInvalidations,
+    /// Invalidation failures (notification rejected/unsupported). Non-zero means
+    /// the mount has fallen back to zero TTL.
+    TtlFailures,
+    /// LOOKUP replies published with a non-zero positive-entry TTL.
+    EntryTtlNonZero,
+    /// LOOKUP replies published with a zero entry TTL.
+    EntryTtlZero,
+    /// Replies published with a non-zero attribute TTL.
+    AttrTtlNonZero,
+    /// Replies published with a zero attribute TTL.
+    AttrTtlZero,
+    /// Replies that could publish at least one non-zero TTL (cache effective).
+    CacheableReplies,
+    /// One READDIRPLUS reply served from a warm authoritative view.
+    ReaddirPlusQueue,
+    /// One bounded attribute page projection for READDIRPLUS.
+    ReaddirPlusProjection,
 }
-const STAGES: [Stage; 20] = [
+const STAGES: [Stage; 35] = [
     Stage::LookupQueue,
     Stage::LookupStoreWait,
     Stage::LookupProjection,
@@ -51,6 +83,21 @@ const STAGES: [Stage; 20] = [
     Stage::DirectoryInodes,
     Stage::DirectoryCollect,
     Stage::DirectoryCommit,
+    Stage::DirectoryInodeWrites,
+    Stage::DirectoryCommitNoop,
+    Stage::LookupInline,
+    Stage::GetattrInline,
+    Stage::TtlPublishedReplies,
+    Stage::TtlDelivered,
+    Stage::TtlInvalidations,
+    Stage::TtlFailures,
+    Stage::EntryTtlNonZero,
+    Stage::EntryTtlZero,
+    Stage::AttrTtlNonZero,
+    Stage::AttrTtlZero,
+    Stage::CacheableReplies,
+    Stage::ReaddirPlusQueue,
+    Stage::ReaddirPlusProjection,
 ];
 struct Aggregate {
     count: AtomicU64,
@@ -68,7 +115,7 @@ impl Aggregate {
         }
     }
 }
-static TOTALS: [Aggregate; 20] = [const { Aggregate::new() }; 20];
+static TOTALS: [Aggregate; 35] = [const { Aggregate::new() }; 35];
 static ENABLED: OnceLock<bool> = OnceLock::new();
 pub(crate) fn enabled() -> bool {
     *ENABLED
@@ -89,16 +136,46 @@ pub fn count(stage: Stage) {
         record(stage, 0);
     }
 }
+/// Count one metadata publication's entry/attr TTLs (counts only, no paths).
+pub(crate) fn ttls(entry: Option<std::time::Duration>, attr: Option<std::time::Duration>) {
+    if !enabled() {
+        return;
+    }
+    if let Some(entry) = entry {
+        count(if entry.is_zero() {
+            Stage::EntryTtlZero
+        } else {
+            Stage::EntryTtlNonZero
+        });
+    }
+    if let Some(attr) = attr {
+        count(if attr.is_zero() {
+            Stage::AttrTtlZero
+        } else {
+            Stage::AttrTtlNonZero
+        });
+    }
+    if entry.is_some_and(|ttl| !ttl.is_zero()) || attr.is_some_and(|ttl| !ttl.is_zero()) {
+        count(Stage::CacheableReplies);
+    }
+}
+
 pub(crate) fn directory(t: &drive_core::filesystem::DirectoryBuildTimings) {
     if enabled() {
         for (stage, us) in [
             (Stage::DirectoryIdentity, t.identity_us),
             (Stage::DirectoryCount, t.count_us),
             (Stage::DirectoryInodes, t.inode_allocation_us),
+            (Stage::DirectoryInodeWrites, t.inode_writes),
             (Stage::DirectoryCollect, t.collect_us),
             (Stage::DirectoryCommit, t.commit_us),
         ] {
             record(stage, us);
+        }
+        // A projection that wrote no inode rows commits no WAL frame, so the
+        // first-scan per-directory fsync is gone. Count those commits directly.
+        if t.inode_writes == 0 {
+            count(Stage::DirectoryCommitNoop);
         }
     }
 }

@@ -326,6 +326,7 @@ impl Store {
             }
             let shadow = format!("local:{}", uuid::Uuid::new_v4());
             tx.execute("INSERT INTO nodes(id,parent,name,remote_version,directory,deleted) VALUES(?1,?2,?3,?4,0,1)",params![shadow,job.source.parent,job.source.name,job.source.version])?;
+            crate::filesystem::mark_inode_map_incomplete(&tx)?;
             let mut n = job.source.clone();
             n.id = shadow.clone();
             crate::filesystem::write_metadata(&tx, &n)?;

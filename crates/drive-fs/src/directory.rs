@@ -340,6 +340,185 @@ pub(super) fn open(fs: &mut CacheFilesystem, ino: u64, flags: i32, reply: ReplyO
         }
     }));
 }
+// Attribute chunks are computed until the reply buffer is full; 128 keeps
+// wasted rows bounded while amortizing the per-chunk Store statement.
+const PLUS_PAGE: usize = 128;
+
+/// READDIRPLUS: names/cookies come from the immutable directory view, bounded
+/// attribute pages from one Store statement. Attributes use the same policy as
+/// GETATTR (attr changes are invalidated with INVAL_INODE); positive entry TTLs
+/// are suppressed while the directory was touched by a recent change, which
+/// compresses the readdirplus late-install window. Preview views publish
+/// zero-TTL placeholder entries only.
+pub(super) fn read_plus(
+    fs: &mut CacheFilesystem,
+    ino: u64,
+    fh: u64,
+    offset: i64,
+    mut reply: fuser::ReplyDirectoryPlus,
+) {
+    let Ok(offset) = usize::try_from(offset) else {
+        reply.error(libc::EINVAL);
+        return;
+    };
+    let views = fs.directories.clone();
+    let store = fs.store.clone();
+    let notify = fs.notify.clone();
+    let (uid, gid) = (fs.uid, fs.gid);
+    let queued = diagnostics::span(diagnostics::Stage::ReaddirPlusQueue);
+    fs.read_queue.submit(Box::new(move || {
+        drop(queued);
+        let view = match views.get(ino, fh) {
+            Ok(view) => view,
+            Err(e) => {
+                reply.error(e);
+                return;
+            }
+        };
+        let publication = notify.reply_guard();
+        let entries = &view.snapshot().entries;
+        if offset > entries.len() {
+            reply.error(libc::EINVAL);
+            return;
+        }
+        match &view.origin {
+            ViewOrigin::Authority => {
+                let mut index = offset;
+                while index < entries.len() {
+                    let end = (index + PLUS_PAGE).min(entries.len());
+                    let slots = entries[index..end]
+                        .iter()
+                        .map(|entry| drive_core::filesystem::DirectorySlot {
+                            ino: entry.ino,
+                            name: &entry.name,
+                            directory: entry.directory,
+                        })
+                        .collect::<Vec<_>>();
+                    let projection = diagnostics::span(diagnostics::Stage::ReaddirPlusProjection);
+                    // Never wait for the Store on a directory continuation: an
+                    // in-flight commit/indexing can hold it for seconds while the
+                    // kernel expects the stream to keep flowing (the
+                    // continuation-and-seek contract). When it is busy we publish
+                    // the immutable view's names/cookies with zero-TTL
+                    // deny-by-default placeholders; the kernel re-looks them up
+                    // through the ordinary metadata path.
+                    let records = match store.try_lock() {
+                        Ok(guard) => match guard.directory_posix_page(ino, &slots) {
+                            Ok(records) => Some(records),
+                            Err(e) => {
+                                drop(projection);
+                                reply.error(errno(&e));
+                                drop(publication);
+                                return;
+                            }
+                        },
+                        Err(std::sync::TryLockError::WouldBlock) => None,
+                        Err(std::sync::TryLockError::Poisoned(_)) => {
+                            drop(projection);
+                            reply.error(libc::EIO);
+                            drop(publication);
+                            return;
+                        }
+                    };
+                    drop(projection);
+                    let stable = records.is_some() && !notify.directory_unstable(ino);
+                    let mut full = false;
+                    for (position, entry) in entries[index..end].iter().enumerate() {
+                        let record = records
+                            .as_ref()
+                            .and_then(|records| records[position].as_ref());
+                        let cookie = (index + position + 1) as i64;
+                        let kind = if entry.directory {
+                            FileType::Directory
+                        } else {
+                            FileType::RegularFile
+                        };
+                        let Some(record) = record else {
+                            // Busy Store (or a stale slot): emit a dirent-only
+                            // entry, which the kernel treats as a plain readdir
+                            // item and never caches. The stream keeps flowing and
+                            // the next stat re-looks the name up.
+                            if reply.add_without_lookup(entry.ino, cookie, &entry.name, kind) {
+                                full = true;
+                                break;
+                            }
+                            continue;
+                        };
+                        let attr = preview::posix_attr(record, uid, gid);
+                        let (mut entry_ttl, attr_ttl) =
+                            preview::reply_ttls(&notify, record.cacheable, true);
+                        if !stable {
+                            entry_ttl = Duration::ZERO;
+                        }
+                        diagnostics::ttls(
+                            Some(entry_ttl),
+                            Some(if entry_ttl.is_zero() {
+                                Duration::ZERO
+                            } else {
+                                attr_ttl
+                            }),
+                        );
+                        if reply.add_with_timeouts(
+                            entry.ino,
+                            cookie,
+                            &entry.name,
+                            &entry_ttl,
+                            &attr_ttl,
+                            &attr,
+                            0,
+                        ) {
+                            full = true;
+                            break;
+                        }
+                    }
+                    if full {
+                        break;
+                    }
+                    index = end;
+                }
+            }
+            ViewOrigin::Preview(stamp) => {
+                // The same no-wait rule applies: a busy Store degrades to
+                // zero-TTL placeholders for this continuation instead of
+                // stalling the directory stream; nothing is cached either way
+                // for preview views.
+                match store.try_lock() {
+                    Ok(guard) => {
+                        if let Err(e) = guard.preview_validate_view(stamp) {
+                            reply.error(errno(&e));
+                            drop(publication);
+                            return;
+                        }
+                    }
+                    Err(std::sync::TryLockError::WouldBlock) => {}
+                    Err(std::sync::TryLockError::Poisoned(_)) => {
+                        reply.error(libc::EIO);
+                        drop(publication);
+                        return;
+                    }
+                }
+                for (position, entry) in entries[offset..].iter().enumerate() {
+                    let kind = if entry.directory {
+                        FileType::Directory
+                    } else {
+                        FileType::RegularFile
+                    };
+                    if reply.add_without_lookup(
+                        entry.ino,
+                        (offset + position + 1) as i64,
+                        &entry.name,
+                        kind,
+                    ) {
+                        break;
+                    }
+                }
+            }
+        }
+        reply.ok();
+        drop(publication);
+    }));
+}
+
 pub(super) fn read(
     fs: &mut CacheFilesystem,
     ino: u64,

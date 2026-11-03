@@ -21,10 +21,14 @@ fn desktop_namespace_navigation_never_allocates_filesystem_inodes() {
  let d=tempfile::tempdir().unwrap();let mut s=Store::open(d.path()).unwrap();
  s.install_remote_snapshot(&[node("root",None,true),node("folder",Some("root"),true),node("a",Some("folder"),false)],"1","s").unwrap();
  s.ensure_fs_root("root").unwrap();let rev=s.local_revision();
+ let db=rusqlite::Connection::open_with_flags(d.path().join("state.sqlite"),rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+ let count=||db.query_row("SELECT COUNT(*) FROM fs_inodes",[],|r|r.get::<_,i64>(0)).unwrap();
+ // Install allocated the whole namespace once; desktop navigation must not
+ // allocate any further inode rows.
+ let before=count();
  assert_eq!(s.lookup_node("root","folder").unwrap().id,"folder");
  assert_eq!(s.child_nodes("folder").unwrap()[0].id,"a");
  assert_eq!(s.local_revision(),rev);
- let db=rusqlite::Connection::open_with_flags(d.path().join("state.sqlite"),rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
- let count:i64=db.query_row("SELECT COUNT(*) FROM fs_inodes",[],|r|r.get(0)).unwrap();assert_eq!(count,1);
+ assert_eq!(count(),before);
  assert!(s.downloads_needed().unwrap().is_empty());
 }

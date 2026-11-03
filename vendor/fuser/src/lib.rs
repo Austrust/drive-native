@@ -265,6 +265,13 @@ impl KernelConfig {
         Ok(())
     }
 
+    /// Request READDIRPLUS (directory names plus entry/attribute metadata in
+    /// one reply). The kernel may still send plain READDIR; both handlers stay
+    /// valid. A kernel without the capability returns the unsupported bits.
+    pub fn enable_readdirplus(&mut self) -> Result<(), u64> {
+        self.add_capabilities(FUSE_DO_READDIRPLUS | FUSE_READDIRPLUS_AUTO)
+    }
+
     /// Set the maximum number of pending background requests. Such as readahead requests.
     ///
     /// On success returns the previous value. On error returns the nearest value which will succeed
