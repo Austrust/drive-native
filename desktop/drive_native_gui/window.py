@@ -68,8 +68,8 @@ ERRORS = {
     "trust_settings_not_durable": "证书设置未确认保存。请在连接证书中重新读取并保存；本地缓存仍可使用。",
     "certificate_or_configuration": "证书或连接配置需要检查。",
     "native_root_unavailable": "远端同步根已不可用或身份发生变化，同步已停止。缓存和未上传修改均保留；请检查远端目录及权限，恢复原目录后重新登录连接。",
-    "native_index_capacity": "目录历史或索引超过当前处理预算；本地内容已保留。请导出诊断，重新登录不会解决此问题。",
-    "native_response_capacity": "服务器元数据响应超过当前解码预算；本地内容已保留。请导出诊断。",
+    "native_index_capacity": "目录历史或索引超过当前处理预算；本地内容已保留。请在“同步问题”复制诊断摘要，重新登录不会解决此问题。",
+    "native_response_capacity": "服务器元数据响应超过当前解码预算；本地内容已保留。请在“同步问题”复制诊断摘要。",
     "native_state_recovery_required": "远端状态需要恢复，已保存的本地内容会保留。",
     "network_unavailable": "暂时无法连接 NAS，已有缓存仍可使用。",
     "local_or_protocol_error": "同步遇到问题，已保存的本地内容会保留。",
@@ -229,6 +229,15 @@ class MainWindow(QMainWindow):
         self.banner.setObjectName("message")
         self.banner.hide()
         content.addWidget(self.banner)
+        self.upload_block_label = QLabel()
+        self.upload_block_label.setTextFormat(Qt.PlainText)
+        self.upload_block_label.setWordWrap(True)
+        self.upload_block_label.hide()
+        content.addWidget(self.upload_block_label)
+        self.upload_block_action = QPushButton("查看上传阻塞与恢复方式")
+        self.upload_block_action.clicked.connect(self.show_issues)
+        self.upload_block_action.hide()
+        content.addWidget(self.upload_block_action)
         self.overview_hint = QLabel("文件可直接从文件管理器打开。\n点击左侧“查看文件状态”，按需载入当前目录的状态列表。")
         self.overview_hint.setObjectName("muted")
         self.overview_hint.setAlignment(Qt.AlignCenter)
@@ -338,8 +347,9 @@ class MainWindow(QMainWindow):
 
     def show_issues(self):
         if self.issues_dialog is None:
-            self.issues_dialog = IssuesDialog(self.bus, self)
+            self.issues_dialog = IssuesDialog(self.bus, self, configure=self.configure_account)
             self.issues_dialog.resolved.connect(self.schedule_refresh)
+        self.issues_dialog.update_context(self.overview)
         self.issues_dialog.show()
         self.issues_dialog.raise_()
         self.issues_dialog.activateWindow()
@@ -394,6 +404,10 @@ class MainWindow(QMainWindow):
 
     def offline_ui(self):
         self.overview = {}
+        self.upload_block_label.hide()
+        self.upload_block_action.hide()
+        if self.issues_dialog is not None:
+            self.issues_dialog.update_context({})
         self.progress_timer.stop()
         self.progress_label.hide()
         self.connection_value.setText("尚未连接")
@@ -582,6 +596,12 @@ class MainWindow(QMainWindow):
             self.followup_refresh()
             return
         self.overview = data
+        block = data.get("upload_block")
+        self.upload_block_label.setText("上传受阻：" + str(block)[:2000] if block else "")
+        self.upload_block_label.setVisible(bool(block))
+        self.upload_block_action.setVisible(bool(block))
+        if self.issues_dialog is not None:
+            self.issues_dialog.update_context(data)
         self.preview_label.setVisible(data.get("preview_only") is True)
         self.overview_hint.setText(
             "已确认的目录可以从文件管理器浏览。\n初始化预览中的文件暂不能打开或编辑。"

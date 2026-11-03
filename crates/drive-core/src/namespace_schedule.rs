@@ -426,6 +426,15 @@ impl Store {
             .recovery
             .remove(operation);
     }
+    /// Explicit user recheck only expires process-local observation deadlines.
+    /// The durable journal, origin, state and retry history stay unchanged.
+    /// Selectors still enforce uncertain/read-only and dependency barriers.
+    pub fn request_namespace_recheck(&self) {
+        let now = Instant::now();
+        for recovery in self.namespace_runtime.lock().unwrap().recovery.values_mut() {
+            recovery.next = now;
+        }
+    }
     pub fn namespace_recovery_due(&self) -> Result<bool> {
         let runtime = self.namespace_runtime.lock().unwrap();
         let now = Instant::now();

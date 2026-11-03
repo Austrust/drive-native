@@ -98,6 +98,7 @@ pub struct Bridge {
     pub download_failures_seen: AtomicUsize,
     pub last_download_failure: Mutex<Option<(DownloadFailureKind, Option<u32>)>>,
     upload_signal: (Mutex<bool>, Condvar),
+    recheck_requested: AtomicBool,
     pub last_error: Mutex<Option<String>>,
     /// Last concrete reason a pending upload could not start. Unlike
     /// `last_error` this is resolved state, cleared as soon as the queue is
@@ -229,7 +230,7 @@ impl Bridge {
         };
         drop(flights);
         for ino in inodes {
-            let _ = self.notifications.send(Invalidation::Inode(ino));
+            self.enqueue_invalidation(Invalidation::Inode(ino));
         }
         Ok(result)
     }
@@ -243,7 +244,7 @@ impl Bridge {
         store.release(id).map_err(io::Error::other)?;
         drop(store);
         drop(flights);
-        let _ = self.notifications.try_send(Invalidation::Inode(ino));
+        self.enqueue_invalidation(Invalidation::Inode(ino));
         Ok(())
     }
     fn from_connection(store: Arc<drive_core::SharedStore>, rpc: Arc<Rpc>) -> io::Result<Self> {
@@ -278,11 +279,17 @@ impl Bridge {
             download_failures_seen: AtomicUsize::new(0),
             last_download_failure: Mutex::new(None),
             upload_signal: (Mutex::new(false), Condvar::new()),
+            recheck_requested: AtomicBool::new(false),
             last_error: Mutex::new(None),
             upload_block: Mutex::new(None),
             cache_error: Mutex::new(None),
             initialization: Arc::new(crate::initialization::Tracker::default()),
         })
+    }
+    /// Every upstream queue failure must disable attribute leases, not silently
+    /// lose a committed mutation before it reaches the mount's notification hub.
+    fn enqueue_invalidation(&self, invalidation: Invalidation) {
+        enqueue_invalidation(&self.notifications, &self.notify_hub, invalidation);
     }
     /// Stop publishing cacheable metadata once background producers stop.
     pub fn clear_notifier(&self) {
@@ -421,10 +428,10 @@ impl Bridge {
         self.initialization
             .pulled(true, event_count, changed_notification);
         for ino in invalidated_inodes {
-            let _ = self.notifications.try_send(Invalidation::Inode(ino));
+            self.enqueue_invalidation(Invalidation::Inode(ino));
         }
         for (p, name) in invalidations {
-            let _ = self.notifications.try_send(Invalidation::Entry(p, name));
+            self.enqueue_invalidation(Invalidation::Entry(p, name));
         }
         self.signal_upload();
         self.finish_session_catchup(&rpc)?;
@@ -485,10 +492,10 @@ impl Bridge {
         };
         for (inode, parent, name) in invalidations {
             if let Some(ino) = inode {
-                let _ = self.notifications.send(Invalidation::Inode(ino));
+                self.enqueue_invalidation(Invalidation::Inode(ino));
             }
             if let Some(parent) = parent {
-                let _ = self.notifications.send(Invalidation::Entry(parent, name));
+                self.enqueue_invalidation(Invalidation::Entry(parent, name));
             }
         }
         self.signal_upload();
@@ -702,7 +709,7 @@ impl Bridge {
             .map_err(|_| (libc::EIO, LocalStorage, None))?
             .ino;
         drop(store);
-        let _ = self.notifications.try_send(Invalidation::Inode(ino));
+        self.enqueue_invalidation(Invalidation::Inode(ino));
         Ok(())
     }
     pub fn ensure(&self, node: &Node) -> Result<(), i32> {
@@ -1026,17 +1033,13 @@ impl Bridge {
             .keep_directory_both(root, id, token, name)
             .map_err(io::Error::other)?;
         if let Ok(record) = store.record(id) {
-            let _ = self.notifications.try_send(Invalidation::Inode(record.ino));
+            self.enqueue_invalidation(Invalidation::Inode(record.ino));
         }
         if let Some(parent) = result.node.parent.as_deref() {
             if let Ok(record) = store.record(parent) {
-                let _ = self.notifications.try_send(Invalidation::Inode(record.ino));
-                let _ = self
-                    .notifications
-                    .try_send(Invalidation::Entry(record.ino, result.old_name.clone()));
-                let _ = self
-                    .notifications
-                    .try_send(Invalidation::Entry(record.ino, result.node.name.clone()));
+                self.enqueue_invalidation(Invalidation::Inode(record.ino));
+                self.enqueue_invalidation(Invalidation::Entry(record.ino, result.old_name.clone()));
+                self.enqueue_invalidation(Invalidation::Entry(record.ino, result.node.name.clone()));
             }
         }
         drop(store);
@@ -1055,23 +1058,19 @@ impl Bridge {
             .keep_both(root, id, token, name)
             .map_err(io::Error::other)?;
         if let Ok(record) = store.record_for_handle(id) {
-            let _ = self.notifications.try_send(Invalidation::Inode(record.ino));
+            self.enqueue_invalidation(Invalidation::Inode(record.ino));
             if let Some(parent) = record.node.parent.as_deref() {
                 if let Ok(parent) = store.record(parent) {
                     // Resolving an unbound creation exposes a different object
                     // at the old name. Invalidate that dentry as well as the copy.
-                    let _ = self
-                        .notifications
-                        .try_send(Invalidation::Entry(parent.ino, record.node.name.clone()));
+                    self.enqueue_invalidation(Invalidation::Entry(parent.ino, record.node.name.clone()));
                 }
             }
         }
         if let Some(parent) = result.copy.parent.as_deref() {
             if let Ok(record) = store.record(parent) {
-                let _ = self.notifications.try_send(Invalidation::Inode(record.ino));
-                let _ = self
-                    .notifications
-                    .try_send(Invalidation::Entry(record.ino, result.copy.name.clone()));
+                self.enqueue_invalidation(Invalidation::Inode(record.ino));
+                self.enqueue_invalidation(Invalidation::Entry(record.ino, result.copy.name.clone()));
             }
         }
         drop(store);
@@ -1081,6 +1080,12 @@ impl Bridge {
     pub fn signal_upload(&self) {
         *self.upload_signal.0.lock().unwrap() = true;
         self.upload_signal.1.notify_all();
+    }
+    /// Enqueue a bounded local wake; no Store or network wait on the UI path.
+    pub fn request_issue_recheck(&self) -> bool {
+        let fresh = !self.recheck_requested.swap(true, Ordering::AcqRel);
+        self.signal_upload();
+        fresh
     }
     pub fn upload_loop(&self, stop: &std::sync::atomic::AtomicBool) {
         self.signal_upload();
@@ -1105,6 +1110,9 @@ impl Bridge {
             // this process. This check does not enumerate the NAS.
             let retry_due = {
                 let store = self.store.lock().unwrap();
+                if self.recheck_requested.swap(false, Ordering::AcqRel) {
+                    store.request_namespace_recheck();
+                }
                 store
                     .next_download_retry()
                     .ok()
@@ -1770,3 +1778,22 @@ mod root_diagnostics_tests {
         assert_eq!(network.kind(), io::ErrorKind::NotConnected);
     }
 }
+
+/// Non-blocking on Store and kernel notification delivery. Also used for former
+/// blocking sends so a saturated channel cannot hold a state transaction open.
+fn enqueue_invalidation(
+    queue: &std::sync::mpsc::SyncSender<Invalidation>,
+    hub: &Mutex<Option<drive_fs::NotifyHub>>,
+    invalidation: Invalidation,
+) {
+    if queue.try_send(invalidation).is_err() {
+        let hub = hub.lock().unwrap().clone();
+        if let Some(hub) = hub {
+            hub.invalidate_delivery_failed();
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "notification_queue_tests.rs"]
+mod notification_queue_tests;

@@ -1,0 +1,347 @@
+diff --git a/src/lib.rs b/src/lib.rs
+index 5619121..f45cfce 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -265,6 +265,13 @@ impl KernelConfig {
+         Ok(())
+     }
+ 
++    /// Request READDIRPLUS (directory names plus entry/attribute metadata in
++    /// one reply). The kernel may still send plain READDIR; both handlers stay
++    /// valid. A kernel without the capability returns the unsupported bits.
++    pub fn enable_readdirplus(&mut self) -> Result<(), u64> {
++        self.add_capabilities(FUSE_DO_READDIRPLUS | FUSE_READDIRPLUS_AUTO)
++    }
++
+     /// Set the maximum number of pending background requests. Such as readahead requests.
+     ///
+     /// On success returns the previous value. On error returns the nearest value which will succeed
+diff --git a/src/ll/fuse_abi.rs b/src/ll/fuse_abi.rs
+index f35a09a..8651795 100644
+--- a/src/ll/fuse_abi.rs
++++ b/src/ll/fuse_abi.rs
+@@ -414,6 +414,9 @@ pub enum fuse_notify_code {
+     FUSE_NOTIFY_STORE = 4,
+     FUSE_NOTIFY_RETRIEVE = 5,
+     FUSE_NOTIFY_DELETE = 6,
++    /// Mainline FUSE protocol 7.45 / kernel >= 6.16. Older kernels reject it
++    /// with EINVAL, which callers must treat as "unsupported", not as failure.
++    FUSE_NOTIFY_INC_EPOCH = 8,
+ }
+ 
+ impl TryFrom<u32> for fuse_notify_code {
+@@ -427,6 +430,7 @@ impl TryFrom<u32> for fuse_notify_code {
+             4 => Ok(fuse_notify_code::FUSE_NOTIFY_STORE),
+             5 => Ok(fuse_notify_code::FUSE_NOTIFY_RETRIEVE),
+             6 => Ok(fuse_notify_code::FUSE_NOTIFY_DELETE),
++            8 => Ok(fuse_notify_code::FUSE_NOTIFY_INC_EPOCH),
+ 
+             _ => Err(InvalidNotifyCodeError),
+         }
+diff --git a/src/ll/notify.rs b/src/ll/notify.rs
+index 55d1cae..2aa8fcf 100644
+--- a/src/ll/notify.rs
++++ b/src/ll/notify.rs
+@@ -104,6 +104,11 @@ impl<'a> Notification<'a> {
+         Ok(Self::from_struct_with_name(&r, name.as_bytes()))
+     }
+ 
++    /// Notification with no payload: zero-length request body.
++    pub(crate) fn new_inc_epoch() -> Self {
++        Self::Bare(NotificationBuf::new())
++    }
++
+     pub(crate) fn new_poll(kh: u64) -> Self {
+         let r = abi::fuse_notify_poll_wakeup_out { kh };
+         Self::from_struct(&r)
+diff --git a/src/ll/reply.rs b/src/ll/reply.rs
+index ed525bd..0bedfa7 100644
+--- a/src/ll/reply.rs
++++ b/src/ll/reply.rs
+@@ -483,6 +483,25 @@ impl DirEntPlusList {
+     pub(crate) fn new(max_size: usize) -> Self {
+         Self(EntListBuf::new(max_size))
+     }
++    /// Emit only a `fuse_dirent` inside a PLUS response. A zero entry nodeid
++    /// tells the kernel not to establish a lookup reference, inode or attribute
++    /// cache for this slot: it behaves like a plain readdir entry inside a
++    /// readdirplus reply. Used when a directory continuation must not wait for
++    /// the authoritative Store.
++    #[must_use]
++    pub fn push_without_lookup<T: AsRef<Path>>(&mut self, ent: &DirEntry<T>) -> bool {
++        let name = ent.name.as_ref().as_os_str().as_bytes();
++        let dirent = abi::fuse_dirent {
++            ino: ent.ino.into(),
++            off: ent.offset.0,
++            namelen: name.len().try_into().expect("Name too long"),
++            typ: mode_from_kind_and_perm(ent.kind, 0) >> 12,
++        };
++        let mut header = [0u8; size_of::<abi::fuse_direntplus>()];
++        header[size_of::<abi::fuse_entry_out>()..].copy_from_slice(dirent.as_bytes());
++        self.0.push([&header, name])
++    }
++
+     /// Add an entry to the directory reply buffer. Returns true if the buffer is full.
+     /// A transparent offset value can be provided for each entry. The kernel uses these
+     /// value to request the next entries in further readdir calls
+@@ -890,4 +909,78 @@ mod test {
+             expected
+         );
+     }
++
++    #[test]
++    fn directory_plus_without_lookup_emits_zero_nodeid_dirent() {
++        let attr = crate::FileAttr {
++            ino: 11,
++            size: 3,
++            blocks: 1,
++            atime: UNIX_EPOCH,
++            mtime: UNIX_EPOCH,
++            ctime: UNIX_EPOCH,
++            crtime: UNIX_EPOCH,
++            kind: FileType::RegularFile,
++            perm: 0o644,
++            nlink: 1,
++            uid: 1,
++            gid: 1,
++            rdev: 0,
++            flags: 0,
++            blksize: 4096,
++        };
++        let mut list = DirEntPlusList::new(4096);
++        assert!(!list.push(&DirEntryPlus::new(
++            INodeNo(11),
++            Generation(0),
++            DirEntOffset(1),
++            "with-attr",
++            Duration::ZERO,
++            attr.into(),
++            Duration::ZERO,
++        )));
++        assert!(!list.push_without_lookup(&DirEntry::new(
++            INodeNo(12),
++            DirEntOffset(2),
++            FileType::Directory,
++            "plain",
++        )));
++        let response: Response<'_> = list.into();
++        let encoded = response.with_iovec(RequestId(7), ioslice_to_vec);
++        let body = &encoded[size_of::<abi::fuse_out_header>()..];
++        let base = size_of::<abi::fuse_direntplus>();
++        let item_size = |name: &str| {
++            let length = base + name.len();
++            (length + 7) & !7
++        };
++        let first_size = item_size("with-attr");
++        let second = &body[first_size..];
++        assert_eq!(body.len(), first_size + item_size("plain"));
++        // First slot: a real readdirplus entry with nodeid 11 and matching dirent.
++        assert_eq!(u64::from_ne_bytes(body[..8].try_into().unwrap()), 11);
++        let dirent = &body[size_of::<abi::fuse_entry_out>()..];
++        assert_eq!(u64::from_ne_bytes(dirent[..8].try_into().unwrap()), 11);
++        assert_eq!(i64::from_ne_bytes(dirent[8..16].try_into().unwrap()), 1);
++        assert_eq!(u32::from_ne_bytes(dirent[16..20].try_into().unwrap()), 9);
++        // Second slot: nodeid zero means "plain dirent, no lookup/cache".
++        assert_eq!(
++            u64::from_ne_bytes(second[..8].try_into().unwrap()),
++            0,
++            "entry_out nodeid must be zero"
++        );
++        let dirent = &second[size_of::<abi::fuse_entry_out>()..];
++        assert_eq!(u64::from_ne_bytes(dirent[..8].try_into().unwrap()), 12);
++        assert_eq!(i64::from_ne_bytes(dirent[8..16].try_into().unwrap()), 2);
++        assert_eq!(u32::from_ne_bytes(dirent[16..20].try_into().unwrap()), 5);
++        assert_eq!(
++            u32::from_ne_bytes(dirent[20..24].try_into().unwrap()),
++            4,
++            "directory type in the dirent"
++        );
++        assert_eq!(&second[base..base + 5], b"plain");
++        assert_eq!(
++            dirent.len(),
++            item_size("plain") - size_of::<abi::fuse_entry_out>()
++        );
++    }
+ }
+diff --git a/src/notify.rs b/src/notify.rs
+index ed2e0e2..80028d7 100644
+--- a/src/notify.rs
++++ b/src/notify.rs
+@@ -62,6 +62,29 @@ impl Notifier {
+         self.send(notify_code::FUSE_POLL, &notif)
+     }
+ 
++    /// Bump the connection epoch (FUSE protocol 7.45 / kernel >= 6.16). Every
++    /// dentry installed by an older epoch is revalidated on next use. Kernels
++    /// without the notification return EINVAL/ENOSYS; callers must treat those
++    /// as "unsupported" rather than as a delivery failure.
++    pub fn inc_epoch(&self) -> io::Result<()> {
++        let notif = Notification::new_inc_epoch();
++        self.send(notify_code::FUSE_NOTIFY_INC_EPOCH, &notif)
++    }
++
++    /// Invalidate the kernel cache for a given directory entry, reporting
++    /// every error. Callers that publish bounded metadata must use this variant:
++    /// the non-strict one deliberately swallows ENOENT.
++    pub fn inval_entry_strict(&self, parent: u64, name: &OsStr) -> io::Result<()> {
++        let notif = Notification::new_inval_entry(parent, name).map_err(Self::too_big_err)?;
++        self.send(notify_code::FUSE_NOTIFY_INVAL_ENTRY, &notif)
++    }
++
++    /// Strict form of [`Notifier::inval_inode`]; see `inval_entry_strict`.
++    pub fn inval_inode_strict(&self, ino: u64, offset: i64, len: i64) -> io::Result<()> {
++        let notif = Notification::new_inval_inode(ino, offset, len);
++        self.send(notify_code::FUSE_NOTIFY_INVAL_INODE, &notif)
++    }
++
+     /// Invalidate the kernel cache for a given directory entry
+     pub fn inval_entry(&self, parent: u64, name: &OsStr) -> io::Result<()> {
+         let notif = Notification::new_inval_entry(parent, name).map_err(Self::too_big_err)?;
+diff --git a/src/reply.rs b/src/reply.rs
+index 84f37c6..892c340 100644
+--- a/src/reply.rs
++++ b/src/reply.rs
+@@ -197,6 +197,26 @@ impl ReplyEntry {
+         ));
+     }
+ 
++    /// Reply to a request with separate positive-entry and attribute lifetimes.
++    /// A zero entry TTL keeps the kernel from caching the name while still
++    /// letting the attributes returned by this same reply satisfy a following
++    /// stat(2), which is what bounded metadata caching needs.
++    pub fn entry_with_timeouts(
++        self,
++        entry_ttl: &Duration,
++        attr_ttl: &Duration,
++        attr: &FileAttr,
++        generation: u64,
++    ) {
++        self.reply.send_ll(&ll::Response::new_entry(
++            ll::INodeNo(attr.ino),
++            ll::Generation(generation),
++            &attr.into(),
++            *attr_ttl,
++            *entry_ttl,
++        ));
++    }
++
+     /// Reply to a request with the given error code
+     pub fn error(self, err: c_int) {
+         self.reply.error(err);
+@@ -610,6 +630,41 @@ impl ReplyDirectoryPlus {
+         ttl: &Duration,
+         attr: &FileAttr,
+         generation: u64,
++    ) -> bool {
++        self.add_with_timeouts(ino, offset, name, ttl, ttl, attr, generation)
++    }
++
++    /// Add a name/cookie-only entry to a READDIRPLUS reply. The kernel treats it
++    /// as a plain dirent: no lookup reference, dentry, inode or attribute cache
++    /// is established for this slot. Used when a directory continuation must
++    /// not wait for the authoritative Store.
++    #[must_use]
++    pub fn add_without_lookup<T: AsRef<OsStr>>(
++        &mut self,
++        ino: u64,
++        offset: i64,
++        name: T,
++        kind: FileType,
++    ) -> bool {
++        self.buf.push_without_lookup(&DirEntry::new(
++            INodeNo(ino),
++            DirEntOffset(offset),
++            kind,
++            name.as_ref(),
++        ))
++    }
++
++    /// Add an entry with separate positive-entry and attribute lifetimes.
++    #[must_use]
++    pub fn add_with_timeouts<T: AsRef<OsStr>>(
++        &mut self,
++        ino: u64,
++        offset: i64,
++        name: T,
++        entry_ttl: &Duration,
++        attr_ttl: &Duration,
++        attr: &FileAttr,
++        generation: u64,
+     ) -> bool {
+         let name = name.as_ref();
+         self.buf.push(&DirEntryPlus::new(
+@@ -617,9 +672,9 @@ impl ReplyDirectoryPlus {
+             Generation(generation),
+             DirEntOffset(offset),
+             name,
+-            *ttl,
++            *entry_ttl,
+             attr.into(),
+-            *ttl,
++            *attr_ttl,
+         ))
+     }
+ 
+@@ -865,6 +920,62 @@ mod test {
+         reply.entry(&ttl, &attr, 0xaa);
+     }
+ 
++    struct AssertTtlSender {
++        entry: Duration,
++        attr: Duration,
++        sent: std::sync::Arc<std::sync::atomic::AtomicBool>,
++    }
++    impl super::ReplySender for AssertTtlSender {
++        fn send(&self, data: &[IoSlice<'_>]) -> std::io::Result<()> {
++            let bytes = data.iter().flat_map(|s| s.iter().copied()).collect::<Vec<_>>();
++            // fuse_out_header (16 bytes), then fuse_entry_out. Test the actual
++            // wire fields independently of the serializer's argument order.
++            assert!(bytes.len() >= 56);
++            assert_eq!(i32::from_ne_bytes(bytes[4..8].try_into().unwrap()), 0);
++            assert_eq!(u64::from_ne_bytes(bytes[32..40].try_into().unwrap()), self.entry.as_secs());
++            assert_eq!(u64::from_ne_bytes(bytes[40..48].try_into().unwrap()), self.attr.as_secs());
++            assert_eq!(u32::from_ne_bytes(bytes[48..52].try_into().unwrap()), self.entry.subsec_nanos());
++            assert_eq!(u32::from_ne_bytes(bytes[52..56].try_into().unwrap()), self.attr.subsec_nanos());
++            self.sent.store(true, std::sync::atomic::Ordering::SeqCst);
++            Ok(())
++        }
++        #[cfg(feature = "abi-7-40")]
++        fn open_backing(&self, _fd: BorrowedFd<'_>) -> std::io::Result<BackingId> {
++            unreachable!()
++        }
++    }
++    fn unequal_ttl_wire(plus: bool) {
++        let attr = FileAttr {
++            ino: 17, size: 3, blocks: 1, atime: UNIX_EPOCH, mtime: UNIX_EPOCH,
++            ctime: UNIX_EPOCH, crtime: UNIX_EPOCH, kind: FileType::RegularFile,
++            perm: 0o644, nlink: 1, uid: 1000, gid: 1000, rdev: 0, flags: 0, blksize: 4096,
++        };
++        for (entry, attr_ttl) in [
++            (Duration::ZERO, Duration::new(30, 123_456_789)),
++            (Duration::new(2, 7), Duration::new(5, 11)),
++        ] {
++            let sent = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
++            let sender = AssertTtlSender { entry, attr: attr_ttl, sent: sent.clone() };
++            if plus {
++                let mut reply = ReplyDirectoryPlus::new(1, sender, 4096);
++                assert!(!reply.add_with_timeouts(attr.ino, 1, "file", &entry, &attr_ttl, &attr, 0));
++                reply.ok();
++            } else {
++                let reply: ReplyEntry = Reply::new(1, sender);
++                reply.entry_with_timeouts(&entry, &attr_ttl, &attr, 0);
++            }
++            assert!(sent.load(std::sync::atomic::Ordering::SeqCst));
++        }
++    }
++    #[test]
++    fn reply_entry_unequal_ttls_reach_the_correct_wire_fields() {
++        unequal_ttl_wire(false);
++    }
++    #[test]
++    fn reply_directory_plus_unequal_ttls_reach_the_correct_wire_fields() {
++        unequal_ttl_wire(true);
++    }
++
+     #[test]
+     fn reply_attr() {
+         let mut expected = if cfg!(target_os = "macos") {

@@ -59,6 +59,8 @@ dpkg-buildpackage -b -us -uc
 
 ## 导航
 
+FSearch 与故障操作 — 目录性能、缓存安全和问题恢复的实现与验证入口：[说明](docs/FS_RECOVERY_20261103.md)。
+
 | 目录 | 内容 |
 | --- | --- |
 | [crates](crates/) | 原生协议、状态核心、FUSE 与服务 |

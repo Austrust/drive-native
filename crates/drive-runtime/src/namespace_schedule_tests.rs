@@ -90,7 +90,14 @@ fn lost_mkdir_ack_does_not_head_of_line_block_independent_rename_or_replay_creat
     // A UI refresh/upload wake does not cause another network observation.
     assert_eq!(bridge.namespace_pending().unwrap(), 0);
     for _ in 0..2 {
-        store.lock().unwrap().clear_namespace_observation(&op);
+        {
+            let s = store.lock().unwrap();
+            let attempts = s.queue_health().unwrap().recovery_attempts_observed;
+            s.request_namespace_recheck();
+            assert!(s.namespace_recovery_due().unwrap());
+            assert_eq!(s.queue_health().unwrap().namespace_uncertain, 1);
+            assert_eq!(s.queue_health().unwrap().recovery_attempts_observed, attempts);
+        }
         assert_eq!(bridge.namespace_pending().unwrap(), 0);
     }
     rx.recv_timeout(Duration::from_secs(5)).unwrap();

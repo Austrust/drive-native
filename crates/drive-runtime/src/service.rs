@@ -169,6 +169,13 @@ pub enum ConnectionState {
     NeedsAttention,
     Stopping,
 }
+#[derive(Debug, Serialize)]
+pub struct RecoveryRequest {
+    pub schema: u8,
+    pub accepted: bool,
+    pub paused_preserved: bool,
+    pub message_code: &'static str,
+}
 pub struct Control {
     pub state: ConnectionState,
     pub error: Option<&'static str>,
@@ -536,6 +543,59 @@ impl Service {
         };
         self.interrupt(&mut c);
         Ok(())
+    }
+    /// Explicit recovery request: preserve pause/trust/authentication gates and
+    /// all durable intents. Online recovery wakes the usual reconciliation
+    /// path; it never resets uncertain operations to pending. Independent
+    /// pending writes may proceed normally after that read-only reconciliation.
+    pub fn recheck_issues(&self) -> io::Result<RecoveryRequest> {
+        let result = |code, accepted| RecoveryRequest {
+            schema: 1,
+            accepted,
+            paused_preserved: true,
+            message_code: code,
+        };
+        // Maintenance and durable pause may temporarily own Control while
+        // waiting for Store. A recovery button must not queue behind that
+        // work: report busy without changing any gate or persistent intent.
+        let mut c = match self.control.try_lock() {
+            Ok(control) => control,
+            Err(std::sync::TryLockError::WouldBlock) => return Ok(result("busy", false)),
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                return Err(io::Error::other("local control state unavailable"));
+            }
+        };
+        if self.stop.load(Ordering::Acquire) {
+            return Ok(result("stopping", false));
+        }
+        if c.paused {
+            return Ok(result("paused", false));
+        }
+        if c.trust_pending_durability
+            || matches!(c.error, Some("certificate_or_configuration" | "worker_image_unavailable"))
+        {
+            return Ok(result("settings_required", false));
+        }
+        if c.password.is_none() || c.error == Some("authentication_or_protocol_rejected") {
+            return Ok(result("login_required", false));
+        }
+        if c.attention && !matches!(c.error, Some("native_state_recovery_required" | "native_root_unavailable")) {
+            return Ok(result("settings_required", false));
+        }
+        if matches!(c.state, ConnectionState::Online | ConnectionState::Connecting) && !c.attention {
+            let fresh = self.bridge.request_issue_recheck();
+            if fresh { c.revision += 1; }
+            return Ok(result(if fresh { "queued" } else { "already_queued" }, true));
+        }
+        // Existing credentials only; supervisor performs authentication outside
+        // this method. It resumes persisted candidates/cursors, not a forced
+        // clear-cache or unconditional full re-index.
+        c.attention = false;
+        c.error = None;
+        c.state = ConnectionState::Connecting;
+        self.interrupt(&mut c);
+        self.bridge.request_issue_recheck();
+        Ok(result("reconnecting", true))
     }
     pub fn shutdown(&self) {
         self.shutdown_diagnostics

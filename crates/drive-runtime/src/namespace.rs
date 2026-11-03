@@ -87,7 +87,7 @@ impl Bridge {
                             .confirm_rename(&op, &node, same_content)
                             .map_err(io::Error::other)?;
                         if let Ok(record) = store.record(&node.id) {
-                            let _ = self.notifications.try_send(Invalidation::Inode(record.ino));
+                            self.enqueue_invalidation(Invalidation::Inode(record.ino));
                         }
                         done += 1;
                         if done >= limit {

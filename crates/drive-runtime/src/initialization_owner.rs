@@ -710,10 +710,10 @@ impl Bridge {
             };
             for (inode, parent, name) in invalidations {
                 if let Some(inode) = inode {
-                    let _ = self.notifications.send(Invalidation::Inode(inode));
+                    self.enqueue_invalidation(Invalidation::Inode(inode));
                 }
                 if let Some(parent) = parent {
-                    let _ = self.notifications.send(Invalidation::Entry(parent, name));
+                    self.enqueue_invalidation(Invalidation::Entry(parent, name));
                 }
             }
             self.signal_upload();

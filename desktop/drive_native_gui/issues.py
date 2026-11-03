@@ -1,11 +1,14 @@
 """Local conflict centre. Decisions carry a version token checked by the fsd."""
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from uuid import uuid4
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import Qt, QTimer, Signal, QUrl
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTreeWidget,
+    QApplication, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTreeWidget,
     QTreeWidgetItem, QHeaderView, QLineEdit, QPushButton,
 )
+
+from PySide6.QtGui import QDesktopServices
+from .issue_actions import next_step, parent_candidates, diagnostic_text, recheck_message, TASK_STEPS
 
 REASONS = {
     "content_conflict": "本地和远端都有修改",
@@ -24,9 +27,13 @@ REASONS = {
 class IssuesDialog(QDialog):
     resolved = Signal()
 
-    def __init__(self, bus, parent=None):
+    def __init__(self, bus, parent=None, *, configure=None):
         super().__init__(parent)
         self.bus = bus
+        self.configure = configure
+        self.overview = {}
+        self.context_loading = False
+        self.action_generation = 0
         self.busy = False
         self.loading = False
         self.refresh_again = False
@@ -45,6 +52,10 @@ class IssuesDialog(QDialog):
         self.message = QLabel("正在读取本地状态…")
         self.message.setWordWrap(True)
         layout.addWidget(self.message)
+        self.context_notice = QLabel()
+        self.context_notice.setWordWrap(True)
+        self.context_notice.hide()
+        layout.addWidget(self.context_notice)
         self.table = QTreeWidget()
         self.table.setRootIsDecorated(False)
         self.table.setHeaderLabels(["文件", "需要处理的原因"])
@@ -59,6 +70,24 @@ class IssuesDialog(QDialog):
         self.name.setPlaceholderText("本地副本的新文件名")
         self.name.setAccessibleName("本地冲突副本文件名")
         layout.addWidget(self.name)
+        recovery = QHBoxLayout()
+        self.recheck = QPushButton("重新核对 / 重连")
+        self.recheck.clicked.connect(self.request_recheck)
+        recovery.addWidget(self.recheck)
+        self.open_parent = QPushButton("打开可用父目录")
+        self.open_parent.clicked.connect(self.open_available_parent)
+        recovery.addWidget(self.open_parent)
+        self.copy_details = QPushButton("复制诊断")
+        self.copy_details.clicked.connect(self.copy_diagnostic)
+        recovery.addWidget(self.copy_details)
+        self.pause_sync = QPushButton("暂停并保留数据")
+        self.pause_sync.clicked.connect(self.pause_task)
+        recovery.addWidget(self.pause_sync)
+        layout.addLayout(recovery)
+        self.login = QPushButton("解锁 / 重新登录")
+        self.login.clicked.connect(lambda: self.configure() if self.configure else None)
+        self.login.setVisible(configure is not None)
+        layout.addWidget(self.login)
         actions = QHBoxLayout()
         self.more = QPushButton("加载更多")
         self.more.clicked.connect(self.load_more)
@@ -91,6 +120,7 @@ class IssuesDialog(QDialog):
 
     def hideEvent(self, event):
         self.timer.stop()
+        self.action_generation += 1
         super().hideEvent(event)
 
     def schedule_refresh(self):
@@ -105,6 +135,7 @@ class IssuesDialog(QDialog):
             return
         self.generation += 1
         self.request_page("", self.generation)
+        self.refresh_context()
 
     def load_more(self):
         if self.cursor and not self.loading and not self.busy:
@@ -153,12 +184,13 @@ class IssuesDialog(QDialog):
     def selection_changed(self):
         item = self.table.currentItem()
         row = item.data(0, Qt.UserRole) if item else None
+        self.update_actions(row)
         enabled = bool(row and (row.get("can_keep_both") or row.get("can_keep_directory")) and not self.busy)
         self.keep.setEnabled(enabled)
         self.name.setEnabled(enabled)
         if not row:
             self.selected_id = None
-            self.explanation.setText("选择一个文件查看处理方式。")
+            self.explanation.setText("选择一个文件查看处理方式。若没有列出上传阻塞项，可先请求重新核对或复制诊断。")
             return
         directory = bool(row.get("directory"))
         self.name.setPlaceholderText("本地文件夹的新名称" if directory else "本地副本的新文件名")
@@ -179,8 +211,144 @@ class IssuesDialog(QDialog):
         else:
             self.explanation.setText(
                 "本地修改将成为同目录下的新文件，并在联网后上传。原文件保留远端版本；远端已删除时不会恢复原路径。"
-                if row.get("can_keep_both") else REASONS.get(row["reason"], "需要进一步核对") + "。本地内容继续保留，当前不能直接解决。"
+                if row.get("can_keep_both") else REASONS.get(row["reason"], "需要进一步核对") + "。" + next_step(row)
             )
+
+    def selected_row(self):
+        item = self.table.currentItem()
+        return item.data(0, Qt.UserRole) if item else None
+
+    def update_context(self, overview):
+        self.overview = overview if isinstance(overview, dict) else {}
+        block = self.overview.get("upload_block")
+        state = self.overview.get("connection")
+        if block:
+            self.context_notice.setText("上传受阻：" + str(block)[:2000] + "\n本地修改已保留。先重新核对依赖操作；若仍未恢复，请复制诊断。")
+        elif self.overview.get("error") in TASK_STEPS:
+            self.context_notice.setText(TASK_STEPS[self.overview["error"]])
+        elif state in ("paused", "locked", "offline", "needs_attention", "stopping"):
+            self.context_notice.setText({"paused": "此任务已暂停；不会自动恢复同步。", "locked": "请先解锁 / 重新登录。", "offline": "当前离线。可请求重连，已有完整本地文件仍保留。", "stopping": "挂载正在停止，请等待正常退出。", "needs_attention": "任务需要处理。请核对证书、连接设置与账号权限，再重新登录。"}[state])
+        elif not isinstance(self.overview.get("recovery_actions"), dict) or self.overview["recovery_actions"].get("recheck_issues") is not True:
+            self.context_notice.setText("当前后台尚未提供安全核对能力。可先刷新状态；需要更新后台时保留现有缓存和草稿，勿重新建任务。")
+        else:
+            self.context_notice.setText("")
+        self.context_notice.setVisible(bool(self.context_notice.text()))
+        self.update_actions(self.selected_row())
+
+    def update_actions(self, row):
+        actions = self.overview.get("recovery_actions")
+        supported = isinstance(actions, dict) and actions.get("recheck_issues") is True
+        self.recheck.setEnabled(supported and not self.busy)
+        self.recheck.setToolTip("请求安全核对；不会清除缓存或盲目重复未知提交。" if supported else
+                               "当前后台未提供安全核对接口。可刷新本地状态，或更新后台后再试。")
+        self.open_parent.setEnabled(bool(row and parent_candidates(row.get("path")) and self.overview.get("mounted") is True and not self.busy))
+        self.pause_sync.setEnabled(not self.busy and self.overview.get("connection") in ("online", "offline", "connecting", "needs_attention"))
+        self.login.setEnabled(not self.busy and self.configure is not None)
+
+    def refresh_context(self):
+        if not self.isVisible() or self.context_loading:
+            return
+        self.context_loading = True
+        def done(data, error):
+            self.context_loading = False
+            if not error and isinstance(data, dict):
+                self.update_context(data)
+            elif error:
+                # A stale capability is not permission to command a replacement service.
+                self.update_context({})
+        self.bus.call("GetOverview", callback=done)
+
+    def request_recheck(self):
+        if not self.recheck.isEnabled() or self.busy:
+            return
+        self.busy = True
+        self.selection_changed()
+        self.message.setText("正在请求后台核对…")
+        def done(data, error):
+            self.busy = False
+            self.selection_changed()
+            if error:
+                self.message.setText("未确认核对请求。请刷新状态；后台较旧时请先更新后台。缓存与草稿保持不变。")
+            else:
+                self.message.setText(recheck_message(data))
+                self.resolved.emit()
+            self.refresh_context()
+        self.bus.call("RecheckIssues", callback=done)
+
+    def pause_task(self):
+        if not self.pause_sync.isEnabled() or self.busy:
+            return
+        self.busy = True
+        self.selection_changed()
+        self.message.setText("正在请求暂停此任务…")
+        def done(_data, error):
+            self.busy = False
+            if error:
+                self.message.setText("未确认暂停，仍按后台实际状态显示。请刷新后检查。")
+            else:
+                self.update_context(dict(self.overview, connection="paused"))
+                self.message.setText("此任务已暂停，挂载、缓存和未上传修改保留。需要继续时在任务页恢复同步。")
+                self.resolved.emit()
+            self.selection_changed()
+            self.refresh_context()
+        self.bus.call("Pause", callback=done)
+
+    def copy_diagnostic(self):
+        QApplication.clipboard().setText(diagnostic_text(self.overview, self.selected_row()))
+        self.message.setText("已复制诊断摘要（不含路径、账号、凭据、文件正文或版本令牌），可粘贴到问题反馈。")
+
+    def open_available_parent(self):
+        row = self.selected_row()
+        if not row or not self.open_parent.isEnabled() or self.busy:
+            return
+        candidates = parent_candidates(row.get("path"))
+        mount = self.overview.get("mount")
+        if not isinstance(mount, str) or not Path(mount).is_absolute():
+            self.message.setText("挂载位置尚未确认，请刷新状态。")
+            return
+        self.action_generation += 1
+        generation = self.action_generation
+        task = self.overview.get("task_id")
+        self.busy = True
+        self.selection_changed()
+        self.message.setText("正在核对可访问的父目录…")
+        def attempt():
+            if generation != self.action_generation or not self.isVisible():
+                self.busy = False
+                self.selection_changed()
+                return
+            if not candidates or self.overview.get("mounted") is not True or self.overview.get("task_id") != task:
+                self.busy = False
+                self.selection_changed()
+                self.message.setText("未确认可访问的父目录。请先恢复挂载或权限，数据保持不变。")
+                return
+            path = candidates.pop(0)
+            def checked(data, error):
+                if generation != self.action_generation or not self.isVisible():
+                    self.busy = False
+                    self.selection_changed()
+                    return
+                if error in ("service_changed", "service_unavailable") or self.overview.get("task_id") != task or self.overview.get("mounted") is not True:
+                    candidates.clear()
+                    attempt()
+                    return
+                if error and any(word in str(error).casefold() for word in ("timeout", "timedout", "noreply")):
+                    self.busy = False
+                    self.selection_changed()
+                    self.message.setText("本地目录核对超时。未打开失效路径，请稍后重试或复制诊断。")
+                    return
+                valid = not error and isinstance(data, dict) and data.get("path") == path and isinstance(data.get("entries"), list)
+                if valid and data.get("preview_only") is True:
+                    valid = data.get("directory_state") == "received"
+                if not valid:
+                    QTimer.singleShot(0, attempt)
+                    return
+                self.busy = False
+                self.selection_changed()
+                ok = QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(mount) / path)))
+                self.message.setText("已请求文件管理器打开父目录。" if ok else "文件管理器未接受打开请求，请检查桌面应用关联。")
+            self.bus.call("GetDirectory", [path, 0], checked)
+        attempt()
 
     def keep_both(self):
         item = self.table.currentItem()

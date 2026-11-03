@@ -536,7 +536,11 @@ impl Filesystem for CacheFilesystem {
             let projection = diagnostics::span(diagnostics::Stage::GetattrProjection);
             let result = preview::metadata(&guard, ino);
             drop(projection);
-            drop(guard);
+            // Candidate attributes are revocable metadata too; keep the same
+            // validation boundary until its zero-TTL reply has been sent.
+            if !matches!(&result, Ok(preview::Metadata::Preview(_))) {
+                drop(guard);
+            }
             match result {
                 Ok(preview::Metadata::Preview(record)) => {
                     if fh.is_some() {

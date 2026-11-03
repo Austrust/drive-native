@@ -61,6 +61,7 @@
   },
   "patch": "drive-native-interrupt.patch",
   "additional_patches": [
-    "drive-native-session-stop.patch"
+    "drive-native-session-stop.patch",
+    "drive-native-metadata-cache.patch"
   ]
 }

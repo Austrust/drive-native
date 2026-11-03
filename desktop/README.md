@@ -8,6 +8,7 @@
 - [drive-native.service](drive-native.service)
 - [drive-native@.service](drive-native@.service)
 - [drive_native_gui](drive_native_gui/)
+- [同步问题恢复入口](ISSUE_RECOVERY.md)：异步核对、可用父目录、诊断摘要及暂停语义。
 - [gio](gio/)
 - [nemo](nemo/)
 - [nautilus](nautilus/)：Nautilus 4入口，桌面验收待做。
