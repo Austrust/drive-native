@@ -78,6 +78,7 @@ impl Store {
         let op = uuid::Uuid::new_v4().to_string();
         let tx = self.db.transaction()?;
         tx.execute("INSERT INTO nodes(id,parent,name,remote_version,directory,local_version,blob,dirty_blob,base_version,dirty_generation) VALUES(?1,?2,?3,?4,0,?4,?5,?5,?4,1)",params![id,parent,name,CREATE_VERSION,blob])?;
+        crate::filesystem::mark_inode_map_incomplete(&tx)?;
         crate::filesystem::write_metadata(&tx, &n)?;
         tx.execute(
             "INSERT INTO local_creations(node,ready) VALUES(?1,0)",

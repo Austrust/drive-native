@@ -118,6 +118,7 @@ impl Store {
                     let cycle:bool=tx.query_row("WITH RECURSIVE parents(id) AS (SELECT ?1 UNION SELECT n.parent FROM nodes n JOIN parents p ON n.id=p.id WHERE n.parent IS NOT NULL) SELECT EXISTS(SELECT 1 FROM parents WHERE id=?2)",params![n.parent,n.id],|r|r.get(0))?;
                     if cycle { return Err(Error::State("directory cycle".into())); }
                     tx.execute("INSERT INTO nodes(id,parent,name,remote_version,directory) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(id) DO UPDATE SET parent=excluded.parent,name=excluded.name,remote_version=excluded.remote_version,directory=excluded.directory,deleted=CASE WHEN EXISTS(SELECT 1 FROM local_unlinks WHERE node=nodes.id) THEN 1 ELSE 0 END,conflict=CASE WHEN nodes.dirty_blob IS NOT NULL AND nodes.base_version!=excluded.remote_version AND NOT EXISTS(SELECT 1 FROM local_unlinks WHERE node=nodes.id) THEN 1 ELSE nodes.conflict END",params![n.id,n.parent,n.name,n.version,n.directory])?;
+                    crate::filesystem::mark_inode_map_incomplete(&tx)?;
                     crate::filesystem::write_metadata(&tx,&n)?;
                     if same_content && !n.directory {
                         if let Some(base)=&intent.baseline {

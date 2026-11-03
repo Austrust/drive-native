@@ -7,7 +7,9 @@ use serde::Serialize;
 mod inodes;
 #[path = "filesystem_posix.rs"]
 mod posix;
-pub(crate) use inodes::allocate_namespace_inodes;
+pub(crate) use inodes::{
+    allocate_namespace_inodes, mark_inode_map_complete, mark_inode_map_incomplete,
+};
 pub use posix::PosixRecord;
 
 #[derive(Debug, Clone, Serialize)]
