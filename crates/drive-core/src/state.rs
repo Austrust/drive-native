@@ -147,6 +147,23 @@ impl Drop for ReadHandle {
     }
 }
 
+/// Test-only seam: the next `Store::open` migration in this thread fails with a
+/// real SQL constraint error inside the still-open schema transaction. It is
+/// compiled only for unit tests, so release builds have no runtime switch or
+/// environment backdoor. Thread-local keeps parallel tests independent.
+#[cfg(test)]
+thread_local! {
+    static INJECT_MIGRATION_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+#[cfg(test)]
+pub(crate) fn inject_migration_failure() {
+    INJECT_MIGRATION_FAILURE.with(|flag| flag.set(true));
+}
+#[cfg(test)]
+fn take_injected_migration_failure() -> bool {
+    INJECT_MIGRATION_FAILURE.with(|flag| flag.replace(false))
+}
+
 /// Version of the durable state contract, including journal semantics.
 pub const STATE_SCHEMA_VERSION: i64 = 24;
 
@@ -249,6 +266,16 @@ impl Store {
         }
         crate::initialization_store::migrate(&db)?;
         crate::preview::migrate(&db)?;
+        #[cfg(test)]
+        if take_injected_migration_failure() {
+            // A genuine NOT NULL constraint failure inside the migration
+            // transaction opened above. The error path must drop this
+            // connection (rolling back) before returning to the caller.
+            db.execute(
+                "INSERT INTO metadata(key,value) VALUES('injected migration failure',NULL)",
+                [],
+            )?;
+        }
         db.pragma_update(None, "user_version", STATE_SCHEMA_VERSION)?;
         db.execute_batch("COMMIT;")?;
         crate::initialization_store::recover_open(&db)?;
@@ -1248,3 +1275,7 @@ pub(crate) fn valid_node(n: &Node) -> Result<()> {
 pub fn sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
+
+#[cfg(test)]
+#[path = "migration_failure_tests.rs"]
+mod migration_failure_tests;
