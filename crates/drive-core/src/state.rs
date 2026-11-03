@@ -915,8 +915,18 @@ impl Store {
         }
         // A possibly committed operation must be reconciled before another upload of the same file.
         let path = crate::namespace::node_path(&self.db, &node)?;
+        // Only a remove that owns this target (same identity, deleted ancestor,
+        // or overlapping path) may precede the upload. A global remove barrier
+        // let unrelated pending removes, such as freedesktop trash entries,
+        // block every ordinary upload.
+        if let Some(blocked) = crate::removals::upload_remove_barrier(&self.db, &node, &path)? {
+            return Err(Error::State(format!(
+                "pending remove of {} blocks upload of {}",
+                blocked.path, path
+            )));
+        }
         let tx = self.db.transaction()?;
-        let changed=tx.execute("UPDATE operations SET state='inflight' WHERE id=?1 AND state='pending' AND node NOT IN (SELECT id FROM access_blocked) AND NOT EXISTS(SELECT 1 FROM operations other WHERE other.node=operations.node AND other.state IN ('inflight','uncertain')) AND EXISTS(SELECT 1 FROM nodes n WHERE n.id=operations.node AND n.remote_version=operations.base AND n.deleted=0 AND n.conflict=0) AND NOT EXISTS(SELECT 1 FROM drafts d WHERE d.node=operations.node AND d.generation!=d.checkpoint) AND NOT EXISTS(SELECT 1 FROM local_creations c WHERE c.node=operations.node AND c.ready=0) AND NOT EXISTS(SELECT 1 FROM namespace_ops WHERE kind='remove' AND id NOT IN (SELECT operation FROM access_blocked_operations) AND state NOT IN ('committed','superseded'))",[op])?;
+        let changed=tx.execute("UPDATE operations SET state='inflight' WHERE id=?1 AND state='pending' AND node NOT IN (SELECT id FROM access_blocked) AND NOT EXISTS(SELECT 1 FROM operations other WHERE other.node=operations.node AND other.state IN ('inflight','uncertain')) AND EXISTS(SELECT 1 FROM nodes n WHERE n.id=operations.node AND n.remote_version=operations.base AND n.deleted=0 AND n.conflict=0) AND NOT EXISTS(SELECT 1 FROM drafts d WHERE d.node=operations.node AND d.generation!=d.checkpoint) AND NOT EXISTS(SELECT 1 FROM local_creations c WHERE c.node=operations.node AND c.ready=0)",[op])?;
         if changed != 1 {
             return Err(Error::State(
                 "upload needs conflict resolution or commit reconciliation".into(),

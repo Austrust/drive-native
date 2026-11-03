@@ -99,6 +99,10 @@ pub struct Bridge {
     pub last_download_failure: Mutex<Option<(DownloadFailureKind, Option<u32>)>>,
     upload_signal: (Mutex<bool>, Condvar),
     pub last_error: Mutex<Option<String>>,
+    /// Last concrete reason a pending upload could not start. Unlike
+    /// `last_error` this is resolved state, cleared as soon as the queue is
+    /// startable again, so it can name the blocking path/operation.
+    pub upload_block: Mutex<Option<String>>,
     pub cache_error: Mutex<Option<String>>,
     pub initialization: Arc<crate::initialization::Tracker>,
 }
@@ -276,6 +280,7 @@ impl Bridge {
             last_download_failure: Mutex::new(None),
             upload_signal: (Mutex::new(false), Condvar::new()),
             last_error: Mutex::new(None),
+            upload_block: Mutex::new(None),
             cache_error: Mutex::new(None),
             initialization: Arc::new(crate::initialization::Tracker::default()),
         })
@@ -1134,6 +1139,7 @@ impl Bridge {
             .upload_operations(if reconcile { "uncertain" } else { "pending" })
             .map_err(io::Error::other)?;
         let mut confirmed = 0;
+        let mut blocked: Option<String> = None;
         for op in operations {
             let (mut job, scope) = {
                 let s = self.store.lock().unwrap();
@@ -1208,8 +1214,13 @@ impl Bridge {
             let (node, path, origin, mtime) = {
                 let mut s = self.store.lock().unwrap();
                 let fresh = s.upload_job(&op).map_err(io::Error::other)?;
-                if !reconcile && s.mark_upload_started(&op).is_err() {
-                    continue;
+                if !reconcile {
+                    if let Err(error) = s.mark_upload_started(&op) {
+                        // Surface the concrete dependency; a silent continue made
+                        // the whole queue look idle in the transfer list.
+                        blocked = Some(error.to_string());
+                        continue;
+                    }
                 }
                 (
                     fresh.node,
@@ -1271,6 +1282,9 @@ impl Bridge {
                     return Err(io::Error::other("commit unknown; reconciliation required"));
                 }
             }
+        }
+        if !reconcile {
+            *self.upload_block.lock().unwrap() = blocked;
         }
         Ok(confirmed)
     }
