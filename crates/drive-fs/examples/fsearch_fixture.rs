@@ -43,13 +43,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let groups = args[3].parse::<usize>()?;
     let files = args[4].parse::<usize>()?;
     let wide = args[5].parse::<usize>()?;
-    if groups
-        .checked_mul(files)
+    // Test-only scale bounds. The measurement matrix now includes a
+    // Personal_Sync-sized tree (56,007 groups / 319,679 entries), previously
+    // rejected by the 10,000-group gate; the total budget stays bounded so a
+    // typo cannot allocate an unbounded tree. This example is a fixture, never
+    // shipped product code.
+    const MAX_ENTRIES: usize = 500_000;
+    const MAX_GROUPS: usize = 100_000;
+    // root + wide + 64 deep directories, and the 64 `leaf.dat` files.
+    let total_entries = groups
+        .checked_mul(files.saturating_add(1))
         .and_then(|n| n.checked_add(wide))
-        .is_none_or(|n| n > 500_000)
-        || groups > 10_000
-    {
-        return Err("fixture budget exceeded".into());
+        .and_then(|n| n.checked_add(130))
+        .ok_or("fixture entry count overflow")?;
+    if total_entries > MAX_ENTRIES || groups > MAX_GROUPS {
+        return Err(format!(
+            "fixture budget exceeded: {total_entries} entries / {groups} groups (max {MAX_ENTRIES}/{MAX_GROUPS})"
+        )
+        .into());
     }
     std::fs::create_dir_all(&run)?;
     let mount = run.join("mount");
