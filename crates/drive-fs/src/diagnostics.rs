@@ -34,8 +34,12 @@ pub enum Stage {
     DirectoryInodeWrites,
     /// One opendir whose projection committed without writing any WAL frame.
     DirectoryCommitNoop,
+    /// One lookup answered on the FUSE dispatcher thread (no queue wakeup).
+    LookupInline,
+    /// One getattr answered on the FUSE dispatcher thread (no queue wakeup).
+    GetattrInline,
 }
-const STAGES: [Stage; 22] = [
+const STAGES: [Stage; 24] = [
     Stage::LookupQueue,
     Stage::LookupStoreWait,
     Stage::LookupProjection,
@@ -58,6 +62,8 @@ const STAGES: [Stage; 22] = [
     Stage::DirectoryCommit,
     Stage::DirectoryInodeWrites,
     Stage::DirectoryCommitNoop,
+    Stage::LookupInline,
+    Stage::GetattrInline,
 ];
 struct Aggregate {
     count: AtomicU64,
@@ -75,7 +81,7 @@ impl Aggregate {
         }
     }
 }
-static TOTALS: [Aggregate; 22] = [const { Aggregate::new() }; 22];
+static TOTALS: [Aggregate; 24] = [const { Aggregate::new() }; 24];
 static ENABLED: OnceLock<bool> = OnceLock::new();
 pub(crate) fn enabled() -> bool {
     *ENABLED
