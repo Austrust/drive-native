@@ -39,7 +39,7 @@ const ROOT_INITIALIZED_QUERY: &str = "SELECT EXISTS(SELECT 1 FROM fs_inodes WHER
 /// exactly, including the namespace-overlay remote parent edge, but keeps the
 /// empty-denial fast path so a mount without ACL denials pays only the
 /// uncorrelated `EXISTS` probe.
-fn not_inaccessible(id: &str) -> String {
+pub(super) fn not_inaccessible(id: &str) -> String {
     format!(
         "(NOT EXISTS(SELECT 1 FROM access_denied) OR NOT (WITH RECURSIVE ancestors(id) AS (
             SELECT {id}.id
@@ -370,9 +370,8 @@ fn projection(row: &rusqlite::Row<'_>, base: usize) -> rusqlite::Result<Option<P
         atime_nsec: row.get(base + 10)?,
         ino: match row.get::<_, Option<i64>>(base + 11)? {
             Some(ino) => Some(
-                u64::try_from(ino).map_err(|_| {
-                    rusqlite::Error::IntegralValueOutOfRange(base + 11, ino)
-                })?,
+                u64::try_from(ino)
+                    .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(base + 11, ino))?,
             ),
             None => None,
         },
@@ -454,7 +453,10 @@ impl Projection {
             mtime,
             atime,
             atime_nsec,
-            mode: self.mode.unwrap_or(if self.directory { 0o755 } else { 0o644 }) & 0o777,
+            mode: self
+                .mode
+                .unwrap_or(if self.directory { 0o755 } else { 0o644 })
+                & 0o777,
             unlinked: self.unlinked,
             blocks: if allocated { size.div_ceil(512) } else { 0 },
             cacheable,

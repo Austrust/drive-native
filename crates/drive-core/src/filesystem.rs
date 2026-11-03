@@ -27,6 +27,43 @@ pub struct FileRecord {
 // Shared with the desktop count/page projection; preserve ACL and local creation precedence.
 const VISIBLE_CHILDREN: &str = "n.id NOT IN (SELECT id FROM access_blocked) AND n.parent=?1 AND n.deleted=0 AND NOT EXISTS(SELECT 1 FROM nodes l JOIN local_creations c ON c.node=l.id WHERE l.parent=n.parent AND l.name=n.name AND l.id!=n.id AND l.deleted=0)";
 
+/// Cached SQL text plus SQLite prepared statements keep directory construction
+/// proportional to its visible children, not repeated parsing of ACL/shadow SQL.
+/// This is a query-plan cache only: every execution reads current transaction data.
+struct DirectorySql {
+    identity: String,
+    count: String,
+    allocate: String,
+    collect: String,
+}
+fn directory_sql() -> &'static DirectorySql {
+    static SQL: std::sync::OnceLock<DirectorySql> = std::sync::OnceLock::new();
+    SQL.get_or_init(|| {
+        // Match Store::node for both the selected directory and its parent.
+        // Parent metadata/body/version are irrelevant to '..', but its live
+        // identity and BOTH local/remote-overlay permission edges are required.
+        let identity = format!(
+            "SELECT n.id,n.directory,n.parent,pi.ino FROM fs_inodes i
+             JOIN nodes n ON n.id=i.node
+             LEFT JOIN nodes p ON p.id=n.parent
+             LEFT JOIN fs_inodes pi ON pi.node=p.id
+             WHERE i.ino=?1 AND n.deleted=0 AND {visible}
+               AND (n.parent IS NULL OR (p.id IS NOT NULL AND p.deleted=0 AND {parent_visible}))",
+            visible = posix::not_inaccessible("n"),
+            parent_visible = posix::not_inaccessible("p"),
+        );
+        // Short-circuit an empty ACL seed table before constructing the recursive
+        // blocked set. The denied case retains the original full predicate.
+        let visible = "(NOT EXISTS(SELECT 1 FROM access_denied) OR n.id NOT IN (SELECT id FROM access_blocked)) AND n.parent=?1 AND n.deleted=0 AND NOT EXISTS(SELECT 1 FROM nodes l JOIN local_creations c ON c.node=l.id WHERE l.parent=n.parent AND l.name=n.name AND l.id!=n.id AND l.deleted=0)";
+        DirectorySql {
+            identity,
+            count: format!("SELECT count(*),coalesce(sum(length(CAST(n.name AS BLOB))),0) FROM nodes n WHERE {visible}"),
+            allocate: format!("INSERT INTO fs_inodes(node) SELECT n.id FROM nodes n WHERE {visible} AND NOT EXISTS(SELECT 1 FROM fs_inodes i WHERE i.node=n.id) ORDER BY n.name,n.id"),
+            collect: format!("SELECT i.ino,n.directory,n.name FROM nodes n JOIN fs_inodes i ON i.node=n.id WHERE {visible} ORDER BY n.name,n.id"),
+        }
+    })
+}
+
 /// Directory enumeration never needs body state, hashes or per-file attributes.
 #[derive(Debug, PartialEq, Eq)]
 pub struct DirectoryEntry {
@@ -113,24 +150,35 @@ impl Store {
             old.elapsed().as_micros().min(u64::MAX as u128) as u64
         };
         let tx = self.db.unchecked_transaction()?;
-        let id: String = tx.query_row(
-            "SELECT node FROM fs_inodes WHERE ino=?1",
-            [sql_unsigned(ino)?],
-            |r| r.get(0),
-        )?;
-        let node = self.node(&id)?;
-        if !node.directory {
+        let sql = directory_sql();
+        let (id, directory, parent, mapped_parent): (String, bool, Option<String>, Option<u64>) =
+            tx.prepare_cached(&sql.identity)?
+                .query_row([sql_unsigned(ino)?], |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get::<_, Option<i64>>(3)?
+                            .map(u64::try_from)
+                            .transpose()
+                            .map_err(|e| {
+                                rusqlite::Error::FromSqlConversionFailure(
+                                    3,
+                                    rusqlite::types::Type::Integer,
+                                    Box::new(e),
+                                )
+                            })?,
+                    ))
+                })?;
+        if !directory {
             return Err(Error::Io(std::io::Error::from_raw_os_error(libc::ENOTDIR)));
         }
         if let Some(t) = timings.as_deref_mut() {
             t.identity_us = elapsed();
         }
-        let sql = format!(
-            "SELECT count(*),coalesce(sum(length(CAST(n.name AS BLOB))),0) FROM nodes n WHERE {VISIBLE_CHILDREN}"
-        );
-        let (count, names) = tx.query_row(&sql, [&id], |r| {
-            Ok((read_unsigned(r, 0)?, read_unsigned(r, 1)?))
-        })?;
+        let (count, names) = tx
+            .prepare_cached(&sql.count)?
+            .query_row([&id], |r| Ok((read_unsigned(r, 0)?, read_unsigned(r, 1)?)))?;
         let count =
             usize::try_from(count).map_err(|_| Error::State("directory size overflow".into()))?;
         let names =
@@ -153,20 +201,16 @@ impl Store {
         // (and mount initialization backfills older stores), so these statements
         // usually insert zero rows and the commit below appends no WAL frame.
         let mut inode_writes = 0u64;
-        let parent_ino = match node.parent.as_deref() {
-            None => 1,
-            Some(parent) => {
-                self.node(parent)?;
-                inode_writes += tx.execute("INSERT INTO fs_inodes(node) SELECT ?1 WHERE NOT EXISTS(SELECT 1 FROM fs_inodes WHERE node=?1)", [parent])? as u64;
-                tx.query_row("SELECT ino FROM fs_inodes WHERE node=?1", [parent], |r| {
-                    read_unsigned(r, 0)
-                })?
+        let parent_ino = match (parent.as_deref(), mapped_parent) {
+            (None, _) => 1,
+            (Some(_), Some(ino)) => ino,
+            (Some(parent), None) => {
+                inode_writes += tx.prepare_cached("INSERT INTO fs_inodes(node) SELECT ?1 WHERE NOT EXISTS(SELECT 1 FROM fs_inodes WHERE node=?1)")?.execute([parent])? as u64;
+                tx.prepare_cached("SELECT ino FROM fs_inodes WHERE node=?1")?
+                    .query_row([parent], |r| read_unsigned(r, 0))?
             }
         };
-        let insert = format!(
-            "INSERT INTO fs_inodes(node) SELECT n.id FROM nodes n WHERE {VISIBLE_CHILDREN} AND NOT EXISTS(SELECT 1 FROM fs_inodes i WHERE i.node=n.id) ORDER BY n.name,n.id"
-        );
-        inode_writes += tx.execute(&insert, [&id])? as u64;
+        inode_writes += tx.prepare_cached(&sql.allocate)?.execute([&id])? as u64;
         if let Some(t) = timings.as_deref_mut() {
             t.inode_allocation_us = elapsed();
             t.inode_writes = inode_writes;
@@ -182,11 +226,8 @@ impl Store {
             directory: true,
             name: "..".into(),
         });
-        let select = format!(
-            "SELECT i.ino,n.directory,n.name FROM nodes n JOIN fs_inodes i ON i.node=n.id WHERE {VISIBLE_CHILDREN} ORDER BY n.name,n.id"
-        );
         {
-            let mut query = tx.prepare(&select)?;
+            let mut query = tx.prepare_cached(&sql.collect)?;
             let rows = query.query_map([&id], |r| {
                 Ok(DirectoryEntry {
                     ino: read_unsigned(r, 0)?,
@@ -516,3 +557,7 @@ mod directory_stamp_tests;
 #[cfg(test)]
 #[path = "filesystem_posix_tests.rs"]
 mod posix_tests;
+
+#[cfg(test)]
+#[path = "filesystem_directory_scale_tests.rs"]
+mod directory_scale_tests;
