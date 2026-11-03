@@ -109,7 +109,152 @@ fn lookup_sql() -> &'static str {
     })
 }
 
+/// One slot of an already-open directory view: inode, name, directory flag.
+pub struct DirectorySlot<'a> {
+    pub ino: u64,
+    pub name: &'a str,
+    pub directory: bool,
+}
+
 impl Store {
+    /// Bounded attributes for the slots of an already-open authoritative
+    /// directory view. One statement resolves all slots; a slot whose identity
+    /// no longer matches the view yields `None` (the caller keeps its cookie and
+    /// publishes a zero-TTL entry), while a known ACL denial is an error for the
+    /// whole page (never downgraded to a normal entry).
+    pub fn directory_posix_page(
+        &self,
+        parent_ino: u64,
+        slots: &[DirectorySlot<'_>],
+    ) -> Result<Vec<Option<PosixRecord>>> {
+        let parent = self.posix_record_by_inode(parent_ino)?;
+        if !parent.directory || parent.unlinked {
+            return Err(Error::Io(std::io::Error::from_raw_os_error(libc::ENOTDIR)));
+        }
+        let mut result: Vec<Option<PosixRecord>> = vec![None; slots.len()];
+        if slots.is_empty() {
+            return Ok(result);
+        }
+        let placeholders = (2..=slots.len() + 1)
+            .map(|index| format!("?{index}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        // The overwhelmingly common case has no denied roots at all; skipping
+        // the (correlated) accessibility predicates for that case is what keeps
+        // a 256-slot page in the microsecond range. A page with known denials
+        // keeps the full gated predicates and errors below on a denied slot.
+        let access_denied: bool = self
+            .db
+            .prepare_cached("SELECT EXISTS(SELECT 1 FROM access_denied)")?
+            .query_row([], |r| r.get(0))?;
+        let visibility = if access_denied {
+            format!(
+                "AND (n.id NOT IN (SELECT id FROM access_blocked)) AND {}",
+                not_inaccessible("n")
+            )
+        } else {
+            String::new()
+        };
+        // CROSS JOIN pins `fs_inodes` (the IN-list / primary key) as the outer
+        // loop; the default join order scans `nodes` by parent and probes the
+        // inode index for every row (8x slower at 200 rows).
+        let sql = format!(
+            "SELECT {columns},n.name,n.directory FROM fs_inodes i
+             CROSS JOIN nodes n ON n.id=i.node
+             {joins}
+             WHERE i.ino IN ({placeholders})
+               AND n.parent=?1 AND n.deleted=0 {visibility}",
+            columns = record_columns(),
+            joins = record_joins(),
+            placeholders = placeholders,
+            visibility = visibility,
+        );
+        let mut query = self.db.prepare_cached(&sql)?;
+        let mut values: Vec<rusqlite::types::Value> = Vec::with_capacity(slots.len() + 1);
+        values.push(rusqlite::types::Value::Text(parent.id.clone()));
+        for slot in slots {
+            values.push(rusqlite::types::Value::Integer(sql_unsigned(slot.ino)?));
+        }
+        let mut rows = query.query(rusqlite::params_from_iter(values))?;
+        let mut by_ino: std::collections::HashMap<u64, Projection> =
+            std::collections::HashMap::new();
+        let mut names: std::collections::HashMap<u64, (String, bool)> =
+            std::collections::HashMap::new();
+        while let Some(row) = rows.next()? {
+            let Some(projection) = projection(row, 0)? else {
+                continue;
+            };
+            let name: String = row.get(12)?;
+            let directory: bool = row.get(13)?;
+            if let Some(ino) = projection.ino {
+                names.insert(ino, (name, directory));
+                by_ino.insert(ino, projection);
+            }
+        }
+        for (index, slot) in slots.iter().enumerate() {
+            if slot.name == "." {
+                result[index] = (slot.ino == parent_ino && slot.directory).then(|| parent.clone());
+                continue;
+            }
+            if slot.name == ".." {
+                let parent_id: Option<String> = self
+                    .db
+                    .prepare_cached("SELECT parent FROM nodes WHERE id=?1")?
+                    .query_row([&parent.id], |r| r.get(0))?;
+                let Some(parent_id) = parent_id else {
+                    result[index] = Some(parent.clone());
+                    continue;
+                };
+                let grandparent_ino: Option<u64> = self
+                    .db
+                    .prepare_cached("SELECT ino FROM fs_inodes WHERE node=?1")?
+                    .query_row([&parent_id], |r| read_unsigned(r, 0))
+                    .optional()?;
+                if let Some(grandparent_ino) = grandparent_ino {
+                    if let Ok(grandparent) = self.posix_record_by_inode(grandparent_ino) {
+                        if slot.directory && slot.ino == grandparent.ino {
+                            result[index] = Some(grandparent);
+                        }
+                    }
+                }
+                continue;
+            }
+            let Some((name, directory)) = names.get(&slot.ino) else {
+                // A vanished/moved slot (or a denied one, checked below).
+                continue;
+            };
+            if name != slot.name || *directory != slot.directory {
+                continue;
+            }
+            let Some(projection) = by_ino.remove(&slot.ino) else {
+                continue;
+            };
+            let record = projection.finish(self)?;
+            if record.ino != slot.ino || record.directory != slot.directory || record.unlinked {
+                continue;
+            }
+            result[index] = Some(record);
+        }
+        // A missing slot that is a known ACL-denied identity is a page error,
+        // not a normal entry: never downgrade the denial.
+        for (index, slot) in slots.iter().enumerate() {
+            if result[index].is_some() || slot.name == "." || slot.name == ".." {
+                continue;
+            }
+            let id: Option<String> = self
+                .db
+                .prepare_cached("SELECT node FROM fs_inodes WHERE ino=?1")?
+                .query_row([sql_unsigned(slot.ino)?], |r| r.get(0))
+                .optional()?;
+            if let Some(id) = id {
+                if self.is_inaccessible(&id)? {
+                    return Err(Error::Io(std::io::Error::from_raw_os_error(libc::EACCES)));
+                }
+            }
+        }
+        Ok(result)
+    }
+
     /// The legacy parent-id entry point keeps its exact lookup contract; the
     /// FUSE hot path uses `posix_lookup_by_inode` and skips this resolution.
     pub fn posix_lookup(&self, parent: &str, name: &str) -> Result<PosixRecord> {

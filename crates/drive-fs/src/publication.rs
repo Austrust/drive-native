@@ -9,26 +9,26 @@
 //!
 //! Invalidation delivery is asynchronous and **non-blocking for FUSE reply
 //! paths**: a dedicated thread writes strict `INVAL_ENTRY`/`INVAL_INODE`
-//! notifications directly. There is intentionally no user-space publication
-//! lock: user-space write order does not prove kernel-side cache-install order
-//! (the kernel installs a reply's TTL after waking the waiting FUSE task), and a
+//! notifications directly, holding no lock that a reply path or kernel callback
+//! could wait for. There is intentionally no user-space publication lock:
+//! user-space write order does not prove kernel-side cache-install order (the
+//! kernel installs a reply's TTL after waking the waiting FUSE task), and a
 //! blocking lock lets a kernel notification (which may wait for an in-flight
-//! reply) deadlock against the reply path. Reply paths only bump counters.
+//! reply) deadlock against the reply path.
 //!
 //! Kernel-side protection differs per cache kind:
-//! - attribute TTL is guarded by the kernel's `attr_version`: an
-//!   `INVAL_INODE` bumps it and older GETATTR replies are discarded, so attr
-//!   changes must always send `INVAL_INODE`;
+//! - attribute TTL is guarded by the kernel's `attr_version`: an `INVAL_INODE`
+//!   bumps it and older GETATTR replies are discarded, so attr changes must
+//!   always send `INVAL_INODE`;
 //! - positive entry TTL has no equivalent guard on the kernels this product
 //!   targets (Mint 22.x ships 6.8/6.11/6.14; `FUSE_NOTIFY_INC_EPOCH` exists only
 //!   from 6.16), hence the bounded contract above and the directory quieting
-//!   period for READDIRPLUS.
+//!   period used by READDIRPLUS.
 //!
-//! A full invalidation queue or a failed notification (other than the benign
-//! "nothing cached" ENOENT) fails the mount closed:
+//! A full invalidation queue or a real delivery failure fails the mount closed:
 //! `ttl()` becomes zero and later replies carry zero TTL, so earlier cached
-//! answers age out within the previous bound. Strict notifier variants are used
-//! because the lenient fuser API swallows ENOENT. `NotifyStats` and the
+//! answers age out within the previous bound. The kernel's benign "nothing
+//! cached" ENOENT is not a failure. `NotifyStats` and the
 //! `TtlPublishedReplies`/`TtlDelivered`/`TtlInvalidations`/`TtlFailures`
 //! diagnostics expose backlog and fallback behaviour.
 //!
@@ -37,13 +37,14 @@
 //! notifier installation cannot publish a cacheable answer.
 use fuser::Notifier;
 use std::{
+    collections::HashMap,
     ffi::OsStr,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
         mpsc::{self, SyncSender},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 /// Environment override for the metadata TTL. `0` disables caching entirely.
@@ -57,18 +58,29 @@ enum Invalidate {
     Inode(u64),
 }
 
+/// Non-blocking observation token for a published metadata reply.
+pub struct ReplyPermit;
+
 struct Shared {
     notifier: Mutex<Option<Notifier>>,
     /// Test-only deterministic late-reply injection (feature `test-seams`).
     #[cfg(any(test, feature = "test-seams"))]
     reply_delay: Mutex<Option<Duration>>,
     active: AtomicBool,
+    /// Mirrors `active && !failed && ttl_ms > 0`: one relaxed load on the hot
+    /// reply path so a disabled cache costs no gate or clock work.
+    caching: AtomicBool,
     failed: AtomicBool,
     ttl_ms: AtomicU64,
     published: AtomicU64,
     invalidations: AtomicU64,
     delivered: AtomicU64,
     failures: AtomicU64,
+    /// Directories touched by a change recently; READDIRPLUS must not publish a
+    /// positive entry TTL for them until the view is stable again.
+    touched: Mutex<HashMap<u64, Instant>>,
+    /// 0 unknown, 1 `INC_EPOCH` supported, 2 not supported by this kernel.
+    epoch: AtomicU8,
 }
 
 /// Observable hub counters (tests/diagnostics only; no paths or names).
@@ -102,11 +114,36 @@ impl Drop for Worker {
     }
 }
 
-/// Non-blocking observation token for a published metadata reply.
-pub struct ReplyPermit;
+/// Best-effort `FUSE_NOTIFY_INC_EPOCH` (kernel >= 6.16). Unsupported kernels
+/// answer EINVAL/ENOSYS, which is remembered and treated as optional; any other
+/// failure falls back to zero TTL like a lost invalidation.
+fn bump_epoch(shared: &Shared, notifier: &Notifier) {
+    match shared.epoch.load(Ordering::Relaxed) {
+        2 => return,
+        1 => {}
+        _ => {}
+    }
+    match notifier.inc_epoch() {
+        Ok(()) => {
+            shared.epoch.store(1, Ordering::Relaxed);
+        }
+        Err(error) => {
+            let unsupported = matches!(
+                error.raw_os_error(),
+                Some(libc::EINVAL | libc::ENOSYS | libc::EOPNOTSUPP | libc::ENOTTY)
+            );
+            if unsupported {
+                shared.epoch.store(2, Ordering::Relaxed);
+            } else {
+                fail_closed(shared);
+            }
+        }
+    }
+}
 
 fn fail_closed(shared: &Shared) {
     if !shared.failed.swap(true, Ordering::AcqRel) {
+        shared.caching.store(false, Ordering::Release);
         shared.failures.fetch_add(1, Ordering::Relaxed);
         crate::diagnostics::count(crate::diagnostics::Stage::TtlFailures);
     }
@@ -128,12 +165,15 @@ impl NotifyHub {
             #[cfg(any(test, feature = "test-seams"))]
             reply_delay: Mutex::new(None),
             active: AtomicBool::new(false),
+            caching: AtomicBool::new(false),
             failed: AtomicBool::new(false),
             ttl_ms: AtomicU64::new(ttl_ms),
             published: AtomicU64::new(0),
             invalidations: AtomicU64::new(0),
             delivered: AtomicU64::new(0),
             failures: AtomicU64::new(0),
+            touched: Mutex::new(HashMap::new()),
+            epoch: AtomicU8::new(0),
         });
         let worker_shared = shared.clone();
         let thread = std::thread::spawn(move || {
@@ -141,7 +181,7 @@ impl NotifyHub {
                 // Deliberately no user-space lock here: a kernel notification
                 // can wait for an in-flight FUSE reply, so blocking reply paths
                 // on delivery would deadlock (ABBA). The cache contract is
-                // bounded staleness + authoritative data path, not proven
+                // bounded staleness + the authoritative data path, not proven
                 // ordering (see the module documentation).
                 worker_shared.delivered.fetch_add(1, Ordering::Relaxed);
                 crate::diagnostics::count(crate::diagnostics::Stage::TtlDelivered);
@@ -162,17 +202,17 @@ impl NotifyHub {
                     Invalidate::Inode(ino) => notifier.inval_inode_strict(ino, 0, 0),
                 };
                 if let Err(error) = result {
-                    // The kernel answers ENOENT when nothing for that name/inode
-                    // is cached (or a racing install is still in flight). Under
-                    // the bounded-staleness contract that is benign: there is no
-                    // installed cache entry to revoke. Any other write failure
-                    // means an invalidation may have been lost, so stop
-                    // publishing cacheable metadata (`TTL` becomes zero and
-                    // older answers age out within the previous bound).
-                    let benign = error.raw_os_error() == Some(libc::ENOENT);
-                    if !benign {
+                    // The kernel answers ENOENT when nothing for that name or
+                    // inode is cached (or a racing install is still in flight).
+                    // Under the bounded-staleness contract that is benign: there
+                    // is no installed cache entry to revoke. Any other write
+                    // failure means an invalidation may have been lost, so stop
+                    // publishing cacheable metadata.
+                    if error.raw_os_error() != Some(libc::ENOENT) {
                         fail_closed(&worker_shared);
                     }
+                } else if !worker_shared.ttl_ms.load(Ordering::Relaxed).eq(&0) {
+                    bump_epoch(&worker_shared, notifier);
                 }
             }
         });
@@ -188,17 +228,26 @@ impl NotifyHub {
     pub fn install(&self, notifier: Notifier) {
         *self.shared.notifier.lock().unwrap() = Some(notifier);
         self.shared.active.store(true, Ordering::Release);
+        self.refresh_caching();
     }
     /// Stop publishing or delivering: the mount is going away.
     pub fn deactivate(&self) {
         self.shared.active.store(false, Ordering::Release);
+        self.shared.caching.store(false, Ordering::Release);
         self.shared.notifier.lock().unwrap().take();
+    }
+    fn refresh_caching(&self) {
+        let caching = self.shared.active.load(Ordering::Acquire)
+            && !self.shared.failed.load(Ordering::Acquire)
+            && self.shared.ttl_ms.load(Ordering::Relaxed) > 0;
+        self.shared.caching.store(caching, Ordering::Release);
     }
     /// Enable a TTL without a real notifier (ordering/fallback tests only).
     #[doc(hidden)]
     pub fn activate_ttl_for_tests(&self, ttl_ms: u64) {
         self.shared.ttl_ms.store(ttl_ms, Ordering::Relaxed);
         self.shared.active.store(true, Ordering::Release);
+        self.refresh_caching();
     }
     /// Model a rejected notification / unsupported kernel (tests only).
     #[doc(hidden)]
@@ -224,7 +273,40 @@ impl NotifyHub {
     #[inline]
     pub(crate) fn apply_reply_delay(&self) {}
 
+    /// Configured TTL regardless of activation: used to decide at FUSE init
+    /// whether READDIRPLUS should be requested.
+    pub fn configured_ttl_ms(&self) -> u64 {
+        self.shared.ttl_ms.load(Ordering::Relaxed)
+    }
+    /// A directory touched by a change recently must not publish a positive
+    /// entry TTL (compresses the readdirplus late-install window).
+    pub fn directory_unstable(&self, ino: u64) -> bool {
+        if !self.is_caching() {
+            return false;
+        }
+        let ttl = self.ttl();
+        let touched = self.shared.touched.lock().unwrap();
+        touched
+            .get(&ino)
+            .is_some_and(|last| last.elapsed() < ttl)
+    }
+    fn mark_directory_touched(&self, ino: u64) {
+        if self.configured_ttl_ms() == 0 {
+            return;
+        }
+        let mut touched = self.shared.touched.lock().unwrap();
+        if touched.len() >= 8192 {
+            touched.clear();
+        }
+        touched.insert(ino, Instant::now());
+    }
+    /// Whether the kernel accepted `FUSE_NOTIFY_INC_EPOCH` (dentry epoch guard).
+    pub fn epoch_supported(&self) -> bool {
+        self.shared.epoch.load(Ordering::Relaxed) == 1
+    }
+
     /// Configured TTL, or zero when caching is not publishable.
+    #[inline]
     pub fn ttl(&self) -> Duration {
         if !self.shared.active.load(Ordering::Acquire)
             || self.shared.failed.load(Ordering::Acquire)
@@ -233,7 +315,13 @@ impl NotifyHub {
         }
         Duration::from_millis(self.shared.ttl_ms.load(Ordering::Relaxed))
     }
+    #[inline]
     pub fn is_caching(&self) -> bool {
+        // One relaxed load on the hot path; the slow path only runs when the
+        // cache is configured and installed.
+        if !self.shared.caching.load(Ordering::Relaxed) {
+            return false;
+        }
         !self.ttl().is_zero()
     }
     /// Observation only, never a lock: metadata reply paths must stay
@@ -249,6 +337,7 @@ impl NotifyHub {
         Some(ReplyPermit)
     }
     pub fn invalidate_entry(&self, parent_ino: u64, name: &str) {
+        self.mark_directory_touched(parent_ino);
         self.shared.invalidations.fetch_add(1, Ordering::Relaxed);
         crate::diagnostics::count(crate::diagnostics::Stage::TtlInvalidations);
         if self
@@ -260,6 +349,7 @@ impl NotifyHub {
         }
     }
     pub fn invalidate_inode(&self, ino: u64) {
+        self.mark_directory_touched(ino);
         self.shared.invalidations.fetch_add(1, Ordering::Relaxed);
         crate::diagnostics::count(crate::diagnostics::Stage::TtlInvalidations);
         if self.queue.try_send(Invalidate::Inode(ino)).is_err() {
@@ -287,9 +377,6 @@ mod tests {
         let hub = NotifyHub::with_ttl_ms(2000);
         hub.activate_ttl_for_tests(2000);
         let permit = hub.reply_guard().expect("caching active");
-        // Enqueue invalidations without any reply-side lock: both the enqueue
-        // and a later reply permit stay non-blocking while delivery may still
-        // be writing a kernel notification.
         for index in 0..1000 {
             hub.invalidate_entry(1, &format!("name-{index}"));
         }
@@ -300,12 +387,28 @@ mod tests {
             "reply path blocked on invalidation delivery"
         );
         drop(permit);
-        // The delivery thread makes progress on its own.
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         while hub.stats().delivered == 0 && std::time::Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(5));
         }
         assert!(hub.stats().delivered >= 1);
+    }
+
+    #[test]
+    fn a_touched_directory_suppresses_entry_ttls_until_it_is_stable() {
+        let hub = NotifyHub::with_ttl_ms(1000);
+        hub.activate_ttl_for_tests(60);
+        assert!(!hub.directory_unstable(7));
+        hub.invalidate_entry(7, "child");
+        assert!(hub.directory_unstable(7));
+        assert!(!hub.directory_unstable(8));
+        std::thread::sleep(Duration::from_millis(90));
+        assert!(!hub.directory_unstable(7));
+        // A configured TTL of zero tracks nothing.
+        let disabled = NotifyHub::with_ttl_ms(0);
+        disabled.activate_ttl_for_tests(0);
+        disabled.invalidate_entry(7, "child");
+        assert!(!disabled.directory_unstable(7));
     }
 
     #[test]

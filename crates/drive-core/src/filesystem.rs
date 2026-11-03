@@ -10,7 +10,7 @@ mod posix;
 pub(crate) use inodes::{
     allocate_namespace_inodes, mark_inode_map_complete, mark_inode_map_incomplete,
 };
-pub use posix::PosixRecord;
+pub use posix::{DirectorySlot, PosixRecord};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct FileRecord {

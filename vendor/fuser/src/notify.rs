@@ -62,6 +62,15 @@ impl Notifier {
         self.send(notify_code::FUSE_POLL, &notif)
     }
 
+    /// Bump the connection epoch (FUSE protocol 7.45 / kernel >= 6.16). Every
+    /// dentry installed by an older epoch is revalidated on next use. Kernels
+    /// without the notification return EINVAL/ENOSYS; callers must treat those
+    /// as "unsupported" rather than as a delivery failure.
+    pub fn inc_epoch(&self) -> io::Result<()> {
+        let notif = Notification::new_inc_epoch();
+        self.send(notify_code::FUSE_NOTIFY_INC_EPOCH, &notif)
+    }
+
     /// Invalidate the kernel cache for a given directory entry, reporting
     /// every error. Callers that publish bounded metadata must use this variant:
     /// the non-strict one deliberately swallows ENOENT.
