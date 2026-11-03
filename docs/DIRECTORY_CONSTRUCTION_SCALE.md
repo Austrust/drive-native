@@ -16,7 +16,7 @@ cargo test --release --locked --offline -p drive-core --all-features --test file
 cargo test --release --locked --offline -p drive-fs --test directory_views --test preview_tests --test readdirplus -- --ignored --test-threads=1
 ```
 
-新增回归覆盖查询缓存后的 ACL/overlay 撤销、缺父／删除／非目录拒绝、inode 预算与失败回滚、UTF-8 名称、local shadow 和 dirty body 不被目录查询打开。隔离 run001 的原夹具将本地创建排在远端同名之后，合法触发 EEXIST：core 350 通过、1 失败、1 ignored；FS lib 28 通过、7 ignored。修订夹具改为先本地创建再接收远端同名事件，**当前提交尚待复测，不写成全绿**。run001 原源码与失败保留，不回写。
+新增回归覆盖查询缓存后的 ACL/overlay 撤销、缺父／删除／非目录拒绝、inode 预算与失败回滚、UTF-8 名称、local shadow 和 dirty body 不被目录查询打开。隔离 run001 的原夹具将本地创建排在远端同名之后，合法触发 EEXIST：core 350 通过、1 失败、1 ignored；FS lib 28 通过、7 ignored；默认和 TTL=0 两组显式目录／预览／PLUS 内核测试各 10 通过。core 命令在 lib 失败后未继续指定的两个集成测试。修订夹具改为先本地创建再接收远端同名事件，**当前提交尚待复测，不写成全绿**。run001 原源码与失败保留，不回写。
 
 局部成本例程：
 
@@ -26,3 +26,6 @@ cargo build --release --locked --offline -p drive-core --example directory_const
 ```
 
 例程在新临时数据库创建合成树，先安装索引，再测每个目录构造的 identity/count/inode/collect/commit 时长，并断言条目数量、父 inode 与零 inode 写入。对比时将同一例程逐字节移植到基准源码，所有构建完成后串行执行；它不含内核、FSearch、网络或 TTL，不能代替完整扫描。此提交尚无新的计时结果；完整原版 FSearch 和整合后安全策略的性能由后续独立窗口验证。
+
+
+001 后续构建均退出 0，但微基准的两个工作区共用同一新 target，导致 fixed 的无 feature 例程复用 baseline 产物（SHA256 完全相同，且不含新的 identity SQL）。**这两个例程不能用于性能比较**；没有运行计时，也没有据此作提速声明。实际 FSearch fixture 包含新 SQL，已运行的新增 core 用例也进入测试二进制。后续配对构建必须使用两个独立目标目录，或在保留旧二进制后显式使新目标目录的相关产品 crate 重新构建，再验证源码／二进制身份；不能仅凭 cargo 成功退出断言两个工作区都已重新编译。001 原始结果保留，整体退出码为 1。
