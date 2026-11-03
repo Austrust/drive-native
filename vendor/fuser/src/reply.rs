@@ -634,6 +634,26 @@ impl ReplyDirectoryPlus {
         self.add_with_timeouts(ino, offset, name, ttl, ttl, attr, generation)
     }
 
+    /// Add a name/cookie-only entry to a READDIRPLUS reply. The kernel treats it
+    /// as a plain dirent: no lookup reference, dentry, inode or attribute cache
+    /// is established for this slot. Used when a directory continuation must
+    /// not wait for the authoritative Store.
+    #[must_use]
+    pub fn add_without_lookup<T: AsRef<OsStr>>(
+        &mut self,
+        ino: u64,
+        offset: i64,
+        name: T,
+        kind: FileType,
+    ) -> bool {
+        self.buf.push_without_lookup(&DirEntry::new(
+            INodeNo(ino),
+            DirEntOffset(offset),
+            kind,
+            name.as_ref(),
+        ))
+    }
+
     /// Add an entry with separate positive-entry and attribute lifetimes.
     #[must_use]
     pub fn add_with_timeouts<T: AsRef<OsStr>>(

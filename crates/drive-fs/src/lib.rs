@@ -137,6 +137,13 @@ pub struct CacheFilesystem {
     // Metadata publication gate + kernel invalidation delivery (see
     // publication.rs). Inert until a session notifier is installed.
     notify: NotifyHub,
+    // Request READDIRPLUS at FUSE_INIT. FUSE_INIT necessarily happens before
+    // the session (and therefore the notifier) exists, so "notifier installed"
+    // cannot be observed here; `with_notify_hub` is the mount owner's
+    // declaration that it will install one. Without that declaration the mount
+    // keeps the plain READDIR profile (e.g. kernel tests that never install a
+    // notifier).
+    readdirplus: bool,
     uid: u32,
     gid: u32,
 }
@@ -156,6 +163,9 @@ impl CacheFilesystem {
     /// session exists; until then replies carry zero TTL.
     pub fn with_notify_hub(mut self, hub: NotifyHub) -> Self {
         self.notify = hub;
+        // The owner promises to install the session notifier right after the
+        // session exists, which is the earliest point the API allows.
+        self.readdirplus = true;
         self
     }
 
@@ -215,6 +225,7 @@ impl CacheFilesystem {
             network_queue: Arc::new(LocalQueue::new()),
             hydrator: None,
             notify: NotifyHub::from_env(),
+            readdirplus: false,
             uid,
             gid,
         })
@@ -283,9 +294,10 @@ impl Filesystem for CacheFilesystem {
         config
             .set_time_granularity(Duration::from_secs(1))
             .map_err(|_| libc::EINVAL)?;
-        // Only request READDIRPLUS when a bounded TTL is configured; with
-        // caching disabled the mount keeps the safe-stage request profile.
-        if self.notify.configured_ttl_ms() > 0 {
+        // READDIRPLUS pays off only with a bounded TTL and only when the mount
+        // owner declared that it installs an invalidation notifier (see the
+        // `readdirplus` field); otherwise the mount keeps the safe-stage profile.
+        if self.readdirplus && self.notify.configured_ttl_ms() > 0 {
             let _ = config.enable_readdirplus();
         }
         Ok(())

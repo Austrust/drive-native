@@ -483,6 +483,25 @@ impl DirEntPlusList {
     pub(crate) fn new(max_size: usize) -> Self {
         Self(EntListBuf::new(max_size))
     }
+    /// Emit only a `fuse_dirent` inside a PLUS response. A zero entry nodeid
+    /// tells the kernel not to establish a lookup reference, inode or attribute
+    /// cache for this slot: it behaves like a plain readdir entry inside a
+    /// readdirplus reply. Used when a directory continuation must not wait for
+    /// the authoritative Store.
+    #[must_use]
+    pub fn push_without_lookup<T: AsRef<Path>>(&mut self, ent: &DirEntry<T>) -> bool {
+        let name = ent.name.as_ref().as_os_str().as_bytes();
+        let dirent = abi::fuse_dirent {
+            ino: ent.ino.into(),
+            off: ent.offset.0,
+            namelen: name.len().try_into().expect("Name too long"),
+            typ: mode_from_kind_and_perm(ent.kind, 0) >> 12,
+        };
+        let mut header = [0u8; size_of::<abi::fuse_direntplus>()];
+        header[size_of::<abi::fuse_entry_out>()..].copy_from_slice(dirent.as_bytes());
+        self.0.push([&header, name])
+    }
+
     /// Add an entry to the directory reply buffer. Returns true if the buffer is full.
     /// A transparent offset value can be provided for each entry. The kernel uses these
     /// value to request the next entries in further readdir calls
@@ -888,6 +907,80 @@ mod test {
         assert_eq!(
             r.with_iovec(RequestId(0xdeadbeef), ioslice_to_vec),
             expected
+        );
+    }
+
+    #[test]
+    fn directory_plus_without_lookup_emits_zero_nodeid_dirent() {
+        let attr = crate::FileAttr {
+            ino: 11,
+            size: 3,
+            blocks: 1,
+            atime: UNIX_EPOCH,
+            mtime: UNIX_EPOCH,
+            ctime: UNIX_EPOCH,
+            crtime: UNIX_EPOCH,
+            kind: FileType::RegularFile,
+            perm: 0o644,
+            nlink: 1,
+            uid: 1,
+            gid: 1,
+            rdev: 0,
+            flags: 0,
+            blksize: 4096,
+        };
+        let mut list = DirEntPlusList::new(4096);
+        assert!(!list.push(&DirEntryPlus::new(
+            INodeNo(11),
+            Generation(0),
+            DirEntOffset(1),
+            "with-attr",
+            Duration::ZERO,
+            attr.into(),
+            Duration::ZERO,
+        )));
+        assert!(!list.push_without_lookup(&DirEntry::new(
+            INodeNo(12),
+            DirEntOffset(2),
+            FileType::Directory,
+            "plain",
+        )));
+        let response: Response<'_> = list.into();
+        let encoded = response.with_iovec(RequestId(7), ioslice_to_vec);
+        let body = &encoded[size_of::<abi::fuse_out_header>()..];
+        let base = size_of::<abi::fuse_direntplus>();
+        let item_size = |name: &str| {
+            let length = base + name.len();
+            (length + 7) & !7
+        };
+        let first_size = item_size("with-attr");
+        let second = &body[first_size..];
+        assert_eq!(body.len(), first_size + item_size("plain"));
+        // First slot: a real readdirplus entry with nodeid 11 and matching dirent.
+        assert_eq!(u64::from_ne_bytes(body[..8].try_into().unwrap()), 11);
+        let dirent = &body[size_of::<abi::fuse_entry_out>()..];
+        assert_eq!(u64::from_ne_bytes(dirent[..8].try_into().unwrap()), 11);
+        assert_eq!(i64::from_ne_bytes(dirent[8..16].try_into().unwrap()), 1);
+        assert_eq!(u32::from_ne_bytes(dirent[16..20].try_into().unwrap()), 9);
+        // Second slot: nodeid zero means "plain dirent, no lookup/cache".
+        assert_eq!(
+            u64::from_ne_bytes(second[..8].try_into().unwrap()),
+            0,
+            "entry_out nodeid must be zero"
+        );
+        let dirent = &second[size_of::<abi::fuse_entry_out>()..];
+        assert_eq!(u64::from_ne_bytes(dirent[..8].try_into().unwrap()), 12);
+        assert_eq!(i64::from_ne_bytes(dirent[8..16].try_into().unwrap()), 2);
+        assert_eq!(u32::from_ne_bytes(dirent[16..20].try_into().unwrap()), 5);
+        assert_eq!(
+            u32::from_ne_bytes(dirent[20..24].try_into().unwrap()),
+            4,
+            "directory type in the dirent"
+        );
+        assert_eq!(&second[base..base + 5], b"plain");
+        assert_eq!(
+            dirent.len(),
+            item_size("plain") - size_of::<abi::fuse_entry_out>()
         );
     }
 }

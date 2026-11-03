@@ -344,37 +344,6 @@ pub(super) fn open(fs: &mut CacheFilesystem, ino: u64, flags: i32, reply: ReplyO
 // wasted rows bounded while amortizing the per-chunk Store statement.
 const PLUS_PAGE: usize = 128;
 
-fn plus_placeholder(
-    entry: &drive_core::filesystem::DirectoryEntry,
-    uid: u32,
-    gid: u32,
-) -> FileAttr {
-    // Placeholder for a slot whose identity no longer matches the view: the
-    // entry is published with zero TTLs so the kernel re-looks it up. `perm` is
-    // deliberately 0 (deny) rather than optimistic.
-    FileAttr {
-        ino: entry.ino,
-        size: 0,
-        blocks: 0,
-        atime: UNIX_EPOCH,
-        mtime: UNIX_EPOCH,
-        ctime: UNIX_EPOCH,
-        crtime: UNIX_EPOCH,
-        kind: if entry.directory {
-            FileType::Directory
-        } else {
-            FileType::RegularFile
-        },
-        perm: 0,
-        nlink: if entry.directory { 2 } else { 1 },
-        uid,
-        gid,
-        rdev: 0,
-        blksize: 4096,
-        flags: 0,
-    }
-}
-
 /// READDIRPLUS: names/cookies come from the immutable directory view, bounded
 /// attribute pages from one Store statement. Attributes use the same policy as
 /// GETATTR (attr changes are invalidated with INVAL_INODE); positive entry TTLs
@@ -426,35 +395,61 @@ pub(super) fn read_plus(
                         })
                         .collect::<Vec<_>>();
                     let projection = diagnostics::span(diagnostics::Stage::ReaddirPlusProjection);
-                    let result = store.lock().unwrap().directory_posix_page(ino, &slots);
-                    drop(projection);
-                    let records = match result {
-                        Ok(records) => records,
-                        Err(e) => {
-                            reply.error(errno(&e));
+                    // Never wait for the Store on a directory continuation: an
+                    // in-flight commit/indexing can hold it for seconds while the
+                    // kernel expects the stream to keep flowing (the
+                    // continuation-and-seek contract). When it is busy we publish
+                    // the immutable view's names/cookies with zero-TTL
+                    // deny-by-default placeholders; the kernel re-looks them up
+                    // through the ordinary metadata path.
+                    let records = match store.try_lock() {
+                        Ok(guard) => match guard.directory_posix_page(ino, &slots) {
+                            Ok(records) => Some(records),
+                            Err(e) => {
+                                drop(projection);
+                                reply.error(errno(&e));
+                                drop(publication);
+                                return;
+                            }
+                        },
+                        Err(std::sync::TryLockError::WouldBlock) => None,
+                        Err(std::sync::TryLockError::Poisoned(_)) => {
+                            drop(projection);
+                            reply.error(libc::EIO);
                             drop(publication);
                             return;
                         }
                     };
-                    let stable = !notify.directory_unstable(ino);
+                    drop(projection);
+                    let stable = records.is_some() && !notify.directory_unstable(ino);
                     let mut full = false;
                     for (position, entry) in entries[index..end].iter().enumerate() {
-                        let (attr, entry_ttl, attr_ttl) = match &records[position] {
-                            Some(record) => {
-                                let attr = preview::posix_attr(record, uid, gid);
-                                let (mut entry_ttl, attr_ttl) =
-                                    preview::reply_ttls(&notify, record.cacheable, true);
-                                if !stable {
-                                    entry_ttl = Duration::ZERO;
-                                }
-                                (attr, entry_ttl, attr_ttl)
-                            }
-                            None => (
-                                plus_placeholder(entry, uid, gid),
-                                Duration::ZERO,
-                                Duration::ZERO,
-                            ),
+                        let record = records
+                            .as_ref()
+                            .and_then(|records| records[position].as_ref());
+                        let cookie = (index + position + 1) as i64;
+                        let kind = if entry.directory {
+                            FileType::Directory
+                        } else {
+                            FileType::RegularFile
                         };
+                        let Some(record) = record else {
+                            // Busy Store (or a stale slot): emit a dirent-only
+                            // entry, which the kernel treats as a plain readdir
+                            // item and never caches. The stream keeps flowing and
+                            // the next stat re-looks the name up.
+                            if reply.add_without_lookup(entry.ino, cookie, &entry.name, kind) {
+                                full = true;
+                                break;
+                            }
+                            continue;
+                        };
+                        let attr = preview::posix_attr(record, uid, gid);
+                        let (mut entry_ttl, attr_ttl) =
+                            preview::reply_ttls(&notify, record.cacheable, true);
+                        if !stable {
+                            entry_ttl = Duration::ZERO;
+                        }
                         diagnostics::ttls(
                             Some(entry_ttl),
                             Some(if entry_ttl.is_zero() {
@@ -463,7 +458,6 @@ pub(super) fn read_plus(
                                 attr_ttl
                             }),
                         );
-                        let cookie = (index + position + 1) as i64;
                         if reply.add_with_timeouts(
                             entry.ino,
                             cookie,
@@ -484,28 +478,36 @@ pub(super) fn read_plus(
                 }
             }
             ViewOrigin::Preview(stamp) => {
-                {
-                    let guard = store.lock().unwrap();
-                    match guard.preview_validate_view(stamp) {
-                        Ok(()) => {}
-                        Err(e) => {
+                // The same no-wait rule applies: a busy Store degrades to
+                // zero-TTL placeholders for this continuation instead of
+                // stalling the directory stream; nothing is cached either way
+                // for preview views.
+                match store.try_lock() {
+                    Ok(guard) => {
+                        if let Err(e) = guard.preview_validate_view(stamp) {
                             reply.error(errno(&e));
                             drop(publication);
                             return;
                         }
                     }
+                    Err(std::sync::TryLockError::WouldBlock) => {}
+                    Err(std::sync::TryLockError::Poisoned(_)) => {
+                        reply.error(libc::EIO);
+                        drop(publication);
+                        return;
+                    }
                 }
                 for (position, entry) in entries[offset..].iter().enumerate() {
-                    let attr = plus_placeholder(entry, uid, gid);
-                    let zero = Duration::ZERO;
-                    if reply.add_with_timeouts(
+                    let kind = if entry.directory {
+                        FileType::Directory
+                    } else {
+                        FileType::RegularFile
+                    };
+                    if reply.add_without_lookup(
                         entry.ino,
                         (offset + position + 1) as i64,
                         &entry.name,
-                        &zero,
-                        &zero,
-                        &attr,
-                        0,
+                        kind,
                     ) {
                         break;
                     }
