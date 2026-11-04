@@ -255,6 +255,17 @@ pub fn decide(store: &Store, root: &str, node: &str, action: Action) -> Result<D
     if !in_scope {
         return Ok(Decision::Deny);
     }
+    if action == Action::WriteContent {
+        let parent: Option<String> = store.db.query_row(
+            "SELECT parent FROM nodes WHERE id=?1 AND remote_version=?2",
+            params![node, crate::creations::CREATE_VERSION], |r| r.get(0),
+        ).optional()?.flatten();
+        if let Some(parent) = parent {
+            if decide(store, root, &parent, Action::CreateFile)? == Decision::Deny {
+                return Ok(Decision::Deny);
+            }
+        }
+    }
     exact(store, root, node, action)
 }
 /// Distinguishes whole-mount policy from a target-specific refusal.
@@ -425,7 +436,12 @@ pub fn refuse_operation(
     record_db(&tx, &root, node, action, "denied", "observed")?;
     // The server proved this attempt did not commit. An already uncertain
     // reconciliation is never reset or resent by this method.
-    tx.execute(&format!("UPDATE {table} SET state=CASE state WHEN 'cleanup_inflight' THEN 'cleanup_pending' ELSE 'pending' END WHERE id=?1 AND state IN ('inflight','cleanup_inflight')"),[operation])?;
+    let changed = tx.execute(&format!("UPDATE {table} SET state=CASE state WHEN 'cleanup_inflight' THEN 'cleanup_pending' ELSE 'pending' END WHERE id=?1 AND state IN ('inflight','cleanup_inflight')"),[operation])?;
+    if !namespace && changed > 0 {
+        // A definite non-commit can capture the current path on the next
+        // attempt. Keep content, origin and mtime intent; uncertain paths stay.
+        tx.execute("DELETE FROM upload_paths WHERE operation=?1", [operation])?;
+    }
     tx.execute("UPDATE sync_history SET result='failed',error_kind='permission_denied',error_summary='permission_denied',completed_at=unixepoch() WHERE operation_key=?1",[key])?;
     tx.commit()?;
     Ok(())
@@ -495,7 +511,10 @@ mod tests {
             name: id.into(),
             version: "v1".into(),
             directory: d,
-            metadata: None,
+            metadata: Some(crate::NodeMetadata {
+                size: if d { 0 } else { 3 }, mtime: 1,
+                mode: if d { 0o755 } else { 0o644 },
+            }),
         });
         s.install_remote_snapshot(&nodes, "1", "server").unwrap();
         s.ensure_fs_root("root").unwrap();
@@ -761,6 +780,16 @@ mod tests {
         assert!(s.download_failure("f").unwrap().is_none());
         assert_eq!(decide(&s,"root","f",Action::Read).unwrap(),Decision::Unknown);
         assert_eq!(s.db.query_row("SELECT state FROM transfers WHERE node='f'",[],|r|r.get::<_,String>(0)).unwrap(),"pending");
+    }
+    #[test]
+    fn a_new_draft_rechecks_its_parents_create_permission() {
+        let (_d, mut s) = fixture();
+        let file = s.create_local_file("A", "draft", 0o600).unwrap();
+        inject(&s, "root", &file.id, Action::WriteContent, Decision::Allow).unwrap();
+        inject(&s, "root", "A", Action::CreateFile, Decision::Deny).unwrap();
+        assert_eq!(decide(&s, "root", &file.id, Action::WriteContent).unwrap(), Decision::Deny);
+        inject(&s, "root", "A", Action::CreateFile, Decision::Unknown).unwrap();
+        assert_eq!(decide(&s, "root", &file.id, Action::WriteContent).unwrap(), Decision::Allow);
     }
 
 }

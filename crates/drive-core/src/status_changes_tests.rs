@@ -722,6 +722,14 @@ fn schema_inventory_requires_an_explicit_decision_for_new_tables_and_columns() {
         // as a journaled operations/nodes change; not a separate status atom.
         // Cascading deletion accompanies the journaled operation deletion.
         "upload_times",
+        // Completion history is not an icon/namespace atom. Its writer's
+        // original operations/nodes transaction already supplies that atom.
+        "sync_history",
+        // ACL has its own revision and SharedStore projection/publication
+        // boundary; icon Status does not encode these per-action decisions.
+        // This explicit classification keeps new schema additions audited.
+        "write_policy",
+        "directory_permissions",
         "cache_access",
         "cache_published",
         "engine_upload_stages",

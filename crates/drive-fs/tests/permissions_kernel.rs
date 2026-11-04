@@ -29,7 +29,7 @@ impl Fixture {
         let mount = temp.path().join("mount");
         fs::create_dir(&mount).unwrap();
         let mut s = Store::open(temp.path().join("state")).unwrap();
-        let nodes = [
+        let mut nodes = [
             ("root", None, true),
             ("A", Some("root"), true),
             ("B", Some("root"), true),
@@ -47,9 +47,19 @@ impl Fixture {
                 mtime: 1,
                 mode: if directory { 0o755 } else { 0o644 },
             }),
-        });
+        })
+        .to_vec();
+        if root == "A" {
+            // An independent task indexes the selected subtree, just as
+            // native::project does. Do not change an existing mount's inode 1.
+            nodes.retain(|node| node.id == "A" || node.parent.as_deref() == Some("A"));
+            nodes.iter_mut().find(|node| node.id == "A").unwrap().parent = None;
+        }
         s.install_remote_snapshot(&nodes, "1", "server").unwrap();
         for id in ["file", "target"] {
+            if !nodes.iter().any(|node| node.id == id) {
+                continue;
+            }
             s.publish_download(
                 &DownloadTicket {
                     id: id.into(),
