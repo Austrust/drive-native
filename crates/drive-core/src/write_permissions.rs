@@ -320,6 +320,10 @@ fn record_db(
 }
 pub fn reset_observed(store: &Store, root: &str) -> Result<()> {
     let tx = store.db.unchecked_transaction()?;
+    // Clear the terminal retry gate paired with a typed Read refusal as well.
+    tx.execute("UPDATE transfers SET state='pending',error=NULL WHERE direction='download' AND state IN ('failed','retry')
+      AND json_valid(error) AND json_extract(error,'$.kind')='server_rejected' AND json_extract(error,'$.server_code') IS NULL
+      AND node IN (SELECT node FROM directory_permissions WHERE root=?1 AND action='read' AND state='denied' AND source='observed')",[root])?;
     tx.execute(
         "UPDATE write_policy SET revision=revision+1,updated_at=unixepoch() WHERE root=?1",
         [root],
@@ -742,4 +746,21 @@ mod tests {
             LocalPolicy::ExplicitReadOnly
         );
     }
+    #[test]
+    fn malformed_pending_intent_keeps_the_existing_fail_closed_barrier() {
+        let(_d,mut s)=fixture();s.create_local_directory("A","pending",0o755).unwrap();
+        s.db.execute("UPDATE namespace_ops SET body='{}' WHERE state='pending'",[]).unwrap();
+        assert!(s.next_namespace_operation().unwrap().is_none());
+        assert!(s.queue_health().unwrap().schedule.unwrap().unresolved_barrier);
+    }
+    #[test]
+    fn recheck_releases_only_the_typed_read_refusal_retry_gate() {
+        let(_d,mut s)=fixture();let ticket=crate::DownloadTicket{id:"f".into(),version:"v1".into()};
+        s.begin_download(&ticket).unwrap();s.fail_download(&ticket,crate::download_jobs::DownloadFailureKind::ServerRejected,None,1).unwrap();
+        record_observed(&s,"root","f",Action::Read,false).unwrap();reset_session(&s).unwrap();
+        assert!(s.download_failure("f").unwrap().is_none());
+        assert_eq!(decide(&s,"root","f",Action::Read).unwrap(),Decision::Unknown);
+        assert_eq!(s.db.query_row("SELECT state FROM transfers WHERE node='f'",[],|r|r.get::<_,String>(0)).unwrap(),"pending");
+    }
+
 }
