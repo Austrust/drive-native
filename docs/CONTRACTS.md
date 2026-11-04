@@ -68,7 +68,7 @@ Store 是权威，索引只读，不写业务状态、不下载正文。装载�
 ### G1 静态核对后的 G2 接线补充
 
 `DirBlock.entries` 前两项固定为 `.`、`..`，其余按 name/ino 排序；lookup 只在 children 中二分，保持既有 cookie 规则。
-已核实 `Store::local_revision()` 是 SQLite total_changes，而旧 SharedStore 提交通知有意忽略 local_atimes/inode 分配。G2 由协调者在 shared_store.rs 添加独立 `projection_state() -> CommitState` 和 `try_projection_read() -> Option<ProjectionReadGuard<'_>>`，后者提供 `state() -> CommitState`。所有 Store guard 持有短时投影写保护；索引读租约持到回复结束，不取 Store 锁，失败则原路径回退。projection revision 覆盖任何 total_changes、Store 替换和未确认边界，保留旧 change_state()/通知语义。禁止在持有投影读租约时获取 Store。B 可先按此 API 编写，G2 接通后全量编译。
+已核实 `Store::local_revision()` 是 SQLite total_changes，而旧 SharedStore 提交通知有意忽略 local_atimes/inode 分配。G2 由协调者在 shared_store.rs 添加独立 `projection_state() -> CommitState` 和 `try_projection_read() -> Option<ProjectionReadGuard<'_>>`，后者提供 `state() -> CommitState`。所有 Store guard 持有短时投影写保护；索引读租约持到回复结束，不取 Store 锁，失败则原路径回退。projection revision 覆盖任何 total_changes、Store 替换和未确认边界，保留旧 change_state()/通知语义。禁止在持有投影读租约时获取 Store。`StoreGuard::finish_projection(self) -> CommitState` 完成与 Drop 相同的版本发布，在写租约释放前捕获新 token；B 用此 token 绑定刚刷新的索引，避免释放 Store 后另一次提交造成错误绑定。B 可先按此 API 编写，G2 接通后全量编译。
 
 ## C2 SyncHistory schema 24 与 IPC
 
