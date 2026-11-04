@@ -13,6 +13,7 @@ pub(super) struct Binding {
     token: AtomicU64,
     refresh: Mutex<()>,
     requested: AtomicBool,
+    ready: AtomicBool,
 }
 fn word(state: CommitState) -> u64 {
     if state.revision >= (1 << 63) { u64::MAX }
@@ -20,12 +21,19 @@ fn word(state: CommitState) -> u64 {
 }
 impl Binding {
     pub fn new(index: Arc<NamespaceIndex>, store: &drive_core::SharedStore) -> Self {
-        let binding = Self { index, token: AtomicU64::new(u64::MAX), refresh: Mutex::new(()), requested: AtomicBool::new(false) };
+        let binding = Self { index, token: AtomicU64::new(u64::MAX), refresh: Mutex::new(()), requested: AtomicBool::new(false), ready: AtomicBool::new(false) };
         binding.refresh(store);
         binding
     }
+    fn needs_refresh(&self, store: &drive_core::SharedStore) -> bool {
+        word(store.projection_state()) != self.token.load(Ordering::Acquire)
+            // A valid snapshot explicitly invalidated by a hint needs refresh.
+            // A transient failed builder which left an old snapshot valid also
+            // needs retry. A stable budget-degraded generation does not.
+            || self.ready.load(Ordering::Acquire) == self.index.is_degraded()
+    }
     pub fn schedule(self: &Arc<Self>, store: Arc<drive_core::SharedStore>, queue: &LocalQueue) {
-        if word(store.projection_state()) == self.token.load(Ordering::Acquire)
+        if !self.needs_refresh(&store)
             || self.requested.swap(true, Ordering::AcqRel) { return; }
         struct Pending(Arc<Binding>);
         impl Drop for Pending { fn drop(&mut self) { self.0.requested.store(false, Ordering::Release); } }
@@ -36,7 +44,7 @@ impl Binding {
     /// until its single FUSE reply has been sent, including test delay seams.
     pub fn lease<'a>(&self, store: &'a drive_core::SharedStore, notify: &NotifyHub)
         -> Option<drive_core::shared_store::ProjectionReadGuard<'a>> {
-        if notify.delivery_failed() || self.index.is_degraded() {
+        if notify.delivery_failed() || !self.ready.load(Ordering::Acquire) || self.index.is_degraded() {
             diagnostics::count(diagnostics::Stage::IndexDegraded);
             return None;
         }
@@ -51,7 +59,7 @@ impl Binding {
     /// Called only on initialization or a metadata worker, never on the FUSE
     /// dispatcher. Rebuilding may consume the bounded index-load budget.
     pub fn refresh(&self, store: &drive_core::SharedStore) {
-        if word(store.projection_state()) == self.token.load(Ordering::Acquire) {
+        if !self.needs_refresh(store) {
             return;
         }
         let Ok(_refresh) = self.refresh.try_lock() else { return; };
@@ -70,6 +78,9 @@ impl Binding {
         if outcome == RefreshOutcome::Degraded || !state.verified {
             diagnostics::count(diagnostics::Stage::IndexDegraded);
         }
+        // A failed builder can leave an old snapshot present. Never bind it to
+        // this newer Store token merely because is_degraded() is still false.
+        self.ready.store(outcome != RefreshOutcome::Degraded && state.verified, Ordering::Release);
         self.token.store(word(state), Ordering::Release);
     }
 }

@@ -115,3 +115,15 @@ fn separate_mount_indexes_do_not_share_generations_or_identities() {
     assert!(a.index.lookup(1, "only-first").is_some());
     drop(lease);
 }
+
+#[test]
+fn explicit_hint_refreshes_without_a_store_revision_change() {
+    let (_temp, store, binding, notify) = fixture();
+    let state = store.projection_state();
+    binding.index.invalidate(drive_core::namespace_index::InvalidateHint::All);
+    assert!(binding.lease(&store, &notify).is_none());
+    assert!(binding.needs_refresh(&store));
+    binding.refresh(&store);
+    assert_eq!(store.projection_state(), state);
+    assert!(binding.lease(&store, &notify).is_some());
+}

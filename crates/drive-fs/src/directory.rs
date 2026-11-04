@@ -638,7 +638,7 @@ pub(super) fn read(
             if let Some(lease) = binding.lease(&fs.store, &fs.notify) {
                 if lease.state() == opened {
                     diagnostics::count(diagnostics::Stage::IndexHits);
-                    send_index_page(block, offset, reply, None);
+                    send_index_page(block, offset, reply);
                     drop(lease);
                     return;
                 }
@@ -666,17 +666,22 @@ pub(super) fn read(
                         drop(guard);
                     }
                     ViewOrigin::Indexed { block: Some(block), .. } => {
-                        // A changed generation must revalidate visibility. Keep
-                        // the original cookies, but omit names no longer visible
-                        // in the authoritative directory. Never refresh/reorder
-                        // the held block underneath an existing offset.
-                        let guard = store.lock().unwrap();
-                        match guard.directory_snapshot(ino, MAX_BYTES) {
-                            Ok(current) => {
-                                let visible = current.entries.iter().map(|entry| (entry.ino, entry.name.as_str()))
-                                    .collect::<std::collections::HashSet<_>>();
-                                send_index_page(block, offset, reply, Some(&visible));
+                        // Revalidate the directory when available; immutable
+                        // names/cookies retain .9's opened-view semantics. New
+                        // lookup/open calls still revalidate moved/deleted names.
+                        let guard = match store.try_lock() {
+                            Ok(guard) => guard,
+                            // The authority handle already owns these names.
+                            // Match .9's nonblocking continuation contract;
+                            // subsequent lookup/open still revalidates identity.
+                            Err(std::sync::TryLockError::WouldBlock) => {
+                                send_index_page(block, offset, reply);
+                                return;
                             }
+                            Err(std::sync::TryLockError::Poisoned(_)) => { reply.error(libc::EIO); return; }
+                        };
+                        match guard.directory_snapshot(ino, MAX_BYTES) {
+                            Ok(_) => send_index_page(block, offset, reply),
                             Err(e) => reply.error(errno(&e)),
                         }
                         drop(guard);
@@ -691,12 +696,10 @@ pub(super) fn read(
 fn kind(kind: FileKind) -> FileType {
     match kind { FileKind::Directory => FileType::Directory, FileKind::File => FileType::RegularFile }
 }
-fn send_index_page(block: &DirBlock, offset: usize, mut reply: ReplyDirectory,
-    visible: Option<&std::collections::HashSet<(u64, &str)>>) {
+fn send_index_page(block: &DirBlock, offset: usize, mut reply: ReplyDirectory) {
     let _span = diagnostics::span(diagnostics::Stage::ReaddirReply);
     if offset > block.entries.len() { reply.error(libc::EINVAL); return; }
     for (position, entry) in block.entries.iter().enumerate().skip(offset) {
-        if visible.is_some_and(|visible| !visible.contains(&(entry.ino, entry.name.as_ref()))) { continue; }
         if reply.add(entry.ino, (position + 1) as i64, kind(entry.kind), entry.name.as_ref()) { break; }
     }
     reply.ok();
@@ -704,14 +707,25 @@ fn send_index_page(block: &DirBlock, offset: usize, mut reply: ReplyDirectory,
 fn send_index_plus_sql(store: &drive_core::SharedStore, notify: &NotifyHub,
     block: &DirBlock, offset: usize, uid: u32, gid: u32, mut reply: ReplyDirectoryPlus) {
     if offset > block.entries.len() { reply.error(libc::EINVAL); return; }
-    let guard = store.lock().unwrap();
+    let guard = match store.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => {
+            // No old attribute is ever published. dirent-only PLUS preserves
+            // .9 continuation/seek behavior while the authority writer is busy.
+            for (position, entry) in block.entries.iter().enumerate().skip(offset) {
+                if reply.add_without_lookup(entry.ino, (position + 1) as i64,
+                    entry.name.as_ref(), kind(entry.kind)) { break; }
+            }
+            reply.ok();
+            return;
+        }
+        Err(std::sync::TryLockError::Poisoned(_)) => { reply.error(libc::EIO); return; }
+    };
     // Includes EOF: revocation cannot be bypassed with an empty page.
-    let current = match guard.directory_snapshot(block.ino, MAX_BYTES) {
-        Ok(current) => current,
+    match guard.directory_snapshot(block.ino, MAX_BYTES) {
+        Ok(_) => (),
         Err(e) => { reply.error(errno(&e)); return; },
     };
-    let visible = current.entries.iter().map(|entry| (entry.ino, entry.name.as_str()))
-        .collect::<std::collections::HashSet<_>>();
     let mut index = offset;
     while index < block.entries.len() {
         let end = (index + PLUS_PAGE).min(block.entries.len());
@@ -723,7 +737,6 @@ fn send_index_plus_sql(store: &drive_core::SharedStore, notify: &NotifyHub,
             Err(e) => { reply.error(errno(&e)); return; },
         };
         for (position, entry) in block.entries[index..end].iter().enumerate() {
-            if !visible.contains(&(entry.ino, entry.name.as_ref())) { continue; }
             let cookie = (index + position + 1) as i64;
             let full = if let Some(record) = &records[position] {
                 let (_, attr_ttl) = preview::reply_ttls(notify, record.cacheable, true);

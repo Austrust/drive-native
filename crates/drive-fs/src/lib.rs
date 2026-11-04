@@ -160,6 +160,7 @@ impl CacheFilesystem {
         self
     }
     fn refresh_index_later(&self) {
+        if self.notify.delivery_failed() { return; }
         if let Some(binding) = &self.namespace_index {
             binding.schedule(self.store.clone(), &self.queue);
         }
