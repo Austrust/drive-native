@@ -1179,22 +1179,46 @@ impl Bridge {
         let mut blocked: Option<String> = None;
         for op in operations {
             let (mut job, scope) = {
-                let s = self.store.lock().unwrap();
+                let mut s = self.store.lock().unwrap();
+                let job = match s.upload_job(&op) {
+                    Ok(job) => job,
+                    Err(error) => {
+                        if !reconcile {
+                            s.record_upload_preparation_failure(&op, "local_storage").map_err(io::Error::other)?;
+                        }
+                        return Err(io::Error::other(error));
+                    }
+                };
                 (
-                    s.upload_job(&op).map_err(io::Error::other)?,
+                    job,
                     s.scope_path().map_err(io::Error::other)?,
                 )
+            };
+            // Preparation is read-only remotely. A failed attempt is history,
+            // not an uncertain mutation, and its raw error is never persisted.
+            let record_preparation_failure = |kind: &str| -> io::Result<()> {
+                if !reconcile {
+                    self.store.lock().unwrap().record_upload_preparation_failure(&op, kind)
+                        .map_err(io::Error::other)?;
+                }
+                Ok(())
             };
             let mut h = sha2::Sha256::new();
             let mut buf = [0; 65536];
             loop {
-                let n = job.file.read(&mut buf)?;
+                let n = match job.file.read(&mut buf) {
+                    Ok(n) => n,
+                    Err(error) => { record_preparation_failure("local_storage")?; return Err(error); }
+                };
                 if n == 0 {
                     break;
                 }
                 h.update(&buf[..n]);
             }
-            job.file.seek(SeekFrom::Start(0))?;
+            if let Err(error) = job.file.seek(SeekFrom::Start(0)) {
+                record_preparation_failure("local_storage")?;
+                return Err(error);
+            }
             let sha256 = format!("{:x}", h.finalize());
             if !reconcile && job.node.version == drive_core::creations::CREATE_VERSION {
                 let (parent, cursor) = {
@@ -1214,7 +1238,7 @@ impl Bridge {
                     continue;
                 }
                 let path = format!("{}/{}", scope.trim_end_matches('/'), job.relative_path);
-                let prepared = rpc.call(
+                let prepared = match rpc.call(
                     Command::PrepareUpload {
                         node: job.node.clone(),
                         parent,
@@ -1223,18 +1247,24 @@ impl Bridge {
                         cursor,
                     },
                     Duration::from_secs(120),
-                )?;
+                ) {
+                    Ok(reply) => reply,
+                    Err(error) => {
+                        record_preparation_failure(if error.kind() == io::ErrorKind::InvalidData { "protocol" } else { "network" })?;
+                        return Err(error);
+                    }
+                };
                 match prepared.body {
                     Response::UploadPrepared { origin } => {
                         // The operation is still pending: a lost preparation reply
                         // is safe to repeat because no mutation was sent.
-                        if self
+                        let saved_origin = self
                             .store
                             .lock()
                             .unwrap()
-                            .prepare_upload_origin(&op, &origin, &sha256)
-                            .is_err()
-                        {
+                            .prepare_upload_origin(&op, &origin, &sha256);
+                        if saved_origin.is_err() {
+                            record_preparation_failure("protocol")?;
                             continue;
                         }
                     }
@@ -1245,7 +1275,14 @@ impl Bridge {
                         }
                         continue;
                     }
-                    _ => continue,
+                    Response::Failed { .. } => {
+                        record_preparation_failure("server_rejected")?;
+                        continue;
+                    }
+                    _ => {
+                        record_preparation_failure("protocol")?;
+                        continue;
+                    }
                 }
             }
             let (node, path, origin, mtime) = {

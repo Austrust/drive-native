@@ -197,6 +197,7 @@ impl Store {
             .as_secs()
             .min(i64::MAX as u64) as i64;
         tx.execute("INSERT INTO cache_published(node,at) VALUES(?1,?2) ON CONFLICT(node) DO UPDATE SET at=excluded.at", params![body.ticket.id, now])?;
+        crate::sync_history::record_download_publication(&tx, &body.ticket.id, &body.ticket.version)?;
         tx.commit()?;
         Ok(())
     }

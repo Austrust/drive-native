@@ -81,7 +81,7 @@ fn dirty_draft_is_not_an_index_attribute_hit() {
     let (_temp, store, binding, notify) = fixture();
     let draft = { let mut guard = store.lock().unwrap();
         let draft = guard.begin_draft("a", "v1", None).unwrap();
-        guard.draft_write(&draft, 0, b"modified local bytes").unwrap(); draft };
+        guard.draft_write(&draft, 0, b"modified local bytes", false).unwrap(); draft };
     binding.refresh(&store);
     let lease = binding.lease(&store, &notify).unwrap();
     assert!(binding.index.lookup(1, "a").is_none());

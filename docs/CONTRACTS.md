@@ -31,6 +31,7 @@ G2 全量编译；G3 完整实现后才由独立验证代理进入 G4；G5 独�
 pub fn build(store: &Store) -> Result<NamespaceIndex>;
 impl NamespaceIndex {
     pub fn build(store: &Store) -> Result<Self>;
+    pub fn degraded() -> Self; // G2: refreshable empty holder for initial preview
     pub fn entry_by_ino(&self, ino: u64) -> Option<Arc<EntrySlot>>;
     pub fn lookup(&self, parent_ino: u64, name: &str) -> Option<Arc<EntrySlot>>;
     pub fn dir_block(&self, ino: u64) -> Option<Arc<DirBlock>>;

@@ -104,6 +104,14 @@ pub struct NamespaceIndex { inner: Arc<Inner> }
 pub fn build(store: &Store) -> Result<NamespaceIndex> { NamespaceIndex::build(store) }
 
 impl NamespaceIndex {
+    /// A mount beginning in preview keeps a refreshable holder without ever
+    /// publishing preview data as authoritative. build() retains its errors.
+    pub fn degraded() -> Self {
+        Self { inner: Arc::new(Inner {
+            snapshot: RwLock::new(Arc::new(Snapshot::empty(0, 0, None))),
+            invalidation: AtomicU64::new(0), builder: Mutex::new(()),
+        }) }
+    }
     pub fn build(store: &Store) -> Result<Self> {
         Self::build_with_budget(store, Budget::default())
     }
@@ -574,5 +582,16 @@ mod tests {
         let actual = index.dir_block(parent).unwrap();
         assert_eq!(actual.entries.iter().map(|entry| entry.ino).collect::<Vec<_>>(),
             expected.entries.iter().map(|entry| entry.ino).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn initial_degraded_holder_recovers_without_replacing_the_mount() {
+        let (_path, store) = fixture();
+        let index = NamespaceIndex::degraded();
+        assert!(index.is_degraded());
+        assert!(index.entry_by_ino(1).is_none());
+        assert_eq!(index.ensure_fresh(&store), RefreshOutcome::Refreshed);
+        assert!(!index.is_degraded());
+        assert_eq!(index.entry_by_ino(1).unwrap().node.as_ref(), "root");
     }
 }

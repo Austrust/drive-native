@@ -6,6 +6,7 @@ use std::{
     ops::{Deref, DerefMut},
     sync::{
         Arc, LockResult, Mutex, MutexGuard, PoisonError, TryLockError, TryLockResult,
+        RwLock, RwLockReadGuard, RwLockWriteGuard,
         atomic::{AtomicU64, Ordering},
         mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TryRecvError},
     },
@@ -53,6 +54,20 @@ pub struct SharedStore {
     signal: OwnerSignal,
     inner: Mutex<Tracked>,
     receiver: Mutex<Option<Receiver<()>>>,
+    // Independent of semantic desktop notifications: includes atime/inode and
+    // every SQLite mutation. Lock order is projection -> inner everywhere.
+    projection: RwLock<()>,
+    projection_word: AtomicU64,
+}
+
+/// A short metadata publication lease. It never holds SQLite/Store; callers
+/// must not acquire Store until this lease has been dropped.
+pub struct ProjectionReadGuard<'a> {
+    _guard: RwLockReadGuard<'a, ()>,
+    state: CommitState,
+}
+impl ProjectionReadGuard<'_> {
+    pub fn state(&self) -> CommitState { self.state }
 }
 struct OwnerSignal {
     state: Arc<AtomicU64>,
@@ -113,10 +128,20 @@ impl SharedStore {
                 unverified,
             }),
             receiver: Mutex::new(Some(receiver)),
+            projection: RwLock::new(()),
+            projection_word: AtomicU64::new(if unverified { 1 } else { 0 }),
         }
     }
     pub fn change_state(&self) -> CommitState {
         state(self.signal.state.load(Ordering::Acquire))
+    }
+    /// Observation only. A reply must additionally hold try_projection_read().
+    pub fn projection_state(&self) -> CommitState {
+        state(self.projection_word.load(Ordering::Acquire))
+    }
+    pub fn try_projection_read(&self) -> Option<ProjectionReadGuard<'_>> {
+        let guard = self.projection.try_read().ok()?;
+        Some(ProjectionReadGuard { _guard: guard, state: self.projection_state() })
     }
     pub fn take_notifications(&self) -> Result<CommitNotifications, AlreadySubscribed> {
         let mut receiver = self.receiver.lock().unwrap_or_else(PoisonError::into_inner);
@@ -128,26 +153,38 @@ impl SharedStore {
             })
             .ok_or(AlreadySubscribed)
     }
-    fn guard<'a>(&'a self, guard: MutexGuard<'a, Tracked>, poisoned: bool) -> StoreGuard<'a> {
+    fn guard<'a>(&'a self, guard: MutexGuard<'a, Tracked>, projection: RwLockWriteGuard<'a, ()>, poisoned: bool) -> StoreGuard<'a> {
         StoreGuard {
             shared: self,
             guard: Some(guard),
             mutable_access: false,
             poisoned,
+            _projection: projection,
         }
     }
     pub fn lock(&self) -> LockResult<StoreGuard<'_>> {
+        let (projection, projection_poisoned) = match self.projection.write() {
+            Ok(guard) => (guard, false),
+            Err(error) => (error.into_inner(), true),
+        };
         match self.inner.lock() {
-            Ok(guard) => Ok(self.guard(guard, false)),
-            Err(error) => Err(PoisonError::new(self.guard(error.into_inner(), true))),
+            Ok(guard) if !projection_poisoned => Ok(self.guard(guard, projection, false)),
+            Ok(guard) => Err(PoisonError::new(self.guard(guard, projection, true))),
+            Err(error) => Err(PoisonError::new(self.guard(error.into_inner(), projection, true))),
         }
     }
     pub fn try_lock(&self) -> TryLockResult<StoreGuard<'_>> {
+        let (projection, projection_poisoned) = match self.projection.try_write() {
+            Ok(guard) => (guard, false),
+            Err(TryLockError::WouldBlock) => return Err(TryLockError::WouldBlock),
+            Err(TryLockError::Poisoned(error)) => (error.into_inner(), true),
+        };
         match self.inner.try_lock() {
-            Ok(guard) => Ok(self.guard(guard, false)),
+            Ok(guard) if !projection_poisoned => Ok(self.guard(guard, projection, false)),
+            Ok(guard) => Err(TryLockError::Poisoned(PoisonError::new(self.guard(guard, projection, true)))),
             Err(TryLockError::WouldBlock) => Err(TryLockError::WouldBlock),
             Err(TryLockError::Poisoned(error)) => Err(TryLockError::Poisoned(PoisonError::new(
-                self.guard(error.into_inner(), true),
+                self.guard(error.into_inner(), projection, true),
             ))),
         }
     }
@@ -171,6 +208,7 @@ pub struct StoreGuard<'a> {
     guard: Option<MutexGuard<'a, Tracked>>,
     mutable_access: bool,
     poisoned: bool,
+    _projection: RwLockWriteGuard<'a, ()>,
 }
 impl fmt::Debug for StoreGuard<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -191,14 +229,23 @@ impl DerefMut for StoreGuard<'_> {
         &mut self.guard.as_mut().expect("live Store guard").store
     }
 }
-impl Drop for StoreGuard<'_> {
-    fn drop(&mut self) {
+impl StoreGuard<'_> {
+    /// Publish the completed boundary and capture its exact projection token
+    /// before releasing the write lease. This binds a rebuilt index without a
+    /// race against a second Store writer between drop and token observation.
+    pub fn finish_projection(mut self) -> CommitState {
+        self.finish();
+        self.shared.projection_state()
+    }
+    fn finish(&mut self) {
         let Some(mut guard) = self.guard.take() else {
             return;
         };
         let hint = guard.store.db.total_changes();
         let poisoned = self.poisoned || std::thread::panicking();
         let before = self.shared.change_state();
+        let projection_before = self.shared.projection_state();
+        let projection_changed = hint != guard.total_changes || self.mutable_access || poisoned;
         let mut changed = false;
         if hint != guard.total_changes
             || self.mutable_access
@@ -223,6 +270,12 @@ impl Drop for StoreGuard<'_> {
         }
         guard.total_changes = hint;
         let verified = !guard.unverified;
+        if projection_changed || projection_before.verified != verified {
+            let next = projection_before.revision.checked_add(1).filter(|n| *n < (1 << 63));
+            self.shared.projection_word.store(
+                next.map_or(u64::MAX, |n| (n << 1) | u64::from(!verified)), Ordering::Release,
+            );
+        }
         changed |= before.verified != verified;
         if changed {
             // Store serialization makes this the sole publisher. One atomic
@@ -238,6 +291,9 @@ impl Drop for StoreGuard<'_> {
             let _ = self.shared.signal.wake.try_send(());
         }
     }
+}
+impl Drop for StoreGuard<'_> {
+    fn drop(&mut self) { self.finish(); }
 }
 
 #[cfg(test)]

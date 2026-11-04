@@ -666,7 +666,10 @@ impl Service {
             drop(timing);
             match index {
                 Ok(index) => fs = fs.with_namespace_index(Arc::new(index)),
-                Err(_) => drive_fs::diagnostics::count(drive_fs::diagnostics::Stage::IndexDegraded),
+                Err(_) => {
+                    drive_fs::diagnostics::count(drive_fs::diagnostics::Stage::IndexDegraded);
+                    fs = fs.with_namespace_index(Arc::new(drive_core::namespace_index::NamespaceIndex::degraded()));
+                }
             }
         }
         if self.profile.writable {

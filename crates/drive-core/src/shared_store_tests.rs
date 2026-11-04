@@ -42,6 +42,41 @@ fn quiet(n: &CommitNotifications) {
 }
 
 #[test]
+fn projection_lease_covers_atime_without_changing_semantic_notifications() {
+    let (_dir, shared, notifications) = fixture();
+    let semantic = shared.change_state();
+    let before = shared.projection_state();
+    let guard = shared.lock().unwrap();
+    assert!(shared.try_projection_read().is_none());
+    guard.db.execute("INSERT INTO local_atimes(node,seconds,nanoseconds) VALUES('a',42,7)", []).unwrap();
+    let captured = guard.finish_projection();
+    assert!(captured.verified && captured.revision > before.revision);
+    assert_eq!(captured, shared.projection_state());
+    assert_eq!(semantic, shared.change_state());
+    quiet(&notifications);
+    let lease = shared.try_projection_read().unwrap();
+    assert_eq!(lease.state(), captured);
+    assert!(matches!(shared.try_lock(), Err(TryLockError::WouldBlock)));
+    drop(lease);
+    assert!(shared.try_lock().is_ok());
+}
+
+#[test]
+fn uncommitted_projection_never_becomes_a_verified_reply_token() {
+    let (_dir, shared, _) = fixture();
+    let guard = shared.lock().unwrap();
+    guard.db.execute_batch("BEGIN; UPDATE nodes SET name='uncommitted' WHERE id='a';").unwrap();
+    let captured = guard.finish_projection();
+    assert!(!captured.verified);
+    assert!(!shared.try_projection_read().unwrap().state().verified);
+    let guard = shared.lock().unwrap();
+    guard.db.execute_batch("ROLLBACK").unwrap();
+    let repaired = guard.finish_projection();
+    assert!(repaired.verified && repaired.revision > captured.revision);
+    assert_eq!(shared.lock().unwrap().node("a").unwrap().name, "a");
+}
+
+#[test]
 fn outer_error_after_commit_wakes_once_for_the_entire_guard() {
     let (_dir, shared, notifications) = fixture();
     let result = (|| -> crate::Result<()> {
