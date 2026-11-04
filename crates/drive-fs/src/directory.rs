@@ -379,7 +379,6 @@ impl Views {
 }
 
 pub(super) fn open(fs: &mut CacheFilesystem, ino: u64, flags: i32, reply: ReplyOpen) {
-    if let Err(e)=permissions::read(&fs.store,ino,permissions::Action::List){reply.error(e);return;}
     diagnostics::count(diagnostics::Stage::OpendirRequests);
     if flags & libc::O_ACCMODE != libc::O_RDONLY {
         reply.error(libc::EISDIR);

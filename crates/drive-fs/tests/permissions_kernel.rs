@@ -194,6 +194,7 @@ fn live_revocation_restoration_and_list_vs_traverse() {
     assert_eq!(&bytes, b"old");
     f.decision("root", "A", Action::Traverse, Decision::Deny);
     denied(std::fs::File::open(f.mount.join("A/file")));
+    denied(fs::metadata(f.mount.join("A/missing")));
     assert_eq!(fs::read(f.mount.join("B/target")).unwrap(), b"old");
 }
 

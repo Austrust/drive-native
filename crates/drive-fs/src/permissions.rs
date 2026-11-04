@@ -61,14 +61,14 @@ pub(super) fn rename(
     }
     Ok(())
 }
-/// No-denial metadata scans pay one atomic read. Once a denial is published,
-/// current Store decisions are required; a busy writer yields EAGAIN, never
-/// a stale permission grant. Existing access_denied/preview gates still apply.
-pub(super) fn read(store: &drive_core::SharedStore, ino: u64, action: Action) -> Result<(), i32> {
+/// Body reads call this only on a worker. Wait for the current Store decision
+/// instead of turning ordinary metadata contention into a spurious EAGAIN.
+/// Dispatcher metadata handlers use their normal inline-or-queue routing.
+pub(super) fn read_on_worker(store: &drive_core::SharedStore, ino: u64, action: Action) -> Result<(), i32> {
     if !store.has_permission_denials() {
         return Ok(());
     }
-    let guard = store.try_lock().map_err(|_| libc::EAGAIN)?;
+    let guard = store.lock().map_err(|_| libc::EIO)?;
     inode(&guard, ino, action).map_err(|e| errno(&e))
 }
 pub(super) fn publish_read(

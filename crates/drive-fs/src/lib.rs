@@ -454,7 +454,6 @@ impl Filesystem for CacheFilesystem {
     }
     fn lookup(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEntry) {
         diagnostics::count(diagnostics::Stage::LookupRequests);
-        if let Err(error)=permissions::read(&self.store,parent,permissions::Action::Traverse){reply.error(error);return;}
         let Some(name) = name.to_str() else {
             reply.error(libc::ENOENT);
             return;
@@ -542,7 +541,6 @@ impl Filesystem for CacheFilesystem {
     }
     fn getattr(&mut self, _req: &Request<'_>, ino: u64, fh: Option<u64>, reply: ReplyAttr) {
         diagnostics::count(diagnostics::Stage::GetattrRequests);
-        if let Err(error)=permissions::read(&self.store,ino,permissions::Action::Traverse){reply.error(error);return;}
         // Handle-relative attributes, mutable drafts and unlinked objects retain
         // their original descriptor-aware SQL path.
         if fh.is_none() {
@@ -787,7 +785,7 @@ impl Filesystem for CacheFilesystem {
         let hydrator = self.hydrator.clone();
         let store = self.store.clone();
         self.read_queue.submit(Box::new(move || {
-            if let Err(e)=permissions::read(&store,ino,permissions::Action::Read){reply.error(e);return;}
+            if let Err(e)=permissions::read_on_worker(&store,ino,permissions::Action::Read){reply.error(e);return;}
             let (cached, missing) = {
                 let table = handles.lock().unwrap();
                 match table.entries.get(&fh) {
@@ -822,7 +820,7 @@ impl Filesystem for CacheFilesystem {
             network_queue.submit(Box::new(move || {
                 match hydrator.hydrate_cancellable(&missing.unwrap(), &cancel) {
                     Ok(content) => {
-                        if let Err(e)=permissions::read(&store,ino,permissions::Action::Read){reply.error(e);return;}
+                        if let Err(e)=permissions::read_on_worker(&store,ino,permissions::Action::Read){reply.error(e);return;}
                         let mut h = handles.lock().unwrap();
                         let Some(entry) = h.entries.get_mut(&fh) else {
                             reply.error(libc::EBADF);

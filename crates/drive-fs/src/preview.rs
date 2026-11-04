@@ -57,6 +57,9 @@ pub(super) fn metadata(s: &Store, ino: u64) -> drive_core::Result<Metadata> {
     }
 }
 pub(super) fn lookup(s: &Store, parent: u64, name: &str) -> drive_core::Result<Metadata> {
+    // Check the parent even when the requested child does not exist. A denied
+    // traversal must not leak the child's existence through ENOENT.
+    permissions::inode(s, parent, permissions::Action::Traverse)?;
     // One statement resolves the authority parent, ENOTDIR and the child
     // projection. Only a missing authority answer can be a cold preview parent,
     // and that fallback keeps the original candidate-namespace errors.
@@ -94,6 +97,11 @@ pub(super) fn try_inline_lookup(
         Err(std::sync::TryLockError::Poisoned(_)) => return None,
     };
     diagnostics::count(diagnostics::Stage::LookupInline);
+    if store.has_permission_denials() {
+        if let Err(error) = permissions::inode(&guard, parent, permissions::Action::Traverse) {
+            return Some(Err(errno(&error)));
+        }
+    }
     let projection = diagnostics::span(diagnostics::Stage::LookupProjection);
     let result = guard.posix_lookup_by_inode(parent, name);
     drop(projection);
