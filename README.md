@@ -2,6 +2,9 @@
 
 索引、同步历史与逐目录权限的实现接口和阶段边界：[冻结契约](docs/CONTRACTS.md)。
 
+- 索引与桌面历史 — 实现范围、验证和性能证据：[报告](docs/FIX_5_2_REPORT.md)。
+- 逐目录权限 — 策略、迁移、权限来源和验收边界：[报告](docs/FIX_7_REPORT.md)。
+
 开发包与安装说明 — FSearch 提速、故障恢复操作和验证边界：[交付说明](docs/RELEASE_20261103_9.md)。
 
 以下保留此前交付记录；当前验收统一从 [DELIVERY_GATES.md](DELIVERY_GATES.md) 进入。

@@ -64,7 +64,7 @@ G0 对原示意签名的裁决：可刷新共享对象不能安全返回无守�
 Store 是权威，索引只读，不写业务状态、不下载正文。装载采用批量投影，完全复用 PosixRecord 的 blob/draft/mtime/atime/mode/不可见/本地覆盖语义。缺失 inode、预览、不确定和脏正文可直接返回 miss，由 .9 SQL 路径回答；不得冒充不存在。
 默认上限 2,000,000 条 / 512 MiB；超过上限或装载超过 1s，安全降级 SQL，诊断 partial/degraded。允许有界目录懒加载，但不允许半代刷新后把未刷新的条目标为新代。
 
-读取者在回复前核对 SharedStore::change_state() 的 revision 与 verified，以及既有 publication/目录 stamp 门禁。Store::local_revision() 是索引内部代数，不能假设与 SharedStore revision 数值相等。热路径不取 Store 锁；状态变化时回退 SQL/受序列化保护地刷新。只有在完整且 verified 的快照上才重新启用内存命中。通知丢失不能影响正确性。dirty/draft 的文件变化可能不提交 SQLite，因此不能靠 revision 缓存其属性；这些属性走 SQL。打开目录的 cookie、ACL/preview 重验、取消和 releasedir 生命周期保持 .9 语义。
+读取者在回复前核对 SharedStore::projection_state() 的 revision 与 verified，以及既有 publication/目录 stamp 门禁（G2 接线细节见下节）。Store::local_revision() 是索引内部代数，不能假设与 SharedStore revision 数值相等。热路径不取 Store 锁；状态变化时回退 SQL/受序列化保护地刷新。只有在完整且 verified 的快照上才重新启用内存命中。通知丢失不能影响正确性。dirty/draft 的文件变化可能不提交 SQLite，因此不能靠 revision 缓存其属性；这些属性走 SQL。打开目录的 cookie、ACL/preview 重验、取消和 releasedir 生命周期保持 .9 语义。
 
 ### G1 静态核对后的 G2 接线补充
 

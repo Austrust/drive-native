@@ -24,6 +24,7 @@
 - [multi_mount_tests.py](multi_mount_tests.py)
 - [unified_manager_tests.py](unified_manager_tests.py)：同窗切换、显式配置、开发子进程环境、独立任务请求、托盘可达性与停止阶段。
 - [history_gui_tests.py](history_gui_tests.py)：服务绑定的历史分页、筛选、清理与当前文件解析；覆盖缓存、仅在线、删除和离线操作。
+- [permission_gui_tests.py](permission_gui_tests.py)：权限四态、策略 revision、迟到回复及合成截图；真实 ACL 验收另行进行。
 - [gui_instance_test.py](gui_instance_test.py)：在独立 `dbus-run-session` 中验证第二个 GUI 进程激活现有窗口。
 - [unified_gui_render.py](unified_gui_render.py)：合成多挂载的浅／深色布局截图，不连接后台或 NAS。
 - [multi_nemo_check.py](multi_nemo_check.py)

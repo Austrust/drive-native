@@ -1,5 +1,10 @@
 # FSearch performance and actionable issue recovery
 
+This document records the `.9` integration. The current branch's namespace
+index, persistent history and schema25 permission work have separate
+[#5/#2](FIX_5_2_REPORT.md) and [#7](FIX_7_REPORT.md) reports; historical results
+below must not be used as acceptance evidence for that candidate.
+
 This development integration starts from the published `.8` source and retains
 its initialization, timestamp, local draft and upgrade safeguards. It combines
 the directory work from `codex/fsearch-perf-1`, the dependency-scoped upload

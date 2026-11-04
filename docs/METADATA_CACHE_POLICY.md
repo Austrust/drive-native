@@ -1,5 +1,24 @@
 # Metadata cache policy: names always revalidate
 
+## Namespace index integration
+
+The current branch adds a read-only NamespaceIndex guarded by an independent
+SharedStore projection generation and a reply lease. Store mutations include
+atime and inode allocation; semantic desktop notifications alone are insufficient.
+An index miss, dirty body, preview, unverified generation or exhausted build
+budget uses the authority SQL path. A degraded holder can recover after preview
+promotion. No index path extends positive-entry TTL.
+
+Known per-action ACL denials suspend indexed replies. Actual operations check
+current target actions and both local/retained remote ancestry. Bounded content
+and directory replies serialize with first-denial publication without making
+ordinary metadata work block cached content. See the exact locking and fallback
+contract in [CONTRACTS.md](CONTRACTS.md), and current evidence in the
+[#5/#2 report](FIX_5_2_REPORT.md) and [#7 report](FIX_7_REPORT.md).
+
+The following validation references describe the earlier `.9` policy. They do
+not certify the current index/ACL integration.
+
 This development integration separates positive-entry and attribute lifetimes.
 It supersedes the positive-name caching contract of `de19ae0`; the earlier
 approximately four-second static scan result is not a performance claim for this

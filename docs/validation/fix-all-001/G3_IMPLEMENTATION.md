@@ -46,3 +46,18 @@ G3 期间仅 cargo check；G4 由不写产品代码的独立验证代理运行�
 所有用例截至 G3 冻结均**未实测**。保留 DefaultPermissions；未实施替代内核 POSIX 权限系统。
 
 G3 后只由独立验证代理执行 G4。真实 NAS、凭据、生产数据、push、发布均未操作。
+
+## G4 反馈后的修复候选
+
+首轮独立归档为 `cb22500`，保留原有候选与失败日志。以下修改由协调者完成，作者仍只运行 cargo check：
+
+| commit | 修改依据 | 未验证点（提交时） |
+|---|---|---|
+| 8ceda14 | 调度先验证 durable intent 再解码 ACL 目标；重置 observed Read 拒绝时恢复下载重试门禁 | 新增回归和完整矩阵未实测 |
+| 55189ba | 显式分类三张新表；确定非提交后重试释放旧 upload_paths 捕获；新草稿重查父 CreateFile；修正缺元数据及独立任务范围的夹具 | 新候选由独立 G4 复跑，不能沿用旧候选通过数 |
+
+`g3-check-009.log` 和 `g3-check-010.log` 的全 workspace/all-targets/all-features 编译完成；010 退出 0。
+新候选未删除或放宽原断言。独立挂载 A 的夹具按 native::project 的选定子树模型令 A.parent=None；
+产品 `ensure_fs_root` 的 inode 1 身份保护保持不变。原失败为该夹具错误地在整树 Store 上改挂载根。
+
+最终 G4/G5 结果见 [#5/#2 报告](../../FIX_5_2_REPORT.md)和 [#7 报告](../../FIX_7_REPORT.md)，本节保留修复提交时的验证边界。
