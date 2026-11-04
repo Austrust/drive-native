@@ -256,6 +256,10 @@ fn overview_reports_exact_unknown_commits_without_running_dependency_scheduler()
     let (_d, service) = fixture();
     {
         let mut store = service.bridge.store.lock().unwrap();
+        // The shared service fixture is legacy read-only. Authorize these
+        // synthetic jobs before exercising the scheduler and unknown commits.
+        drive_core::write_permissions::set_local_policy(&store, "root",
+            drive_core::write_permissions::LocalPolicy::FollowRemote).unwrap();
         let upload = store.save_local("one", b"unconfirmed local edit").unwrap();
         store.mark_upload_started(&upload).unwrap();
         store.mark_upload_uncertain(&upload).unwrap();
@@ -324,8 +328,10 @@ fn directory_pages_are_complete_without_inode_allocation_or_downloads() {
         .install_remote_snapshot(&nodes, "1", "server")
         .unwrap();
     store.ensure_fs_root("root").unwrap();
-    let before = store.local_revision();
     let service = Service::new(profile(), store, PathBuf::from("/nonexistent-worker")).unwrap();
+    // Service startup persists the task policy once. Measure only the queries,
+    // which must still allocate no inodes, hydrate nothing, and mutate no state.
+    let before = service.bridge.store.lock().unwrap().local_revision();
     let mut paths = Vec::new();
     for (offset, expected_count) in [(0, 256), (256, 256), (512, 1), (513, 0), (u32::MAX, 0)] {
         let page: serde_json::Value =

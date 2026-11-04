@@ -42,11 +42,27 @@ pub struct HistoryPage {
     pub next_cursor: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
+#[derive(Debug, Clone)]
 pub enum ClearHistory {
     OlderThanDays { days: Option<u32> },
     All,
+}
+
+impl<'de> Deserialize<'de> for ClearHistory {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        // An internally tagged unit variant discards its remaining map, even
+        // with deny_unknown_fields. An empty struct variant validates it.
+        #[derive(Deserialize)]
+        #[serde(tag = "mode", rename_all = "snake_case", deny_unknown_fields)]
+        enum Wire {
+            OlderThanDays { days: Option<u32> },
+            All {},
+        }
+        Ok(match Wire::deserialize(deserializer)? {
+            Wire::OlderThanDays { days } => Self::OlderThanDays { days },
+            Wire::All {} => Self::All,
+        })
+    }
 }
 
 fn invalid() -> Error {
@@ -494,6 +510,8 @@ mod tests {
         assert_eq!(store.open_cached("file").unwrap().size().unwrap(),bytes);
         assert_eq!(store.upload_job(&op).unwrap().state,"pending");
         assert!(serde_json::from_str::<ClearHistory>(r#"{"mode":"older_than_days","days":-1}"#).is_err());
+        assert!(serde_json::from_str::<ClearHistory>(r#"{"mode":"all","days":30}"#).is_err());
+        assert!(serde_json::from_str::<ClearHistory>(r#"{"mode":"all","unexpected":true}"#).is_err());
         assert!(serde_json::from_str::<ClearHistory>(r#"{"mode":"oops"}"#).is_err());
     }
 

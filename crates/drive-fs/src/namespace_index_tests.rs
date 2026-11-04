@@ -46,6 +46,9 @@ fn dropped_notification_cannot_keep_an_old_generation_current() {
     // No consumer subscribes to or drains commit notifications.
     store.lock().unwrap().create_local_directory("root", "added", 0o755).unwrap();
     assert!(binding.lease(&store, &notify).is_none());
+    // Direct Store creation has no inode yet. The real mkdir reply (or a
+    // lookup miss) allocates it through the authoritative POSIX projection.
+    assert!(store.lock().unwrap().posix_lookup_by_inode(1, "added").unwrap().directory);
     binding.refresh(&store);
     let lease = binding.lease(&store, &notify).unwrap();
     assert!(binding.index.lookup(1, "added").unwrap().directory);
@@ -107,6 +110,7 @@ fn separate_mount_indexes_do_not_share_generations_or_identities() {
     let (_a, first, a, notify_a) = fixture();
     let (_b, second, b, notify_b) = fixture();
     first.lock().unwrap().create_local_directory("root", "only-first", 0o755).unwrap();
+    assert!(first.lock().unwrap().posix_lookup_by_inode(1, "only-first").unwrap().directory);
     a.refresh(&first);
     let lease = b.lease(&second, &notify_b).unwrap();
     assert!(b.index.lookup(1, "only-first").is_none());

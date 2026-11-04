@@ -16,8 +16,21 @@ pub(super) fn node(store: &Store, id: &str, action: Action) -> drive_core::Resul
     result
 }
 pub(super) fn inode(store: &Store, ino: u64, action: Action) -> drive_core::Result<()> {
-    let record = store.posix_record_by_inode(ino)?;
-    node(store, &record.id, action)
+    match store.posix_record_by_inode(ino) {
+        Ok(record) => node(store, &record.id, action),
+        Err(error) if error.is_not_found() => {
+            // Preview has its own current identity/denial checks and no body.
+            // Do not turn its EAGAIN/EROFS contract into authoritative ENOENT.
+            store.preview_record_by_inode(ino)?;
+            match action {
+                Action::Traverse | Action::List => Ok(()),
+                _ => Err(Error::Io(std::io::Error::from_raw_os_error(
+                    if action.is_write() { libc::EROFS } else { libc::EAGAIN },
+                ))),
+            }
+        }
+        Err(error) => Err(error),
+    }
 }
 pub(super) fn remove(
     store: &Store,
@@ -93,6 +106,12 @@ pub(super) fn project(
     )? == Decision::Deny
     {
         record.mode &= !0o444;
+    }
+    // Whole-task policy is EROFS at the actual operation (and at mount time).
+    // Removing write bits here would make DefaultPermissions return EACCES
+    // before that hook, particularly after a live user-policy change.
+    if !drive_core::write_permissions::mount_writable(store, &root)? {
+        return Ok(());
     }
     // A single denied directory operation must not make DefaultPermissions
     // reject a different allowed operation. Unknown access() stays optimistic.
