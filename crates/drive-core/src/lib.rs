@@ -55,3 +55,5 @@ pub mod initialization_events;
 pub mod initialization_store;
 pub mod snapshot_progress;
 pub mod task_control;
+pub mod namespace_index;
+pub use namespace_index::NamespaceIndex;

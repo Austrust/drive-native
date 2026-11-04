@@ -117,6 +117,74 @@ pub struct DirectorySlot<'a> {
 }
 
 impl Store {
+    /// Read-only, streaming bulk projection for the namespace index. It uses
+    /// the same attribute decoder and precedence as the individual POSIX
+    /// queries. The caller holds a committed Store boundary and a read
+    /// transaction. Missing inode identities are reported, never allocated.
+    pub(crate) fn visit_namespace_index(
+        &self,
+        mut visit: impl FnMut(crate::namespace_index::ProjectedEntry) -> Result<()>,
+    ) -> Result<()> {
+        let denied: bool = self.db.prepare_cached(
+            "SELECT EXISTS(SELECT 1 FROM access_denied)",
+        )?.query_row([], |r| r.get(0))?;
+        // access_blocked includes BOTH current and remote-overlay parent
+        // edges. Materialize it once rather than walking ancestry per row.
+        let visibility = if denied {
+            "AND n.id NOT IN (SELECT id FROM access_blocked)"
+        } else {
+            ""
+        };
+        let parent_visibility = if denied {
+            "AND p.id NOT IN (SELECT id FROM access_blocked)"
+        } else {
+            ""
+        };
+        let sql = format!(
+            "SELECT {columns},n.name,pi.ino,n.parent IS NULL,
+                (n.parent IS NULL OR (p.id IS NOT NULL AND p.deleted=0 {parent_visibility})),
+                NOT EXISTS(SELECT 1 FROM nodes s JOIN local_creations c ON c.node=s.id
+                    WHERE s.parent=n.parent AND s.name=n.name AND s.id!=n.id AND s.deleted=0)
+             FROM nodes n
+             LEFT JOIN fs_inodes i ON i.node=n.id
+             {joins}
+             LEFT JOIN nodes p ON p.id=n.parent
+             LEFT JOIN fs_inodes pi ON pi.node=n.parent
+             WHERE n.deleted=0 {visibility}",
+            columns = record_columns(), joins = record_joins(),
+        );
+        let mut query = self.db.prepare_cached(&sql)?;
+        let mut rows = query.query([])?;
+        while let Some(row) = rows.next()? {
+            let raw = projection(row, 0)?.ok_or_else(|| Error::State(
+                "namespace projection identity missing".into(),
+            ))?;
+            let ino = raw.ino;
+            let id = raw.id.clone();
+            let directory = raw.directory;
+            let parent_ino = row.get::<_, Option<i64>>(13)?
+                .map(u64::try_from).transpose()
+                .map_err(|_| Error::State("invalid namespace parent inode".into()))?;
+            // finish may stat local bodies. Mutable/unlinked attributes and
+            // any row-local failure are a cache miss; enumeration still knows
+            // the name/type. No finish call can allocate an inode here.
+            let attributes = ino.and_then(|_| raw.finish(self).ok())
+                .filter(|record| record.cacheable && !record.unlinked);
+            visit(crate::namespace_index::ProjectedEntry {
+                id,
+                ino,
+                name: row.get(12)?,
+                parent_ino,
+                root: row.get(14)?,
+                parent_visible: row.get(15)?,
+                visible_child: row.get(16)?,
+                directory,
+                attributes,
+            })?;
+        }
+        Ok(())
+    }
+
     /// Bounded attributes for the slots of an already-open authoritative
     /// directory view. One statement resolves all slots; a slot whose identity
     /// no longer matches the view yields `None` (the caller keeps its cookie and
