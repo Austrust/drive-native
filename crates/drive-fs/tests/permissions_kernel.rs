@@ -7,6 +7,7 @@ use drive_core::{
 use std::{
     fs::{self, OpenOptions},
     io::{Read, Seek, SeekFrom, Write},
+    os::unix::fs::PermissionsExt,
     sync::Arc,
 };
 struct Fixture {
@@ -134,7 +135,46 @@ fn root_a_b_and_action_classes_are_enforced_in_one_mount() {
     file.set_len(2).unwrap();
     denied(fs::remove_file(f.mount.join("A/file")));
     denied(fs::rename(f.mount.join("A/file"), f.mount.join("B/moved")));
+    denied(fs::set_permissions(f.mount.join("A/file"), fs::Permissions::from_mode(0o600)));
     assert_eq!(fs::read(f.mount.join("A/file")).unwrap(), b"ed");
+}
+
+#[test]
+#[ignore = "requires ordinary Linux user, /dev/fuse and test-seams; isolated ACL truth"]
+fn setattr_only_persists_mtime_without_granting_content_writes_or_uploads() {
+    let mut f = Fixture::new("root");
+    f.decision("root", "file", Action::WriteContent, Decision::Deny);
+    f.decision("root", "file", Action::Setattr, Decision::Allow);
+    let path = f.mount.join("A/file");
+    let modified = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1234);
+    let file = fs::File::open(&path).unwrap();
+    file.set_modified(modified).unwrap();
+    assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), modified);
+    assert_eq!(fs::read(&path).unwrap(), b"old");
+    denied(OpenOptions::new().write(true).open(&path));
+    denied(OpenOptions::new().write(true).truncate(true).open(&path));
+    {
+        let s = f.store.lock().unwrap();
+        let pending = s.upload_operations("pending").unwrap();
+        assert_eq!(pending.len(), 1);
+        let job = s.upload_job(&pending[0]).unwrap();
+        assert_eq!(job.mtime, Some(1234));
+        // Native mtime still uses a full-body upload. A local Setattr grant
+        // must never override that distinct remote operation's content gate.
+        assert!(p::targets_denied(&s, &p::upload_targets(&job.node)).unwrap());
+        assert_eq!(s.pending_operations().unwrap(), 1);
+    }
+    drop(file);
+    // Keep only this synthetic state while stopping the mount and closing Store.
+    let saved = std::mem::replace(&mut f._temp, tempfile::tempdir().unwrap());
+    drop(f);
+    let s = Store::open(saved.path().join("state")).unwrap();
+    let draft = s.open_dirty_draft("file").unwrap().unwrap();
+    assert_eq!(draft.mtime().unwrap(), 1234);
+    let mut bytes = [0; 3];
+    assert_eq!(draft.read_at(&mut bytes, 0).unwrap(), 3);
+    assert_eq!(&bytes, b"old");
+    assert_eq!(s.upload_operations("pending").unwrap().len(), 1);
 }
 
 #[test]

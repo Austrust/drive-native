@@ -97,7 +97,7 @@ pub(super) fn set_times(
         let missing = matches!(body, OpenContent::Missing(_));
         let job: Job = Box::new(move || {
             let result =
-                draft(&store, &handles, &updates, &hydrator, &id, body, false).and_then(|d| {
+                draft(&store, &handles, &updates, &hydrator, &id, body, false, permissions::Action::Setattr).and_then(|d| {
                     let mut s = store.lock().unwrap();
                     permissions::node(&s,&id,permissions::Action::Setattr).map_err(|e|errno(&e))?;
                     // Recheck access after network hydration and before mutation.

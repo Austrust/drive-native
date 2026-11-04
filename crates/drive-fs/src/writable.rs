@@ -30,8 +30,11 @@ fn draft(
     id: &str,
     body: OpenContent,
     empty: bool,
+    action: permissions::Action,
 ) -> Result<Arc<DraftHandle>, i32> {
-    permissions::node(&store.lock().unwrap(), id, permissions::Action::WriteContent).map_err(|e|errno(&e))?;
+    // Preparing a timestamp edit changes no content. Its local authorization
+    // is Setattr; the eventual full-body upload retains its WriteContent gate.
+    permissions::node(&store.lock().unwrap(), id, action).map_err(|e|errno(&e))?;
     if let OpenContent::Draft(d) = body {
         return Ok(d);
     }
@@ -46,7 +49,7 @@ fn draft(
     };
     let _update = updates.lock().unwrap();
     let d = { let mut s=store.lock().unwrap();
-        permissions::node(&s,id,permissions::Action::WriteContent).map_err(|e|errno(&e))?;
+        permissions::node(&s,id,action).map_err(|e|errno(&e))?;
         Arc::new(s.begin_draft(id, &base, if empty { None } else { source.as_deref() }).map_err(|e|errno(&e))?) };
     let candidates: Vec<_> = {
         let h = handles.lock().unwrap();
@@ -111,7 +114,7 @@ pub(super) fn open(fs: &mut CacheFilesystem, ino: u64, flags: i32, reply: ReplyO
             }
         };
         if flags & libc::O_TRUNC != 0 {
-            match draft(&store, &handles, &updates, &hydrator, &id, body, true) {
+            match draft(&store, &handles, &updates, &hydrator, &id, body, true, permissions::Action::WriteContent) {
                 Ok(d) => {
                     let result={let mut s=store.lock().unwrap();permissions::node(&s,&id,permissions::Action::WriteContent).and_then(|_|s.draft_truncate(&d,0))};
                     if let Err(e) = result {
@@ -208,7 +211,7 @@ pub(super) fn write(
         let missing = matches!(body, OpenContent::Missing(_));
         let job: Job = Box::new(move || {
             let result =
-                draft(&store, &handles, &updates, &hydrator, &id, body, false).and_then(|d| {
+                draft(&store, &handles, &updates, &hydrator, &id, body, false, permissions::Action::WriteContent).and_then(|d| {
                     let mut s=store.lock().unwrap();
                     permissions::node(&s,&id,permissions::Action::WriteContent).map_err(|e|errno(&e))?;
                     s.draft_write(&d, offset as u64, &data, flags & libc::O_APPEND != 0)
@@ -463,7 +466,7 @@ pub(super) fn setattr(
         };
         let missing = matches!(body, OpenContent::Missing(_)) && size != 0;
         let job: Job = Box::new(move || {
-            let result = draft(&store, &handles, &updates, &hydrator, &id, body, size == 0)
+            let result = draft(&store, &handles, &updates, &hydrator, &id, body, size == 0, permissions::Action::WriteContent)
                 .and_then(|d| {
                     let mut s = store.lock().unwrap();
                     permissions::node(&s,&id,permissions::Action::WriteContent).map_err(|e|errno(&e))?;

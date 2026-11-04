@@ -81,6 +81,7 @@ fn readonly_route_captures_before_promotion_and_draft_routes_to_metadata() {
         "cached",
         body,
         false,
+        permissions::Action::WriteContent,
     )
     .unwrap();
     assert!(matches!(
