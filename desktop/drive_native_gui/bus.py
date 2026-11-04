@@ -11,6 +11,7 @@ from PySide6.QtDBus import (
 
 NAME = "org.drivenative.Client1"
 PATH = "/org/drivenative/Client1"
+HISTORY_METHODS = frozenset(("GetSyncHistory", "GetRecentActivity", "ResolveHistoryTarget", "ClearSyncHistory"))
 
 
 class ClientBus(QObject):
@@ -65,7 +66,7 @@ class ClientBus(QObject):
         destination = (
             self.owner
             if method
-            in ("Unlock", "KeepBoth", "KeepDirectoryBoth", "RecheckIssues", "SetCacheSettings", "SetTransferSettings", "SetTrustSettings", "Pause", "Resume", "StopMount")
+            in ("Unlock", "KeepBoth", "KeepDirectoryBoth", "RecheckIssues", "SetCacheSettings", "SetTransferSettings", "SetTrustSettings", "Pause", "Resume", "StopMount", "ClearSyncHistory")
             else self.service
         )
         if not destination:
@@ -103,8 +104,12 @@ class ClientBus(QObject):
                 if isinstance(data, str):
                     try:
                         data = json.loads(data)
-                        if not isinstance(data, dict) or data.get("schema") != 1:
+                        if not isinstance(data, dict) or (
+                            data.get("schema", 1 if method in HISTORY_METHODS else None) != 1
+                        ):
                             raise ValueError()
+                        if method in HISTORY_METHODS and data.get("error"):
+                            error = str(data["error"])
                     except (ValueError, TypeError):
                         data, error = None, "invalid_service_response"
             if callback:
@@ -112,3 +117,17 @@ class ClientBus(QObject):
             watcher.deleteLater()
 
         watcher.finished.connect(finished)
+
+    def get_sync_history(self, query, callback):
+        self.call("GetSyncHistory", [json.dumps(query)], callback)
+
+    def get_recent_activity(self, limit, callback):
+        self.call("GetRecentActivity", [json.dumps({"limit": limit})], callback)
+
+    def resolve_history_target(self, history_id, callback):
+        self.call("ResolveHistoryTarget", [json.dumps({"id": history_id})], callback)
+
+    def clear_sync_history(self, mode, days, callback):
+        query = {"mode": mode}
+        if mode == "older_than_days" and days is not None: query["days"] = days
+        self.call("ClearSyncHistory", [json.dumps(query)], callback)
