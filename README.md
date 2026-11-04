@@ -1,5 +1,7 @@
 # Drive Native
 
+索引、同步历史与逐目录权限的实现接口和阶段边界：[冻结契约](docs/CONTRACTS.md)。
+
 开发包与安装说明 — FSearch 提速、故障恢复操作和验证边界：[交付说明](docs/RELEASE_20261103_9.md)。
 
 以下保留此前交付记录；当前验收统一从 [DELIVERY_GATES.md](DELIVERY_GATES.md) 进入。
