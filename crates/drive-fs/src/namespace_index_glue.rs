@@ -56,13 +56,15 @@ impl Binding {
         }
         let Ok(_refresh) = self.refresh.try_lock() else { return; };
         let Ok(guard) = store.try_lock() else { return; };
-        let span = diagnostics::span(diagnostics::Stage::IndexBuildUs);
+        let started = std::time::Instant::now();
         let outcome = self.index.ensure_fresh(&guard);
         // finish_projection captures the published token while the exclusive
         // projection lease is still held. Reading a token after plain drop
         // could bind this index to a different concurrent writer's generation.
         let state = guard.finish_projection();
-        drop(span);
+        if outcome == RefreshOutcome::Refreshed {
+            diagnostics::value(diagnostics::Stage::IndexBuildUs, started.elapsed().as_micros().min(u64::MAX as u128) as u64);
+        }
         diagnostics::value(diagnostics::Stage::IndexBytes, self.index.bytes() as u64);
         if self.index.is_partial() { diagnostics::count(diagnostics::Stage::IndexPartial); }
         if outcome == RefreshOutcome::Degraded || !state.verified {

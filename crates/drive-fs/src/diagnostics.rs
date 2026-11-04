@@ -71,8 +71,15 @@ pub enum Stage {
     IndexPartial,
     PermissionDenied,
     SpaceForbidden,
+    LookupRequests,
+    GetattrRequests,
+    OpendirRequests,
+    ReaddirRequests,
+    ReaddirPlusRequests,
+    /// Elapsed time for index attempts/replies, not a CPU-time attribution.
+    IndexReadUs,
 }
-const STAGES: [Stage; 44] = [
+const STAGES: [Stage; 50] = [
     Stage::LookupQueue,
     Stage::LookupStoreWait,
     Stage::LookupProjection,
@@ -111,6 +118,8 @@ const STAGES: [Stage; 44] = [
     Stage::IndexHits, Stage::IndexMisses, Stage::IndexFallback,
     Stage::IndexDegraded, Stage::IndexBuildUs, Stage::IndexBytes,
     Stage::IndexPartial, Stage::PermissionDenied, Stage::SpaceForbidden,
+    Stage::LookupRequests, Stage::GetattrRequests, Stage::OpendirRequests,
+    Stage::ReaddirRequests, Stage::ReaddirPlusRequests, Stage::IndexReadUs,
 ];
 struct Aggregate {
     count: AtomicU64,
@@ -128,7 +137,7 @@ impl Aggregate {
         }
     }
 }
-static TOTALS: [Aggregate; 44] = [const { Aggregate::new() }; 44];
+static TOTALS: [Aggregate; 50] = [const { Aggregate::new() }; 50];
 static ENABLED: OnceLock<bool> = OnceLock::new();
 pub(crate) fn enabled() -> bool {
     *ENABLED

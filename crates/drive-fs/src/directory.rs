@@ -378,11 +378,13 @@ impl Views {
 }
 
 pub(super) fn open(fs: &mut CacheFilesystem, ino: u64, flags: i32, reply: ReplyOpen) {
+    diagnostics::count(diagnostics::Stage::OpendirRequests);
     if flags & libc::O_ACCMODE != libc::O_RDONLY {
         reply.error(libc::EISDIR);
         return;
     }
     if let Some(binding) = &fs.namespace_index {
+        let _index_time = diagnostics::span(diagnostics::Stage::IndexReadUs);
         if let Some(lease) = binding.lease(&fs.store, &fs.notify) {
             if let Some(block) = binding.index.dir_block(ino) {
                 if let Some(result) = fs.directories.open_index(block, lease.state()) {
@@ -426,12 +428,14 @@ pub(super) fn read_plus(
     offset: i64,
     mut reply: fuser::ReplyDirectoryPlus,
 ) {
+    diagnostics::count(diagnostics::Stage::ReaddirPlusRequests);
     let Ok(offset) = usize::try_from(offset) else {
         reply.error(libc::EINVAL);
         return;
     };
     if let (Some(binding), Ok(view)) = (&fs.namespace_index, fs.directories.get(ino, fh)) {
         if let Some((block, opened)) = view.indexed() {
+            let _index_time = diagnostics::span(diagnostics::Stage::IndexReadUs);
             if let Some(lease) = binding.lease(&fs.store, &fs.notify) {
                 if lease.state() == opened {
                     if offset > block.entries.len() { reply.error(libc::EINVAL); return; }
@@ -623,12 +627,14 @@ pub(super) fn read(
     offset: i64,
     reply: ReplyDirectory,
 ) {
+    diagnostics::count(diagnostics::Stage::ReaddirRequests);
     let Ok(offset) = usize::try_from(offset) else {
         reply.error(libc::EINVAL);
         return;
     };
     if let (Some(binding), Ok(view)) = (&fs.namespace_index, fs.directories.get(ino, fh)) {
         if let Some((block, opened)) = view.indexed() {
+            let _index_time = diagnostics::span(diagnostics::Stage::IndexReadUs);
             if let Some(lease) = binding.lease(&fs.store, &fs.notify) {
                 if lease.state() == opened {
                     diagnostics::count(diagnostics::Stage::IndexHits);

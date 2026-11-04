@@ -450,6 +450,7 @@ impl Filesystem for CacheFilesystem {
         writable::create(self, parent, name, mode, umask, flags, reply)
     }
     fn lookup(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEntry) {
+        diagnostics::count(diagnostics::Stage::LookupRequests);
         let Some(name) = name.to_str() else {
             reply.error(libc::ENOENT);
             return;
@@ -457,6 +458,7 @@ impl Filesystem for CacheFilesystem {
         // G3 permission hook: any effective ACL cache must share this lease and
         // token, or disable the index for this request before entering here.
         if let Some(binding) = &self.namespace_index {
+            let _index_time = diagnostics::span(diagnostics::Stage::IndexReadUs);
             if let Some(lease) = binding.lease(&self.store, &self.notify) {
                 if let Some(slot) = binding.index.lookup(parent, name) {
                     let publication = self.notify.reply_guard();
@@ -535,10 +537,12 @@ impl Filesystem for CacheFilesystem {
         }));
     }
     fn getattr(&mut self, _req: &Request<'_>, ino: u64, fh: Option<u64>, reply: ReplyAttr) {
+        diagnostics::count(diagnostics::Stage::GetattrRequests);
         // Handle-relative attributes, mutable drafts and unlinked objects retain
         // their original descriptor-aware SQL path.
         if fh.is_none() {
             if let Some(binding) = &self.namespace_index {
+                let _index_time = diagnostics::span(diagnostics::Stage::IndexReadUs);
                 if let Some(lease) = binding.lease(&self.store, &self.notify) {
                     if let Some(slot) = binding.index.entry_by_ino(ino) {
                         let publication = self.notify.reply_guard();
