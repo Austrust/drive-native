@@ -484,7 +484,8 @@ pub fn resolve_history_target(service: &Service, body: &str) -> io::Result<Strin
     let Some(path) = history_current_path(&store,service,&id)? else {
         response["reason"]="unavailable".into(); return Ok(response.to_string());
     };
-    let cached = node.directory || store.open_cached(&id).is_ok();
+    let cached = node.directory || store.open_dirty_draft(&id).map_err(|_| other())?.is_some()
+        || store.open_cached(&id).is_ok();
     response["offline_available"]=cached.into();
     response["exists"]=true.into();
     if cached || online {

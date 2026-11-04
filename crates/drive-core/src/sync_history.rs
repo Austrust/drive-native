@@ -147,10 +147,11 @@ fn workflow_trigger(db: &Connection, name: &str, table: &str, filter: &str,
 // These inputs are SQL expressions owned by this module, never user strings.
 fn append_sql(key: &str, node: &str, action: &str, result: &str, error: &str,
     attempted: &str, detail: &str) -> String {
-    let path = format!("COALESCE((WITH RECURSIVE p(id,parent,path,depth) AS (
-        SELECT id,parent,CASE WHEN parent IS NULL THEN '' ELSE name END,0 FROM nodes WHERE id={node}
-        UNION ALL SELECT n.id,n.parent,CASE WHEN n.parent IS NULL THEN p.path ELSE n.name||'/'||p.path END,p.depth+1
-          FROM nodes n JOIN p ON p.parent=n.id WHERE p.depth<128)
+    let path = format!("COALESCE((WITH RECURSIVE p(id,parent,path,visited) AS (
+        SELECT id,parent,CASE WHEN parent IS NULL THEN '' ELSE name END,'/'||hex(id)||'/' FROM nodes WHERE id={node}
+        UNION ALL SELECT n.id,n.parent,CASE WHEN n.parent IS NULL THEN p.path ELSE n.name||'/'||p.path END,p.visited||hex(n.id)||'/'
+          FROM nodes n JOIN p ON p.parent=n.id
+          WHERE instr(p.visited,'/'||hex(n.id)||'/')=0)
         SELECT path FROM p WHERE parent IS NULL LIMIT 1),'')");
     format!(
         "UPDATE metadata SET value=CAST(value AS INTEGER)+1 WHERE key='sync_history_sequence';
@@ -205,7 +206,7 @@ fn record(db: &Connection, key: &str, node: &str, action: &str, result: &str,
     let mut name = String::new();
     let mut root = String::new();
     while let Some(id) = cursor.take() {
-        if !seen.insert(id.clone()) || seen.len() > 128 { return Err(invalid()); }
+        if !seen.insert(id.clone()) { return Err(Error::State("namespace path cycle".into())); }
         let row: Option<(Option<String>, String)> = db.query_row(
             "SELECT parent,name FROM nodes WHERE id=?1", [&id], |r| Ok((r.get(0)?,r.get(1)?))).optional()?;
         let Some((parent, current_name)) = row else { break; };
@@ -242,6 +243,29 @@ fn row_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<SyncHistoryRecord> {
 const COLUMNS: &str = "id,seq,mount,node,name,path_at_event,action,result,attempts,error_kind,error_summary,started_at,completed_at,detail";
 
 impl Store {
+    /// A failed preparation has not submitted a mutation. Keep the upload job
+    /// pending and retain its body; history describes the failed attempt only.
+    /// This method never accepts raw transport error strings or changes unknown
+    /// commits back into retryable uploads.
+    pub fn record_upload_preparation_failure(&mut self, operation: &str, kind: &str) -> Result<()> {
+        if !matches!(kind,"network"|"server_rejected"|"local_storage"|"protocol") {
+            return Err(Error::State("unsupported upload preparation failure category".into()));
+        }
+        let tx=self.db.transaction()?;
+        let (node,state):(String,String)=tx.query_row("SELECT node,state FROM operations WHERE id=?1 AND kind='upload'",
+            [operation],|r|Ok((r.get(0)?,r.get(1)?)))?;
+        if state!="pending" { return Err(Error::State("upload preparation requires pending operation".into())); }
+        let key=format!("upload:{operation}");
+        let previous:Option<u32>=tx.query_row("SELECT attempts FROM sync_history WHERE operation_key=?1",
+            [&key],|r|r.get(0)).optional()?;
+        record(&tx,&key,&node,"upload","failed",Some(kind))?;
+        if let Some(attempts)=previous {
+            tx.execute("UPDATE sync_history SET attempts=?2 WHERE operation_key=?1",
+                params![key,attempts.saturating_add(1)])?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
     /// Retained identity only; callers must still validate visibility/root scope.
     pub fn sync_history_parent(&self, id: &str) -> Result<Option<String>> {
         Ok(self.db.query_row("SELECT parent FROM nodes WHERE id=?1",[id],|r| r.get::<_,Option<String>>(0)).optional()?.flatten())
@@ -544,5 +568,58 @@ mod tests {
         let records=rows(&store);
         assert_eq!(records[0].error_kind.as_deref(),Some("download_failed"));
         assert!(!serde_json::to_string(&records).unwrap().contains("synthetic-secret-body"));
+    }
+
+    #[test]
+    fn history_does_not_impose_a_new_depth_limit_on_remote_events_or_uploads() {
+        let dir=tempfile::tempdir().unwrap();
+        let mut store=Store::open(dir.path()).unwrap();
+        let mut nodes=vec![Node { id:"root".into(),parent:None,name:"root".into(),version:"v1".into(),directory:true,
+            metadata:Some(NodeMetadata{size:0,mtime:1,mode:0o755}) }];
+        let mut parent="root".to_owned();
+        let mut names=Vec::new();
+        for depth in 0..160 {
+            let id=format!("d{depth:03}");
+            names.push(id.clone());
+            nodes.push(Node{id:id.clone(),parent:Some(parent),name:id.clone(),version:"v1".into(),directory:true,
+                metadata:Some(NodeMetadata{size:0,mtime:1,mode:0o755})});
+            parent=id;
+        }
+        names.push("deep-file".into());
+        nodes.push(Node{id:"deep-file".into(),parent:Some(parent),name:"deep-file".into(),version:"v1".into(),directory:false,
+            metadata:Some(NodeMetadata{size:3,mtime:1,mode:0o644})});
+        store.install_remote_snapshot(&nodes,"0","server").unwrap();
+        store.ensure_fs_root("root").unwrap();
+        let mut changed=store.node("deep-file").unwrap();
+        changed.version="v2".into();
+        store.receive(&Batch{from:"0".into(),to:"1".into(),events:vec![Event{id:"deep-event".into(),change:Change::Upsert(changed)}]}).unwrap();
+        store.drain().unwrap();
+        assert_eq!(store.cursor().unwrap(),"1");
+        assert_eq!(rows(&store)[0].path_at_event,names.join("/"));
+        let operation=store.save_local("deep-file",b"deep edit").unwrap();
+        store.mark_upload_started(&operation).unwrap();
+        assert_eq!(rows(&store)[0].action,"upload");
+        assert_eq!(rows(&store)[0].path_at_event,names.join("/"));
+    }
+
+    #[test]
+    fn preparation_failure_merges_attempts_without_submitting_or_reclassifying_uncertain_work() {
+        let (_dir,mut store)=fixture();
+        let operation=store.save_local("file",b"retained local bytes").unwrap();
+        store.record_upload_preparation_failure(&operation,"network").unwrap();
+        store.record_upload_preparation_failure(&operation,"server_rejected").unwrap();
+        assert_eq!(rows(&store).len(),1);
+        assert_eq!(rows(&store)[0].attempts,2);
+        assert_eq!(rows(&store)[0].result,"failed");
+        assert_eq!(store.upload_job(&operation).unwrap().state,"pending");
+        assert_eq!(store.open_cached("file").unwrap().size().unwrap(),20);
+        assert!(store.record_upload_preparation_failure(&operation,"raw credential-like text").is_err());
+        assert_eq!(rows(&store)[0].attempts,2);
+        store.mark_upload_started(&operation).unwrap();
+        assert_eq!(rows(&store)[0].attempts,3);
+        store.mark_upload_uncertain(&operation).unwrap();
+        assert!(store.record_upload_preparation_failure(&operation,"network").is_err());
+        assert_eq!(store.upload_job(&operation).unwrap().state,"uncertain");
+        assert_eq!(rows(&store)[0].result,"pending");
     }
 }

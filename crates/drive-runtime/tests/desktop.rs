@@ -158,6 +158,29 @@ fn history_ipc_busy_returns_without_waiting_for_store_or_control() {
     assert_eq!(serde_json::from_str::<serde_json::Value>(&desktop::resolve_history_target(&service,r#"{"id":1}"#).unwrap()).unwrap()["error"],"busy");
 }
 
+#[test]
+fn history_target_can_open_an_offline_dirty_draft_without_any_cached_blob() {
+    let (_dir,service)=fixture();
+    let id=remote_history(&service);
+    service.mounted.store(true,std::sync::atomic::Ordering::Release);
+    service.control.lock().unwrap().state=ConnectionState::Offline;
+    {
+        let mut store=service.bridge.store.lock().unwrap();
+        assert!(store.open_cached("one").is_err());
+        let draft=store.begin_draft("one","v2",None).unwrap();
+        store.draft_truncate(&draft,0).unwrap();
+        store.draft_write(&draft,0,b"uncheckpointed draft",false).unwrap();
+        assert!(store.open_cached("one").is_err());
+        assert!(store.open_dirty_draft("one").unwrap().is_some());
+    }
+    let target:serde_json::Value=serde_json::from_str(&desktop::resolve_history_target(&service,
+        &serde_json::json!({"id":id}).to_string()).unwrap()).unwrap();
+    assert_eq!(target["offline_available"],true);
+    assert_eq!(target["mount_online"],false);
+    assert_eq!(target["path"],"/tmp/drive-native-test-mount/folder/one");
+    assert!(target["reason"].is_null());
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "run under a dedicated dbus-run-session; no network worker or NAS"]
 async fn recovery_action_real_dbus_preserves_unknown_queue_and_user_pause() {
