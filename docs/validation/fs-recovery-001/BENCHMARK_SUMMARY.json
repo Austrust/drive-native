@@ -1,0 +1,194 @@
+{
+  "schema": 1,
+  "scope": "synthetic local ext4/FUSE, original FSearch 0.3.1; no NAS or Mint acceptance",
+  "source_commit": "dfb5aca4bf571f35ade337395ba15c761cc55075",
+  "fixed_binary_sha256": "c84ac48ad19f34b544d81ab4552303212b0cc0646ace941eb6081ef14b824e81",
+  "normal_elf": true,
+  "positive_entry_ttl_ms": 0,
+  "clean_authoritative_attribute_ttl_ms": 1000,
+  "host_page_cache_dropped": false,
+  "baseline": "published .8 fixture; same-window alternating paired scans",
+  "dense_scope": "synthetic tree with matching entry/directory counts, not real Personal_Sync contents or tree shape",
+  "provenance_note": "Exact ELF and frozen source manifests identify the inputs; the dense raw harness retained an obsolete baseline description, which is not used as source identity.",
+  "window_manifest_sha256": "69d6c26428c261aef9933390c189dee1f3524523f62c998f83ac8626d83f2017",
+  "runs": {
+    "paired-100k": {
+      "source_result_sha256": "b3c2174022f55c19d2abe1546956a118915eb68216b93f648be6bd0a653907a3",
+      "indexed_entries": 102130,
+      "complete_scans": 18,
+      "all_saved_index_truth_checks_passed": true,
+      "hydration_attempts": 0,
+      "rounds": 3,
+      "seconds": {
+        "baseline:first": {
+          "median": 74.96644303799258,
+          "min": 71.30373128299834,
+          "max": 77.22121064599196,
+          "samples": [
+            71.30373128299834,
+            74.96644303799258,
+            77.22121064599196
+          ]
+        },
+        "baseline:repeat": {
+          "median": 67.39951329899486,
+          "min": 64.69060950899438,
+          "max": 69.3082490539964,
+          "samples": [
+            64.69060950899438,
+            67.39951329899486,
+            69.3082490539964
+          ]
+        },
+        "fixed:first": {
+          "median": 10.33586952299811,
+          "min": 10.234464680004749,
+          "max": 11.79892924700107,
+          "samples": [
+            10.234464680004749,
+            11.79892924700107,
+            10.33586952299811
+          ]
+        },
+        "fixed:repeat": {
+          "median": 11.138745036005275,
+          "min": 9.982953691011062,
+          "max": 12.19901631299581,
+          "samples": [
+            12.19901631299581,
+            11.138745036005275,
+            9.982953691011062
+          ]
+        },
+        "local:first": {
+          "median": 0.5150511329993606,
+          "min": 0.46510886699252296,
+          "max": 0.5651963069976773,
+          "samples": [
+            0.46510886699252296,
+            0.5150511329993606,
+            0.5651963069976773
+          ]
+        },
+        "local:repeat": {
+          "median": 0.5150190840067808,
+          "min": 0.4649253690004116,
+          "max": 0.5653983230004087,
+          "samples": [
+            0.5653983230004087,
+            0.5150190840067808,
+            0.4649253690004116
+          ]
+        }
+      },
+      "fixture_cpu_ticks": {
+        "baseline:first": [
+          5810,
+          6167,
+          6391
+        ],
+        "baseline:repeat": [
+          5808,
+          6066,
+          6235
+        ],
+        "fixed:first": [
+          647,
+          741,
+          650
+        ],
+        "fixed:repeat": [
+          792,
+          722,
+          647
+        ],
+        "local:first": [
+          0,
+          0,
+          0
+        ],
+        "local:repeat": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    "dense-319k": {
+      "source_result_sha256": "64ee3b9a23f28d1e73f8856c474847d4efcdab301e1617965724f56a74b2959d",
+      "indexed_entries": 319679,
+      "complete_scans": 12,
+      "all_saved_index_truth_checks_passed": true,
+      "hydration_attempts": 0,
+      "rounds": 3,
+      "seconds": {
+        "fuse:first": {
+          "median": 59.43160040200746,
+          "min": 57.729846153000835,
+          "max": 61.186368989001494,
+          "samples": [
+            59.43160040200746,
+            61.186368989001494,
+            57.729846153000835
+          ]
+        },
+        "fuse:repeat": {
+          "median": 56.5243949630094,
+          "min": 56.22372145901318,
+          "max": 58.982005954996566,
+          "samples": [
+            58.982005954996566,
+            56.5243949630094,
+            56.22372145901318
+          ]
+        },
+        "local:first": {
+          "median": 1.7677636529988376,
+          "min": 1.7176695529924473,
+          "max": 2.11916207500326,
+          "samples": [
+            2.11916207500326,
+            1.7677636529988376,
+            1.7176695529924473
+          ]
+        },
+        "local:repeat": {
+          "median": 1.767765941011021,
+          "min": 1.6677138099912554,
+          "max": 1.819459108999581,
+          "samples": [
+            1.819459108999581,
+            1.6677138099912554,
+            1.767765941011021
+          ]
+        }
+      },
+      "fixture_cpu_ticks": {
+        "fuse:first": [
+          4203,
+          4307,
+          4144
+        ],
+        "fuse:repeat": [
+          4289,
+          4108,
+          4091
+        ],
+        "local:first": [
+          0,
+          0,
+          0
+        ],
+        "local:repeat": [
+          0,
+          0,
+          0
+        ]
+      }
+    }
+  },
+  "paired_elapsed_reduction_fraction": {
+    "first": 0.8621267182469903,
+    "repeat": 0.8347355271455441
+  }
+}

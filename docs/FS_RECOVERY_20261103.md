@@ -27,9 +27,19 @@ Candidate preview replies keep the current permission/stamp check protected
 through publication. A busy Store cannot authorize reuse of an old preview.
 Loss at either invalidation queue disables new attribute leases.
 
+The new ordinary-ELF window used entry TTL 0 and attribute TTL 1000 ms. Three
+paired rounds on 102,130 entries reduced first-scan median from `.8`'s 74.9664 s
+to 10.3359 s and repeat median from 67.3995 s to 11.1387 s. A denser synthetic
+tree of 319,679 entries and 56,073 directories still took 59.4316 s first and
+56.5244 s on repeat, compared with local ext4's 1.7678 s. All 30 complete scans
+passed saved-index truth checks with zero hydration. These results improve
+scanning but do not meet near-local experience; #5 remains open. See the
+[performance results](validation/fs-recovery-001/REPORT.md#ordinary-elf-performance-measurements).
+
 Earlier approximately four-second scans used positive name caching and are
-**not** performance evidence for this integration. Complete original FSearch
-scans must be timed again, with saved-index truth checks and zero hydration.
+**not** evidence for this entry-zero integration. The synthetic dense tree is
+not a real account's contents or directory shape; NAS initialization was not
+validated by this window.
 
 ## Recovering from a visible issue
 
@@ -54,12 +64,27 @@ The overview reports this blockage separately from connection state. See
 
 ## Validation and remaining scope
 
-Integration validation is in progress. No new package, real-user queue recovery,
-NAS round trip or near-local performance acceptance is claimed by this document.
-The initial functional snapshot exposed a D-Bus test API mismatch and the
-reversed FUSE timeout arguments; its failed records are retained. A corrected
-immutable snapshot must pass the workspace, explicit kernel, raw reply and
-real local D-Bus gates before performance measurement and packaging.
+Functional validation and the standard package014 build have completed for
+frozen source `dfb5aca4bf571f35ade337395ba15c761cc55075`, targeting development
+version `0.1.0~dev20261103.9`. Snapshot 003 passed 888 Rust tests and a separate
+real local D-Bus case. Snapshot 002 passed 55 vendor tests, two 31-case explicit
+release FUSE matrices and one runtime kernel case. The package build passed
+888 Rust and 117 GUI tests; additional debug/release checks each passed 31 FUSE
+and one runtime case. These are separate runs, not distinct-feature totals.
+
+Original FSearch cancellation, rescan and local-edit behavior passed on an
+independent diagnostic fixture, including two complete 11,630-entry truth
+comparisons and zero hydration. That run shared build resources and provides
+no timing comparison. Initial API/TTL failures and the first behavior harness's
+diagnostic prerequisite failure remain documented in the
+[functional validation report](validation/fs-recovery-001/REPORT.md).
+
+[Isolated installation and paused upgrade](validation/native-package-014/REPORT.md)
+passed, including preserved drafts, pending operations, same-schema old-reader
+compatibility and reinstall/purge retention. Performance measurements have
+completed, while near-local acceptance stays open. Release scope and files:
+[development .9](RELEASE_20261103_9.md). No new NAS round trip or original-user
+queue recovery is claimed.
 
 Issue #2 still includes persistent history and broader desktop work. Issue #5
 still includes near-local application experience. Issue #7 needs a verified
