@@ -37,8 +37,10 @@ pub(super) fn rename(
             let p = preview::authoritative(&s, parent, libc::EROFS)?.node.id;
             let np = preview::authoritative(&s, new_parent, libc::EROFS)?.node.id;
             let source = s.lookup(&p, &name)?.node.id;
+            permissions::rename(&s,&p,&source,&np,None)?;
             match s.lookup(&np, &new_name) {
                 Ok(target) if target.node.id != source && flags == 0 => {
+                    permissions::rename(&s,&p,&source,&np,Some(&target.node.id))?;
                     Ok(Some((p, np, source, target.node.id)))
                 }
                 _ => {
@@ -91,7 +93,7 @@ pub(super) fn remove(
     let notify = fs.notify.clone();
     fs.queue.submit(Box::new(move|| {
         let identity=(||->drive_core::Result<(String,String)>{
-            let s=store.lock().unwrap();let parent=preview::authoritative(&s, parent_ino, libc::EROFS)?.node.id;let id=s.lookup(&parent,&name)?.node.id;Ok((parent,id))
+            let s=store.lock().unwrap();let parent=preview::authoritative(&s, parent_ino, libc::EROFS)?.node.id;let id=s.lookup(&parent,&name)?.node.id;permissions::remove(&s,&parent,&id,directory)?;Ok((parent,id))
         })();
         let (parent,id)=match identity {Ok(v)=>v,Err(e)=>{reply.error(errno(&e));return;}};
         network.submit(Box::new(move|| {
@@ -105,7 +107,7 @@ pub(super) fn remove(
                     let missing=handles.lock().unwrap().entries.values().filter(|h|h.node==id).find_map(|h|match &h.content{OpenContent::Missing(n)=>Some(n.clone()),_=>None});
                     let Some(missing)=missing else {
                         let ino=store.lock().unwrap().record(&id).map_err(|e|errno(&e))?.ino;
-                        store.lock().unwrap().unlink_local(&parent,&name,&id,directory).map_err(|e|errno(&e))?;
+                        {let mut s=store.lock().unwrap();permissions::remove(&s,&parent,&id,directory).map_err(|e|errno(&e))?;s.unlink_local(&parent,&name,&id,directory).map_err(|e|errno(&e))?;}
                         notify.invalidate_entry(parent_ino, &name);
                         notify.invalidate_inode(parent_ino);
                         notify.invalidate_inode(ino);
@@ -154,6 +156,7 @@ fn replace_prepared(
             if src.node.directory || dst.node.directory{return Err(if src.node.directory&&!dst.node.directory{libc::ENOTDIR}else if !src.node.directory&&dst.node.directory{libc::EISDIR}else{libc::EOPNOTSUPP});}
             let missing=handles.lock().unwrap().entries.values().filter(|h|h.node==source||h.node==target).find_map(|h|match &h.content{OpenContent::Missing(n)=>Some(n.clone()),_=>None});
             let mut s=store.lock().unwrap();
+            permissions::rename(&s,&parent,&source,&new_parent,Some(&target)).map_err(|e|errno(&e))?;
             let missing=match missing {
                 Some(n)=>Some(n),
                 None if s.open_dirty_draft(&source).map_err(|e|errno(&e))?.is_some()=>None,

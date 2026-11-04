@@ -14,7 +14,7 @@ libc = "0.2"
 [features]
 # Test-only seams (deterministic late-reply injection). Never enabled in
 # release/packaging builds.
-test-seams = []
+test-seams = ["drive-core/test-seams"]
 
 [dev-dependencies]
 tempfile = "3"

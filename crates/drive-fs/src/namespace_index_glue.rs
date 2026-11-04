@@ -49,6 +49,7 @@ impl Binding {
             return None;
         }
         let lease = store.try_projection_read()?;
+        if store.has_permission_denials() { return None; }
         let state = lease.state();
         if !state.verified || word(state) != self.token.load(Ordering::Acquire) {
             diagnostics::count(diagnostics::Stage::IndexMisses);

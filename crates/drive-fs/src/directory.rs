@@ -262,6 +262,7 @@ impl Views {
                 Err(e) if e.is_not_found() => true,
                 Err(e) => return Err(errno(&e)),
             };
+            if authority {permissions::inode(&store,ino,permissions::Action::List).map_err(|e|errno(&e))?;}
             let revision = store.directory_view_stamp().map_err(|e| errno(&e))?;
             self.trim_hot(Some(&revision));
             let cached = self
@@ -378,6 +379,7 @@ impl Views {
 }
 
 pub(super) fn open(fs: &mut CacheFilesystem, ino: u64, flags: i32, reply: ReplyOpen) {
+    if let Err(e)=permissions::read(&fs.store,ino,permissions::Action::List){reply.error(e);return;}
     diagnostics::count(diagnostics::Stage::OpendirRequests);
     if flags & libc::O_ACCMODE != libc::O_RDONLY {
         reply.error(libc::EISDIR);
@@ -485,6 +487,11 @@ pub(super) fn read_plus(
             }
         };
         let publication = notify.reply_guard();
+        let permission_lease=if matches!(&view.origin,ViewOrigin::Preview(_)){None}else{store.permission_clear_lease()};
+        if store.has_permission_denials() {
+            send_acl_plus(&store,&notify,&view,offset,uid,gid,reply);
+            return;
+        }
         if let Some((block, _)) = view.indexed() {
             send_index_plus_sql(&store, &notify, block, offset, uid, gid, reply);
             drop(publication);
@@ -616,6 +623,7 @@ pub(super) fn read_plus(
             ViewOrigin::Indexed { .. } => unreachable!("indexed continuation handled above"),
         }
         reply.ok();
+        drop(permission_lease);
         drop(publication);
     }));
 }
@@ -654,6 +662,14 @@ pub(super) fn read(
         drop(queued);
         match views.get(ino, fh) {
             Ok(view) => {
+                let permission_lease=if matches!(&view.origin,ViewOrigin::Preview(_)){None}else{store.permission_clear_lease()};
+                if store.has_permission_denials() {
+                    let guard=match store.try_lock(){Ok(g)=>g,Err(_)=>{reply.error(libc::EAGAIN);return;}};
+                    if let Err(e)=permissions::inode(&guard,ino,permissions::Action::List){reply.error(errno(&e));return;}
+                    if let ViewOrigin::Preview(stamp)=&view.origin {if let Err(e)=guard.preview_validate_view(stamp){reply.error(errno(&e));return;}}
+                    if let Some((block,_))=view.indexed(){send_index_page(block,offset,reply);}else{send_page(&view,offset,reply);}
+                    drop(guard);return;
+                }
                 match &view.origin {
                     ViewOrigin::Authority => send_page(&view, offset, reply),
                     ViewOrigin::Preview(stamp) => {
@@ -688,6 +704,7 @@ pub(super) fn read(
                     }
                     ViewOrigin::Indexed { block: None, .. } => reply.error(libc::EBADF),
                 }
+                drop(permission_lease);
             }
             Err(e) => reply.error(e),
         }
@@ -695,6 +712,25 @@ pub(super) fn read(
 }
 fn kind(kind: FileKind) -> FileType {
     match kind { FileKind::Directory => FileType::Directory, FileKind::File => FileType::RegularFile }
+}
+// ACL publication holds Store through the bounded reply. Known revocations
+// cannot use the immutable-name busy-Store fallback of ordinary scans.
+fn send_acl_plus(store:&drive_core::SharedStore,notify:&NotifyHub,view:&View,offset:usize,uid:u32,gid:u32,mut reply:ReplyDirectoryPlus) {
+    let guard=match store.try_lock(){Ok(g)=>g,Err(_)=>{reply.error(libc::EAGAIN);return;}};
+    if let Err(e)=permissions::inode(&guard,view.ino,permissions::Action::List){reply.error(errno(&e));return;}
+    if let ViewOrigin::Preview(stamp)=&view.origin {if let Err(e)=guard.preview_validate_view(stamp){reply.error(errno(&e));return;}}
+    let entries:Vec<_>=if let Some((block,_))=view.indexed(){block.entries.iter().map(|e|(e.ino,e.name.as_ref(),kind(e.kind))).collect()}
+        else{view.snapshot().entries.iter().map(|e|(e.ino,e.name.as_str(),if e.directory{FileType::Directory}else{FileType::RegularFile})).collect()};
+    if offset>entries.len(){reply.error(libc::EINVAL);return;}
+    for (position,(ino,name,kind)) in entries.iter().enumerate().skip(offset) {
+        let cookie=(position+1) as i64;
+        let full=match guard.posix_record_by_inode(*ino).and_then(|mut r|{permissions::project(&guard,&mut r)?;Ok(r)}) {
+            Ok(r)=>{let(_,ttl)=preview::reply_ttls(notify,r.cacheable,true);reply.add_with_timeouts(*ino,cookie,name,&ENTRY_TTL,&ttl,&preview::posix_attr(&r,uid,gid),0)},
+            Err(_)=>reply.add_without_lookup(*ino,cookie,name,*kind),
+        };
+        if full{break;}
+    }
+    reply.ok();drop(guard);
 }
 fn send_index_page(block: &DirBlock, offset: usize, mut reply: ReplyDirectory) {
     let _span = diagnostics::span(diagnostics::Stage::ReaddirReply);

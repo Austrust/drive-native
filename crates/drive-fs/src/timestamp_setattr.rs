@@ -56,6 +56,7 @@ pub(super) fn set_times(
         let resolved = (|| -> drive_core::Result<_> {
             let mut s = store.lock().unwrap();
             let record = preview::authoritative(&s, ino, libc::EROFS)?;
+            permissions::node(&s,&record.node.id,permissions::Action::Setattr)?;
             if mtime.is_some() && record.node.directory {
                 return Err(Error::Io(std::io::Error::from_raw_os_error(
                     libc::EOPNOTSUPP,
@@ -98,6 +99,7 @@ pub(super) fn set_times(
             let result =
                 draft(&store, &handles, &updates, &hydrator, &id, body, false).and_then(|d| {
                     let mut s = store.lock().unwrap();
+                    permissions::node(&s,&id,permissions::Action::Setattr).map_err(|e|errno(&e))?;
                     // Recheck access after network hydration and before mutation.
                     s.record_for_handle(&id).map_err(|e| errno(&e))?;
                     s.draft_set_mtime(&d, mtime.unwrap())

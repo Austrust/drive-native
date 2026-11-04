@@ -51,7 +51,7 @@ pub(super) fn reply_ttls(
 }
 pub(super) fn metadata(s: &Store, ino: u64) -> drive_core::Result<Metadata> {
     match s.posix_record_by_inode(ino) {
-        Ok(r) => Ok(Metadata::Authority(r)),
+        Ok(mut r) => {permissions::project(s,&mut r)?;Ok(Metadata::Authority(r))},
         Err(e) if e.is_not_found() => s.preview_record_by_inode(ino).map(Metadata::Preview),
         Err(e) => Err(e),
     }
@@ -61,7 +61,7 @@ pub(super) fn lookup(s: &Store, parent: u64, name: &str) -> drive_core::Result<M
     // projection. Only a missing authority answer can be a cold preview parent,
     // and that fallback keeps the original candidate-namespace errors.
     match s.posix_lookup_by_inode(parent, name) {
-        Ok(r) => Ok(Metadata::Authority(r)),
+        Ok(mut r) => {permissions::project(s,&mut r)?;Ok(Metadata::Authority(r))},
         Err(e) if e.is_not_found() => match s.preview_record_by_inode(parent) {
             Ok(_) => s.preview_lookup(parent, name).map(Metadata::Preview),
             // Keep the candidate-namespace error code (ESTALE/EACCES/...) that
@@ -98,7 +98,8 @@ pub(super) fn try_inline_lookup(
     let result = guard.posix_lookup_by_inode(parent, name);
     drop(projection);
     match result {
-        Ok(record) => {
+        Ok(mut record) => {
+            if store.has_permission_denials() {if let Err(e)=permissions::project(&guard,&mut record){return Some(Err(errno(&e)));}}
             let attr = posix_attr(&record, uid, gid);
             let cacheable = record.cacheable;
             // The projection is fully owned; do not hold Store across the reply.
@@ -135,7 +136,7 @@ pub(super) fn try_inline_getattr(
     let projection = diagnostics::span(diagnostics::Stage::GetattrProjection);
     let result = guard.posix_record_by_inode(ino);
     drop(projection);
-    let record = match result {
+    let mut record = match result {
         Ok(record) => record,
         Err(e) if e.is_not_found() => {
             drop(guard);
@@ -146,6 +147,7 @@ pub(super) fn try_inline_getattr(
             return Some(Err(errno(&e)));
         }
     };
+    if store.has_permission_denials() {if let Err(e)=permissions::project(&guard,&mut record){return Some(Err(errno(&e)));}}
     let mut attr = posix_attr(&record, uid, gid);
     // Same order as the offloaded handler: Store first, then the handle table,
     // and neither is held while the reply is written.

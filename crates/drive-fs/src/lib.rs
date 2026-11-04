@@ -22,6 +22,7 @@ mod read_requests;
 #[cfg(test)]
 mod shutdown_tests;
 mod writable;
+mod permissions;
 use drive_core::filesystem::FileRecord;
 use drive_core::{Error, Node, ReadHandle, Store};
 use fuser::{
@@ -371,6 +372,7 @@ impl Filesystem for CacheFilesystem {
             let result = (|| -> drive_core::Result<_> {
                 let mut s = store.lock().unwrap();
                 let p = preview::authoritative(&s, parent, libc::EROFS)?;
+                permissions::node(&s, &p.node.id, permissions::Action::CreateDir)?;
                 let node = s.create_local_directory(&p.node.id, &name, mode & !umask)?;
                 s.record(&node.id)
             })();
@@ -452,6 +454,7 @@ impl Filesystem for CacheFilesystem {
     }
     fn lookup(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEntry) {
         diagnostics::count(diagnostics::Stage::LookupRequests);
+        if let Err(error)=permissions::read(&self.store,parent,permissions::Action::Traverse){reply.error(error);return;}
         let Some(name) = name.to_str() else {
             reply.error(libc::ENOENT);
             return;
@@ -539,6 +542,7 @@ impl Filesystem for CacheFilesystem {
     }
     fn getattr(&mut self, _req: &Request<'_>, ino: u64, fh: Option<u64>, reply: ReplyAttr) {
         diagnostics::count(diagnostics::Stage::GetattrRequests);
+        if let Err(error)=permissions::read(&self.store,ino,permissions::Action::Traverse){reply.error(error);return;}
         // Handle-relative attributes, mutable drafts and unlinked objects retain
         // their original descriptor-aware SQL path.
         if fh.is_none() {
@@ -781,7 +785,9 @@ impl Filesystem for CacheFilesystem {
         let handles = self.handles.clone();
         let network_queue = self.network_queue.clone();
         let hydrator = self.hydrator.clone();
+        let store = self.store.clone();
         self.read_queue.submit(Box::new(move || {
+            if let Err(e)=permissions::read(&store,ino,permissions::Action::Read){reply.error(e);return;}
             let (cached, missing) = {
                 let table = handles.lock().unwrap();
                 match table.entries.get(&fh) {
@@ -793,7 +799,7 @@ impl Filesystem for CacheFilesystem {
                             drop(table);
                             let mut data = vec![0; size as usize];
                             match d.read_at(&mut data, offset as u64) {
-                                Ok(n) => reply.data(&data[..n]),
+                                Ok(n) => permissions::publish_read(&store,ino,|r|match r{Ok(())=>reply.data(&data[..n]),Err(e)=>reply.error(e)}),
                                 Err(e) => reply.error(e.raw_os_error().unwrap_or(libc::EIO)),
                             }
                             return;
@@ -806,7 +812,7 @@ impl Filesystem for CacheFilesystem {
                 }
             };
             if let Some(content) = cached {
-                reply_read(content, offset, size, reply);
+                reply_read(&store,ino,content, offset, size, reply);
                 return;
             }
             let Some(hydrator) = hydrator else {
@@ -816,6 +822,7 @@ impl Filesystem for CacheFilesystem {
             network_queue.submit(Box::new(move || {
                 match hydrator.hydrate_cancellable(&missing.unwrap(), &cancel) {
                     Ok(content) => {
+                        if let Err(e)=permissions::read(&store,ino,permissions::Action::Read){reply.error(e);return;}
                         let mut h = handles.lock().unwrap();
                         let Some(entry) = h.entries.get_mut(&fh) else {
                             reply.error(libc::EBADF);
@@ -829,11 +836,11 @@ impl Filesystem for CacheFilesystem {
                         let current = entry.content.clone();
                         drop(h);
                         match current {
-                            OpenContent::Cached(c) => reply_read(c, offset, size, reply),
+                            OpenContent::Cached(c) => reply_read(&store,ino,c, offset, size, reply),
                             OpenContent::Draft(d) => {
                                 let mut data = vec![0; size as usize];
                                 match d.read_at(&mut data, offset as u64) {
-                                    Ok(n) => reply.data(&data[..n]),
+                                    Ok(n) => permissions::publish_read(&store,ino,|r|match r{Ok(())=>reply.data(&data[..n]),Err(e)=>reply.error(e)}),
                                     Err(e) => reply.error(e.raw_os_error().unwrap_or(libc::EIO)),
                                 }
                             }
@@ -860,10 +867,10 @@ impl Filesystem for CacheFilesystem {
     }
 }
 
-fn reply_read(content: Arc<ReadHandle>, offset: i64, size: u32, reply: ReadReply) {
+fn reply_read(store:&drive_core::SharedStore,ino:u64,content: Arc<ReadHandle>, offset: i64, size: u32, reply: ReadReply) {
     let mut data = vec![0; size as usize];
     match content.read_at(&mut data, offset as u64) {
-        Ok(n) => reply.data(&data[..n]),
+        Ok(n) => permissions::publish_read(&store,ino,|r|match r{Ok(())=>reply.data(&data[..n]),Err(e)=>reply.error(e)}),
         Err(e) => reply.error(e.raw_os_error().unwrap_or(libc::EIO)),
     }
 }

@@ -31,6 +31,7 @@ fn draft(
     body: OpenContent,
     empty: bool,
 ) -> Result<Arc<DraftHandle>, i32> {
+    permissions::node(&store.lock().unwrap(), id, permissions::Action::WriteContent).map_err(|e|errno(&e))?;
     if let OpenContent::Draft(d) = body {
         return Ok(d);
     }
@@ -44,13 +45,9 @@ fn draft(
         OpenContent::Draft(_) => unreachable!(),
     };
     let _update = updates.lock().unwrap();
-    let d = Arc::new(
-        store
-            .lock()
-            .unwrap()
-            .begin_draft(id, &base, if empty { None } else { source.as_deref() })
-            .map_err(|e| errno(&e))?,
-    );
+    let d = { let mut s=store.lock().unwrap();
+        permissions::node(&s,id,permissions::Action::WriteContent).map_err(|e|errno(&e))?;
+        Arc::new(s.begin_draft(id, &base, if empty { None } else { source.as_deref() }).map_err(|e|errno(&e))?) };
     let candidates: Vec<_> = {
         let h = handles.lock().unwrap();
         h.entries
@@ -102,7 +99,9 @@ pub(super) fn open(fs: &mut CacheFilesystem, ino: u64, flags: i32, reply: ReplyO
     fs.queue.submit(Box::new(move || {
         let result = {
             let s = store.lock().unwrap();
-            content(&s, ino, if writable { libc::EROFS } else { libc::EAGAIN })
+            (|| { permissions::inode(&s,ino,if writable {permissions::Action::WriteContent}else{permissions::Action::Read})?;
+                if flags & libc::O_ACCMODE == libc::O_RDWR {permissions::inode(&s,ino,permissions::Action::Read)?;}
+                content(&s, ino, if writable { libc::EROFS } else { libc::EAGAIN }) })()
         };
         let (id, mut body) = match result {
             Ok(r) => r,
@@ -114,7 +113,8 @@ pub(super) fn open(fs: &mut CacheFilesystem, ino: u64, flags: i32, reply: ReplyO
         if flags & libc::O_TRUNC != 0 {
             match draft(&store, &handles, &updates, &hydrator, &id, body, true) {
                 Ok(d) => {
-                    if let Err(e) = store.lock().unwrap().draft_truncate(&d, 0) {
+                    let result={let mut s=store.lock().unwrap();permissions::node(&s,&id,permissions::Action::WriteContent).and_then(|_|s.draft_truncate(&d,0))};
+                    if let Err(e) = result {
                         reply.error(errno(&e));
                         return;
                     }
@@ -130,6 +130,7 @@ pub(super) fn open(fs: &mut CacheFilesystem, ino: u64, flags: i32, reply: ReplyO
         let refreshed = (|| -> drive_core::Result<()> {
             let s = store.lock().unwrap();
             s.node(&id)?;
+            permissions::node(&s,&id,if writable{permissions::Action::WriteContent}else{permissions::Action::Read})?;
             let base = match &body {
                 OpenContent::Cached(c) => Some(c.version()),
                 OpenContent::Missing(n) => Some(n.version.as_str()),
@@ -208,10 +209,9 @@ pub(super) fn write(
         let job: Job = Box::new(move || {
             let result =
                 draft(&store, &handles, &updates, &hydrator, &id, body, false).and_then(|d| {
-                    store
-                        .lock()
-                        .unwrap()
-                        .draft_write(&d, offset as u64, &data, flags & libc::O_APPEND != 0)
+                    let mut s=store.lock().unwrap();
+                    permissions::node(&s,&id,permissions::Action::WriteContent).map_err(|e|errno(&e))?;
+                    s.draft_write(&d, offset as u64, &data, flags & libc::O_APPEND != 0)
                         .map_err(|e| errno(&e))
                 });
             match result {
@@ -413,6 +413,7 @@ pub(super) fn setattr(
             let result = (|| -> drive_core::Result<_> {
                 let mut s = store.lock().unwrap();
                 let record = preview::authoritative(&s, ino, libc::EROFS)?;
+                permissions::node(&s,&record.node.id,permissions::Action::Setattr)?;
                 if let Some(mode) = mode {
                     s.set_local_mode(&record.node.id, mode & 0o777)?;
                 }
@@ -465,6 +466,7 @@ pub(super) fn setattr(
             let result = draft(&store, &handles, &updates, &hydrator, &id, body, size == 0)
                 .and_then(|d| {
                     let mut s = store.lock().unwrap();
+                    permissions::node(&s,&id,permissions::Action::WriteContent).map_err(|e|errno(&e))?;
                     s.draft_truncate(&d, size).map_err(|e| errno(&e))?;
                     // Path-based truncate has no later file-handle fsync/release callback.
                     if fh.is_none() {
@@ -522,6 +524,7 @@ pub(super) fn create(
         let result = (|| -> drive_core::Result<_> {
             let mut s = store.lock().unwrap();
             let parent = preview::authoritative(&s, parent, libc::EROFS)?;
+            permissions::node(&s,&parent.node.id,permissions::Action::CreateFile)?;
             let n = s.create_local_file(&parent.node.id, &name, mode & !umask)?;
             let source = s.open_cached(&n.id)?;
             let draft = Arc::new(s.begin_draft(&n.id, &n.version, Some(&source))?);
