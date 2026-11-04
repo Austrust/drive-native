@@ -214,7 +214,9 @@ fn record(db: &Connection, key: &str, node: &str, action: &str, result: &str,
         cursor = parent;
     }
     parts.reverse();
-    let mount: Option<String> = db.query_row("SELECT node FROM fs_inodes WHERE ino=1", [], |r| r.get(0)).optional()?;
+    let mount: Option<String> = db.query_row("SELECT COALESCE((SELECT node FROM fs_inodes WHERE ino=1),
+        (SELECT CASE WHEN json_valid(value) THEN json_extract(value,'$.file_id') END FROM metadata WHERE key='native_scope'))",
+        [], |r| r.get(0))?;
     db.execute("INSERT INTO sync_history(seq,mount,node,name,path_at_event,action,result,attempts,error_kind,error_summary,completed_at,operation_key)
         VALUES((SELECT CAST(value AS INTEGER) FROM metadata WHERE key='sync_history_sequence'),?1,?2,?3,?4,?5,?6,1,?7,?7,?8,?9)
         ON CONFLICT(operation_key) DO UPDATE SET seq=excluded.seq,result=excluded.result,
@@ -504,5 +506,43 @@ mod tests {
         drop(store);
         let store=Store::open(dir.path()).unwrap();
         assert_eq!(rows(&store),before);
+    }
+
+    #[test]
+    fn failed_migration_rolls_back_schema_and_keeps_coherent_backup() {
+        let (dir,mut store)=fixture();
+        store.save_local("file",b"pending survives").unwrap();
+        store.db.execute_batch("DROP TRIGGER history_upload; DROP TRIGGER history_namespace;
+          DROP TRIGGER history_download; DROP TRIGGER history_download_removed;
+          DROP TABLE sync_history;
+          DELETE FROM metadata WHERE key LIKE 'sync_history_%';
+          CREATE VIEW sync_history AS SELECT 1 AS incompatible;
+          PRAGMA user_version=23;").unwrap();
+        drop(store);
+        assert!(Store::open(dir.path()).is_err());
+        let db=Connection::open(dir.path().join("state.sqlite")).unwrap();
+        let version:i64=db.pragma_query_value(None,"user_version",|r|r.get(0)).unwrap();
+        assert_eq!(version,23);
+        let dirty:bool=db.query_row("SELECT dirty_blob IS NOT NULL FROM nodes WHERE id='file'",[],|r|r.get(0)).unwrap();
+        assert!(dirty);
+        let metadata:i64=db.query_row("SELECT COUNT(*) FROM metadata WHERE key LIKE 'sync_history_%'",[],|r|r.get(0)).unwrap();
+        assert_eq!(metadata,0);
+        let backups=std::fs::read_dir(dir.path()).unwrap().filter_map(|e|e.ok()).filter(|e|
+            e.file_name().to_string_lossy().starts_with(&format!("state-before-v{}-",crate::STATE_SCHEMA_VERSION))).collect::<Vec<_>>();
+        assert_eq!(backups.len(),1);
+        let backup=Connection::open(backups[0].path()).unwrap();
+        let backup_version:i64=backup.pragma_query_value(None,"user_version",|r|r.get(0)).unwrap();
+        assert_eq!(backup_version,23);
+    }
+
+    #[test]
+    fn download_history_never_copies_unstructured_error_bodies() {
+        let (_dir,mut store)=fixture();
+        let ticket=DownloadTicket{id:"file".into(),version:"v1".into()};
+        store.begin_download(&ticket).unwrap();
+        store.db.execute("UPDATE transfers SET state='retry',error='synthetic-secret-body'",[]).unwrap();
+        let records=rows(&store);
+        assert_eq!(records[0].error_kind.as_deref(),Some("download_failed"));
+        assert!(!serde_json::to_string(&records).unwrap().contains("synthetic-secret-body"));
     }
 }
