@@ -31,7 +31,7 @@ reply, and invalidation queue loss disables new attribute leases. Details:
 | --- | --- | --- |
 | Corrected functional snapshot 002 | 55 vendored fuser unit tests passed | Includes unequal entry/attribute TTL wire serialization |
 | Snapshot 002 explicit release kernel runs | 31 passed with default environment; 31 passed with attribute-TTL environment set to zero | Real synthetic FUSE mounts; the two path-revalidation cases explicitly set attribute TTL to 30 seconds in both runs |
-| Snapshot 002 runtime kernel case | 1 passed | Explicit filesystem shutdown regression |
+| Snapshot 002 runtime kernel case | 1 passed | Cancel during backoff, then successfully read complete content |
 | Supplemental snapshot 003 | 888 Rust passed, 0 failed, 35 ignored | Workspace regression; product input matches 002, test Builder API corrected |
 | Snapshot 003 separate D-Bus session | 1 passed | Real local session bus recovery request |
 | Standard package014 build | 888 Rust and 117 GUI passed | Frozen source identity checked after build |
