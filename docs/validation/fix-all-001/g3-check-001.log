@@ -1,0 +1,59 @@
+    Checking sproto v0.1.0 (/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/fix-7/crates/sproto)
+   Compiling fuser v0.16.0 (/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/fix-7/vendor/fuser)
+    Checking drive-core v0.1.0 (/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/fix-7/crates/drive-core)
+warning: struct `cuse_init_in` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:814:12
+    |
+814 | pub struct cuse_init_in {
+    |            ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: struct `cuse_init_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:823:12
+    |
+823 | pub struct cuse_init_out {
+    |            ^^^^^^^^^^^^^
+
+warning: struct `fuse_ioctl_iovec` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:868:12
+    |
+868 | pub struct fuse_ioctl_iovec {
+    |            ^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:996:12
+    |
+996 | pub struct fuse_notify_retrieve_out {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_in` is never constructed
+    --> vendor/fuser/src/ll/fuse_abi.rs:1006:12
+     |
+1006 | pub struct fuse_notify_retrieve_in {
+     |            ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `fuser` (lib) generated 5 warnings
+error[E0277]: the trait bound `u64: FromSql` is not satisfied
+   --> crates/drive-core/src/write_permissions.rs:56:48
+    |
+ 56 |         |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional()?;
+    |                                                ^^^ the trait `FromSql` is not implemented for `u64`
+    |
+    = help: the following other types implement trait `FromSql`:
+              f32
+              f64
+              i16
+              i32
+              i64
+              i8
+              isize
+              u16
+            and 2 others
+note: required by a bound in `Row::<'_>::get`
+   --> /mnt/c/Users/a_tas/Documents/Codex/2026-10-28/dui-yu/work/toolchains/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rusqlite-0.39.0/src/row.rs:285:32
+    |
+285 |     pub fn get<I: RowIndex, T: FromSql>(&self, idx: I) -> Result<T> {
+    |                                ^^^^^^^ required by this bound in `Row::<'_>::get`
+
+For more information about this error, try `rustc --explain E0277`.

@@ -1,0 +1,61 @@
+    Checking drive-core v0.1.0 (/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/fix-7/crates/drive-core)
+warning: struct `cuse_init_in` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:814:12
+    |
+814 | pub struct cuse_init_in {
+    |            ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: struct `cuse_init_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:823:12
+    |
+823 | pub struct cuse_init_out {
+    |            ^^^^^^^^^^^^^
+
+warning: struct `fuse_ioctl_iovec` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:868:12
+    |
+868 | pub struct fuse_ioctl_iovec {
+    |            ^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:996:12
+    |
+996 | pub struct fuse_notify_retrieve_out {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_in` is never constructed
+    --> vendor/fuser/src/ll/fuse_abi.rs:1006:12
+     |
+1006 | pub struct fuse_notify_retrieve_in {
+     |            ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `fuser` (lib) generated 5 warnings
+    Checking sproto v0.1.0 (/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/fix-7/crates/sproto)
+    Checking drive-fs v0.1.0 (/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/fix-7/crates/drive-fs)
+error[E0596]: cannot borrow `s` as mutable, as it is not declared as mutable
+   --> crates/drive-fs/src/writable.rs:116:133
+    |
+116 | ...sions::Action::WriteContent).and_then(|_|s.draft_truncate(&d,0))};
+    |                                             ^ cannot borrow as mutable
+    |
+help: consider changing this to be mutable
+    |
+116 |                     let result={let mut s=store.lock().unwrap();permissions::node(&s,&id,permissions::Action::WriteContent).and_then(|_|s.draft_truncate(&d,0))};
+    |                                     +++
+
+error[E0596]: cannot borrow `s` as mutable, as it is not declared as mutable
+   --> crates/drive-fs/src/writable.rs:214:21
+    |
+214 |                     s.draft_write(&d, offset as u64, &data, flags & libc::O_APPEND != 0)
+    |                     ^ cannot borrow as mutable
+    |
+help: consider changing this to be mutable
+    |
+212 |                     let mut s=store.lock().unwrap();
+    |                         +++
+
+For more information about this error, try `rustc --explain E0596`.
+error: could not compile `drive-fs` (lib) due to 2 previous errors
+warning: build failed, waiting for other jobs to finish...

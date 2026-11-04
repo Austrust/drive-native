@@ -25,3 +25,24 @@ File Station 辅助探测未实现、默认不调用；真实 ACL、空间禁止
 
 G3 期间仅 cargo check；G4 由不写产品代码的独立验证代理运行。
 本文不是测试通过报告。原始日志保留在本目录，最终结果见 G4 报告。
+
+## M2–M5 与 G3 冻结
+
+| 里程碑 | commit | 内容 |
+|---|---|---|
+| M1 | ce22057 | schema25、三层模型、legacy profile、挂载策略 |
+| M2 | 442824f | confirmed/typed-refusal 接收、队列隔离、重连、祖先与回复边界、核心用例 |
+| M3 | 85b906d | setup/wizard、overview、目录权限与 revision 策略 IPC、历史目标保护 |
+| M4 | bcaaf75 | FUSE 逐动作检查、目录与正文回复保护、3 个显式内核夹具 |
+| M5 | 812ef09 | GUI 四态、读写设置、重新核对入口、5 个 GUI 夹具 |
+
+最终产品候选 `812ef09`。`g3-check-007.log` 对此候选执行
+`cargo check --workspace --all-targets --all-features --locked --offline -j 2`，退出 0。
+此前 `004/005/006` 也通过编译；这些均不是运行测试。
+独立 target：`/home/drive-native-test/.cache/ultra-acl-target`。
+
+新增核心用例包含 schema24→25、旧 profile、unknown 不持久化允许、根/A/B、只遍历不列目录、
+远端 overlay 祖先、精确拒绝的数据保留与兄弟队列、旧回复阻挡首次撤销发布、普通元数据不阻挡缓存读取。
+所有用例截至 G3 冻结均**未实测**。保留 DefaultPermissions；未实施替代内核 POSIX 权限系统。
+
+G3 后只由独立验证代理执行 G4。真实 NAS、凭据、生产数据、push、发布均未操作。
