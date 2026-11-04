@@ -1,5 +1,9 @@
 # Drive Native
 
+开发包与安装说明 — FSearch 提速、故障恢复操作和验证边界：[交付说明](docs/RELEASE_20261103_9.md)。
+
+以下保留此前交付记录；当前验收统一从 [DELIVERY_GATES.md](DELIVERY_GATES.md) 进入。
+
 [`.8` 开发包已发布](https://github.com/Austrust/drive-native/releases/tag/dev20261102.8)，包含[初始化流水线与阶段诊断](docs/INITIALIZATION_PIPELINE.md)、[队列恢复与目录属性优化](docs/ISSUES_20261103.md)和[文件时间写回](docs/FILE_TIMESTAMPS.md)。配套 FSD／worker 使用 IPC20、数据库 schema23；源码为 `416cc41b11fce2774bc8eb1e899e100f3d896b8f`。
 
 用户决定发布后停止目标；已发布经过验证的[包013](docs/validation/native-package-013/REPORT.md)。[真实Lab004](docs/validation/native-lab-004/REPORT.md)通过非空事件、后台缓存保鲜及文件时间写回；[原版FSearch扫描](docs/validation/fsearch-001/REPORT.md)首轮约170→79秒、重扫162→70秒。近本地性能及Personal_Sync完整初始化仍未通过；后续缓存实验和目录等待分支未纳入本包。[Personal_Sync一小时终态](docs/validation/personal-003/REPORT.md)确认非空事件推进，但完整初始化未通过。发布范围见[本版结论](docs/RELEASE_20261102_8.md)。
@@ -14,7 +18,7 @@
 
 面向 Linux Mint Cinnamon / Nemo 的 Synology Drive 原生协议按需同步客户端。使用 Rust、FUSE、SQLite、PySide6 和 Nemo 扩展；独立连接 Drive Server，不依赖 WebDAV 或官方客户端进程。
 
-**开发测试版本，尚未完成日常使用验收。** `.7` 的真实只读观察通过约2.083秒根目录预览、暂停和重启续接；600秒内完整初始化未完成，诊断去重2次响应超时后继续枚举。事件接收／应用序号均0，不作为非空事件恢复证明。普通目录全量同步、持久历史、Mint及最终数据安全／7×24仍开放。完整目标未完成；本轮已发布有实测改善的 `.8`，按用户要求结束后续开发并暂停目标。
+使用与验收范围见[当前交付说明](docs/RELEASE_20261103_9.md)；历史观察不能替代新代码的验证。
 
 ## 已实现
 

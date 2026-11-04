@@ -3,7 +3,9 @@
 This development integration separates positive-entry and attribute lifetimes.
 It supersedes the positive-name caching contract of `de19ae0`; the earlier
 approximately four-second static scan result is not a performance claim for this
-policy. The changes and new regressions await the integration validation run.
+policy. The corrected functional and package-build regressions have passed;
+[validation and remaining gates](validation/fs-recovery-001/REPORT.md) distinguish
+those results from pending installation and performance acceptance.
 
 ## Published replies
 
@@ -14,8 +16,9 @@ policy. The changes and new regressions await the integration validation run.
   open handle, and candidate previews use attribute TTL 0.
 - A notifier must be installed before attributes become cacheable. Runtime
   feeder overflow/disconnection and hub delivery failures stop new leases.
-  Already granted kernel leases expire within their remaining lifetime; a
-  failure flag is not evidence that those leases were synchronously revoked.
+  This does not recall an already prepared reply. Installed or in-flight
+  attribute replies remain subject to their TTL and kernel attribute-version
+  checks; a failure flag does not prove immediate attribute revocation.
 - Existing open descriptors preserve their POSIX identity/content semantics.
   New path-based opens must revalidate the name; checking a cached inode in
   Store cannot prove that the caller's original path still names that inode.
@@ -38,7 +41,7 @@ mount hub; loss can no longer remain hidden before the hub's own queue. Neither
 producer waits for a kernel invalidation while holding Store. Notification
 failure and outstanding lease expiry remain distinct events.
 
-## New validation targets
+## Validation coverage
 
 - [Preview boundary unit tests](../crates/drive-fs/src/preview_publication_tests.rs):
   busy Store plus child denial, guard held through send, promotion revokes old view.
@@ -53,9 +56,16 @@ failure and outstanding lease expiry remain distinct events.
 - [Feeder unit tests](../crates/drive-runtime/src/notification_queue_tests.rs):
   queue full/disconnected disables leases and exposes one persistent failure.
 
-These tests are not a completed Mint/NAS or end-to-end performance acceptance.
-Attribute invalidation coverage, permission policy changes and actual application
-behaviour must still pass the current integration gates.
+The explicit kernel regressions passed in snapshot 002 and again in the frozen
+package014 debug/release checks. The first run had exposed reversed ordinary
+entry TTL arguments; unequal-TTL ABI checks now cover that boundary. The
+30-second path tests set their own attribute TTL in both environment matrices,
+so they are not a zero-versus-positive attribute-cache comparison.
+
+Original FSearch behavior passed on a separately built diagnostic fixture;
+ordinary-ELF timing, installation, Mint/NAS acceptance and the broader permission
+policy remain separate gates. Passing these regressions does not establish
+strict instantaneous attribute invalidation on every supported kernel.
 
 Kernel references: [Linux 6.14 dentry revalidation](https://github.com/torvalds/linux/blob/v6.14/fs/fuse/dir.c),
 [Linux 6.18 PLUS linking](https://github.com/torvalds/linux/blob/v6.18/fs/fuse/readdir.c).
