@@ -1,12 +1,22 @@
 //! Offline synthetic fixture for the ORIGINAL FSearch application. No NAS or
 //! protocol worker is configured. Local mode is a separate comparison filesystem,
 //! never a surrogate for the Drive mount being indexed.
+//!
+//! Two generators are supported:
+//! * `GROUPS FILES_PER_GROUP WIDE_FILES`: deterministic synthetic tree.
+//! * `fuse-manifest MANIFEST.tsv`: the real namespace of an existing tree,
+//!   supplied as `relative_path<TAB>d|f<TAB>size<TAB>mtime_epoch_seconds` lines
+//!   (root is `.`). This only reproduces metadata; content is never hydrated.
+//!   The manifest mode exists so measurement runs can use a real names/layout
+//!   distribution instead of the synthetic shape.
 #![allow(unexpected_cfgs)]
 use drive_core::{Node, NodeMetadata, ReadHandle, Store};
 use drive_fs::{CacheFilesystem, Hydrator};
 use std::{
-    io::{BufRead, Write},
-    path::PathBuf,
+    collections::HashSet,
+    fs::File,
+    io::{BufRead, BufReader, Write},
+    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -24,47 +34,22 @@ fn emit(value: serde_json::Value) {
     println!("{value}");
     std::io::stdout().flush().unwrap();
 }
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args: Vec<_> = std::env::args().collect();
-    if args.len() != 6 {
-        return Err(
-            "usage: fsearch_fixture RUN_DIR fuse|fuse-writable|local GROUPS FILES_PER_GROUP WIDE_FILES".into(),
-        );
-    }
-    let run = PathBuf::from(&args[1]);
-    let local = args[2] == "local";
-    let writable = args[2] == "fuse-writable";
-    if !local && !writable && args[2] != "fuse" {
-        return Err("invalid mode".into());
-    }
-    if run.exists() {
-        return Err("fixture destination must be new".into());
-    }
-    let groups = args[3].parse::<usize>()?;
-    let files = args[4].parse::<usize>()?;
-    let wide = args[5].parse::<usize>()?;
-    // Test-only scale bounds. The measurement matrix now includes a
-    // Personal_Sync-sized tree (56,007 groups / 319,679 entries), previously
-    // rejected by the 10,000-group gate; the total budget stays bounded so a
-    // typo cannot allocate an unbounded tree. This example is a fixture, never
-    // shipped product code.
-    const MAX_ENTRIES: usize = 500_000;
-    const MAX_GROUPS: usize = 100_000;
-    // root + wide + 64 deep directories, and the 64 `leaf.dat` files.
+/// Test-only scale bound: a typo cannot allocate an unbounded tree.
+const MAX_ENTRIES: usize = 1_000_000;
+
+fn synthetic_entries(
+    groups: usize,
+    files: usize,
+    wide: usize,
+) -> Result<Vec<(String, Node)>, Box<dyn std::error::Error>> {
     let total_entries = groups
         .checked_mul(files.saturating_add(1))
         .and_then(|n| n.checked_add(wide))
         .and_then(|n| n.checked_add(130))
         .ok_or("fixture entry count overflow")?;
-    if total_entries > MAX_ENTRIES || groups > MAX_GROUPS {
-        return Err(format!(
-            "fixture budget exceeded: {total_entries} entries / {groups} groups (max {MAX_ENTRIES}/{MAX_GROUPS})"
-        )
-        .into());
+    if total_entries > MAX_ENTRIES || groups > 100_000 {
+        return Err(format!("fixture budget exceeded: {total_entries} entries / {groups} groups").into());
     }
-    std::fs::create_dir_all(&run)?;
-    let mount = run.join("mount");
-    std::fs::create_dir(&mount)?;
     let mut entries = Vec::<(String, Node)>::new();
     let mut add = |path: String, parent: Option<String>, directory: bool| {
         let id = if path.is_empty() {
@@ -116,6 +101,123 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         add(format!("{path}/leaf.dat"), Some(path.clone()), false);
         parent = path.clone();
     }
+    Ok(entries)
+}
+
+/// Read a real namespace manifest. The caller passes the metadata only; no file
+/// is opened, so an on-demand mount can serve the naming/layout distribution of
+/// an existing tree without transferring content.
+fn manifest_entries(manifest: &Path) -> Result<Vec<(String, Node)>, Box<dyn std::error::Error>> {
+    let file = File::open(manifest)
+        .map_err(|e| format!("cannot open manifest {}: {e}", manifest.display()))?;
+    let mut entries = Vec::<(String, Node)>::new();
+    let mut seen = HashSet::<String>::new();
+    let mut root_seen = false;
+    for (index, line) in BufReader::new(file).lines().enumerate() {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let mut fields = line.split('\t');
+        let (Some(path), Some(kind), Some(size), Some(mtime)) = (
+            fields.next(),
+            fields.next(),
+            fields.next(),
+            fields.next(),
+        ) else {
+            return Err(format!("manifest line {} is not 4 tab-separated fields", index + 1).into());
+        };
+        if fields.next().is_some() {
+            return Err(format!("manifest line {} has extra fields", index + 1).into());
+        }
+        let directory = match kind {
+            "d" => true,
+            "f" => false,
+            other => return Err(format!("manifest line {}: unknown kind {other:?}", index + 1).into()),
+        };
+        let (rel, id, parent, name) = if path == "." {
+            if root_seen {
+                return Err("duplicate root entry".into());
+            }
+            root_seen = true;
+            (String::new(), "root".to_string(), None, "root".to_string())
+        } else {
+            if path.is_empty() || path.starts_with('/') || path.ends_with('/') || path.contains("//") {
+                return Err(format!("manifest line {}: invalid path {path:?}", index + 1).into());
+            }
+            let (parent, name) = match path.rsplit_once('/') {
+                Some((parent, name)) => (parent.to_string(), name.to_string()),
+                None => ("root".to_string(), path.to_string()),
+            };
+            if name.is_empty() {
+                return Err(format!("manifest line {}: empty name", index + 1).into());
+            }
+            (path.to_string(), path.to_string(), Some(parent), name)
+        };
+        if !seen.insert(id.clone()) {
+            return Err(format!("manifest line {}: duplicate path {path:?}", index + 1).into());
+        }
+        let size = size.parse::<u64>()?;
+        let mtime = mtime.parse::<u64>()?;
+        entries.push((
+            rel,
+            Node {
+                id,
+                parent,
+                name,
+                version: "v1".into(),
+                directory,
+                metadata: Some(NodeMetadata {
+                    size: if directory { 0 } else { size },
+                    mtime,
+                    mode: if directory { 0o755 } else { 0o644 },
+                }),
+            },
+        ));
+        if entries.len() > MAX_ENTRIES {
+            return Err(format!("manifest exceeds {MAX_ENTRIES} entries").into());
+        }
+    }
+    if !root_seen {
+        return Err("manifest has no root entry (.)".into());
+    }
+    Ok(entries)
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<_> = std::env::args().collect();
+    let manifest_mode = args.get(2).is_some_and(|mode| mode == "fuse-manifest");
+    if manifest_mode {
+        if args.len() != 4 {
+            return Err("usage: fsearch_fixture RUN_DIR fuse-manifest MANIFEST.tsv".into());
+        }
+    } else if args.len() != 6 {
+        return Err(
+            "usage: fsearch_fixture RUN_DIR fuse|fuse-writable|local GROUPS FILES_PER_GROUP WIDE_FILES"
+                .into(),
+        );
+    }
+    let run = PathBuf::from(&args[1]);
+    let local = !manifest_mode && args[2] == "local";
+    let writable = !manifest_mode && args[2] == "fuse-writable";
+    if !manifest_mode && !local && !writable && args[2] != "fuse" {
+        return Err("invalid mode".into());
+    }
+    if run.exists() {
+        return Err("fixture destination must be new".into());
+    }
+    let entries = if manifest_mode {
+        manifest_entries(Path::new(&args[3]))?
+    } else {
+        synthetic_entries(
+            args[3].parse::<usize>()?,
+            args[4].parse::<usize>()?,
+            args[5].parse::<usize>()?,
+        )?
+    };
+    std::fs::create_dir_all(&run)?;
+    let mount = run.join("mount");
+    std::fs::create_dir(&mount)?;
     let truth:Vec<_>=entries.iter().map(|(path,n)|serde_json::json!({"path":path,"directory":n.directory,"size":n.metadata.as_ref().unwrap().size,"mtime":n.metadata.as_ref().unwrap().mtime})).collect();
     std::fs::write(run.join("truth.json"), serde_json::to_vec(&truth)?)?;
     let no_network = Arc::new(NoNetwork(AtomicU64::new(0)));
@@ -143,11 +245,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         store.install_remote_snapshot(
             &entries.iter().map(|(_, n)| n.clone()).collect::<Vec<_>>(),
             "1",
-            "synthetic",
+            if manifest_mode { "manifest" } else { "synthetic" },
         )?;
         let shared = Arc::new(drive_core::SharedStore::new(store));
         // Metadata caching is active only after the session notifier is
-        // installed; the default TTL is DRIVE_NATIVE_FS_TTL_MS (2 s).
+        // installed; the TTL comes from DRIVE_NATIVE_FS_TTL_MS (1 s default,
+        // 0 disables caching).
         let notify = drive_fs::NotifyHub::from_env();
         let mut fs = CacheFilesystem::new(shared, "root", unsafe { libc::getuid() }, unsafe {
             libc::getgid()
@@ -159,6 +262,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if writable {
             fs = fs.with_writes_enabled();
         }
+        let fsname = if manifest_mode {
+            "drive-native-fsearch-manifest"
+        } else {
+            "drive-native-fsearch-synthetic"
+        };
         let mounted = fuser::spawn_mount2(
             fs,
             &mount,
@@ -166,14 +274,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 fuser::MountOption::DefaultPermissions,
                 fuser::MountOption::NoDev,
                 fuser::MountOption::NoSuid,
-                fuser::MountOption::FSName("drive-native-fsearch-synthetic".into()),
+                fuser::MountOption::FSName(fsname.into()),
             ],
         )?;
         notify.install(mounted.notifier());
         session = Some(mounted);
     }
     emit(
-        serde_json::json!({"ready":true,"mode":args[2],"files":entries.iter().filter(|(_,n)|!n.directory).count(),"directories_including_root":entries.iter().filter(|(_,n)|n.directory).count()}),
+        serde_json::json!({"ready":true,"mode":args[2],"manifest":manifest_mode,"files":entries.iter().filter(|(_,n)|!n.directory).count(),"directories_including_root":entries.iter().filter(|(_,n)|n.directory).count()}),
     );
     for line in std::io::stdin().lock().lines() {
         match line?.as_str() {
