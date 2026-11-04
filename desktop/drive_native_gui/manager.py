@@ -4,7 +4,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtCore import QUrl
-from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTreeWidget, QTreeWidgetItem, QInputDialog, QListWidget, QListWidgetItem, QStackedWidget, QApplication, QHeaderView
+from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTreeWidget, QTreeWidgetItem, QInputDialog, QStackedWidget, QApplication, QHeaderView, QSplitter, QTabWidget, QMenu
 from .config import profile_records, config_path
 from .bus import ClientBus
 from .lifecycle import ServiceLauncher
@@ -13,6 +13,7 @@ from .initialization import progress_text
 from .shutdown import shutdown_text, ShutdownWatcher
 from .theme import apply_window_theme
 from .queue_health import queue_caption, queue_notice
+from .history import HistoryPage, HistorySource
 
 LABELS = {"locked":"等待解锁", "connecting":"连接中", "online":"已连接", "offline":"离线", "paused":"已暂停", "needs_attention":"需要处理", "stopping":"正在停止"}
 
@@ -42,20 +43,28 @@ class MountManager(QMainWindow):
         add_button = QPushButton("添加挂载…"); add_button.clicked.connect(self.add)
         navigation.addWidget(add_button)
         navigation.addWidget(QLabel("关闭界面不会停止后台同步")); navigation.addStretch()
+        self.exit_button = QPushButton("退出…")
+        navigation.addWidget(self.exit_button)
         shell.addLayout(navigation)
-        body = QHBoxLayout(); shell.addLayout(body, 1)
-        self.navigation = QListWidget(); self.navigation.setMaximumWidth(190)
+        body = QSplitter(Qt.Horizontal); shell.addWidget(body, 1)
+        self.navigation = QTreeWidget(); self.navigation.setHeaderHidden(True)
+        self.navigation.setMinimumWidth(150); self.navigation.setMaximumWidth(300)
         self.navigation.setAccessibleName("挂载导航")
         body.addWidget(self.navigation)
-        self.stack = QStackedWidget(); body.addWidget(self.stack, 1)
+        self.stack = QStackedWidget(); body.addWidget(self.stack)
         self.all_page = QWidget(); self.stack.addWidget(self.all_page)
         self.settings_page = QWidget(); settings = QVBoxLayout(self.settings_page)
         settings.addWidget(QLabel("全局界面设置"))
-        hint = QLabel("关闭主窗口时，托盘可用则保留托盘；没有托盘时退出界面，后台继续同步。\n证书、缓存和带宽设置属于各个挂载，请先选择挂载。\n此版本提供当前传输查询；尚无持久历史及全部暂停／恢复。")
+        hint = QLabel("关闭主窗口时，托盘可用则隐藏窗口，后台继续同步。托盘不可用时保留窗口入口。\n证书、缓存、带宽和目录属于各个挂载，请先选择挂载。\n退出菜单可选择仅退出界面，或正常停止全部同步并退出。")
         hint.setWordWrap(True); settings.addWidget(hint); settings.addStretch()
         self.stack.addWidget(self.settings_page)
         self.navigation.currentItemChanged.connect(self.navigate)
-        layout = QVBoxLayout(self.all_page)
+        all_layout = QVBoxLayout(self.all_page)
+        self.all_tabs = QTabWidget(); all_layout.addWidget(self.all_tabs)
+        all_overview = QWidget(); self.all_tabs.addTab(all_overview, "概览")
+        self.history_page = HistoryPage(self.history_sources, self)
+        self.all_tabs.addTab(self.history_page, "同步历史")
+        layout = QVBoxLayout(all_overview)
         title = QLabel("我的挂载"); title.setStyleSheet("font-size: 25px; font-weight: 600; padding: 12px 0;")
         layout.addWidget(title)
         layout.addWidget(QLabel("多个目录可以同时挂载。每个挂载独立连接、缓存和同步，关闭窗口不会停止挂载。"))
@@ -70,10 +79,15 @@ class MountManager(QMainWindow):
         self.table.itemDoubleClicked.connect(lambda *_: self.open_task())
         layout.addWidget(self.table, 1)
         self.message = QLabel(); self.message.setWordWrap(True); layout.addWidget(self.message)
+        body.setStretchFactor(1, 1); body.setSizes([190, 1000])
         self.timer = QTimer(self); self.timer.setInterval(2000); self.timer.timeout.connect(self.refresh_catalog); self.timer.start()
         self.refresh_catalog()
         from .tray import MountTray
         self.tray = MountTray(self)
+        exit_menu = QMenu(self.exit_button)
+        exit_menu.addAction("退出界面，继续同步", self.tray.quit_interface)
+        exit_menu.addAction("停止全部同步并退出", self.tray.stop_all_and_quit)
+        self.exit_button.setMenu(exit_menu)
         self.apply_theme()
 
     def apply_theme(self):
@@ -218,21 +232,26 @@ class MountManager(QMainWindow):
 
     def rebuild_navigation(self):
         current = self.navigation.currentItem()
-        selected = current.data(Qt.UserRole) if current else ("all", "")
+        selected = current.data(0, Qt.UserRole) if current else ("all", "")
         self.navigation.blockSignals(True)
         self.navigation.clear(); self.nav_items = {}
+        group = QTreeWidgetItem(["我的挂载"])
+        group.setFlags(group.flags() & ~Qt.ItemIsSelectable)
         for key, title in [(('all', ''), '所有挂载')] + [
             (('task', slot), Path(profile['mount']).name) for slot, profile in self.records.items()
         ] + [(('task', slot), page.new_name or '新挂载') for slot, page in self.pages.items() if slot not in self.records] + [(('settings', ''), '全局设置')]:
-            item = QListWidgetItem(title); item.setData(Qt.UserRole, key)
-            self.navigation.addItem(item); self.nav_items[key] = item
+            item = QTreeWidgetItem([title]); item.setData(0, Qt.UserRole, key)
+            if key[0] == 'task': group.addChild(item)
+            else: self.navigation.addTopLevelItem(item)
+            self.nav_items[key] = item
+        self.navigation.insertTopLevelItem(1, group); group.setExpanded(True)
         self.navigation.setCurrentItem(self.nav_items.get(selected, self.nav_items[('all', '')]))
         self.navigation.blockSignals(False)
         self.navigate(self.navigation.currentItem(), None)
 
     def navigate(self, item, _previous):
-        if item is None: return
-        kind, slot = item.data(Qt.UserRole)
+        if item is None or item.data(0, Qt.UserRole) is None: return
+        kind, slot = item.data(0, Qt.UserRole)
         if kind == 'task':
             self.activate_task(slot)
         else:
@@ -270,8 +289,25 @@ class MountManager(QMainWindow):
         if self.tray.available():
             self.hide(); event.ignore()
         else:
-            event.accept()
-            QApplication.instance().quit()
+            # Keep the last reachable UI when no system tray is available.
+            self.showNormal(); event.ignore()
+            self.message.setText("托盘不可用，窗口保持打开。需要退出时请使用“退出界面，继续同步”。")
+
+    def history_sources(self):
+        return {slot: HistorySource(slot, Path(profile['mount']).name, self.buses[slot],
+                                   profile['task_id'], profile['mount'])
+                for slot, profile in self.records.items() if slot in self.buses}
+
+    def show_history(self, slot=None):
+        self.activate('' if slot is None else slot or 'legacy')
+        if slot is None:
+            self.all_tabs.setCurrentWidget(self.history_page)
+        elif slot in self.pages:
+            self.pages[slot].show_history()
+
+    def show_settings(self):
+        self.activate()
+        self.navigation.setCurrentItem(self.nav_items[('settings', '')])
 
     def add(self):
         name, ok = QInputDialog.getText(self, "添加挂载", "挂载名称（本地文件夹名称，可在配置时修改）")

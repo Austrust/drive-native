@@ -123,14 +123,84 @@ class UnifiedTests(unittest.TestCase):
         self.window.tray.pause(B)
         self.assertEqual(self.window.buses[B].calls[-1], 'Resume')
 
-    def test_close_with_tray_hides_without_stopping_and_without_tray_exits_ui(self):
+    def test_close_with_tray_hides_without_stopping_and_without_tray_stays_reachable(self):
         with patch.object(self.window.tray, 'available', return_value=True):
             self.window.close()
         self.assertFalse(self.window.isVisible())
         for bus in self.window.buses.values(): self.assertNotIn('StopMount', bus.calls)
         self.window.show()
         with patch.object(self.window.tray, 'available', return_value=False), patch.object(QApplication, 'quit') as quit_app:
-            self.window.close(); quit_app.assert_called_once()
+            self.window.close(); quit_app.assert_not_called()
+        self.assertTrue(self.window.isVisible())
+        self.assertTrue(self.window.exit_button.isVisible())
+        for bus in self.window.buses.values(): self.assertNotIn('StopMount', bus.calls)
+
+    def test_tree_and_five_tabs_keep_history_in_same_window(self):
+        from PySide6.QtWidgets import QTreeWidget
+        self.assertIsInstance(self.window.navigation, QTreeWidget)
+        self.assertEqual(self.window.navigation.topLevelItem(1).text(0), '我的挂载')
+        self.window.activate_task(A)
+        page = self.window.pages[A]
+        self.assertEqual([page.tabs.tabText(i) for i in range(page.tabs.count())],
+                         ['概览', '文件', '同步历史', '同步问题', '当前挂载设置'])
+        self.window.show_history(A)
+        self.assertIs(self.window.stack.currentWidget(), page)
+        self.assertIs(page.tabs.currentWidget(), page.history_page)
+        self.window.show_history()
+        self.assertIs(self.window.stack.currentWidget(), self.window.all_page)
+        self.assertIs(self.window.all_tabs.currentWidget(), self.window.history_page)
+        self.assertEqual([w for w in APP.topLevelWidgets() if isinstance(w, QMainWindow)], [self.window])
+
+    def test_pause_all_only_resumes_tasks_it_paused_and_preserves_manual_pause(self):
+        self.complete_overview(A, 'online'); self.complete_overview(B, 'paused')
+        tray = self.window.tray
+        tray.pause_all()
+        self.assertIn('Pause', self.window.buses[A].calls)
+        self.assertNotIn('Pause', self.window.buses[B].calls)
+        callback = [cb for method, cb in self.window.buses[A].waiting if method == 'Pause'][-1]
+        callback(None, None)
+        self.window.overviews[A]['connection'] = 'paused'
+        tray.resume_all()
+        self.assertIn('Resume', self.window.buses[A].calls)
+        self.assertNotIn('Resume', self.window.buses[B].calls)
+
+    def test_tray_menu_has_history_settings_and_two_exit_choices(self):
+        self.window.tray.rebuild_menu()
+        labels = [action.text() for action in self.window.tray.menu.actions()]
+        for title in ('同步历史', '全部暂停', '全局设置', '退出界面，继续同步', '停止全部同步并退出'):
+            self.assertIn(title, labels)
+        self.complete_overview(A); self.complete_overview(B, 'paused')
+        self.assertIn('2 个挂载', self.window.tray.icon.toolTip())
+        self.assertIn('个问题', self.window.tray.icon.toolTip())
+
+    def test_stop_all_request_is_not_completion_and_failed_stop_keeps_ui(self):
+        from PySide6.QtWidgets import QMessageBox
+        tray = self.window.tray
+        def capture(slot, task, bus):
+            tray.stop_identity_pending.discard(slot)
+            tray.stop_accepted.add(slot)
+        with patch.object(QMessageBox, 'question', return_value=QMessageBox.Yes), \
+                patch.object(tray, 'capture_stop_identity', capture), patch.object(QApplication, 'quit') as quit_app:
+            tray.stop_all_and_quit()
+            tray.poll_stopping(); quit_app.assert_not_called()
+            self.window.shutdown_watchers[A].value = {'phase': 'complete'}
+            self.window.shutdown_watchers[A].mounted = False
+            tray.poll_stopping(); quit_app.assert_not_called()
+            self.window.shutdown_watchers[B].value = {'phase': 'failed'}
+            tray.poll_stopping(); quit_app.assert_not_called()
+            self.assertFalse(tray.stopping)
+            self.assertTrue(self.window.isVisible())
+
+    def test_stop_all_waits_for_every_mount_and_ui_exit_does_not_stop(self):
+        tray = self.window.tray
+        tray.stopping = True
+        tray.stop_requested = {slot: (p['task_id'], self.window.buses[slot]) for slot, p in self.window.records.items()}
+        with patch.object(QApplication, 'quit') as quit_app:
+            for slot in (A, B):
+                self.window.shutdown_watchers[slot].value = {'phase': 'complete'}
+                self.window.shutdown_watchers[slot].mounted = False
+            tray.poll_stopping(); quit_app.assert_called_once()
+        for bus in self.window.buses.values(): self.assertNotIn('StopMount', bus.calls)
 
     def test_tray_disappearance_restores_window(self):
         self.window.hide()

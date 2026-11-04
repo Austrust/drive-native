@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QStyle,
     QMessageBox,
+    QTabWidget,
 )
 from .issues import IssuesDialog
 from .trust import TrustSettingsDialog
@@ -35,6 +36,7 @@ from .initialization import progress_text
 from .shutdown import shutdown_text, ShutdownWatcher
 from .theme import apply_window_theme
 from .queue_health import queue_notice, uncertain_operations
+from .history import HistoryPage, HistorySource
 
 STATUS = {
     "initializing": ("初始化预览", "#bc8425"),
@@ -105,7 +107,7 @@ class MainWindow(QMainWindow):
         super().__init__(parent)
         self.setWindowTitle("Drive Native")
         self.resize(1120, 740)
-        self.setMinimumSize(820, 580)
+        self.setMinimumSize(540, 380)
         self.instance = os.environ.get("DRIVE_NATIVE_INSTANCE", "") if instance is None else instance
         config_path(self.instance)
         self.new_name = new_name
@@ -129,19 +131,24 @@ class MainWindow(QMainWindow):
         self.keyring_job = None
         root = QWidget()
         self.setCentralWidget(root)
-        layout = QHBoxLayout(root)
+        layout = QVBoxLayout(root)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+        self.tabs = QTabWidget()
+        self.tabs.setAccessibleName("当前挂载页面")
+        layout.addWidget(self.tabs)
+        self.overview_page = QWidget()
+        self.tabs.addTab(self.overview_page, "概览")
         side = QFrame()
         side.setObjectName("sidebar")
-        side.setFixedWidth(214)
+        self.settings_page = side
         left = QVBoxLayout(side)
         left.setContentsMargins(24, 30, 24, 22)
         left.setSpacing(12)
         brand = QLabel("Drive Native")
         brand.setObjectName("brand")
         left.addWidget(brand)
-        caption = QLabel("你的文件，随手可用")
+        caption = QLabel("当前挂载设置")
         caption.setObjectName("muted")
         left.addWidget(caption)
         left.addSpacing(26)
@@ -180,11 +187,9 @@ class MainWindow(QMainWindow):
         self.change_folder = QPushButton("更换同步目录…")
         self.change_folder.clicked.connect(self.choose_other_folder)
         left.addWidget(self.change_folder)
-        layout.addWidget(side)
-        content = QVBoxLayout()
+        content = QVBoxLayout(self.overview_page)
         content.setContentsMargins(30, 28, 30, 24)
         content.setSpacing(18)
-        layout.addLayout(content, 1)
         head = QHBoxLayout()
         titles = QVBoxLayout()
         title = QLabel("同步文件")
@@ -238,7 +243,7 @@ class MainWindow(QMainWindow):
         self.upload_block_action.clicked.connect(self.show_issues)
         self.upload_block_action.hide()
         content.addWidget(self.upload_block_action)
-        self.overview_hint = QLabel("文件可直接从文件管理器打开。\n点击左侧“查看文件状态”，按需载入当前目录的状态列表。")
+        self.overview_hint = QLabel("文件可直接从文件管理器打开。\n选择“文件”页，按需载入当前目录的状态列表。")
         self.overview_hint.setObjectName("muted")
         self.overview_hint.setAlignment(Qt.AlignCenter)
         self.overview_hint.setWordWrap(True)
@@ -246,8 +251,7 @@ class MainWindow(QMainWindow):
         self.file_details = QWidget()
         details = QVBoxLayout(self.file_details)
         details.setContentsMargins(0, 0, 0, 0)
-        content.addWidget(self.file_details, 1)
-        self.file_details.hide()
+        self.tabs.addTab(self.file_details, "文件")
         toolbar = QHBoxLayout()
         self.up = QPushButton("↑ 上一级")
         self.up.clicked.connect(self.parent_folder)
@@ -283,6 +287,18 @@ class MainWindow(QMainWindow):
         self.more.hide()
         footer.addWidget(self.more)
         details.addLayout(footer)
+        self.history_page = HistoryPage(self.history_sources, self)
+        self.tabs.addTab(self.history_page, "同步历史")
+        self.issues_page = QWidget()
+        issue_layout = QVBoxLayout(self.issues_page)
+        issue_hint = QLabel("查看冲突、失败原因与可执行的恢复方式。")
+        issue_layout.addWidget(issue_hint)
+        issue_open = QPushButton("查看同步问题")
+        issue_open.clicked.connect(self.show_issues)
+        issue_layout.addWidget(issue_open); issue_layout.addStretch()
+        self.tabs.addTab(self.issues_page, "同步问题")
+        self.tabs.addTab(side, "当前挂载设置")
+        self.tabs.currentChanged.connect(self.tab_changed)
         self.refresh_timer = QTimer(self)
         self.refresh_timer.setSingleShot(True)
         self.refresh_timer.setInterval(100)
@@ -301,14 +317,34 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self, self.start)
 
     def toggle_files(self, visible):
-        self.file_details.setVisible(visible)
-        self.overview_hint.setVisible(not visible)
+        self.tabs.setCurrentWidget(self.file_details if visible else self.overview_page)
         self.files_button.setText("收起文件状态" if visible else "查看文件状态")
         self.view_generation += 1
         if visible:
             self.schedule_refresh()
         else:
             self.availability_value.setText("按需查询")
+
+    def tab_changed(self, _index):
+        visible = self.tabs.currentWidget() is self.file_details
+        self.files_button.blockSignals(True)
+        self.files_button.setChecked(visible)
+        self.files_button.blockSignals(False)
+        self.view_generation += 1
+        if visible: self.schedule_refresh()
+        if self.tabs.currentWidget() is self.issues_page: self.show_issues()
+
+    def history_sources(self):
+        profile = self.profile or {}
+        if not profile.get("task_id") or not profile.get("mount"): return {}
+        return {self.instance: HistorySource(self.instance, Path(profile["mount"]).name,
+            self.bus, profile["task_id"], profile["mount"])}
+
+    def show_history(self):
+        self.tabs.setCurrentWidget(self.history_page)
+
+    def show_settings(self):
+        self.tabs.setCurrentWidget(self.settings_page)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -349,10 +385,15 @@ class MainWindow(QMainWindow):
         if self.issues_dialog is None:
             self.issues_dialog = IssuesDialog(self.bus, self, configure=self.configure_account)
             self.issues_dialog.resolved.connect(self.schedule_refresh)
+            self.issues_dialog.setWindowFlags(Qt.Widget)
+            self.issues_dialog.setMinimumSize(0, 0)
+            self.issues_page.layout().insertWidget(0, self.issues_dialog, 1)
+            for index in range(1, self.issues_page.layout().count()):
+                widget = self.issues_page.layout().itemAt(index).widget()
+                if widget: widget.hide()
         self.issues_dialog.update_context(self.overview)
+        self.tabs.setCurrentWidget(self.issues_page)
         self.issues_dialog.show()
-        self.issues_dialog.raise_()
-        self.issues_dialog.activateWindow()
         self.issues_dialog.refresh()
 
     def card(self, layout, label, value):
@@ -606,7 +647,7 @@ class MainWindow(QMainWindow):
         self.overview_hint.setText(
             "已确认的目录可以从文件管理器浏览。\n初始化预览中的文件暂不能打开或编辑。"
             if data.get("preview_only") is True else
-            "文件可直接从文件管理器打开。\n点击左侧“查看文件状态”，按需载入当前目录的状态列表。")
+            "文件可直接从文件管理器打开。\n选择“文件”页，按需载入当前目录的状态列表。")
         state = data["connection"]
         self.connection_value.setText(CONNECTION.get(state, "需要检查"))
         self.render_progress(data.get("initialization"))

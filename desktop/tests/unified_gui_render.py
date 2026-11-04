@@ -33,6 +33,10 @@ class Bus(QObject):
             entries = [{'path': '报告/阶段总结.pdf', 'progress': {'direction': 'upload', 'phase': 'transferring',
                         'bytes': 1048576, 'total': 2097152}}] if self.instance == A else []
             callback({'schema': 1, 'task_id': profile['task_id'], 'entries': entries}, None)
+        elif method in ('GetSyncHistory', 'GetRecentActivity'):
+            callback({'records': [{'id': 1, 'seq': 1, 'mount': 'synthetic-root', 'node': 'synthetic-file',
+                'name': '阶段总结.pdf', 'path_at_event': '报告/阶段总结.pdf', 'action': 'upload', 'result': 'ok',
+                'attempts': 2, 'completed_at': 1793750400, 'error_summary': None}], 'next_cursor': None}, None)
 
 
 def main():
@@ -47,6 +51,8 @@ def main():
         page = manager.pages[A]; page.profile = dict(RECORDS)[A]
         page.bus.call('GetOverview', callback=page.received_overview)
         app.processEvents(); manager.grab().save(str(output / 'mount-details.png'))
+        manager.show_history(A); app.processEvents(); manager.grab().save(str(output / 'mount-history.png'))
+        manager.show_history(); app.processEvents(); manager.grab().save(str(output / 'all-history.png'))
         manager.tray.show_activity(); app.processEvents()
         manager.tray.activity.grab().save(str(output / 'current-activity.png'))
         manager.tray.activity.hide()
@@ -54,7 +60,7 @@ def main():
         manager.grab().save(str(output / 'all-mounts-dark.png'))
         manager.activate_task(A); app.processEvents(); manager.grab().save(str(output / 'mount-details-dark.png'))
         manager.tray.icon.hide(); manager.hide()
-    print(json.dumps({'synthetic_only': True, 'nas_access': False, 'images': 5}))
+    print(json.dumps({'synthetic_only': True, 'nas_access': False, 'images': 7}))
 
 
 if __name__ == '__main__': main()
