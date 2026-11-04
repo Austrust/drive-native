@@ -61,8 +61,18 @@ pub enum Stage {
     ReaddirPlusQueue,
     /// One bounded attribute page projection for READDIRPLUS.
     ReaddirPlusProjection,
+    IndexHits,
+    IndexMisses,
+    IndexFallback,
+    IndexDegraded,
+    IndexBuildUs,
+    /// Aggregate allocation samples, in bytes (not microseconds).
+    IndexBytes,
+    IndexPartial,
+    PermissionDenied,
+    SpaceForbidden,
 }
-const STAGES: [Stage; 35] = [
+const STAGES: [Stage; 44] = [
     Stage::LookupQueue,
     Stage::LookupStoreWait,
     Stage::LookupProjection,
@@ -98,6 +108,9 @@ const STAGES: [Stage; 35] = [
     Stage::CacheableReplies,
     Stage::ReaddirPlusQueue,
     Stage::ReaddirPlusProjection,
+    Stage::IndexHits, Stage::IndexMisses, Stage::IndexFallback,
+    Stage::IndexDegraded, Stage::IndexBuildUs, Stage::IndexBytes,
+    Stage::IndexPartial, Stage::PermissionDenied, Stage::SpaceForbidden,
 ];
 struct Aggregate {
     count: AtomicU64,
@@ -115,7 +128,7 @@ impl Aggregate {
         }
     }
 }
-static TOTALS: [Aggregate; 35] = [const { Aggregate::new() }; 35];
+static TOTALS: [Aggregate; 44] = [const { Aggregate::new() }; 44];
 static ENABLED: OnceLock<bool> = OnceLock::new();
 pub(crate) fn enabled() -> bool {
     *ENABLED
@@ -135,6 +148,9 @@ pub fn count(stage: Stage) {
     if enabled() {
         record(stage, 0);
     }
+}
+pub(crate) fn value(stage: Stage, value: u64) {
+    if enabled() { record(stage, value); }
 }
 /// Count one metadata publication's entry/attr TTLs (counts only, no paths).
 pub(crate) fn ttls(entry: Option<std::time::Duration>, attr: Option<std::time::Duration>) {

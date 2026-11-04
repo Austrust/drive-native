@@ -655,6 +655,20 @@ impl Service {
         }
         .with_hydrator(self.bridge.clone())
         .with_notify_hub(notify.clone());
+        // `new` has now backfilled inodes. Index construction is local metadata
+        // only; previews, budget exhaustion and any load error keep the SQL path.
+        if drive_fs::namespace_index_enabled() {
+            let timing = drive_fs::diagnostics::span(drive_fs::diagnostics::Stage::IndexBuildUs);
+            let index = {
+                let store = self.bridge.store.lock().unwrap();
+                drive_core::namespace_index::NamespaceIndex::build(&store)
+            };
+            drop(timing);
+            match index {
+                Ok(index) => fs = fs.with_namespace_index(Arc::new(index)),
+                Err(_) => drive_fs::diagnostics::count(drive_fs::diagnostics::Stage::IndexDegraded),
+            }
+        }
         if self.profile.writable {
             fs = fs.with_writes_enabled();
         }

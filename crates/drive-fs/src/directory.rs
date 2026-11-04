@@ -3,6 +3,7 @@
 //! continuations validate their revocable capability while sending one reply.
 use super::*;
 use drive_core::filesystem::{DirectorySnapshot, DirectoryViewStamp};
+use drive_core::{namespace_index::{DirBlock, FileKind}, shared_store::CommitState};
 use std::sync::{
     Weak,
     atomic::{AtomicUsize, Ordering},
@@ -17,6 +18,7 @@ const HOT_VIEW_BYTES: usize = 128 * 1024;
 enum ViewOrigin {
     Authority,
     Preview(drive_core::preview::PreviewStamp),
+    Indexed { block: Option<Arc<DirBlock>>, token: CommitState, bytes: usize },
 }
 pub(super) struct View {
     origin: ViewOrigin,
@@ -28,23 +30,41 @@ impl View {
     fn snapshot(&self) -> &DirectorySnapshot {
         self.snapshot.as_ref().unwrap()
     }
+    fn indexed(&self) -> Option<(&Arc<DirBlock>, CommitState)> {
+        match &self.origin {
+            ViewOrigin::Indexed { block: Some(block), token, .. } => Some((block, *token)),
+            _ => None,
+        }
+    }
 }
 impl Drop for View {
     fn drop(&mut self) {
         if let Some(snapshot) = self.snapshot.take() {
             self.reclaimer.release(snapshot);
         }
+        if let ViewOrigin::Indexed { block, bytes, .. } = &mut self.origin {
+            if let Some(block) = block.take() { self.reclaimer.release_index(block, *bytes); }
+        }
     }
 }
+enum RetiredView {
+    Sql(DirectorySnapshot),
+    Index(Arc<DirBlock>, usize),
+}
+impl From<DirectorySnapshot> for RetiredView {
+    fn from(snapshot: DirectorySnapshot) -> Self { Self::Sql(snapshot) }
+}
 struct Reclaimer {
-    sender: Option<SyncSender<DirectorySnapshot>>,
+    sender: Option<SyncSender<RetiredView>>,
     thread: Option<std::thread::JoinHandle<()>>,
     charged: Arc<AtomicUsize>,
     allocated: Arc<AtomicUsize>,
 }
-fn reclaim(snapshot: DirectorySnapshot, charged: &AtomicUsize, allocated: &AtomicUsize) {
-    let bytes = snapshot.bytes;
-    drop(snapshot);
+fn reclaim(snapshot: impl Into<RetiredView>, charged: &AtomicUsize, allocated: &AtomicUsize) {
+    let bytes = match snapshot.into() {
+        RetiredView::Sql(snapshot) => { let bytes = snapshot.bytes; drop(snapshot); bytes },
+        RetiredView::Index(block, bytes) => { drop(block); bytes },
+    };
     // Return capacity only after the allocations are actually released.
     charged.fetch_sub(bytes, Ordering::AcqRel);
     allocated.fetch_sub(1, Ordering::AcqRel);
@@ -67,6 +87,12 @@ impl Reclaimer {
         }
     }
     fn release(&self, snapshot: DirectorySnapshot) {
+        self.send(RetiredView::Sql(snapshot));
+    }
+    fn release_index(&self, block: Arc<DirBlock>, bytes: usize) {
+        self.send(RetiredView::Index(block, bytes));
+    }
+    fn send(&self, snapshot: RetiredView) {
         // Each allocated view sends exactly once. Allocated (including queued)
         // views are capped at channel capacity, so a normal send cannot be full.
         // On exceptional receiver failure still release memory, never leak it.
@@ -128,6 +154,33 @@ impl Default for Views {
     }
 }
 impl Views {
+    /// Shares the original handle/byte/allocation caps and reclamation queue.
+    /// A failed try-lock is a normal SQL-path fallback, never dispatcher wait.
+    fn open_index(&self, block: Arc<DirBlock>, token: CommitState) -> Option<Result<u64, i32>> {
+        let Ok(_building) = self.builder.try_lock() else { return None; };
+        let mut table = self.table.lock().unwrap();
+        if table.handles.len() >= MAX_HANDLES || table.next == u64::MAX {
+            return Some(Err(libc::EMFILE));
+        }
+        // A held old-generation block remains charged until the reclaimer has
+        // actually released it. Charge conservatively even when Arc is shared.
+        let bytes = std::mem::size_of::<DirBlock>()
+            .saturating_add(block.entries.capacity() * std::mem::size_of::<drive_core::namespace_index::DirEntryLite>())
+            .saturating_add(block.entries.iter().map(|e| e.name.len()).sum::<usize>());
+        if bytes > MAX_BYTES.saturating_sub(self.charged.load(Ordering::Acquire))
+            || self.allocated.load(Ordering::Acquire) >= MAX_HANDLES {
+            return Some(Err(libc::ENOMEM));
+        }
+        self.charged.fetch_add(bytes, Ordering::AcqRel);
+        self.allocated.fetch_add(1, Ordering::AcqRel);
+        let ino = block.ino;
+        let view = Arc::new(View { origin: ViewOrigin::Indexed { block: Some(block), token, bytes },
+            ino, snapshot: None, reclaimer: self.reclaimer.clone() });
+        let fh = table.next;
+        table.next += 1;
+        table.handles.insert(fh, view);
+        Some(Ok(fh))
+    }
     // Closed small views can be reclaimed synchronously on a metadata worker.
     // Held/in-flight views keep their original immutable cookies and charge.
     fn evict(view: Arc<View>) {
@@ -329,6 +382,22 @@ pub(super) fn open(fs: &mut CacheFilesystem, ino: u64, flags: i32, reply: ReplyO
         reply.error(libc::EISDIR);
         return;
     }
+    if let Some(binding) = &fs.namespace_index {
+        if let Some(lease) = binding.lease(&fs.store, &fs.notify) {
+            if let Some(block) = binding.index.dir_block(ino) {
+                if let Some(result) = fs.directories.open_index(block, lease.state()) {
+                    match result {
+                        Ok(fh) => { diagnostics::count(diagnostics::Stage::IndexHits); reply.opened(fh, 0); },
+                        Err(e) => reply.error(e),
+                    }
+                    drop(lease);
+                    return;
+                }
+            }
+        }
+        diagnostics::count(diagnostics::Stage::IndexFallback);
+    }
+    fs.refresh_index_later();
     let views = fs.directories.clone();
     let store = fs.store.clone();
     let queued = diagnostics::span(diagnostics::Stage::OpendirQueue);
@@ -361,6 +430,42 @@ pub(super) fn read_plus(
         reply.error(libc::EINVAL);
         return;
     };
+    if let (Some(binding), Ok(view)) = (&fs.namespace_index, fs.directories.get(ino, fh)) {
+        if let Some((block, opened)) = view.indexed() {
+            if let Some(lease) = binding.lease(&fs.store, &fs.notify) {
+                if lease.state() == opened {
+                    if offset > block.entries.len() { reply.error(libc::EINVAL); return; }
+                    let publication = fs.notify.reply_guard();
+                    for (position, entry) in block.entries.iter().enumerate().skip(offset) {
+                        let cookie = (position + 1) as i64;
+                        let full = match binding.index.entry_by_ino(entry.ino) {
+                            Some(slot) => {
+                                let (_, attr_ttl) = preview::reply_ttls(&fs.notify, true, true);
+                                diagnostics::ttls(Some(ENTRY_TTL), Some(attr_ttl));
+                                reply.add_with_timeouts(entry.ino, cookie, entry.name.as_ref(),
+                                    &ENTRY_TTL, &attr_ttl, &namespace_index_glue::attr(&slot, fs.uid, fs.gid), 0)
+                            }
+                            None => {
+                                // Dirty/missing attributes are not a negative
+                                // namespace answer. The kernel re-looks up this
+                                // dirent through the ordinary authority path.
+                                diagnostics::count(diagnostics::Stage::IndexMisses);
+                                reply.add_without_lookup(entry.ino, cookie, entry.name.as_ref(), kind(entry.kind))
+                            }
+                        };
+                        if full { break; }
+                    }
+                    diagnostics::count(diagnostics::Stage::IndexHits);
+                    reply.ok();
+                    drop(publication);
+                    drop(lease);
+                    return;
+                }
+            }
+            diagnostics::count(diagnostics::Stage::IndexFallback);
+        }
+    }
+    fs.refresh_index_later();
     let views = fs.directories.clone();
     let store = fs.store.clone();
     let notify = fs.notify.clone();
@@ -376,6 +481,11 @@ pub(super) fn read_plus(
             }
         };
         let publication = notify.reply_guard();
+        if let Some((block, _)) = view.indexed() {
+            send_index_plus_sql(&store, &notify, block, offset, uid, gid, reply);
+            drop(publication);
+            return;
+        }
         let entries = &view.snapshot().entries;
         if offset > entries.len() {
             reply.error(libc::EINVAL);
@@ -499,6 +609,7 @@ pub(super) fn read_plus(
                 drop(publication);
                 return;
             }
+            ViewOrigin::Indexed { .. } => unreachable!("indexed continuation handled above"),
         }
         reply.ok();
         drop(publication);
@@ -516,6 +627,20 @@ pub(super) fn read(
         reply.error(libc::EINVAL);
         return;
     };
+    if let (Some(binding), Ok(view)) = (&fs.namespace_index, fs.directories.get(ino, fh)) {
+        if let Some((block, opened)) = view.indexed() {
+            if let Some(lease) = binding.lease(&fs.store, &fs.notify) {
+                if lease.state() == opened {
+                    diagnostics::count(diagnostics::Stage::IndexHits);
+                    send_index_page(block, offset, reply, None);
+                    drop(lease);
+                    return;
+                }
+            }
+            diagnostics::count(diagnostics::Stage::IndexFallback);
+        }
+    }
+    fs.refresh_index_later();
     let views = fs.directories.clone();
     let store = fs.store.clone();
     let queued = diagnostics::span(diagnostics::Stage::ReaddirQueue);
@@ -534,11 +659,80 @@ pub(super) fn read(
                         // Keep the same guard through the single bounded reply.
                         drop(guard);
                     }
+                    ViewOrigin::Indexed { block: Some(block), .. } => {
+                        // A changed generation must revalidate visibility. Keep
+                        // the original cookies, but omit names no longer visible
+                        // in the authoritative directory. Never refresh/reorder
+                        // the held block underneath an existing offset.
+                        let guard = store.lock().unwrap();
+                        match guard.directory_snapshot(ino, MAX_BYTES) {
+                            Ok(current) => {
+                                let visible = current.entries.iter().map(|entry| (entry.ino, entry.name.as_str()))
+                                    .collect::<std::collections::HashSet<_>>();
+                                send_index_page(block, offset, reply, Some(&visible));
+                            }
+                            Err(e) => reply.error(errno(&e)),
+                        }
+                        drop(guard);
+                    }
+                    ViewOrigin::Indexed { block: None, .. } => reply.error(libc::EBADF),
                 }
             }
             Err(e) => reply.error(e),
         }
     }));
+}
+fn kind(kind: FileKind) -> FileType {
+    match kind { FileKind::Directory => FileType::Directory, FileKind::File => FileType::RegularFile }
+}
+fn send_index_page(block: &DirBlock, offset: usize, mut reply: ReplyDirectory,
+    visible: Option<&std::collections::HashSet<(u64, &str)>>) {
+    let _span = diagnostics::span(diagnostics::Stage::ReaddirReply);
+    if offset > block.entries.len() { reply.error(libc::EINVAL); return; }
+    for (position, entry) in block.entries.iter().enumerate().skip(offset) {
+        if visible.is_some_and(|visible| !visible.contains(&(entry.ino, entry.name.as_ref()))) { continue; }
+        if reply.add(entry.ino, (position + 1) as i64, kind(entry.kind), entry.name.as_ref()) { break; }
+    }
+    reply.ok();
+}
+fn send_index_plus_sql(store: &drive_core::SharedStore, notify: &NotifyHub,
+    block: &DirBlock, offset: usize, uid: u32, gid: u32, mut reply: ReplyDirectoryPlus) {
+    if offset > block.entries.len() { reply.error(libc::EINVAL); return; }
+    let guard = store.lock().unwrap();
+    // Includes EOF: revocation cannot be bypassed with an empty page.
+    let current = match guard.directory_snapshot(block.ino, MAX_BYTES) {
+        Ok(current) => current,
+        Err(e) => { reply.error(errno(&e)); return; },
+    };
+    let visible = current.entries.iter().map(|entry| (entry.ino, entry.name.as_str()))
+        .collect::<std::collections::HashSet<_>>();
+    let mut index = offset;
+    while index < block.entries.len() {
+        let end = (index + PLUS_PAGE).min(block.entries.len());
+        let slots = block.entries[index..end].iter().map(|entry| drive_core::filesystem::DirectorySlot {
+            ino: entry.ino, name: entry.name.as_ref(), directory: entry.kind == FileKind::Directory,
+        }).collect::<Vec<_>>();
+        let records = match guard.directory_posix_page(block.ino, &slots) {
+            Ok(records) => records,
+            Err(e) => { reply.error(errno(&e)); return; },
+        };
+        for (position, entry) in block.entries[index..end].iter().enumerate() {
+            if !visible.contains(&(entry.ino, entry.name.as_ref())) { continue; }
+            let cookie = (index + position + 1) as i64;
+            let full = if let Some(record) = &records[position] {
+                let (_, attr_ttl) = preview::reply_ttls(notify, record.cacheable, true);
+                diagnostics::ttls(Some(ENTRY_TTL), Some(attr_ttl));
+                reply.add_with_timeouts(entry.ino, cookie, entry.name.as_ref(), &ENTRY_TTL,
+                    &attr_ttl, &preview::posix_attr(record, uid, gid), 0)
+            } else {
+                reply.add_without_lookup(entry.ino, cookie, entry.name.as_ref(), kind(entry.kind))
+            };
+            if full { reply.ok(); return; }
+        }
+        index = end;
+    }
+    reply.ok();
+    drop(guard);
 }
 fn send_page(view: &View, offset: usize, mut reply: ReplyDirectory) {
     let _span = diagnostics::span(diagnostics::Stage::ReaddirReply);
@@ -573,6 +767,54 @@ pub(super) fn release(fs: &mut CacheFilesystem, ino: u64, fh: u64, reply: ReplyE
 #[cfg(test)]
 #[path = "directory_view_stamp_tests.rs"]
 mod stamp_tests;
+
+#[cfg(test)]
+mod index_tests {
+    use super::*;
+    fn block() -> Arc<DirBlock> {
+        Arc::new(DirBlock { ino: 1, version: 0, built_at_gen: 3, entries: vec![
+            drive_core::namespace_index::DirEntryLite { ino: 1, name: Arc::from("."), kind: FileKind::Directory },
+            drive_core::namespace_index::DirEntryLite { ino: 1, name: Arc::from(".."), kind: FileKind::Directory },
+            drive_core::namespace_index::DirEntryLite { ino: 2, name: Arc::from("file"), kind: FileKind::File },
+        ] })
+    }
+    fn token() -> CommitState { CommitState { revision: 4, verified: true } }
+    #[test]
+    fn index_views_share_the_original_byte_and_handle_budget() {
+        let views = Views::default();
+        views.charged.store(MAX_BYTES, Ordering::Release);
+        assert_eq!(views.open_index(block(), token()).unwrap(), Err(libc::ENOMEM));
+        views.charged.store(0, Ordering::Release);
+        views.allocated.store(MAX_HANDLES, Ordering::Release);
+        assert_eq!(views.open_index(block(), token()).unwrap(), Err(libc::ENOMEM));
+        views.allocated.store(0, Ordering::Release);
+        let fh = views.open_index(block(), token()).unwrap().unwrap();
+        let view = views.get(1, fh).unwrap();
+        { let mut table = views.table.lock().unwrap();
+          for handle in 2..=MAX_HANDLES as u64 { table.handles.insert(handle, view.clone()); }
+          table.next = MAX_HANDLES as u64 + 1; }
+        assert_eq!(views.open_index(block(), token()).unwrap(), Err(libc::EMFILE));
+        assert_eq!(views.release(2, fh), Err(libc::EBADF));
+    }
+    #[test]
+    fn old_index_view_keeps_cookies_and_releases_through_reserved_reclaimer() {
+        let views = Views::default();
+        let original = block();
+        let fh = views.open_index(original.clone(), token()).unwrap().unwrap();
+        let reader = views.get(1, fh).unwrap();
+        assert!(Arc::ptr_eq(reader.indexed().unwrap().0, &original));
+        assert_eq!(reader.indexed().unwrap().1, token());
+        let charged = views.charged.clone();
+        let allocated = views.allocated.clone();
+        views.release(1, fh).unwrap();
+        assert!(charged.load(Ordering::Acquire) > 0);
+        drop(views);
+        assert_eq!(reader.indexed().unwrap().0.entries[2].name.as_ref(), "file");
+        drop(reader);
+        assert_eq!(charged.load(Ordering::Acquire), 0);
+        assert_eq!(allocated.load(Ordering::Acquire), 0);
+    }
+}
 
 #[cfg(test)]
 mod tests {

@@ -34,6 +34,8 @@ use std::{
 pub const TTL_ENV: &str = "DRIVE_NATIVE_FS_TTL_MS";
 /// Default bounded attribute freshness; never a positive-name lease.
 pub const DEFAULT_TTL_MS: u64 = 1_000;
+/// Names always revalidate, independently of attribute caching configuration.
+pub const ENTRY_TTL: Duration = Duration::ZERO;
 const INVALIDATION_QUEUE: usize = 65_536;
 
 enum Invalidate {
@@ -306,6 +308,11 @@ impl NotifyHub {
             return false;
         }
         !self.ttl().is_zero()
+    }
+    /// A lost notification disables index publication as well as attribute TTL.
+    #[inline]
+    pub fn delivery_failed(&self) -> bool {
+        self.shared.failed.load(Ordering::Acquire)
     }
     /// Observation only, never a lock: metadata reply paths must stay
     /// non-blocking. Holding this does not order replies against invalidations;

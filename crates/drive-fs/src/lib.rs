@@ -13,9 +13,11 @@ mod inline_metadata_tests;
 #[cfg(test)]
 mod isolation_tests;
 mod namespace;
+mod namespace_index_glue;
 mod preview;
 pub mod publication;
-pub use publication::NotifyHub;
+pub use publication::{NotifyHub, ENTRY_TTL};
+pub use namespace_index_glue::enabled as namespace_index_enabled;
 mod read_requests;
 #[cfg(test)]
 mod shutdown_tests;
@@ -129,6 +131,7 @@ pub struct CacheFilesystem {
     // Inside this gate, Store and the handle table are acquired separately.
     handle_updates: Arc<Mutex<()>>,
     directories: Arc<directory::Views>,
+    namespace_index: Option<Arc<namespace_index_glue::Binding>>,
     queue: LocalQueue,
     read_queue: LocalQueue,
     reads: ReadRequests,
@@ -148,6 +151,19 @@ pub struct CacheFilesystem {
     gid: u32,
 }
 impl CacheFilesystem {
+    /// Attach an index only after `new` has backfilled the authoritative inode
+    /// map. Disabled by DRIVE_NATIVE_FS_INDEX=0 for exact SQL-path comparison.
+    pub fn with_namespace_index(mut self, index: Arc<drive_core::namespace_index::NamespaceIndex>) -> Self {
+        if namespace_index_enabled() {
+            self.namespace_index = Some(Arc::new(namespace_index_glue::Binding::new(index, &self.store)));
+        }
+        self
+    }
+    fn refresh_index_later(&self) {
+        if let Some(binding) = &self.namespace_index {
+            binding.schedule(self.store.clone(), &self.queue);
+        }
+    }
     pub fn with_writes_enabled(mut self) -> Self {
         self.writable = true;
         self
@@ -170,7 +186,7 @@ impl CacheFilesystem {
     }
 
     /// Override the metadata TTL (0 disables caching). The default comes from
-    /// `DRIVE_NATIVE_FS_TTL_MS` (2000 ms).
+    /// `DRIVE_NATIVE_FS_TTL_MS` (1000 ms).
     pub fn with_metadata_ttl_ms(mut self, ttl_ms: u64) -> Self {
         self.notify = NotifyHub::with_ttl_ms(ttl_ms);
         self
@@ -218,6 +234,7 @@ impl CacheFilesystem {
                 entries: HashMap::new(),
             })),
             directories: Arc::new(directory::Views::default()),
+            namespace_index: None,
             queue: LocalQueue::new(),
             read_queue: LocalQueue::new(),
             handle_updates: Arc::new(Mutex::new(())),
@@ -433,10 +450,32 @@ impl Filesystem for CacheFilesystem {
         writable::create(self, parent, name, mode, umask, flags, reply)
     }
     fn lookup(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        let Some(name) = name.to_str().map(str::to_owned) else {
+        let Some(name) = name.to_str() else {
             reply.error(libc::ENOENT);
             return;
         };
+        // G3 permission hook: any effective ACL cache must share this lease and
+        // token, or disable the index for this request before entering here.
+        if let Some(binding) = &self.namespace_index {
+            if let Some(lease) = binding.lease(&self.store, &self.notify) {
+                if let Some(slot) = binding.index.lookup(parent, name) {
+                    let publication = self.notify.reply_guard();
+                    let (_, attr_ttl) = preview::reply_ttls(&self.notify, true, true);
+                    diagnostics::count(diagnostics::Stage::IndexHits);
+                    diagnostics::ttls(Some(ENTRY_TTL), Some(attr_ttl));
+                    self.notify.apply_reply_delay();
+                    reply.entry_with_timeouts(&ENTRY_TTL, &attr_ttl,
+                        &namespace_index_glue::attr(&slot, self.uid, self.gid), 0);
+                    drop(publication);
+                    drop(lease);
+                    return;
+                }
+                diagnostics::count(diagnostics::Stage::IndexMisses);
+            }
+            diagnostics::count(diagnostics::Stage::IndexFallback);
+        }
+        self.refresh_index_later();
+        let name = name.to_owned();
         // Observation only (never a lock): reply paths must not block on
         // invalidation delivery; the bounded TTL and the authoritative Store are
         // the correctness contract (see publication.rs).
@@ -496,6 +535,28 @@ impl Filesystem for CacheFilesystem {
         }));
     }
     fn getattr(&mut self, _req: &Request<'_>, ino: u64, fh: Option<u64>, reply: ReplyAttr) {
+        // Handle-relative attributes, mutable drafts and unlinked objects retain
+        // their original descriptor-aware SQL path.
+        if fh.is_none() {
+            if let Some(binding) = &self.namespace_index {
+                if let Some(lease) = binding.lease(&self.store, &self.notify) {
+                    if let Some(slot) = binding.index.entry_by_ino(ino) {
+                        let publication = self.notify.reply_guard();
+                        let (_, attr_ttl) = preview::reply_ttls(&self.notify, true, true);
+                        diagnostics::count(diagnostics::Stage::IndexHits);
+                        diagnostics::ttls(None, Some(attr_ttl));
+                        self.notify.apply_reply_delay();
+                        reply.attr(&attr_ttl, &namespace_index_glue::attr(&slot, self.uid, self.gid));
+                        drop(publication);
+                        drop(lease);
+                        return;
+                    }
+                    diagnostics::count(diagnostics::Stage::IndexMisses);
+                }
+                diagnostics::count(diagnostics::Stage::IndexFallback);
+            }
+        }
+        self.refresh_index_later();
         let inline_publication = self.notify.reply_guard();
         if let Some(result) = preview::try_inline_getattr(
             &self.store,
