@@ -109,8 +109,10 @@ class MountTray:
         self.stop_identity_pending = set()
         self.stop_checks = set()
         self.stopping = False
+        self.stop_generation = 0
         self.stop_poll = QTimer(manager); self.stop_poll.setInterval(500)
         self.stop_poll.timeout.connect(self.poll_stopping)
+        manager.destroyed.connect(self.close_stop_fds)
         self.activity = CurrentActivity(manager)
         self.icon = QSystemTrayIcon(status_icon('local_complete'), manager)
         self.menu = QMenu(manager)
@@ -244,6 +246,9 @@ class MountTray:
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
             return
         self.stopping = True
+        self.stop_generation += 1
+        self.stop_identity_pending.clear()
+        self.close_stop_fds()
         self.stop_requested = {slot: (p['task_id'], self.manager.buses[slot])
                                for slot, p in self.manager.records.items() if slot in self.manager.buses}
         self.stop_failures.clear()
@@ -260,6 +265,7 @@ class MountTray:
         self.stop_poll.start(); self.poll_stopping()
 
     def capture_stop_identity(self, slot, task, bus):
+        generation = self.stop_generation
         owner = bus.owner
         if not getattr(bus, 'bus', None):
             self.stop_identity_pending.discard(slot); self.stop_failures.add(slot); return
@@ -269,7 +275,10 @@ class MountTray:
         check = QDBusPendingCallWatcher(bus.bus.asyncCall(message, 3000), self.manager)
         self.stop_checks.add(check)
         def identified(*_):
-            self.stop_checks.discard(check); self.stop_identity_pending.discard(slot)
+            self.stop_checks.discard(check)
+            if generation != self.stop_generation:
+                check.deleteLater(); return
+            self.stop_identity_pending.discard(slot)
             if not self.stopping or check.isError() or owner != bus.owner:
                 self.stop_failures.add(slot); check.deleteLater(); return
             try:
@@ -280,6 +289,7 @@ class MountTray:
                 self.stop_failures.add(slot); check.deleteLater(); return
             check.deleteLater()
             def done(data, error, slot=slot, task=task, bus=bus):
+                if generation != self.stop_generation: return
                 if self.manager.records.get(slot, {}).get('task_id') != task or self.manager.buses.get(slot) is not bus:
                     self.stop_failures.add(slot)
                 elif (error and error != 'service_changed') or (isinstance(data, dict) and data.get('error')):
@@ -317,18 +327,20 @@ class MountTray:
             if fd is not None: os.close(fd)
         if self.stop_failures:
             self.stop_poll.stop(); self.stopping = False
+            self.stop_generation += 1
             self.close_stop_fds()
             self.manager.message.setText('部分挂载尚未确认正常停止，界面保持打开。请检查停止阶段；不会强杀后台或清理数据。')
         elif not self.stop_requested:
             self.stop_poll.stop(); self.stopping = False; self.quit_interface()
 
     def quit_interface(self):
+        self.stop_generation += 1
         self.stop_poll.stop()
         self.close_stop_fds()
         self.icon.hide()
         QApplication.instance().quit()
 
-    def close_stop_fds(self):
+    def close_stop_fds(self, *_):
         for fd in self.stop_pidfds.values(): os.close(fd)
         self.stop_pidfds.clear()
 

@@ -102,6 +102,7 @@ def status_icon(status):
 
 class MainWindow(QMainWindow):
     ready = Signal()
+    pause_intent = Signal()
 
     def __init__(self, parent=None, *, instance=None, new_name=None):
         super().__init__(parent)
@@ -387,6 +388,9 @@ class MainWindow(QMainWindow):
             self.issues_dialog.resolved.connect(self.schedule_refresh)
             self.issues_dialog.setWindowFlags(Qt.Widget)
             self.issues_dialog.setMinimumSize(0, 0)
+            for button in self.issues_dialog.findChildren(QPushButton):
+                if button.text() == "关闭":
+                    button.clicked.connect(lambda: self.tabs.setCurrentWidget(self.overview_page))
             self.issues_page.layout().insertWidget(0, self.issues_dialog, 1)
             for index in range(1, self.issues_page.layout().count()):
                 widget = self.issues_page.layout().itemAt(index).widget()
@@ -903,6 +907,7 @@ class MainWindow(QMainWindow):
         self.schedule_refresh()
 
     def toggle_pause(self):
+        self.pause_intent.emit()
         self.bus.call(
             "Resume" if self.overview.get("connection") == "paused" else "Pause",
             callback=self.action_done,

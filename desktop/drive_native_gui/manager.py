@@ -268,6 +268,7 @@ class MountManager(QMainWindow):
             page = MainWindow(self.stack, instance=slot, new_name=name)
             page.setWindowFlags(Qt.Widget)
             page.ready.connect(self.refresh_catalog)
+            page.pause_intent.connect(lambda key=slot: self.tray.paused_by_all.pop(key, None))
             self.pages[slot] = page; self.stack.addWidget(page)
             self.rebuild_navigation()
         page = self.pages[slot]
@@ -335,6 +336,7 @@ class MountManager(QMainWindow):
     def pause(self):
         slot = self.selected()
         if slot is None: return
+        self.tray.paused_by_all.pop(slot, None)
         state = self.items[slot].data(1, Qt.UserRole)
         if state is None:
             self.message.setText("状态未确认，请稍后重试。"); return
