@@ -65,6 +65,11 @@ Store 是权威，索引只读，不写业务状态、不下载正文。装载�
 
 读取者在回复前核对 SharedStore::change_state() 的 revision 与 verified，以及既有 publication/目录 stamp 门禁。Store::local_revision() 是索引内部代数，不能假设与 SharedStore revision 数值相等。热路径不取 Store 锁；状态变化时回退 SQL/受序列化保护地刷新。只有在完整且 verified 的快照上才重新启用内存命中。通知丢失不能影响正确性。dirty/draft 的文件变化可能不提交 SQLite，因此不能靠 revision 缓存其属性；这些属性走 SQL。打开目录的 cookie、ACL/preview 重验、取消和 releasedir 生命周期保持 .9 语义。
 
+### G1 静态核对后的 G2 接线补充
+
+`DirBlock.entries` 前两项固定为 `.`、`..`，其余按 name/ino 排序；lookup 只在 children 中二分，保持既有 cookie 规则。
+已核实 `Store::local_revision()` 是 SQLite total_changes，而旧 SharedStore 提交通知有意忽略 local_atimes/inode 分配。G2 由协调者在 shared_store.rs 添加独立 `projection_state() -> CommitState` 和 `try_projection_read() -> Option<ProjectionReadGuard<'_>>`，后者提供 `state() -> CommitState`。所有 Store guard 持有短时投影写保护；索引读租约持到回复结束，不取 Store 锁，失败则原路径回退。projection revision 覆盖任何 total_changes、Store 替换和未确认边界，保留旧 change_state()/通知语义。禁止在持有投影读租约时获取 Store。B 可先按此 API 编写，G2 接通后全量编译。
+
 ## C2 SyncHistory schema 24 与 IPC
 
 记录 JSON 固定字段：
