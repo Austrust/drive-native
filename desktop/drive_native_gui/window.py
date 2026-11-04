@@ -1,4 +1,5 @@
 import os
+import json
 from pathlib import Path
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal, QProcess
 from PySide6.QtGui import QDesktopServices, QAction, QIcon, QColor, QPainter, QPixmap, QPalette
@@ -37,6 +38,7 @@ from .shutdown import shutdown_text, ShutdownWatcher
 from .theme import apply_window_theme
 from .queue_health import queue_notice, uncertain_operations
 from .history import HistoryPage, HistorySource
+from .permissions import permission_text, PermissionSettings
 
 STATUS = {
     "initializing": ("初始化预览", "#bc8425"),
@@ -244,6 +246,18 @@ class MainWindow(QMainWindow):
         self.upload_block_action.clicked.connect(self.show_issues)
         self.upload_block_action.hide()
         content.addWidget(self.upload_block_action)
+        self.permission_label = QLabel()
+        self.permission_label.setTextFormat(Qt.PlainText)
+        self.permission_label.setWordWrap(True)
+        content.addWidget(self.permission_label)
+        permission_actions = QHBoxLayout()
+        self.permission_settings = QPushButton("读写设置…")
+        self.permission_settings.clicked.connect(self.edit_permissions)
+        permission_actions.addWidget(self.permission_settings)
+        self.permission_recheck = QPushButton("重新核对远端权限")
+        self.permission_recheck.clicked.connect(self.show_issues)
+        permission_actions.addWidget(self.permission_recheck)
+        content.addLayout(permission_actions)
         self.overview_hint = QLabel("文件可直接从文件管理器打开。\n选择“文件”页，按需载入当前目录的状态列表。")
         self.overview_hint.setObjectName("muted")
         self.overview_hint.setAlignment(Qt.AlignCenter)
@@ -628,6 +642,11 @@ class MainWindow(QMainWindow):
                 CONNECTION.get(self.overview.get("connection"), "需要检查")
                 if uncertain_operations(self.overview) else title)
 
+    def edit_permissions(self):
+        if "write_policy_revision" in self.overview:
+            PermissionSettings(self.bus, self.overview, self).exec()
+            self.refresh()
+
     def received_overview(self, data, error):
         if error:
             self.loading = False
@@ -642,6 +661,15 @@ class MainWindow(QMainWindow):
             self.followup_refresh()
             return
         self.overview = data
+        self.permission_label.setText(permission_text(data))
+        self.permission_settings.setEnabled("write_policy_revision" in data)
+        self.permission_recheck.setEnabled("write_policy_revision" in data)
+        if "write_policy_revision" in data:
+            folder, task = self.folder, data.get("task_id")
+            def received_permissions(value, error):
+                if not error and value and self.folder == folder and self.overview.get("task_id") == task:
+                    self.permission_label.setText(permission_text(self.overview, value))
+            self.bus.call("GetDirectoryPermissions", (json.dumps({"path": folder}),), callback=received_permissions)
         block = data.get("upload_block")
         self.upload_block_label.setText("上传受阻：" + str(block)[:2000] if block else "")
         self.upload_block_label.setVisible(bool(block))
