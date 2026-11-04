@@ -1,0 +1,18 @@
+test_bounded_directory_summary_is_neutral (__main__.Tests.test_bounded_directory_summary_is_neutral) ... dbus-daemon[41181]: [session uid=1000 pid=41181] Activating service name='org.gtk.vfs.Daemon' requested by ':1.0' (uid=1000 pid=41182 comm="/usr/bin/python3 desktop/tests/filemanager_provide" label="kernel")
+dbus-daemon[41181]: [session uid=1000 pid=41181] Successfully activated service 'org.gtk.vfs.Daemon'
+ok
+test_mount_change_invalidates_old_paths_and_discards_pending (__main__.Tests.test_mount_change_invalidates_old_paths_and_discards_pending) ... ok
+test_nautilus4_menus_accept_removed_window_argument_and_keep_paths_scoped (__main__.Tests.test_nautilus4_menus_accept_removed_window_argument_and_keep_paths_scoped) ... ok
+test_preview_does_not_offer_body_actions_or_offline_emblems (__main__.Tests.test_preview_does_not_offer_body_actions_or_offline_emblems) ... ok
+test_preview_transition_invalidates_previous_emblems_and_requeries (__main__.Tests.test_preview_transition_invalidates_previous_emblems_and_requeries) ... ok
+test_reconnect_requeries_visible_paths_and_clears_stale_reply (__main__.Tests.test_reconnect_requeries_visible_paths_and_clears_stale_reply) ... ok
+test_repeated_identical_status_signals_do_not_invalidate_icons (__main__.Tests.test_repeated_identical_status_signals_do_not_invalidate_icons) ... ok
+test_status_uses_local_cache_without_file_body_or_remote_request (__main__.Tests.test_status_uses_local_cache_without_file_body_or_remote_request) ... ok
+test_tasks_do_not_share_caches_or_accept_other_mount_commands (__main__.Tests.test_tasks_do_not_share_caches_or_accept_other_mount_commands) ... ok
+test_unchanged_status_signal_does_not_invalidate_other_extensions (__main__.Tests.test_unchanged_status_signal_does_not_invalidate_other_extensions) ... ok
+
+----------------------------------------------------------------------
+Ran 10 tests in 0.025s
+
+OK
+A connection to the bus can't be made

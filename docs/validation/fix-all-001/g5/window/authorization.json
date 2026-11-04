@@ -1,0 +1,11 @@
+{
+  "coordinator_start_utc": "2026-11-04T15:50:31Z",
+  "verifier_clock_before_launch_utc": "2026-11-04T15:50:59Z",
+  "candidate_commit": "bae1ef1ddc4061df586221557011f4e30f04d134",
+  "build": "build-002",
+  "primary": "primary-001: all three trees, three fixed paired rounds, first and repeat",
+  "diagnostic": "diagnostic-001: all three trees, one separate paired round, first and repeat plus serial scandir",
+  "coordination": "Coordinator confirmed all other build/test/scan work stopped; only small report edits permitted.",
+  "windows_sampling": "Two-second read-only CIM attempt authorized; inaccessible resources are recorded as unmeasured, with no install or system change.",
+  "sample_policy": "Retain all samples and failures. No TTL, budget, scan boundary or sample selection changes."
+}

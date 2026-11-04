@@ -1,0 +1,85 @@
+{
+  "complete": true,
+  "passed": 6,
+  "failed": 0,
+  "ignored": 0,
+  "results": [
+    {
+      "command": [
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/schema-g4-005/bins/schema23",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/schema-g4-005/state/v23"
+      ],
+      "exit_code": 0,
+      "stdout": "OPEN_OK schema=23\n",
+      "stderr": "",
+      "expected_accept": true,
+      "passed": true
+    },
+    {
+      "command": [
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/schema-g4-005/bins/schema24",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/schema-g4-005/state/v24"
+      ],
+      "exit_code": 0,
+      "stdout": "OPEN_OK schema=24\n",
+      "stderr": "",
+      "expected_accept": true,
+      "passed": true
+    },
+    {
+      "command": [
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/schema-g4-005/bins/schema23",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/schema-g4-005/state/v24"
+      ],
+      "exit_code": 23,
+      "stdout": "",
+      "stderr": "OPEN_REJECTED state precondition: database is newer than this build\n",
+      "expected_accept": false,
+      "passed": true
+    },
+    {
+      "command": [
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/schema-g4-005/bins/schema25",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/schema-g4-005/state/v25"
+      ],
+      "exit_code": 0,
+      "stdout": "OPEN_OK schema=25\n",
+      "stderr": "",
+      "expected_accept": true,
+      "passed": true
+    },
+    {
+      "command": [
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/schema-g4-005/bins/schema23",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/schema-g4-005/state/v25"
+      ],
+      "exit_code": 23,
+      "stdout": "",
+      "stderr": "OPEN_REJECTED state precondition: database is newer than this build\n",
+      "expected_accept": false,
+      "passed": true
+    },
+    {
+      "command": [
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/schema-g4-005/bins/schema24",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/schema-g4-005/state/v25"
+      ],
+      "exit_code": 23,
+      "stdout": "",
+      "stderr": "OPEN_REJECTED state precondition: database is newer than this build\n",
+      "expected_accept": false,
+      "passed": true
+    }
+  ],
+  "readers": {
+    "23": "e9d4eae462a1ab57411dbeeb9c7c03f898e749e11c68f297949f21b743cf868a",
+    "24": "7122704c3652b264fc594e945dc8d4a8862ee2e3e84422ba950225b73cff07cc",
+    "25": "5a62cfda261783ad56c2763496be75cb34aa5d02a29b4af345d96c377846e663"
+  },
+  "versions": [
+    23,
+    24,
+    25
+  ],
+  "rejected_readers_left_database_bytes_unchanged": true
+}

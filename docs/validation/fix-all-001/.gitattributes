@@ -1,0 +1,4 @@
+# Evidence hashes describe the original bytes, including original line endings.
+*.log -text
+g4/** -text
+g5/** -text

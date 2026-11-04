@@ -1,0 +1,11 @@
+Traceback (most recent call last):
+  File "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/source/desktop/tests/filemanager_provider_tests.py", line 9, in <module>
+    m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen importlib._bootstrap_external>", line 995, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/source/desktop/nautilus/drive_native_nautilus.py", line 5, in <module>
+    gi.require_version("Nautilus", "4.0")
+  File "/usr/lib/python3/dist-packages/gi/__init__.py", line 122, in require_version
+    raise ValueError('Namespace %s not available' % namespace)
+ValueError: Namespace Nautilus not available

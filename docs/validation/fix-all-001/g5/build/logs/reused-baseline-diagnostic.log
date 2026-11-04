@@ -1,0 +1,90 @@
+warning: unused import: `validate_path`
+ --> crates/sproto/src/actions/transfer.rs:4:36
+  |
+4 | use super::native::{NativeVersion, validate_path};
+  |                                    ^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `AsyncReadExt` and `AsyncSeekExt`
+  --> crates/sproto/src/actions/transfer.rs:14:17
+   |
+14 | use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWrite};
+   |                 ^^^^^^^^^^^^  ^^^^^^^^^^^^
+
+warning: function `binary_parts` is never used
+  --> crates/sproto/src/pstream/encode.rs:68:15
+   |
+68 | pub(crate) fn binary_parts(obj: &PObject) -> Result<(Vec<u8>, Vec<u8>, u64)> {
+   |               ^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `send_binary` is never used
+  --> crates/sproto/src/channel.rs:80:25
+   |
+77 | impl Channel {
+   | ------------ method in this implementation
+...
+80 |     pub(crate) async fn send_binary<R: AsyncRead + Unpin>(
+   |                         ^^^^^^^^^^^
+
+warning: `sproto` (lib) generated 4 warnings (run `cargo fix --lib -p sproto` to apply 2 suggestions)
+warning: struct `cuse_init_in` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:814:12
+    |
+814 | pub struct cuse_init_in {
+    |            ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: struct `cuse_init_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:823:12
+    |
+823 | pub struct cuse_init_out {
+    |            ^^^^^^^^^^^^^
+
+warning: struct `fuse_ioctl_iovec` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:868:12
+    |
+868 | pub struct fuse_ioctl_iovec {
+    |            ^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:996:12
+    |
+996 | pub struct fuse_notify_retrieve_out {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_in` is never constructed
+    --> vendor/fuser/src/ll/fuse_abi.rs:1006:12
+     |
+1006 | pub struct fuse_notify_retrieve_in {
+     |            ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `verify_root` is never used
+  --> crates/drive-core/src/native_root_guard.rs:86:25
+   |
+26 | impl NativeReadSession {
+   | ---------------------- method in this implementation
+...
+86 |     pub(super) async fn verify_root(&self) -> Result<()> {
+   |                         ^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `fuser` (lib) generated 5 warnings
+warning: `drive-core` (lib) generated 1 warning
+   Compiling drive-fs v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-benchmark/build-001/baseline/crates/drive-fs)
+warning: variable does not need to be mutable
+   --> crates/drive-fs/examples/fsearch_fixture.rs:236:9
+    |
+236 |     let mut index_status = serde_json::json!({"index_enabled":false});
+    |         ----^^^^^^^^^^^^
+    |         |
+    |         help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: `drive-fs` (example "fsearch_fixture") generated 1 warning (run `cargo fix --example "fsearch_fixture" -p drive-fs` to apply 1 suggestion)
+    Finished `release` profile [optimized] target(s) in 5.37s

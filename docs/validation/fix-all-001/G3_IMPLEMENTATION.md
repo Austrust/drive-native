@@ -55,9 +55,20 @@ G3 后只由独立验证代理执行 G4。真实 NAS、凭据、生产数据、p
 |---|---|---|
 | 8ceda14 | 调度先验证 durable intent 再解码 ACL 目标；重置 observed Read 拒绝时恢复下载重试门禁 | 新增回归和完整矩阵未实测 |
 | 55189ba | 显式分类三张新表；确定非提交后重试释放旧 upload_paths 捕获；新草稿重查父 CreateFile；修正缺元数据及独立任务范围的夹具 | 新候选由独立 G4 复跑，不能沿用旧候选通过数 |
+| 652eabe | GUI selector 按规格区分远端根 hint 与显式用户策略；新增保存只读的完整断言 | 独立 GUI 运行前未实测 |
+| c744729 | 严格拒绝 history all 的额外字段；保留 preview EAGAIN/EROFS；L1/L2 实际操作返回 EROFS；旧迁移与直接 Store 测试按实际前置条件构造 | check012 通过，完整 G4 第三轮待独立复跑 |
+| b3dfff5 | 独立复核确认 Setattr 准备误要求 WriteContent；只分开本地 helper 授权，保留实际全文件上传门禁，补交叉内核用例及 chmod 拒绝 | check013 漏传测试参数失败原件保留；014 全量通过；G4 新候选待独立执行 |
+| bae1ef1 | G4-004 新用例发现元数据锁繁忙提前 EAGAIN 掩盖实际 EACCES；dispatcher 恢复 inline/queue 回退，worker 检查可等待，缺失子项前仍检查父 Traverse | check015 全量通过；G4-005 与 G5 未实测 |
 
 `g3-check-009.log` 和 `g3-check-010.log` 的全 workspace/all-targets/all-features 编译完成；010 退出 0。
 新候选未删除或放宽原断言。独立挂载 A 的夹具按 native::project 的选定子树模型令 A.parent=None；
 产品 `ensure_fs_root` 的 inode 1 身份保护保持不变。原失败为该夹具错误地在整树 Store 上改挂载根。
+
+第二轮测试修订不删除原断言：schema6 构造先移除 schema24 才有的触发器；直接 Store 创建后经真实 POSIX 投影分配 inode；
+队列夹具先明确允许写；目录查询的零写入计量从服务持久化一次任务策略之后开始。
+运行时清理 JSON 原来因 Serde unit variant 忽略额外字段，改用严格空结构 wire 解析，公开枚举与 IPC 格式不变。
+
+check015 退出 0、16.32 秒；原始输出包含 80 个 NUL 字节，原样保留，没有整理或替换日志。
+命令、执行退出码和原件 SHA256 另记于[编译元数据](g3-check-015-meta.json)。
 
 最终 G4/G5 结果见 [#5/#2 报告](../../FIX_5_2_REPORT.md)和 [#7 报告](../../FIX_7_REPORT.md)，本节保留修复提交时的验证边界。

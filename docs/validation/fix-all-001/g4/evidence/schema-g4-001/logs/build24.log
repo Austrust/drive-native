@@ -1,0 +1,32 @@
+   Compiling drive-core v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/schema-g4-001/source24/crates/drive-core)
+warning: unused import: `installation_restore`
+   --> /home/drive-native-test/.local/state/drive-native-ultra-validation/schema-g4-001/source24/crates/drive-core/src/initialization_store.rs:851:70
+    |
+851 |     InitializationCommit, check_install_gate, finish_in_transaction, installation_restore,
+    |                                                                      ^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `installation_restore` is never used
+   --> /home/drive-native-test/.local/state/drive-native-ultra-validation/schema-g4-001/source24/crates/drive-core/src/initialization_store_ops.rs:997:15
+    |
+997 | pub(crate) fn installation_restore(
+    |               ^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `emit` is never used
+  --> /home/drive-native-test/.local/state/drive-native-ultra-validation/schema-g4-001/source24/crates/drive-core/src/snapshot_progress.rs:50:15
+   |
+50 | pub(crate) fn emit(progress: Progress) {
+   |               ^^^^
+
+warning: function `retry` is never used
+  --> /home/drive-native-test/.local/state/drive-native-ultra-validation/schema-g4-001/source24/crates/drive-core/src/snapshot_progress.rs:53:15
+   |
+53 | pub(crate) fn retry(attempt: u8, reason: RetryReason) {
+   |               ^^^^^
+
+warning: `drive-core` (lib) generated 4 warnings (run `cargo fix --lib -p drive-core` to apply 1 suggestion)
+   Compiling schema-probe-24 v0.0.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/schema-g4-001/probe24)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 10.15s

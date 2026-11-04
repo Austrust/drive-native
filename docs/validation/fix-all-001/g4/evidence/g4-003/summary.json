@@ -1,0 +1,1077 @@
+{
+  "complete": true,
+  "candidate_commit": "c744729141ca8b23bde63c61ca8a644bdfdaee81",
+  "source": {
+    "candidate_commit": "c744729141ca8b23bde63c61ca8a644bdfdaee81",
+    "baseline_commit": "d555944bfe3058cb223bf7d8ebc71244f1e4d7a3",
+    "candidate_archive_sha256": "f2a260fc4a179609da6a1f706e725d72fb348ae147ab04883eb054329747a8f1",
+    "baseline_archive_sha256": "12363faf6aaff67eb52edda3fc223bab18c31b738408d19cd833e80c16082914",
+    "fixture_overlay": "The candidate fsearch_fixture.rs is copied byte-for-byte into the baseline archive extraction; baseline product files remain d555944.",
+    "executed": "source archival only; no build, test or benchmark"
+  },
+  "start": "2026-11-04T14:34:32.248251+00:00",
+  "environment": "WSL2 Ubuntu-24.04; synthetic/local only; no NAS",
+  "target_seed": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target",
+  "harness_sha256": "49e151f1c7bb096de1586c1a5d5669e5a607189ed5f5c29f19bdb181dff20487",
+  "commands": [
+    {
+      "name": "workspace-all-features",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "--workspace",
+        "--all-features"
+      ],
+      "environment_overrides": {},
+      "kind": "rust",
+      "start": "2026-11-04T14:34:32.260883+00:00",
+      "log": "logs/workspace-all-features.log",
+      "end": "2026-11-04T14:39:13.000600+00:00",
+      "elapsed_seconds": 257.211411581,
+      "exit_code": 0,
+      "log_sha256": "5c32bf54519493fcd0b4120e55ba4ec1332a21d6211a59d212f46f28449b0115",
+      "counts": {
+        "reported": true,
+        "passed": 955,
+        "failed": 0,
+        "ignored": 40,
+        "measured": 0,
+        "filtered": 0
+      },
+      "required_tests": {
+        "definite_permission_refusal_retains_body_allows_sibling_and_rechecks": true,
+        "first_denial_publication_waits_for_existing_bounded_reply": true,
+        "cached_reply_lease_does_not_wait_for_ordinary_metadata_store": true
+      },
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "core-fs-runtime-default",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "-p",
+        "drive-core",
+        "-p",
+        "drive-fs",
+        "-p",
+        "drive-runtime"
+      ],
+      "environment_overrides": {},
+      "kind": "rust",
+      "start": "2026-11-04T14:39:13.008493+00:00",
+      "log": "logs/core-fs-runtime-default.log",
+      "end": "2026-11-04T14:42:39.182694+00:00",
+      "elapsed_seconds": 188.44975356199984,
+      "exit_code": 0,
+      "log_sha256": "fcba10bda0c0f1cb87877d0cacdfed0674be7030f2f53fd75e678342fd2581fa",
+      "counts": {
+        "reported": true,
+        "passed": 786,
+        "failed": 0,
+        "ignored": 36,
+        "measured": 0,
+        "filtered": 0
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "vendored-fuser-wire",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--manifest-path",
+        "vendor/fuser/Cargo.toml",
+        "--lib",
+        "--no-default-features",
+        "--features",
+        "abi-7-31"
+      ],
+      "environment_overrides": {},
+      "kind": "rust",
+      "start": "2026-11-04T14:42:39.185328+00:00",
+      "log": "logs/vendored-fuser-wire.log",
+      "end": "2026-11-04T14:42:55.034664+00:00",
+      "elapsed_seconds": 15.848978907000173,
+      "exit_code": 0,
+      "log_sha256": "b1d67efc514176a8626627d5a6d890b9ea8e323f2460fa48a5ba0e19b99d75c4",
+      "counts": {
+        "reported": true,
+        "passed": 55,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 0
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "kernel-fs-debug-index1",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "-p",
+        "drive-fs",
+        "--lib",
+        "--tests",
+        "--all-features",
+        "--",
+        "--ignored",
+        "--test-threads=1"
+      ],
+      "environment_overrides": {
+        "DRIVE_NATIVE_FS_DIAGNOSTICS": "1",
+        "DRIVE_NATIVE_FS_INDEX": "1"
+      },
+      "kind": "rust",
+      "start": "2026-11-04T14:42:55.036786+00:00",
+      "log": "logs/kernel-fs-debug-index1.log",
+      "end": "2026-11-04T14:43:39.084816+00:00",
+      "elapsed_seconds": 41.102187692999905,
+      "exit_code": 0,
+      "log_sha256": "d98e1168b9d795a2b84a1cb0fb5f030751cd8636875c17dfa976460d19f17e58",
+      "counts": {
+        "reported": true,
+        "passed": 36,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 41
+      },
+      "required_tests": {
+        "root_a_b_and_action_classes_are_enforced_in_one_mount": true,
+        "live_revocation_restoration_and_list_vs_traverse": true,
+        "target_parent_cover_target_and_independent_submount": true
+      },
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "kernel-fs-debug-index0",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "-p",
+        "drive-fs",
+        "--lib",
+        "--tests",
+        "--all-features",
+        "--",
+        "--ignored",
+        "--test-threads=1",
+        "--skip",
+        "indexed_plain_continuation_and_seek_do_not_wait_for_store",
+        "--skip",
+        "indexed_plus_continuation_and_seek_do_not_wait_for_store"
+      ],
+      "environment_overrides": {
+        "DRIVE_NATIVE_FS_DIAGNOSTICS": "1",
+        "DRIVE_NATIVE_FS_INDEX": "0"
+      },
+      "kind": "rust",
+      "start": "2026-11-04T14:43:39.087647+00:00",
+      "log": "logs/kernel-fs-debug-index0.log",
+      "end": "2026-11-04T14:44:00.686410+00:00",
+      "elapsed_seconds": 18.65504258100009,
+      "exit_code": 0,
+      "log_sha256": "2524a6954c671e8216372fbd922977d5e9be8a4c3eb317333f382156135cf958",
+      "counts": {
+        "reported": true,
+        "passed": 34,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 43
+      },
+      "required_tests": {
+        "root_a_b_and_action_classes_are_enforced_in_one_mount": true,
+        "live_revocation_restoration_and_list_vs_traverse": true,
+        "target_parent_cover_target_and_independent_submount": true
+      },
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "kernel-runtime-debug",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "-p",
+        "drive-runtime",
+        "--lib",
+        "--all-features",
+        "--",
+        "--ignored",
+        "--test-threads=1"
+      ],
+      "environment_overrides": {
+        "DRIVE_NATIVE_FS_DIAGNOSTICS": "1"
+      },
+      "kind": "rust",
+      "start": "2026-11-04T14:44:00.689115+00:00",
+      "log": "logs/kernel-runtime-debug.log",
+      "end": "2026-11-04T14:44:28.988279+00:00",
+      "elapsed_seconds": 25.372290564999957,
+      "exit_code": 0,
+      "log_sha256": "c5ca3f91828db1c2fffd204dd29797209e022df8911f1833afd3948c6a6618aa",
+      "counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 141
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "kernel-fs-release-index1",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "--release",
+        "-p",
+        "drive-fs",
+        "--lib",
+        "--tests",
+        "--all-features",
+        "--",
+        "--ignored",
+        "--test-threads=1"
+      ],
+      "environment_overrides": {
+        "DRIVE_NATIVE_FS_DIAGNOSTICS": "1",
+        "DRIVE_NATIVE_FS_INDEX": "1"
+      },
+      "kind": "rust",
+      "start": "2026-11-04T14:44:28.990440+00:00",
+      "log": "logs/kernel-fs-release-index1.log",
+      "end": "2026-11-04T14:45:30.396624+00:00",
+      "elapsed_seconds": 58.284417235999854,
+      "exit_code": 0,
+      "log_sha256": "44132e3f343cb42e45e076fd3fc995c46e5f5d4fedc9fb84bdb6c7a0e0307b45",
+      "counts": {
+        "reported": true,
+        "passed": 36,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 41
+      },
+      "required_tests": {
+        "root_a_b_and_action_classes_are_enforced_in_one_mount": true,
+        "live_revocation_restoration_and_list_vs_traverse": true,
+        "target_parent_cover_target_and_independent_submount": true
+      },
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "kernel-fs-release-index0",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "--release",
+        "-p",
+        "drive-fs",
+        "--lib",
+        "--tests",
+        "--all-features",
+        "--",
+        "--ignored",
+        "--test-threads=1",
+        "--skip",
+        "indexed_plain_continuation_and_seek_do_not_wait_for_store",
+        "--skip",
+        "indexed_plus_continuation_and_seek_do_not_wait_for_store"
+      ],
+      "environment_overrides": {
+        "DRIVE_NATIVE_FS_DIAGNOSTICS": "1",
+        "DRIVE_NATIVE_FS_INDEX": "0"
+      },
+      "kind": "rust",
+      "start": "2026-11-04T14:45:30.399089+00:00",
+      "log": "logs/kernel-fs-release-index0.log",
+      "end": "2026-11-04T14:45:44.484679+00:00",
+      "elapsed_seconds": 11.290515116000051,
+      "exit_code": 0,
+      "log_sha256": "4dac4afcb4a4dd0ffb7843ebdea18f72b278f1a68d08e79df3e4255b8ed97ec9",
+      "counts": {
+        "reported": true,
+        "passed": 34,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 43
+      },
+      "required_tests": {
+        "root_a_b_and_action_classes_are_enforced_in_one_mount": true,
+        "live_revocation_restoration_and_list_vs_traverse": true,
+        "target_parent_cover_target_and_independent_submount": true
+      },
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "kernel-runtime-release",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "--release",
+        "-p",
+        "drive-runtime",
+        "--lib",
+        "--all-features",
+        "--",
+        "--ignored",
+        "--test-threads=1"
+      ],
+      "environment_overrides": {
+        "DRIVE_NATIVE_FS_DIAGNOSTICS": "1"
+      },
+      "kind": "rust",
+      "start": "2026-11-04T14:45:44.487325+00:00",
+      "log": "logs/kernel-runtime-release.log",
+      "end": "2026-11-04T14:46:45.606707+00:00",
+      "elapsed_seconds": 55.233996273,
+      "exit_code": 0,
+      "log_sha256": "faf1342b2439f28eb91df602cb22b9855766d23c85936867727f2732e5e52cf2",
+      "counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 141
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "kernel-fs-release-attr0",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "--release",
+        "-p",
+        "drive-fs",
+        "--lib",
+        "--tests",
+        "--all-features",
+        "--",
+        "--ignored",
+        "--test-threads=1"
+      ],
+      "environment_overrides": {
+        "DRIVE_NATIVE_FS_DIAGNOSTICS": "1",
+        "DRIVE_NATIVE_FS_TTL_MS": "0"
+      },
+      "kind": "rust",
+      "start": "2026-11-04T14:46:45.609121+00:00",
+      "log": "logs/kernel-fs-release-attr0.log",
+      "end": "2026-11-04T14:46:57.351255+00:00",
+      "elapsed_seconds": 11.741168229999857,
+      "exit_code": 0,
+      "log_sha256": "e360a5c15ae338e5f4bde665f2e0c350b155ba6aa8d9bfcd119eef9da5bb4d85",
+      "counts": {
+        "reported": true,
+        "passed": 36,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 41
+      },
+      "required_tests": {
+        "root_a_b_and_action_classes_are_enforced_in_one_mount": true,
+        "live_revocation_restoration_and_list_vs_traverse": true,
+        "target_parent_cover_target_and_independent_submount": true
+      },
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "runtime-private-dbus",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "-p",
+        "drive-runtime",
+        "--test",
+        "desktop",
+        "--all-features",
+        "recovery_action_real_dbus_preserves_unknown_queue_and_user_pause",
+        "--",
+        "--ignored",
+        "--exact",
+        "--test-threads=1"
+      ],
+      "environment_overrides": {},
+      "kind": "rust",
+      "start": "2026-11-04T14:46:57.353571+00:00",
+      "log": "logs/runtime-private-dbus.log",
+      "end": "2026-11-04T14:47:16.322774+00:00",
+      "elapsed_seconds": 18.96849572500014,
+      "exit_code": 0,
+      "log_sha256": "dd1ed6b7dfd32739e760219e68698fb1cea693c565516b7ddf15f405568dc2c6",
+      "counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 24
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "gui-gui_unit_tests",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/gui_unit_tests.py",
+        "-v"
+      ],
+      "environment_overrides": {},
+      "kind": "gui",
+      "start": "2026-11-04T14:47:16.324821+00:00",
+      "log": "logs/gui-gui_unit_tests.log",
+      "end": "2026-11-04T14:47:16.797445+00:00",
+      "elapsed_seconds": 0.4720300550000047,
+      "exit_code": 0,
+      "log_sha256": "819b5ad8dda6dd7610516a7035653b3d6adfcb7422c8a70fa89cc15d8c3d52af",
+      "counts": {
+        "reported": true,
+        "passed": 5,
+        "failed": 0,
+        "ignored": 0
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "gui-cache_gui_tests",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/cache_gui_tests.py",
+        "-v"
+      ],
+      "environment_overrides": {},
+      "kind": "gui",
+      "start": "2026-11-04T14:47:16.800412+00:00",
+      "log": "logs/gui-cache_gui_tests.log",
+      "end": "2026-11-04T14:47:19.907372+00:00",
+      "elapsed_seconds": 0.16951118500014672,
+      "exit_code": 0,
+      "log_sha256": "6289b8c298646a976debb781d45366201b818af4f1ccca3bc8ce51b4fdfc3622",
+      "counts": {
+        "reported": true,
+        "passed": 5,
+        "failed": 0,
+        "ignored": 0
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "gui-conflict_gui_tests",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/conflict_gui_tests.py",
+        "-v"
+      ],
+      "environment_overrides": {},
+      "kind": "gui",
+      "start": "2026-11-04T14:47:19.910161+00:00",
+      "log": "logs/gui-conflict_gui_tests.log",
+      "end": "2026-11-04T14:47:20.431612+00:00",
+      "elapsed_seconds": 0.520757119000109,
+      "exit_code": 0,
+      "log_sha256": "f26b1de95bb7d546b880ab71effb1e3c157359a63d0098ce14cb5c67d80984c8",
+      "counts": {
+        "reported": true,
+        "passed": 24,
+        "failed": 0,
+        "ignored": 0
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "gui-hidden_dialog_tests",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/hidden_dialog_tests.py",
+        "-v"
+      ],
+      "environment_overrides": {},
+      "kind": "gui",
+      "start": "2026-11-04T14:47:20.433958+00:00",
+      "log": "logs/gui-hidden_dialog_tests.log",
+      "end": "2026-11-04T14:47:20.654933+00:00",
+      "elapsed_seconds": 0.22019698200006133,
+      "exit_code": 0,
+      "log_sha256": "54f46185909fd577f8bc8d547a78089877ca80cf87bb0e772f8c59f7a13f92bc",
+      "counts": {
+        "reported": true,
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "gui-lazy_gui_tests",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/lazy_gui_tests.py",
+        "-v"
+      ],
+      "environment_overrides": {},
+      "kind": "gui",
+      "start": "2026-11-04T14:47:20.657170+00:00",
+      "log": "logs/gui-lazy_gui_tests.log",
+      "end": "2026-11-04T14:47:21.078504+00:00",
+      "elapsed_seconds": 0.4206420909999906,
+      "exit_code": 0,
+      "log_sha256": "10c4faf8a4c366b14c49b7e25933fa9397b8f09f4aafc64a6921d5ed497be74e",
+      "counts": {
+        "reported": true,
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "gui-multi_mount_tests",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/multi_mount_tests.py",
+        "-v"
+      ],
+      "environment_overrides": {},
+      "kind": "gui",
+      "start": "2026-11-04T14:47:21.080764+00:00",
+      "log": "logs/gui-multi_mount_tests.log",
+      "end": "2026-11-04T14:47:21.402137+00:00",
+      "elapsed_seconds": 0.3207490780000626,
+      "exit_code": 0,
+      "log_sha256": "8862986856d662567ae6166eeddefa238846ca4df8091081c08fc21e5db1ff09",
+      "counts": {
+        "reported": true,
+        "passed": 5,
+        "failed": 0,
+        "ignored": 0
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "gui-trust_gui_tests",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/trust_gui_tests.py",
+        "-v"
+      ],
+      "environment_overrides": {},
+      "kind": "gui",
+      "start": "2026-11-04T14:47:21.404688+00:00",
+      "log": "logs/gui-trust_gui_tests.log",
+      "end": "2026-11-04T14:47:21.726830+00:00",
+      "elapsed_seconds": 0.32159488699994654,
+      "exit_code": 0,
+      "log_sha256": "cd3b1bbde63ad59a065f1aec4563d5a49149f71c6b24c627bc04301cf46f57f9",
+      "counts": {
+        "reported": true,
+        "passed": 6,
+        "failed": 0,
+        "ignored": 0
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "gui-transfer_gui_tests",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/transfer_gui_tests.py",
+        "-v"
+      ],
+      "environment_overrides": {},
+      "kind": "gui",
+      "start": "2026-11-04T14:47:21.729100+00:00",
+      "log": "logs/gui-transfer_gui_tests.log",
+      "end": "2026-11-04T14:47:21.901453+00:00",
+      "elapsed_seconds": 0.16906724299997222,
+      "exit_code": 0,
+      "log_sha256": "53b95de5c47f8ff2f2a31b77ccdcd170bb4614b319c842b6014ba96b8ee20f21",
+      "counts": {
+        "reported": true,
+        "passed": 6,
+        "failed": 0,
+        "ignored": 0
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "gui-theme_tests",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/theme_tests.py",
+        "-v"
+      ],
+      "environment_overrides": {},
+      "kind": "gui",
+      "start": "2026-11-04T14:47:21.903729+00:00",
+      "log": "logs/gui-theme_tests.log",
+      "end": "2026-11-04T14:47:22.075101+00:00",
+      "elapsed_seconds": 0.1707550099999935,
+      "exit_code": 0,
+      "log_sha256": "73267ee34bbcc9e2e05fac0f08e73aef4fc813973f0330b6aee48121512fce1a",
+      "counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "gui-selector_gui_tests",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/selector_gui_tests.py",
+        "-v"
+      ],
+      "environment_overrides": {},
+      "kind": "gui",
+      "start": "2026-11-04T14:47:22.077421+00:00",
+      "log": "logs/gui-selector_gui_tests.log",
+      "end": "2026-11-04T14:47:22.349244+00:00",
+      "elapsed_seconds": 0.27123303899998064,
+      "exit_code": 0,
+      "log_sha256": "8a7582adedef1fab3f98693c3abf8e26fa09bc9bb80ed517cebfa82242102538",
+      "counts": {
+        "reported": true,
+        "passed": 7,
+        "failed": 0,
+        "ignored": 0
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "gui-backend_upgrade_test",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/backend_upgrade_test.py",
+        "-v"
+      ],
+      "environment_overrides": {},
+      "kind": "gui",
+      "start": "2026-11-04T14:47:22.351838+00:00",
+      "log": "logs/gui-backend_upgrade_test.log",
+      "end": "2026-11-04T14:47:22.523280+00:00",
+      "elapsed_seconds": 0.1707976340001096,
+      "exit_code": 0,
+      "log_sha256": "7a2accc3912e47e58f20f8bc92ad5d50573d4ab8e25cb903045ac0f675b76234",
+      "counts": {
+        "reported": true,
+        "passed": 11,
+        "failed": 0,
+        "ignored": 0
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "gui-pause_handover_test",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/pause_handover_test.py",
+        "-v"
+      ],
+      "environment_overrides": {},
+      "kind": "gui",
+      "start": "2026-11-04T14:47:22.525737+00:00",
+      "log": "logs/gui-pause_handover_test.log",
+      "end": "2026-11-04T14:47:22.647122+00:00",
+      "elapsed_seconds": 0.12078466999992088,
+      "exit_code": 0,
+      "log_sha256": "2174af1fb57fffdb71908e780cce2d2f6c76e438f60fc77bfb281c09d3a12482",
+      "counts": {
+        "reported": true,
+        "passed": 5,
+        "failed": 0,
+        "ignored": 0
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "gui-initialization_gui_tests",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/initialization_gui_tests.py",
+        "-v"
+      ],
+      "environment_overrides": {},
+      "kind": "gui",
+      "start": "2026-11-04T14:47:22.649315+00:00",
+      "log": "logs/gui-initialization_gui_tests.log",
+      "end": "2026-11-04T14:47:23.121289+00:00",
+      "elapsed_seconds": 0.47132843800000046,
+      "exit_code": 0,
+      "log_sha256": "e6dead0b1135b9d6041b133a86f2ac5e4784d326cbb0976e380cdd2fbb0bda5f",
+      "counts": {
+        "reported": true,
+        "passed": 10,
+        "failed": 0,
+        "ignored": 0
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "gui-unified_manager_tests",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/unified_manager_tests.py",
+        "-v"
+      ],
+      "environment_overrides": {},
+      "kind": "gui",
+      "start": "2026-11-04T14:47:23.123809+00:00",
+      "log": "logs/gui-unified_manager_tests.log",
+      "end": "2026-11-04T14:47:25.848872+00:00",
+      "elapsed_seconds": 2.7242591520000587,
+      "exit_code": 0,
+      "log_sha256": "6bad925fa0658671969e7de03715611ed9bbb397c319f152ea7f460cc1b7291b",
+      "counts": {
+        "reported": true,
+        "passed": 27,
+        "failed": 0,
+        "ignored": 0
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "gui-gui_instance_test",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/gui_instance_test.py",
+        "-v"
+      ],
+      "environment_overrides": {},
+      "kind": "gui",
+      "start": "2026-11-04T14:47:25.851319+00:00",
+      "log": "logs/gui-gui_instance_test.log",
+      "end": "2026-11-04T14:47:26.223659+00:00",
+      "elapsed_seconds": 0.371599968000055,
+      "exit_code": 0,
+      "log_sha256": "ad4dceadb74f5a2fe0510610bdc959980d851bd623cd05b598ed936d6313afc3",
+      "counts": {
+        "reported": true,
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "gui-queue_gui_tests",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/queue_gui_tests.py",
+        "-v"
+      ],
+      "environment_overrides": {},
+      "kind": "gui",
+      "start": "2026-11-04T14:47:26.226115+00:00",
+      "log": "logs/gui-queue_gui_tests.log",
+      "end": "2026-11-04T14:47:26.548196+00:00",
+      "elapsed_seconds": 0.32120512000005874,
+      "exit_code": 0,
+      "log_sha256": "7226e141ef12c1dd28a9ee140e722d9f6af2a487c45461aafe28559c5002d252",
+      "counts": {
+        "reported": true,
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "gui-history_gui_tests",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/history_gui_tests.py",
+        "-v"
+      ],
+      "environment_overrides": {},
+      "kind": "gui",
+      "start": "2026-11-04T14:47:26.550734+00:00",
+      "log": "logs/gui-history_gui_tests.log",
+      "end": "2026-11-04T14:47:26.923007+00:00",
+      "elapsed_seconds": 0.37153607599998395,
+      "exit_code": 0,
+      "log_sha256": "e1fef9df083ea31852468b4a92095f69c09b6de28ecb39c06495af59d9a0bb5d",
+      "counts": {
+        "reported": true,
+        "passed": 17,
+        "failed": 0,
+        "ignored": 0
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "gui-permission_gui_tests",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/permission_gui_tests.py",
+        "-v"
+      ],
+      "environment_overrides": {
+        "DRIVE_NATIVE_TEST_SCREENSHOTS": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-003/acl-screenshots"
+      },
+      "kind": "gui",
+      "start": "2026-11-04T14:47:26.925307+00:00",
+      "log": "logs/gui-permission_gui_tests.log",
+      "end": "2026-11-04T14:47:27.197703+00:00",
+      "elapsed_seconds": 0.2715986050000083,
+      "exit_code": 0,
+      "log_sha256": "cbbca2e955f982a360055e4e0ce8f12b2ab606dbbe89b6921349e2cf30d6351c",
+      "counts": {
+        "reported": true,
+        "passed": 5,
+        "failed": 0,
+        "ignored": 0
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "provider-nemo",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/usr/bin/python3",
+        "desktop/tests/filemanager_provider_tests.py",
+        "-v"
+      ],
+      "environment_overrides": {
+        "DRIVE_NATIVE_TEST_FILEMANAGER": "nemo"
+      },
+      "kind": "gui",
+      "start": "2026-11-04T14:47:27.201126+00:00",
+      "log": "logs/provider-nemo.log",
+      "end": "2026-11-04T14:47:27.426511+00:00",
+      "elapsed_seconds": 0.22288510699991093,
+      "exit_code": 0,
+      "log_sha256": "354eded2a08621aae19e9de5f5829123075a6bcfe90981d3d86a0dc717348cd9",
+      "counts": {
+        "reported": true,
+        "passed": 10,
+        "failed": 0,
+        "ignored": 0
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "provider-nautilus",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/usr/bin/python3",
+        "desktop/tests/filemanager_provider_tests.py",
+        "-v"
+      ],
+      "environment_overrides": {
+        "DRIVE_NATIVE_TEST_FILEMANAGER": "nautilus",
+        "GI_TYPELIB_PATH": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-003/nautilus-prefix/usr/lib/x86_64-linux-gnu/girepository-1.0",
+        "LD_LIBRARY_PATH": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-003/nautilus-prefix/usr/lib/x86_64-linux-gnu"
+      },
+      "kind": "gui",
+      "start": "2026-11-04T14:47:27.429315+00:00",
+      "log": "logs/provider-nautilus.log",
+      "end": "2026-11-04T14:47:27.600606+00:00",
+      "elapsed_seconds": 0.1704296840000552,
+      "exit_code": 0,
+      "log_sha256": "7a41d54f73b3b15d15b36f33e65fb400cce13f671fb74920ac2760748ebcc50f",
+      "counts": {
+        "reported": true,
+        "passed": 10,
+        "failed": 0,
+        "ignored": 0
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "unified-ui-render",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/unified_gui_render.py",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-003/screenshots"
+      ],
+      "environment_overrides": {},
+      "kind": "render",
+      "start": "2026-11-04T14:47:27.603316+00:00",
+      "log": "logs/unified-ui-render.log",
+      "end": "2026-11-04T14:47:28.375597+00:00",
+      "elapsed_seconds": 0.7714455510001699,
+      "exit_code": 0,
+      "log_sha256": "172d4f7cb177c7ce404b195f8201e01967107acb6c9956592ab33fea8d018f61",
+      "counts": {
+        "reported": false
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    }
+  ],
+  "index0_not_applicable": {
+    "indexed_plain_continuation_and_seek_do_not_wait_for_store": "Explicitly asserts NSI is enabled; fully exercised by index1 debug/release and attr0 groups.",
+    "indexed_plus_continuation_and_seek_do_not_wait_for_store": "Explicitly asserts NSI is enabled; fully exercised by index1 debug/release and attr0 groups."
+  },
+  "count_note": "Executions are separate; repeated groups are not additive distinct-test coverage.",
+  "nautilus_private_dependency": {
+    "source_prefix": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/nautilus-private/prefix",
+    "copied_file_sha256": {
+      "usr/lib/x86_64-linux-gnu/libnautilus-extension.so.4": "a401bb6a5d63b404cfc9dcd1d1d2841ea08bdc7a31394b88ca45ef168c96fa7f",
+      "usr/lib/x86_64-linux-gnu/girepository-1.0/Nautilus-4.0.typelib": "9a8baf7aa7b2302947ed5e6ae27afed60ef8d3fe976b93e2604fd89ca1952313",
+      "usr/share/doc/libnautilus-extension4/copyright": "700eb4955652ce41f145333fb73d05ce22c9ab1f2905fb81999a31f71c3e57ff",
+      "usr/share/doc/libnautilus-extension4/changelog.Debian.gz": "01d3629073da74da8f1007deeb2247cd62d7111f5f4dd022d52d40e257a5c6f9",
+      "usr/share/doc/gir1.2-nautilus-4.0/copyright": "700eb4955652ce41f145333fb73d05ce22c9ab1f2905fb81999a31f71c3e57ff",
+      "usr/share/doc/gir1.2-nautilus-4.0/changelog.Debian.gz": "01d3629073da74da8f1007deeb2247cd62d7111f5f4dd022d52d40e257a5c6f9"
+    },
+    "scope": "Ubuntu packages privately extracted, no system installation; initial system-GI failure remains in G4-001/G4-002 originals."
+  },
+  "acl_screenshots": {
+    "user": "7b24863ffa11a2187463de8ad087837289ac426b356eea8a96748eaa0ba97833",
+    "space": "046398fc4b1e336ab498961d35d0ad210ffd4ee7e7ae08ebbdb053530679ced5",
+    "directory": "68446c371b21a0c636a25ee7ea8b9d49c22591d8bf2e0ed0c0725b9b7c6fc75b",
+    "unknown": "56707bcba3680128ee520e214f0c4b8b1234cc528a72dfeb023bcd57f23ddc72"
+  },
+  "acl_screenshots_complete": true,
+  "end": "2026-11-04T14:47:28.378139+00:00",
+  "residual_owned_mounts": [],
+  "changed_source_files": [],
+  "new_source_files": [
+    "vendor/fuser/Cargo.lock"
+  ],
+  "command_counts": {
+    "passed": 32,
+    "failed": 0
+  },
+  "all_commands_passed": true
+}

@@ -1,0 +1,31 @@
+{
+  "candidate_commit": "bae1ef1ddc4061df586221557011f4e30f04d134",
+  "g4_complete": true,
+  "main_commands": {
+    "passed": 33,
+    "failed": 0
+  },
+  "schema": {
+    "passed": 6,
+    "failed": 0,
+    "ignored": 0
+  },
+  "history_scale_timeout": {
+    "passed": true,
+    "passed_count": 6,
+    "failed_count": 0,
+    "ignored_count": 0
+  },
+  "source_integrity": {
+    "candidate_commit": "bae1ef1ddc4061df586221557011f4e30f04d134",
+    "changed_source_files": [],
+    "new_source_files": [
+      "vendor/fuser/Cargo.lock"
+    ],
+    "allowed_new_file": "vendor/fuser/Cargo.lock (excluded vendored crate offline test lock)",
+    "residual_owned_mounts": [],
+    "passed": true
+  },
+  "unique_inventory_all_counts_reconciled": true,
+  "scope": "WSL local synthetic tests; no NAS; G5 performance not included"
+}

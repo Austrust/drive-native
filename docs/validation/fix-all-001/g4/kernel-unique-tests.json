@@ -1,0 +1,231 @@
+{
+  "count": 37,
+  "tests": [
+    {
+      "suite": "drive_fs",
+      "name": "cached_close_tests::cached_readonly_sync_and_close_ignore_metadata_backlog",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "drive_fs",
+      "name": "cached_close_tests::draft_and_writable_fsync_still_wait_for_metadata_checkpoint",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "drive_fs",
+      "name": "cached_close_tests::failed_draft_release_reports_error_and_survives_gc_and_reopen",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "drive_fs",
+      "name": "isolation_tests::held_content_reads_survive_all_metadata_workers_waiting_for_store",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "drive_fs",
+      "name": "shutdown_tests::held_file_and_directory_do_not_hold_session_join_and_dirty_bytes_survive",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "drive_fs",
+      "name": "shutdown_tests::stop_cancels_unfinished_network_read_without_waiting_for_download_timeout",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "drive_fs",
+      "name": "shutdown_tests::stop_drains_accepted_local_jobs_and_preserves_successful_fsync",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "deadlock_regression",
+      "name": "invalidation_delivery_never_stalls_other_requests",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "deadlock_regression",
+      "name": "rename_and_delete_under_ttl_do_not_deadlock_concurrent_old_path_stats",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "directory_views",
+      "name": "directory_continuation_and_seek_keep_one_view_without_waiting_for_store",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "entry_revalidation",
+      "name": "new_open_of_old_name_does_not_truncate_renamed_object",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "entry_revalidation",
+      "name": "new_open_of_old_path_does_not_truncate_object_moved_to_another_parent",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "interrupted",
+      "name": "fatal_signal_cancels_kernel_read_and_frees_hydration_worker",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "mounted",
+      "name": "kernel_atomic_replace_keeps_source_inode_and_old_target_handle",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "mounted",
+      "name": "kernel_cache_mount_metadata_reads_version_switch_and_offline_error",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "mounted",
+      "name": "kernel_offline_nested_mkdir_moves_and_restart_preserve_tree_and_child_bytes",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "mounted",
+      "name": "kernel_permissions_owner_restore_and_local_capacity_are_real",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "mounted",
+      "name": "kernel_random_write_shared_handles_truncate_fsync_and_recovery",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "mounted",
+      "name": "kernel_unlink_open_handles_same_name_recreate_and_offline_missing_guard",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "namespace_index_kernel",
+      "name": "indexed_plain_continuation_and_seek_do_not_wait_for_store",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "namespace_index_kernel",
+      "name": "indexed_plus_continuation_and_seek_do_not_wait_for_store",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "permissions_kernel",
+      "name": "live_revocation_restoration_and_list_vs_traverse",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "permissions_kernel",
+      "name": "root_a_b_and_action_classes_are_enforced_in_one_mount",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "permissions_kernel",
+      "name": "setattr_only_persists_mtime_without_granting_content_writes_or_uploads",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "permissions_kernel",
+      "name": "target_parent_cover_target_and_independent_submount",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "preview_plus_revoke",
+      "name": "preview_plus_cannot_disclose_denied_names_while_store_is_busy",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "preview_tests",
+      "name": "cold_preview_browses_received_parent_and_pending_is_not_empty",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "preview_tests",
+      "name": "parent_preview_stream_is_revoked_when_a_listed_child_is_denied",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "preview_tests",
+      "name": "preview_content_and_all_supported_mutations_reject_without_hydration_or_journal",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "preview_tests",
+      "name": "preview_directory_continuation_is_revoked_after_denial",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "preview_tests",
+      "name": "promotion_preserves_mount_and_inode_and_enables_authoritative_content_and_writes",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "preview_tests",
+      "name": "restarted_candidate_recovers_same_mount_without_promoting_old_preview_handles",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "preview_tests",
+      "name": "warm_authoritative_mount_does_not_read_the_pending_candidate",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "readdirplus",
+      "name": "readdirplus_continuation_does_not_wait_for_a_busy_store",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "readdirplus",
+      "name": "readdirplus_pages_stay_consistent_with_plain_metadata_and_invalidate",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "timestamps",
+      "name": "atime_omit_does_not_download_and_directory_mtime_is_honestly_unsupported",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "suite": "timestamps",
+      "name": "touch_and_cp_preserve_file_mtime_with_durable_upload_intent",
+      "status": "ok",
+      "reason": null
+    }
+  ],
+  "index0_not_applicable": {
+    "indexed_plain_continuation_and_seek_do_not_wait_for_store": "Explicitly asserts NSI is enabled; fully exercised by index1 debug/release and attr0 groups.",
+    "indexed_plus_continuation_and_seek_do_not_wait_for_store": "Explicitly asserts NSI is enabled; fully exercised by index1 debug/release and attr0 groups."
+  }
+}

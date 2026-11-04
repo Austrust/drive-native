@@ -1,0 +1,3 @@
+Get:1 http://archive.ubuntu.com/ubuntu noble-updates/main amd64 gir1.2-nautilus-4.0 amd64 1:46.4-0ubuntu0.2 [5496 B]
+Get:2 http://archive.ubuntu.com/ubuntu noble-updates/main amd64 libnautilus-extension4 amd64 1:46.4-0ubuntu0.2 [23.0 kB]
+Fetched 28.5 kB in 1s (29.2 kB/s)

@@ -1,0 +1,24 @@
+{
+  "verified_at_utc": "2026-11-04T17:30:46.8027925Z",
+  "product_candidate": "bae1ef1ddc4061df586221557011f4e30f04d134",
+  "evidence_sha256_checks": 579,
+  "sha256_mismatches": 0,
+  "git_index_raw_blob_checks": 579,
+  "git_index_mismatches": 0,
+  "g4_manifest_sha256": "9413aa811387bbe80f177ff8ebc1dcfb2e21cf1e17fc3f868d19292ea21d78f8",
+  "g5_manifest_sha256": "53a32da19e24722530fea7b909d433584e7027f4eda4dfbb2ce9f5abd0188b72",
+  "independent_link_review": {
+    "markdown_files": 22,
+    "valid_local_links": 283,
+    "broken_local_links": 0,
+    "remote_or_anchor_links_unchecked": 7,
+    "scope": "Changed reports, directly affected navigation and evidence Markdown",
+    "reviewer": "Independent final_review agent"
+  },
+  "raw_whitespace": "Original CRLF, trailing whitespace, blank lines and NUL bytes are retained in raw evidence; full git diff --check reports those originals. Edited prose is checked separately.",
+  "edited_prose_whitespace_check": "passed",
+  "baseline_head": "d555944bfe3058cb223bf7d8ebc71244f1e4d7a3",
+  "baseline_worktree_clean": true,
+  "preserved_stash": "5dbece9e64d201a800df5332faf6ce99cc61829f",
+  "product_diff_from_validated_candidate": "none"
+}

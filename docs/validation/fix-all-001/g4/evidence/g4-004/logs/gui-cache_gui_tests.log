@@ -1,0 +1,10 @@
+test_disconnect_and_invalid_reply_disable_save_without_request (__main__.Tests.test_disconnect_and_invalid_reply_disable_save_without_request) ... ok
+test_failed_save_retains_edits_and_disabling_policy_uses_zero (__main__.Tests.test_failed_save_retains_edits_and_disabling_policy_uses_zero) ... ok
+test_large_mib_limit_roundtrips_without_silent_clamping (__main__.Tests.test_large_mib_limit_roundtrips_without_silent_clamping) ... ok
+test_task_change_reloads_policy_and_does_not_apply_old_edits (__main__.Tests.test_task_change_reloads_policy_and_does_not_apply_old_edits) ... ok
+test_user_limit_survives_usage_refresh_and_targets_loaded_task (__main__.Tests.test_user_limit_survives_usage_refresh_and_targets_loaded_task) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.012s
+
+OK

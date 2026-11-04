@@ -1,0 +1,9 @@
+test_expanding_queries_and_collapsing_stops_inflight_page_chain (__main__.LazyGuiTests.test_expanding_queries_and_collapsing_stops_inflight_page_chain) ... ok
+test_hidden_window_does_not_query_and_reopens_with_refresh (__main__.LazyGuiTests.test_hidden_window_does_not_query_and_reopens_with_refresh) ... ok
+test_no_query_after_close_and_no_stop_service_action (__main__.LazyGuiTests.test_no_query_after_close_and_no_stop_service_action) ... ok
+test_start_shows_overview_without_querying_directory_or_settings (__main__.LazyGuiTests.test_start_shows_overview_without_querying_directory_or_settings) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.109s
+
+OK

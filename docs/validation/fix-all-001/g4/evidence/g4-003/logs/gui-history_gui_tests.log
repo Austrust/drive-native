@@ -1,0 +1,38 @@
+test_cached_file_opens_resolved_current_path (__main__.HistoryActionTests.test_cached_file_opens_resolved_current_path) ... ok
+test_deleted_record_can_locate_validated_parent (__main__.HistoryActionTests.test_deleted_record_can_locate_validated_parent) ... ok
+test_offline_without_content_and_deleted_do_not_open (__main__.HistoryActionTests.test_offline_without_content_and_deleted_do_not_open) ... ok
+test_online_file_hydrates_before_opening (__main__.HistoryActionTests.test_online_file_hydrates_before_opening) ... ok
+test_path_escape_or_replaced_service_never_opens (__main__.HistoryActionTests.test_path_escape_or_replaced_service_never_opens) ... ok
+test_clear_all_has_no_days_and_no_file_mutation_calls (__main__.HistoryTests.test_clear_all_has_no_days_and_no_file_mutation_calls) ... This plugin does not support propagateSizeHints()
+This plugin does not support propagateSizeHints()
+ok
+test_filters_start_new_cursor_and_stale_reply_is_ignored (__main__.HistoryTests.test_filters_start_new_cursor_and_stale_reply_is_ignored) ... This plugin does not support propagateSizeHints()
+This plugin does not support propagateSizeHints()
+ok
+test_hidden_page_rejects_inflight_response_and_makes_no_new_query (__main__.HistoryTests.test_hidden_page_rejects_inflight_response_and_makes_no_new_query) ... This plugin does not support propagateSizeHints()
+This plugin does not support propagateSizeHints()
+ok
+test_mount_filter_only_calls_selected_service (__main__.HistoryTests.test_mount_filter_only_calls_selected_service) ... This plugin does not support propagateSizeHints()
+This plugin does not support propagateSizeHints()
+ok
+test_record_and_model_keep_control_text_plain_and_stable_order (__main__.HistoryTests.test_record_and_model_keep_control_text_plain_and_stable_order) ... This plugin does not support propagateSizeHints()
+This plugin does not support propagateSizeHints()
+ok
+test_replaced_profile_rejects_old_service_record (__main__.HistoryTests.test_replaced_profile_rejects_old_service_record) ... This plugin does not support propagateSizeHints()
+This plugin does not support propagateSizeHints()
+ok
+test_service_ids_are_scoped_and_busy_task_does_not_block_other (__main__.HistoryTests.test_service_ids_are_scoped_and_busy_task_does_not_block_other) ... This plugin does not support propagateSizeHints()
+This plugin does not support propagateSizeHints()
+ok
+test_wrapper_clear_all_omits_days (__main__.HistoryTests.test_wrapper_clear_all_omits_days) ... This plugin does not support propagateSizeHints()
+This plugin does not support propagateSizeHints()
+ok
+test_actual_reader_failure_never_opens_or_claims_completion (__main__.HydrationProcessTests.test_actual_reader_failure_never_opens_or_claims_completion) ... ok
+test_actual_reader_success_revalidates_before_open_and_preserves_content (__main__.HydrationProcessTests.test_actual_reader_success_revalidates_before_open_and_preserves_content) ... ok
+test_node_replacement_after_real_read_never_opens_replacement (__main__.HydrationProcessTests.test_node_replacement_after_real_read_never_opens_replacement) ... ok
+test_task_replacement_during_real_read_discards_completion (__main__.HydrationProcessTests.test_task_replacement_during_real_read_discards_completion) ... ok
+
+----------------------------------------------------------------------
+Ran 17 tests in 0.156s
+
+OK

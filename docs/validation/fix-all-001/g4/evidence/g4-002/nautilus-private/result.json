@@ -1,0 +1,58 @@
+{
+  "candidate_commit": "652eabe741396c8332a7182599aaf4e53d5af48b",
+  "exit_code": 0,
+  "passed": 9,
+  "failed": 0,
+  "ignored": 0,
+  "tests": [
+    [
+      "test_mount_change_invalidates_old_paths_and_discards_pending",
+      "__main__.Tests.test_mount_change_invalidates_old_paths_and_discards_pending",
+      "ok"
+    ],
+    [
+      "test_nautilus4_menus_accept_removed_window_argument_and_keep_paths_scoped",
+      "__main__.Tests.test_nautilus4_menus_accept_removed_window_argument_and_keep_paths_scoped",
+      "ok"
+    ],
+    [
+      "test_preview_does_not_offer_body_actions_or_offline_emblems",
+      "__main__.Tests.test_preview_does_not_offer_body_actions_or_offline_emblems",
+      "ok"
+    ],
+    [
+      "test_preview_transition_invalidates_previous_emblems_and_requeries",
+      "__main__.Tests.test_preview_transition_invalidates_previous_emblems_and_requeries",
+      "ok"
+    ],
+    [
+      "test_reconnect_requeries_visible_paths_and_clears_stale_reply",
+      "__main__.Tests.test_reconnect_requeries_visible_paths_and_clears_stale_reply",
+      "ok"
+    ],
+    [
+      "test_repeated_identical_status_signals_do_not_invalidate_icons",
+      "__main__.Tests.test_repeated_identical_status_signals_do_not_invalidate_icons",
+      "ok"
+    ],
+    [
+      "test_status_uses_local_cache_without_file_body_or_remote_request",
+      "__main__.Tests.test_status_uses_local_cache_without_file_body_or_remote_request",
+      "ok"
+    ],
+    [
+      "test_tasks_do_not_share_caches_or_accept_other_mount_commands",
+      "__main__.Tests.test_tasks_do_not_share_caches_or_accept_other_mount_commands",
+      "ok"
+    ],
+    [
+      "test_unchanged_status_signal_does_not_invalidate_other_extensions",
+      "__main__.Tests.test_unchanged_status_signal_does_not_invalidate_other_extensions",
+      "ok"
+    ]
+  ],
+  "log_sha256": "c048f3950f5c53740a0f89ff0cf4d390af1f1ab235554ec0a33db5dcd36c8b79",
+  "dependency_mode": "Two Ubuntu packages downloaded and extracted to private prefix; system installation unchanged",
+  "packages_sha256": "1ad995582e1e4d80ebf9ee6e22f24fe71d497f77e66fee70efcd6f8b38e00d0d  ./gir1.2-nautilus-4.0_1%3a46.4-0ubuntu0.2_amd64.deb\ne5e4c915b01c4eb398813315b63b9d7d31a4d899a302e6a962d20d678610836e  ./libnautilus-extension4_1%3a46.4-0ubuntu0.2_amd64.deb\n",
+  "complete": false
+}

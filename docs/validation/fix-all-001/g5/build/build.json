@@ -1,0 +1,86 @@
+{
+  "candidate_commit": "bae1ef1ddc4061df586221557011f4e30f04d134",
+  "baseline_commit": "d555944bfe3058cb223bf7d8ebc71244f1e4d7a3",
+  "candidate_archive_sha256": "dbfb638140942e2e1013b32fff44aa35091753992642b27b73ae039e547ec329",
+  "baseline_archive_sha256": "12363faf6aaff67eb52edda3fc223bab18c31b738408d19cd833e80c16082914",
+  "fixture_overlay": "The candidate fsearch_fixture.rs is copied byte-for-byte into the baseline archive extraction; baseline product files remain d555944.",
+  "executed": "offline candidate builds with proven baseline ELF reuse; no tests or scans",
+  "build_complete": true,
+  "built_at_utc_unix": 1793807332.3161576,
+  "fixture_sha256": "d6798d829e132be9c5599cdb723775ca455e1ce60c1c50ddd8a771b93dff2ae4",
+  "commands": {
+    "candidate": {
+      "command": [
+        "cargo",
+        "build",
+        "--release",
+        "--locked",
+        "--offline",
+        "-j2",
+        "-p",
+        "drive-fs",
+        "--example",
+        "fsearch_fixture"
+      ],
+      "exit_code": 0,
+      "start_utc_unix": 1793807293.764483,
+      "end_utc_unix": 1793807326.6860468
+    },
+    "candidate-diagnostic": {
+      "command": [
+        "cargo",
+        "rustc",
+        "--release",
+        "--locked",
+        "--offline",
+        "-j2",
+        "-p",
+        "drive-fs",
+        "--example",
+        "fsearch_fixture",
+        "--",
+        "--cfg",
+        "drive_fs_diagnostics"
+      ],
+      "exit_code": 0,
+      "start_utc_unix": 1793807326.6879153,
+      "end_utc_unix": 1793807332.2736387
+    }
+  },
+  "baseline_reuse": {
+    "previous_build_json": "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/build-001/build.json",
+    "previous_build_json_sha256": "7da5b47c1e9466d8bf54a8ea38fc77cd3c11e738ad814766517f6bba067cf8ba",
+    "baseline_product_files_verified_against_d555944_archive": 879,
+    "fixture_bytes_identical": true,
+    "toolchain_identical": true
+  },
+  "binaries": {
+    "baseline": {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/build-002/bin/baseline",
+      "sha256": "7003d9d4a4957d8e4d589aebb4b8e367356e8282213f931d1473f48dd6c606bc"
+    },
+    "candidate": {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/build-002/bin/candidate",
+      "sha256": "005943948463ce89f42872c3327cbc3ce93dbd2a76fa6324100f72c11d414266"
+    },
+    "baseline-diagnostic": {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/build-002/bin/baseline-diagnostic",
+      "sha256": "b449e73944725797f94f8aa5ee64ad74faa0679c4aa26d0123d92c3889cb1add"
+    },
+    "candidate-diagnostic": {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/build-002/bin/candidate-diagnostic",
+      "sha256": "1b164e34252172109e99907a4c61af4c4b27bae7c3d235df3b16b9f4fda6673c"
+    }
+  },
+  "logs": {
+    "reused-baseline-ordinary.log": "d29f04d97c6d013f789aa7638b65937aa4cc78895211f0b8d546cc05c7506fcf",
+    "candidate-ordinary.log": "fc0d25bdc2f2f5c83719946f6edd1c21296c13cb28a5694c68d6a5fe305c6f69",
+    "reused-baseline-diagnostic.log": "1638aec74fb85a69158849ffce50cfa3c64024771ceda4685d80e83c2ef70e46",
+    "candidate-diagnostic.log": "3a3d1266ff528c5c44937c209eddfc38e75b677b6908d9f1aceaf38a8fcfd3ff",
+    "toolchain.log": "763a6aa87d4cad40a993525ac6f4687c82acdaa31915389ea7fb9b2d00c51468"
+  },
+  "baseline_example_cfg": "drive_fs_baseline",
+  "diagnostic_example_cfg": "drive_fs_diagnostics",
+  "product_rustflags": null,
+  "candidate_changed_source_files": []
+}

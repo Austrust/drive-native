@@ -1,0 +1,67 @@
+warning: struct `cuse_init_in` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:814:12
+    |
+814 | pub struct cuse_init_in {
+    |            ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: struct `cuse_init_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:823:12
+    |
+823 | pub struct cuse_init_out {
+    |            ^^^^^^^^^^^^^
+
+warning: struct `fuse_ioctl_iovec` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:868:12
+    |
+868 | pub struct fuse_ioctl_iovec {
+    |            ^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:996:12
+    |
+996 | pub struct fuse_notify_retrieve_out {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_in` is never constructed
+    --> vendor/fuser/src/ll/fuse_abi.rs:1006:12
+     |
+1006 | pub struct fuse_notify_retrieve_in {
+     |            ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `fuser` (lib) generated 5 warnings
+    Checking drive-fs v0.1.0 (/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/fix-7/crates/drive-fs)
+error[E0061]: this function takes 8 arguments but 7 arguments were supplied
+  --> crates/drive-fs/src/sync_routing_tests.rs:76:5
+   |
+76 |       draft(
+   |  _____^^^^^-
+77 | |         &store,
+78 | |         &handles,
+79 | |         &Arc::new(Mutex::new(())),
+...  |
+83 | |         false,
+84 | |     )
+   | |_____- argument #8 of type `Action` is missing
+   |
+note: function defined here
+  --> crates/drive-fs/src/writable.rs:25:4
+   |
+25 | fn draft(
+   |    ^^^^^
+...
+33 |     action: permissions::Action,
+   |     ---------------------------
+help: provide the argument
+   |
+76 |     draft(
+...
+83 |         false,
+84 ~         /* Action */,
+85 ~     )
+   |
+
+For more information about this error, try `rustc --explain E0061`.
+error: could not compile `drive-fs` (lib test) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...

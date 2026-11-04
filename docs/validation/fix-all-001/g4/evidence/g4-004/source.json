@@ -1,0 +1,8 @@
+{
+  "candidate_commit": "b3dfff5992e2421c3898ff7e79203a2d23c2f5a3",
+  "baseline_commit": "d555944bfe3058cb223bf7d8ebc71244f1e4d7a3",
+  "candidate_archive_sha256": "4952cefd0e1fd5711d374a6a2b9a7f5f7f0ca2ab9ecc70cbe597740a886cc4df",
+  "baseline_archive_sha256": "12363faf6aaff67eb52edda3fc223bab18c31b738408d19cd833e80c16082914",
+  "fixture_overlay": "The candidate fsearch_fixture.rs is copied byte-for-byte into the baseline archive extraction; baseline product files remain d555944.",
+  "executed": "source archival only; no build, test or benchmark"
+}

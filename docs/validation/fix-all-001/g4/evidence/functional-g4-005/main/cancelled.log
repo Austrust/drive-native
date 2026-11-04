@@ -1,0 +1,2 @@
+dbus-daemon[1766]: [session uid=1000 pid=1766] Activating service name='org.gtk.vfs.Daemon' requested by ':1.0' (uid=1000 pid=1780 comm="/home/drive-native-test/fsearch-bench/bin/fsearch-" label="kernel")
+dbus-daemon[1766]: [session uid=1000 pid=1766] Successfully activated service 'org.gtk.vfs.Daemon'

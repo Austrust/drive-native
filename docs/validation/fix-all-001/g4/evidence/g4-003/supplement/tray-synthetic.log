@@ -1,0 +1,37 @@
+test_injected_top_bottom_left_right_panel_geometry_and_cursor_fallback (__main__.TraySupplement.test_injected_top_bottom_left_right_panel_geometry_and_cursor_fallback) ... qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+This plugin does not support propagateSizeHints()
+This plugin does not support raise()
+This plugin does not support raise()
+This plugin does not support raise()
+This plugin does not support raise()
+This plugin does not support raise()
+This plugin does not support raise()
+This plugin does not support raise()
+This plugin does not support raise()
+This plugin does not support raise()
+This plugin does not support raise()
+This plugin does not support raise()
+This plugin does not support raise()
+This plugin does not support raise()
+This plugin does not support raise()
+This plugin does not support raise()
+This plugin does not support raise()
+ok
+test_left_click_toggles_activity_and_double_click_activates_manager (__main__.TraySupplement.test_left_click_toggles_activity_and_double_click_activates_manager) ... qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+This plugin does not support propagateSizeHints()
+This plugin does not support raise()
+This plugin does not support raise()
+ok
+test_recent_history_details_and_buttons_route_to_selected_record (__main__.TraySupplement.test_recent_history_details_and_buttons_route_to_selected_record) ... qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+This plugin does not support propagateSizeHints()
+This plugin does not support raise()
+This plugin does not support raise()
+This plugin does not support propagateSizeHints()
+ok
+test_tooltip_counts_and_text_distinguish_idle_pending_paused_and_attention (__main__.TraySupplement.test_tooltip_counts_and_text_distinguish_idle_pending_paused_and_attention) ... qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.305s
+
+OK

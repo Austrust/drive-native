@@ -1,0 +1,12 @@
+{
+  "start_utc": "2026-11-04T15:52:12.7513957Z",
+  "end_utc": "2026-11-04T15:52:54.9829366Z",
+  "samples": 21,
+  "failed_samples": 21,
+  "interval_seconds": 2,
+  "total_collection_ms": 100.55110000000002,
+  "max_collection_ms": 62.6578,
+  "scope": "Windows host total CPU and memory; low-frequency CIM sampling adds overhead; WSL guest counters are separate.",
+  "command": "Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor (_Total), Win32_PerfFormattedData_PerfOS_Memory",
+  "sample_sha256": "3fd57013881bd56866d921a537a26a881cac7a7bac99bf5a914408f607b7a8a2"
+}

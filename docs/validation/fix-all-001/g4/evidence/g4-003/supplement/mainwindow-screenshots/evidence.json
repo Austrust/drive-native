@@ -1,0 +1,64 @@
+{
+  "synthetic_only": true,
+  "network": false,
+  "component": "drive_native_gui.window.MainWindow",
+  "scope": "real product component and GetOverview/GetDirectoryPermissions callbacks; mocked IPC; no live backend",
+  "cases": [
+    {
+      "file": "permission-user-light.png",
+      "text": "用户设为只读 · 本地修改不会上传",
+      "sha256": "6f1b79bcb770a3d5399af1c40142fafd38bd814cf7304ab74d0594f205c16ca6",
+      "settings_enabled": true,
+      "recheck_enabled": true
+    },
+    {
+      "file": "permission-space-light.png",
+      "text": "服务禁止写入 · 请检查 Drive 空间设置",
+      "sha256": "877cd03888227da982929b5a6eb10e56e3d091709d4bb99d1413704bb855cc4b",
+      "settings_enabled": true,
+      "recheck_enabled": true
+    },
+    {
+      "file": "permission-directory-light.png",
+      "text": "当前目录权限不足 · 仅限制被拒绝的操作，可重新核对",
+      "sha256": "89606d2223c659b731361317248b6d8a05e60fc6bb49ca6583570a263c52263f",
+      "settings_enabled": true,
+      "recheck_enabled": true
+    },
+    {
+      "file": "permission-unknown-light.png",
+      "text": "权限待验证 · 按远端权限尝试，由服务器确认",
+      "sha256": "49cd54aed00769477ffeeaf91f976f0807243e5a4dd8cadf7c628b9fdc842f57",
+      "settings_enabled": true,
+      "recheck_enabled": true
+    },
+    {
+      "file": "permission-user-dark.png",
+      "text": "用户设为只读 · 本地修改不会上传",
+      "sha256": "e8d4c9d73b8f0f413af491fb4b8fcc5bcb731833e82ee6cd1257c3b711984e03",
+      "settings_enabled": true,
+      "recheck_enabled": true
+    },
+    {
+      "file": "permission-space-dark.png",
+      "text": "服务禁止写入 · 请检查 Drive 空间设置",
+      "sha256": "9756ade9492f5797c3cf10aca799d2cc1ddea79bce19f78a6e5cefac76621668",
+      "settings_enabled": true,
+      "recheck_enabled": true
+    },
+    {
+      "file": "permission-directory-dark.png",
+      "text": "当前目录权限不足 · 仅限制被拒绝的操作，可重新核对",
+      "sha256": "3f76274f5bd426438593b1216804b1e0dd44626557cd9ffa2e70e789c8c79acc",
+      "settings_enabled": true,
+      "recheck_enabled": true
+    },
+    {
+      "file": "permission-unknown-dark.png",
+      "text": "权限待验证 · 按远端权限尝试，由服务器确认",
+      "sha256": "7e90cfba1b008a928053fb6f08a041a40fdb7ff130c33da7d5778ce133f31c00",
+      "settings_enabled": true,
+      "recheck_enabled": true
+    }
+  ]
+}

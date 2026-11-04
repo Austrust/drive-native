@@ -1,0 +1,6 @@
+...qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+.......
+----------------------------------------------------------------------
+Ran 10 tests in 0.192s
+
+OK

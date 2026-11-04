@@ -1,0 +1,6 @@
+test_all_text_pairs_have_readable_contrast (__main__.ThemeTests.test_all_text_pairs_have_readable_contrast) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+OK

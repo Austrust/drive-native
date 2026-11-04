@@ -1,0 +1,92 @@
+{
+  "candidate_commit": "c744729141ca8b23bde63c61ca8a644bdfdaee81",
+  "complete": true,
+  "scope": "local functional validation; never G5 performance evidence",
+  "harness_sha256": "f6953f148bda9c4c0a6a9d47d1c70f63e927f6389433b7a362f0545f00fb2bc9",
+  "commands": [
+    {
+      "name": "core-210k-functional",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "-p",
+        "drive-core",
+        "--lib",
+        "--all-features",
+        "status_snapshot::tests::default_budget_admits_210k_node_snapshot_without_holding_store",
+        "--",
+        "--exact",
+        "--ignored",
+        "--test-threads=1"
+      ],
+      "kind": "rust",
+      "start": "2026-11-04T14:48:21.829753+00:00",
+      "exit_code": 0,
+      "end": "2026-11-04T14:48:36.878463+00:00",
+      "elapsed_seconds": 15.048430841000027,
+      "log": "core-210k-functional.log",
+      "log_sha256": "9980071a4bfaa07ea70c33e1d9c568ddd95ab937545fb2f7eabddf78d896b411",
+      "counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 401
+      },
+      "passed": true
+    },
+    {
+      "name": "tray-synthetic",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/ultra-benchmark/verify-tray-supplement.py",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-003/source",
+        "-v"
+      ],
+      "kind": "gui",
+      "start": "2026-11-04T14:48:36.879091+00:00",
+      "exit_code": 0,
+      "end": "2026-11-04T14:48:37.606085+00:00",
+      "elapsed_seconds": 0.7260849449999114,
+      "log": "tray-synthetic.log",
+      "log_sha256": "bc12e18906fdbe9f07c0a67b3ecbb2c7844efe9c2789258a811f037192a9a465",
+      "counts": {
+        "reported": true,
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0
+      },
+      "passed": true
+    },
+    {
+      "name": "mainwindow-permission-render",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/ultra-benchmark/render-mainwindow-permissions.py",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-003/supplement/mainwindow-screenshots"
+      ],
+      "kind": "render",
+      "start": "2026-11-04T14:48:37.606781+00:00",
+      "exit_code": 0,
+      "end": "2026-11-04T14:48:38.279105+00:00",
+      "elapsed_seconds": 0.6721461720001116,
+      "log": "mainwindow-permission-render.log",
+      "log_sha256": "d8126fe0f8adfd98800fb06807047529f10abfe4e7aaf9bbcd9f46b31bdd17f4",
+      "counts": {
+        "reported": false
+      },
+      "passed": true
+    }
+  ],
+  "changed_source_files": [],
+  "new_source_files": [],
+  "residual_owned_mounts": [],
+  "all_passed": true
+}

@@ -1,0 +1,125 @@
+   Compiling fuser v0.16.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-004/source/vendor/fuser)
+   Compiling sproto v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-004/source/crates/sproto)
+warning: unused import: `validate_path`
+ --> crates/sproto/src/actions/transfer.rs:4:36
+  |
+4 | use super::native::{NativeVersion, validate_path};
+  |                                    ^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `AsyncReadExt` and `AsyncSeekExt`
+  --> crates/sproto/src/actions/transfer.rs:14:17
+   |
+14 | use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWrite};
+   |                 ^^^^^^^^^^^^  ^^^^^^^^^^^^
+
+warning: function `binary_parts` is never used
+  --> crates/sproto/src/pstream/encode.rs:68:15
+   |
+68 | pub(crate) fn binary_parts(obj: &PObject) -> Result<(Vec<u8>, Vec<u8>, u64)> {
+   |               ^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `send_binary` is never used
+  --> crates/sproto/src/channel.rs:80:25
+   |
+77 | impl Channel {
+   | ------------ method in this implementation
+...
+80 |     pub(crate) async fn send_binary<R: AsyncRead + Unpin>(
+   |                         ^^^^^^^^^^^
+
+warning: struct `cuse_init_in` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:814:12
+    |
+814 | pub struct cuse_init_in {
+    |            ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: struct `cuse_init_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:823:12
+    |
+823 | pub struct cuse_init_out {
+    |            ^^^^^^^^^^^^^
+
+warning: struct `fuse_ioctl_iovec` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:868:12
+    |
+868 | pub struct fuse_ioctl_iovec {
+    |            ^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:996:12
+    |
+996 | pub struct fuse_notify_retrieve_out {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_in` is never constructed
+    --> vendor/fuser/src/ll/fuse_abi.rs:1006:12
+     |
+1006 | pub struct fuse_notify_retrieve_in {
+     |            ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `sproto` (lib) generated 4 warnings (run `cargo fix --lib -p sproto` to apply 2 suggestions)
+   Compiling drive-core v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-004/source/crates/drive-core)
+warning: `fuser` (lib) generated 5 warnings
+warning: method `verify_root` is never used
+  --> crates/drive-core/src/native_root_guard.rs:86:25
+   |
+26 | impl NativeReadSession {
+   | ---------------------- method in this implementation
+...
+86 |     pub(super) async fn verify_root(&self) -> Result<()> {
+   |                         ^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+   Compiling drive-fs v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-004/source/crates/drive-fs)
+warning: `drive-core` (lib) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 16.60s
+     Running tests/permissions_kernel.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-004/target/debug/deps/permissions_kernel-2ebadbb4bd306336)
+
+running 1 test
+test setattr_only_persists_mtime_without_granting_content_writes_or_uploads ... FAILED
+
+failures:
+
+---- setattr_only_persists_mtime_without_granting_content_writes_or_uploads stdout ----
+
+thread 'setattr_only_persists_mtime_without_granting_content_writes_or_uploads' (1765) panicked at crates/drive-fs/tests/permissions_kernel.rs:110:5:
+assertion `left == right` failed
+  left: Some(11)
+ right: Some(13)
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/std/src/panicking.rs:679:5
+   1: core::panicking::panic_fmt
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/panicking.rs:80:14
+   2: core::panicking::assert_failed_inner
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/panicking.rs:452:17
+   3: core::panicking::assert_failed::<core::option::Option<i32>, core::option::Option<i32>>
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/panicking.rs:407:5
+   4: permissions_kernel::denied::<std::fs::File>
+             at ./tests/permissions_kernel.rs:110:5
+   5: permissions_kernel::setattr_only_persists_mtime_without_granting_content_writes_or_uploads
+             at ./tests/permissions_kernel.rs:154:5
+   6: permissions_kernel::setattr_only_persists_mtime_without_granting_content_writes_or_uploads::{closure#0}
+             at ./tests/permissions_kernel.rs:144:76
+   7: <permissions_kernel::setattr_only_persists_mtime_without_granting_content_writes_or_uploads::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/ops/function.rs:250:5
+   8: <fn() -> core::result::Result<(), alloc::string::String> as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+
+
+failures:
+    setattr_only_persists_mtime_without_granting_content_writes_or_uploads
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.27s
+
+error: test failed, to rerun pass `-p drive-fs --test permissions_kernel`
+error: 1 target failed:
+    `-p drive-fs --test permissions_kernel`

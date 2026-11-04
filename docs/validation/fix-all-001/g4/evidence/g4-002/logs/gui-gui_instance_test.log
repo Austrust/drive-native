@@ -1,0 +1,8 @@
+test_configuration_roots_have_distinct_gui_service_names (__main__.InstanceTests.test_configuration_roots_have_distinct_gui_service_names) ... ok
+test_second_process_activates_existing_gui_without_new_manager (__main__.InstanceTests.test_second_process_activates_existing_gui_without_new_manager) ... ok
+test_strict_activation_and_startup_queue (__main__.InstanceTests.test_strict_activation_and_startup_queue) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.199s
+
+OK

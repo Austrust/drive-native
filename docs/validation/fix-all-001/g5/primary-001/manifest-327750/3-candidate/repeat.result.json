@@ -1,0 +1,76 @@
+{
+  "command": [
+    "dbus-run-session",
+    "--",
+    "xvfb-run",
+    "-a",
+    "--server-args=-screen 0 1280x800x24 -nolisten tcp",
+    "/home/drive-native-test/fsearch-bench/bin/fsearch-0.3.1-canonical",
+    "--update-database"
+  ],
+  "start": {
+    "utc": "2026-11-04T16:42:32.154173+00:00",
+    "asia_shanghai": "2026-11-05T00:42:32.154173+08:00",
+    "unix": 1793810552.154173
+  },
+  "end": {
+    "utc": "2026-11-04T16:44:36.872446+00:00",
+    "asia_shanghai": "2026-11-05T00:44:36.872446+08:00",
+    "unix": 1793810676.872446
+  },
+  "load_before": {
+    "time": {
+      "utc": "2026-11-04T16:42:32.154239+00:00",
+      "asia_shanghai": "2026-11-05T00:42:32.154239+08:00",
+      "unix": 1793810552.154239
+    },
+    "loadavg": "1.36 1.24 1.10 1/281 17504",
+    "cpu_ticks": [
+      180348,
+      8,
+      106800,
+      3528199,
+      3114,
+      0,
+      48227,
+      0,
+      0,
+      0
+    ]
+  },
+  "load_after": {
+    "time": {
+      "utc": "2026-11-04T16:44:36.872631+00:00",
+      "asia_shanghai": "2026-11-05T00:44:36.872631+08:00",
+      "unix": 1793810676.872631
+    },
+    "loadavg": "0.99 1.15 1.08 1/278 17966",
+    "cpu_ticks": [
+      185811,
+      8,
+      111979,
+      3655279,
+      3139,
+      0,
+      49387,
+      0,
+      0,
+      0
+    ]
+  },
+  "exit_code": 0,
+  "elapsed_seconds": 115.8752682270001,
+  "scan_log_sha256": "3231c22536937871cd6f9bc0affad18b01047763f3a5244206786d300919186b",
+  "client_tree_user_seconds": 4.015137000000095,
+  "client_tree_system_seconds": 25.80311699999993,
+  "client_children_maxrss_kib_so_far": 1019164,
+  "fresh_index_save_verified": true,
+  "index_sha256": "450f3975738082cc5e62e8ae74b1cde8b6acd8410161c0444e90e723b0049563",
+  "export_sha256": "22bba9fa0b76528983bd660a8e18985b71c05796829498c6e310f0c6cd69b7e4",
+  "indexed_count": 327750,
+  "missing": 0,
+  "extra": 0,
+  "duplicates": 0,
+  "invalid": 0,
+  "attribute_mismatches": 0
+}

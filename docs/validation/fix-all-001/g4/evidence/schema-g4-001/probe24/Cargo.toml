@@ -1,0 +1,6 @@
+[package]
+name="schema-probe-24"
+version="0.0.0"
+edition="2024"
+[dependencies]
+drive-core={path="/home/drive-native-test/.local/state/drive-native-ultra-validation/schema-g4-001/source24/crates/drive-core"}

@@ -132,6 +132,13 @@ NotifyHub 失败/丢消息与 publication degraded 联动，不能因索引命�
 
 **DefaultPermissions 决策：保留。** 采用 PLAN-7 §4.2 明确允许的兼容方案。unknown/allowed 的远端合成展示 mode 为目录0755/文件0644；known write denied 可去掉相应写位，但不能因为父根不能 create 就错误掩盖其他允许动作；本地显式 mode/uid/gid/sticky/umask 仍由既有 POSIX/内核规则执行。access() 在 unknown 下仅为乐观值，服务端仍最终裁决；必须在报告说明。逐操作实际入口仍检查 C3，mode 不是 ACL 证据。不得用 chmod/chown 改 NAS 权限。
 
+G4 错误码校正：只有逐节点所有相关写动作均 denied 才投影去掉写位；L1/L2 整任务限制不借 mode 抢先产生 EACCES，仍由挂载只读选项或实际操作入口返回 EROFS。预览 inode 保留自己的身份与拒绝检查，正文 EAGAIN、写操作 EROFS，不提前改成权威 ENOENT。
+
+本地 mtime 准备按 Setattr 授权，不能因复用草稿 helper 额外要求 WriteContent；普通写/截断仍要求 WriteContent。
+既有原生 mtime 写回采用整文件上传，其远端 WriteContent 门禁保留。Setattr 允许而内容上传拒绝时，只承诺本地持久保存，保留 pending；元数据专用远端写回未实现，见 [文件时间契约](FILE_TIMESTAMPS.md)。
+
+元数据 dispatcher 遇到 Store 繁忙时沿既有工作队列回退，不以 EAGAIN 代替当前权限判断；父 Traverse 在查找子项之前检查，缺失名称也不能绕过。正文读取的等待只在 worker 上发生。
+
 诊断名称固定：`IndexHits`、`IndexMisses`、`IndexFallback`、`IndexDegraded`、`IndexBuildUs`、`IndexBytes`、`PermissionDenied`、`SpaceForbidden`，另暴露 index_partial。诊断不得包含名称/路径/凭据。
 
 G3 在 SharedStore 发布已知拒绝后暂停 NSI 回复，走权威逐操作检查。无拒绝时保留内存路径。正文/目录续读使用独立的 `permission_clear_lease()` 持至有界回复；首个拒绝的发布等待此前回复完成，但普通元数据事务不阻塞已缓存正文读取。持此租约不得阻塞获取 Store（目录续读仅 try_lock）；已知拒绝的回复在 Store 内重验后发布。所有权限检查同时覆盖本地祖先和未确认 namespace_overlay 的远端祖先，不继承其写动作。

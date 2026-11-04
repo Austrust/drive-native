@@ -1,0 +1,12 @@
+Harness failure, not a product assertion failure. Original attempt preserved in
+/home/drive-native-test/.local/state/drive-native-ultra-validation/schema-g4-001/state
+and results.json. All three probe builds succeeded; schema23 creation succeeded.
+
+verify-schema.py line 19: shutil.copytree(state23,state24) raised shutil.Error:
+state.sqlite-shm and state.sqlite-wal disappeared while being copied.
+
+Cause: Python sqlite3 Connection context-manager commits/rolls back but does not
+close the connection. The version() temporary connection was garbage-collected
+during copytree, unlinking its transient WAL/SHM files. Corrected harness closes
+the connection explicitly before copying. Attempt002 uses a new state directory
+and separate results file; binaries and product source are unchanged.

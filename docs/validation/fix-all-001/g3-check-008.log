@@ -1,0 +1,112 @@
+    Checking drive-core v0.1.0 (/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/fix-7/crates/drive-core)
+warning: struct `cuse_init_in` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:814:12
+    |
+814 | pub struct cuse_init_in {
+    |            ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: struct `cuse_init_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:823:12
+    |
+823 | pub struct cuse_init_out {
+    |            ^^^^^^^^^^^^^
+
+warning: struct `fuse_ioctl_iovec` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:868:12
+    |
+868 | pub struct fuse_ioctl_iovec {
+    |            ^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:996:12
+    |
+996 | pub struct fuse_notify_retrieve_out {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_in` is never constructed
+    --> vendor/fuser/src/ll/fuse_abi.rs:1006:12
+     |
+1006 | pub struct fuse_notify_retrieve_in {
+     |            ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `fuser` (lib) generated 5 warnings
+    Checking drive-fs v0.1.0 (/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/fix-7/crates/drive-fs)
+    Checking drive-runtime v0.1.0 (/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/fix-7/crates/drive-runtime)
+warning: variable does not need to be mutable
+   --> crates/drive-fs/examples/fsearch_fixture.rs:321:21
+    |
+321 |                 let mut value =
+    |                     ----^^^^^
+    |                     |
+    |                     help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: `drive-fs` (example "fsearch_fixture") generated 1 warning (run `cargo fix --example "fsearch_fixture" -p drive-fs` to apply 1 suggestion)
+warning: function `states` is never used
+  --> crates/drive-runtime/examples/support/service.rs:51:14
+   |
+51 | pub async fn states(p: &zbus::Proxy<'_>, path: &str) -> Result<serde_json::Value> {
+   |              ^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `wait_state` is never used
+  --> crates/drive-runtime/examples/support/service.rs:76:14
+   |
+76 | pub async fn wait_state(p: &zbus::Proxy<'_>, path: &str, status: &str) -> Result<()> {
+   |              ^^^^^^^^^^
+
+warning: `drive-runtime` (example "native_access_service") generated 2 warnings
+warning: `drive-runtime` (example "native_trust_roundtrip") generated 2 warnings (2 duplicates)
+warning: unused imports: `MetadataExt` and `PermissionsExt`
+  --> crates/drive-fs/tests/preview_plus_revoke.rs:11:20
+   |
+11 |         unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
+   |                    ^^^^^^^^^^^                  ^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `names` is never used
+   --> crates/drive-fs/tests/preview_plus_revoke.rs:144:4
+    |
+144 | fn names(p: &Path) -> std::io::Result<Vec<String>> {
+    |    ^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `drive-fs` (test "preview_plus_revoke") generated 2 warnings (run `cargo fix --test "preview_plus_revoke" -p drive-fs` to apply 1 suggestion)
+warning: unused variable: `op`
+  --> crates/drive-runtime/src/namespace_schedule_tests.rs:57:10
+   |
+57 |     let (op, child_file) = {
+   |          ^^ help: if this is intentional, prefix it with an underscore: `_op`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+  --> crates/drive-core/tests/package_upgrade.rs:19:9
+   |
+19 |     let mut store=Store::open(directory.path()).unwrap();
+   |         ----^^^^^
+   |         |
+   |         help: remove this `mut`
+   |
+   = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: `drive-core` (test "package_upgrade") generated 1 warning (run `cargo fix --test "package_upgrade" -p drive-core` to apply 1 suggestion)
+warning: `drive-runtime` (lib test) generated 1 warning (run `cargo fix --lib -p drive-runtime --tests` to apply 1 suggestion)
+warning: variable does not need to be mutable
+   --> crates/drive-core/tests/conflicts.rs:215:13
+    |
+215 |     let (d, mut s) = fixture();
+    |             ----^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: `drive-core` (test "conflicts") generated 1 warning (run `cargo fix --test "conflicts" -p drive-core` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 24.46s

@@ -1,0 +1,1305 @@
+{
+  "scope": "originals retained privately; paths are harness artifact names, not manifest member names",
+  "roots": [
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001",
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001"
+  ],
+  "artifacts": {
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/1-baseline/first.log": {
+      "sha256": "821b957dfbcde7740bf3d679bba13a950aa556ef9b1882da08269592493aaf51",
+      "bytes": 402
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/1-baseline/repeat.log": {
+      "sha256": "b0be077186e52a555bec56a232172a8d8f364d49f783a1eb41b8d96eafe0a9e1",
+      "bytes": 401
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/1-baseline/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/1-baseline/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/1-baseline/first.index.tsv": {
+      "sha256": "3ba18ed9383b420825238147a8acd9b5c4640e528a2229da23a5196624294706",
+      "bytes": 14685883
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/1-baseline/repeat.index.tsv": {
+      "sha256": "3ba18ed9383b420825238147a8acd9b5c4640e528a2229da23a5196624294706",
+      "bytes": 14685883
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/1-baseline/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/1-baseline/fixture/truth.json": {
+      "sha256": "5df0d56a63d57c3c621ae4e3b1728c18f55747527c254d0d95dad8301a40b9f3",
+      "bytes": 7943239
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/1-baseline/profile/data/fsearch/fsearch.db": {
+      "sha256": "27aeca7c2dd6b211dea4e16551be54ce9492ba2db7e7ccefe1c2f1bc6bdbdcc4",
+      "bytes": 4598817
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/1-candidate/first.log": {
+      "sha256": "75471cfe2dc32cdadb3e04446cc2d137aa61e0a7fa8a85d1576c7185f9f654cd",
+      "bytes": 401
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/1-candidate/repeat.log": {
+      "sha256": "f53198dff4fd8b38bdc6459cb90a7a1c1b6e07fa6c02d802eacc50fe143152a5",
+      "bytes": 406
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/1-candidate/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/1-candidate/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/1-candidate/first.index.tsv": {
+      "sha256": "c1472c2a96c52fcae9199375b58e457f0237a17d7c2f5ade3b072296296c41df",
+      "bytes": 14788013
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/1-candidate/repeat.index.tsv": {
+      "sha256": "c1472c2a96c52fcae9199375b58e457f0237a17d7c2f5ade3b072296296c41df",
+      "bytes": 14788013
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/1-candidate/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/1-candidate/fixture/truth.json": {
+      "sha256": "5df0d56a63d57c3c621ae4e3b1728c18f55747527c254d0d95dad8301a40b9f3",
+      "bytes": 7943239
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/1-candidate/profile/data/fsearch/fsearch.db": {
+      "sha256": "13b0fa1b66c5b2279ddd13fa56b330c7cc21eef3791c43422c28f853f6c99de8",
+      "bytes": 4598819
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/1-local/first.log": {
+      "sha256": "849e915b84456657825b987ef83de6cb5b195e4efc200a3b536b38e65fe54c96",
+      "bytes": 406
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/1-local/repeat.log": {
+      "sha256": "5de7e6d2518c799e0389b4fba1cb4925e0424a9fd717d6324eafd9643575753e",
+      "bytes": 406
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/1-local/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/1-local/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/1-local/first.index.tsv": {
+      "sha256": "4927ba5f1d356f751b262916892a84cde9711b247457f5205749e9fb3e813b1a",
+      "bytes": 14379493
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/1-local/repeat.index.tsv": {
+      "sha256": "4927ba5f1d356f751b262916892a84cde9711b247457f5205749e9fb3e813b1a",
+      "bytes": 14379493
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/1-local/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/1-local/fixture/truth.json": {
+      "sha256": "5df0d56a63d57c3c621ae4e3b1728c18f55747527c254d0d95dad8301a40b9f3",
+      "bytes": 7943239
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/1-local/profile/data/fsearch/fsearch.db": {
+      "sha256": "458c595b326e5bc1dfd60ff0282102b82048cac59acb3bddcecb84528e01a7a1",
+      "bytes": 4598811
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/2-local/first.log": {
+      "sha256": "659fc40209391f2e7649797ebf6d287134f95f10b06742e8687a163646f9d52b",
+      "bytes": 406
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/2-local/repeat.log": {
+      "sha256": "423b17fdb343e5485f5e9b2e9243baa713f139490e4539dc63eef63d32128cbe",
+      "bytes": 406
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/2-local/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/2-local/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/2-local/first.index.tsv": {
+      "sha256": "9dbd70e1555c6a90056367c8731b5aa50b0a394d11edf0d7d6fc74204d4d061b",
+      "bytes": 14379493
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/2-local/repeat.index.tsv": {
+      "sha256": "9dbd70e1555c6a90056367c8731b5aa50b0a394d11edf0d7d6fc74204d4d061b",
+      "bytes": 14379493
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/2-local/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/2-local/fixture/truth.json": {
+      "sha256": "5df0d56a63d57c3c621ae4e3b1728c18f55747527c254d0d95dad8301a40b9f3",
+      "bytes": 7943239
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/2-local/profile/data/fsearch/fsearch.db": {
+      "sha256": "29a9a1288d80868577a5e8349611d71bc6967c567a72821e6112aa324b343919",
+      "bytes": 4598811
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/2-candidate/first.log": {
+      "sha256": "087af361472a944f6c595ee683320d2b4d6721491df833a1a9adbbccfd721552",
+      "bytes": 406
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/2-candidate/repeat.log": {
+      "sha256": "a350b97fe6be12fdb4da3252ea3f7e475c30009b034ceee1081fee3736f7ccba",
+      "bytes": 406
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/2-candidate/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/2-candidate/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/2-candidate/first.index.tsv": {
+      "sha256": "0bd253f4e3aadb104151a92f2dca365360e20f80af76db30f9cc318f46bd3fe1",
+      "bytes": 14788013
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/2-candidate/repeat.index.tsv": {
+      "sha256": "0bd253f4e3aadb104151a92f2dca365360e20f80af76db30f9cc318f46bd3fe1",
+      "bytes": 14788013
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/2-candidate/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/2-candidate/fixture/truth.json": {
+      "sha256": "5df0d56a63d57c3c621ae4e3b1728c18f55747527c254d0d95dad8301a40b9f3",
+      "bytes": 7943239
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/2-candidate/profile/data/fsearch/fsearch.db": {
+      "sha256": "97a2708dd63f929bef17a2d32cb984c1ea277a478f33cd5e777cd5422b6aec49",
+      "bytes": 4598819
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/2-baseline/first.log": {
+      "sha256": "51c73bd22eaa10e3d36d32a0ea1b222e3f950d51b00fc3ea4d4393c63e0e1830",
+      "bytes": 406
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/2-baseline/repeat.log": {
+      "sha256": "9b427474a4eddb573c9f5beebd52398b4ae7da87af0f5b9ba9684bf8c9fab119",
+      "bytes": 406
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/2-baseline/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/2-baseline/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/2-baseline/first.index.tsv": {
+      "sha256": "80f8cb8a3dc004ac9e49e875d59915d31df318e9934226b2a95adef17fe033bc",
+      "bytes": 14685883
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/2-baseline/repeat.index.tsv": {
+      "sha256": "80f8cb8a3dc004ac9e49e875d59915d31df318e9934226b2a95adef17fe033bc",
+      "bytes": 14685883
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/2-baseline/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/2-baseline/fixture/truth.json": {
+      "sha256": "5df0d56a63d57c3c621ae4e3b1728c18f55747527c254d0d95dad8301a40b9f3",
+      "bytes": 7943239
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/2-baseline/profile/data/fsearch/fsearch.db": {
+      "sha256": "88a3a8c2689f332683d4c952d83e472566485e3b13f0ec8b1bb69b56aff63ac9",
+      "bytes": 4598817
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/3-candidate/first.log": {
+      "sha256": "4f140a31b171fde945573bb6b4351c16108914c400646916343b5bfc9c0ece15",
+      "bytes": 406
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/3-candidate/repeat.log": {
+      "sha256": "77f572365bd4d92cade839f5cbea8c03c52f98e2ddb810d66dc85495d38c4b49",
+      "bytes": 406
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/3-candidate/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/3-candidate/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/3-candidate/first.index.tsv": {
+      "sha256": "453e4ccbd9f9d505c060401a2e3ba36c2db7f2ff44be8eceeabf1802afe67d32",
+      "bytes": 14788013
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/3-candidate/repeat.index.tsv": {
+      "sha256": "453e4ccbd9f9d505c060401a2e3ba36c2db7f2ff44be8eceeabf1802afe67d32",
+      "bytes": 14788013
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/3-candidate/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/3-candidate/fixture/truth.json": {
+      "sha256": "5df0d56a63d57c3c621ae4e3b1728c18f55747527c254d0d95dad8301a40b9f3",
+      "bytes": 7943239
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/3-candidate/profile/data/fsearch/fsearch.db": {
+      "sha256": "4f0b88d5904c7910dada943df7c9c0b0b3058fca8324ec24fb5ca3d783a97f3b",
+      "bytes": 4598819
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/3-baseline/first.log": {
+      "sha256": "6fdc84b26865927539561b60376db0e227534d5a33f6def4abb86e4c0054d7b4",
+      "bytes": 406
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/3-baseline/repeat.log": {
+      "sha256": "4b26277067944a0dbf8eef869e15f7ff41babaa1dd934a531b73703c8cdc7afc",
+      "bytes": 406
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/3-baseline/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/3-baseline/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/3-baseline/first.index.tsv": {
+      "sha256": "90776e4796fcaeed1ee058249ccf4f2809927591d85ac3a18e91a19c7f27a243",
+      "bytes": 14685883
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/3-baseline/repeat.index.tsv": {
+      "sha256": "90776e4796fcaeed1ee058249ccf4f2809927591d85ac3a18e91a19c7f27a243",
+      "bytes": 14685883
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/3-baseline/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/3-baseline/fixture/truth.json": {
+      "sha256": "5df0d56a63d57c3c621ae4e3b1728c18f55747527c254d0d95dad8301a40b9f3",
+      "bytes": 7943239
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/3-baseline/profile/data/fsearch/fsearch.db": {
+      "sha256": "1d5107630687d6c07fbdb8bfade4ca2e80b9bed8be22207046407d5f2de3ca9f",
+      "bytes": 4598817
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/3-local/first.log": {
+      "sha256": "a9f699a5f0a8fdd6f72fe5d2251fe1fec55c4451ee279a18d42602fa1d740319",
+      "bytes": 406
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/3-local/repeat.log": {
+      "sha256": "e638e8c978458f2e4d84a78c51fa0122c5b011ba8cb7b20ef70749031cb2aa42",
+      "bytes": 406
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/3-local/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/3-local/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/3-local/first.index.tsv": {
+      "sha256": "918080627949cbcd21d62da191852a70ff9350267b9baed2433a76b8c59c4a69",
+      "bytes": 14379493
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/3-local/repeat.index.tsv": {
+      "sha256": "918080627949cbcd21d62da191852a70ff9350267b9baed2433a76b8c59c4a69",
+      "bytes": 14379493
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/3-local/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/3-local/fixture/truth.json": {
+      "sha256": "5df0d56a63d57c3c621ae4e3b1728c18f55747527c254d0d95dad8301a40b9f3",
+      "bytes": 7943239
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/100k/3-local/profile/data/fsearch/fsearch.db": {
+      "sha256": "08fe6779900d513bb71c21f45ddb06cb5dd0058d19e1c5a025f9cd4c495e66ca",
+      "bytes": 4598811
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/1-baseline/first.log": {
+      "sha256": "b71221fdd3d8e287ff70e2b5cb858b5a8b4ee754dc6a9c4d0f8b61df269d55f4",
+      "bytes": 407
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/1-baseline/repeat.log": {
+      "sha256": "227c377bac8b427a358c0db0776f3ebb933310d89e12438fff2b792a7de05822",
+      "bytes": 407
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/1-baseline/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/1-baseline/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/1-baseline/first.index.tsv": {
+      "sha256": "7266d95772a208197fc3c34400c1f7b85590fde520db74106cd0c1ebfd3b50e9",
+      "bytes": 47155401
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/1-baseline/repeat.index.tsv": {
+      "sha256": "7266d95772a208197fc3c34400c1f7b85590fde520db74106cd0c1ebfd3b50e9",
+      "bytes": 47155401
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/1-baseline/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/1-baseline/fixture/truth.json": {
+      "sha256": "feec0d21804658d55b6606f530802919aff330cfa53ec509e28c0242cfeb3cc6",
+      "bytes": 24082442
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/1-baseline/profile/data/fsearch/fsearch.db": {
+      "sha256": "863c692374d9a22776527d97d9913eb4c313e97df5182e25bc0a752ed6f1ef66",
+      "bytes": 14330551
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/1-candidate/first.log": {
+      "sha256": "d43f0241a2d01ca5c9acb300fdfde6b4a7848c6e58d7d33e6da463abe640a693",
+      "bytes": 407
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/1-candidate/repeat.log": {
+      "sha256": "4ee97c02a9e84e68c4df770c3cc7a367f7e5874393ad3d224cf811fcc3cee52c",
+      "bytes": 407
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/1-candidate/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/1-candidate/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/1-candidate/first.index.tsv": {
+      "sha256": "f5b2ae05890eae35646d5d0df96d43f368fb0f0315c4b019603e4023b8e30c29",
+      "bytes": 47475080
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/1-candidate/repeat.index.tsv": {
+      "sha256": "f5b2ae05890eae35646d5d0df96d43f368fb0f0315c4b019603e4023b8e30c29",
+      "bytes": 47475080
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/1-candidate/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/1-candidate/fixture/truth.json": {
+      "sha256": "feec0d21804658d55b6606f530802919aff330cfa53ec509e28c0242cfeb3cc6",
+      "bytes": 24082442
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/1-candidate/profile/data/fsearch/fsearch.db": {
+      "sha256": "7bde9f31969aa5b86235102a06b61fdd4f718297a1258481b5fb504180c4af05",
+      "bytes": 14330553
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/1-local/first.log": {
+      "sha256": "0fedcaa53abb1ee384fbf35c32791f46d95897cf4059caee4c9de69393648d85",
+      "bytes": 406
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/1-local/repeat.log": {
+      "sha256": "ffb8b3f0dfb7a20c7f04c1b4c3a9b1bbf6c0dbdb118f52304e80f727e5dbd377",
+      "bytes": 406
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/1-local/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/1-local/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/1-local/first.index.tsv": {
+      "sha256": "562c04ac019723b25b29ee141f1bed9bd529b178da0a5abcbdcd3d98bd66da2d",
+      "bytes": 46196364
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/1-local/repeat.index.tsv": {
+      "sha256": "562c04ac019723b25b29ee141f1bed9bd529b178da0a5abcbdcd3d98bd66da2d",
+      "bytes": 46196364
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/1-local/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/1-local/fixture/truth.json": {
+      "sha256": "feec0d21804658d55b6606f530802919aff330cfa53ec509e28c0242cfeb3cc6",
+      "bytes": 24082442
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/1-local/profile/data/fsearch/fsearch.db": {
+      "sha256": "792b512200176bacd6f92d158ee8f995202c15a3f496318e2db39ccae0c564ba",
+      "bytes": 14330545
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/2-local/first.log": {
+      "sha256": "3742f17ee09f3fe00ded53f883c497a82846d52d86692f9b78d68ffcf3bbf138",
+      "bytes": 406
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/2-local/repeat.log": {
+      "sha256": "83f137988274d80d2b3521d344ecdcb3d7c6074af26065bf36a164fdc788b2ce",
+      "bytes": 406
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/2-local/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/2-local/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/2-local/first.index.tsv": {
+      "sha256": "a789b49bc1b07613cf72b8258ab83a092c5dce3663d2f731ea02e68bf992e15e",
+      "bytes": 46196364
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/2-local/repeat.index.tsv": {
+      "sha256": "a789b49bc1b07613cf72b8258ab83a092c5dce3663d2f731ea02e68bf992e15e",
+      "bytes": 46196364
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/2-local/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/2-local/fixture/truth.json": {
+      "sha256": "feec0d21804658d55b6606f530802919aff330cfa53ec509e28c0242cfeb3cc6",
+      "bytes": 24082442
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/2-local/profile/data/fsearch/fsearch.db": {
+      "sha256": "6d96ddc1b03ee91ce42d24660b95603bbb65550f0e51867bf03aad339cad90db",
+      "bytes": 14330545
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/2-candidate/first.log": {
+      "sha256": "73914e530522d5b255ec9dae1f09772e7d4d741819982b91b8d3a6a5bf00c07f",
+      "bytes": 407
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/2-candidate/repeat.log": {
+      "sha256": "e15bba8012a1c9d54ec4cad37ee3504b7998ec3bc162d703f4467928d5f02cb6",
+      "bytes": 407
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/2-candidate/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/2-candidate/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/2-candidate/first.index.tsv": {
+      "sha256": "fed375ce9bc937dc880f523bba460a02aa5ce86bd5bc62837fb20243b496ffa8",
+      "bytes": 47475080
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/2-candidate/repeat.index.tsv": {
+      "sha256": "fed375ce9bc937dc880f523bba460a02aa5ce86bd5bc62837fb20243b496ffa8",
+      "bytes": 47475080
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/2-candidate/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/2-candidate/fixture/truth.json": {
+      "sha256": "feec0d21804658d55b6606f530802919aff330cfa53ec509e28c0242cfeb3cc6",
+      "bytes": 24082442
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/2-candidate/profile/data/fsearch/fsearch.db": {
+      "sha256": "93adbb2db7e7cde3dacc336b4be6edbdbb34ba415d7c17560378b537e9885a54",
+      "bytes": 14330553
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/2-baseline/first.log": {
+      "sha256": "47363daa005513a7e19dcb00aa03334ad272a7cefaf2b0ac565890bb42ca1b8d",
+      "bytes": 407
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/2-baseline/repeat.log": {
+      "sha256": "b10fe9858784cccadcae532363de46c821580551b4d62c5cc480b6b3d4327623",
+      "bytes": 407
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/2-baseline/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/2-baseline/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/2-baseline/first.index.tsv": {
+      "sha256": "b760a4616bed511fc998de2ba4815e68e731320b4bcab9e18292b3fa5f2a8d23",
+      "bytes": 47155401
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/2-baseline/repeat.index.tsv": {
+      "sha256": "b760a4616bed511fc998de2ba4815e68e731320b4bcab9e18292b3fa5f2a8d23",
+      "bytes": 47155401
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/2-baseline/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/2-baseline/fixture/truth.json": {
+      "sha256": "feec0d21804658d55b6606f530802919aff330cfa53ec509e28c0242cfeb3cc6",
+      "bytes": 24082442
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/2-baseline/profile/data/fsearch/fsearch.db": {
+      "sha256": "a97244930ef96e5b0b9ee74ca0d733a8e0338a9395209160a77a11d1d085a7f0",
+      "bytes": 14330551
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/3-candidate/first.log": {
+      "sha256": "532fed8747ac9114e36b6c7f31ec26ca878420141b048ffae83994c69d9075ed",
+      "bytes": 407
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/3-candidate/repeat.log": {
+      "sha256": "3c2f7cb5f1bab56bbcc21d679696808417376e2029c389594f1047319d94f01b",
+      "bytes": 407
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/3-candidate/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/3-candidate/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/3-candidate/first.index.tsv": {
+      "sha256": "0049db211d3bb9e09bb29bb2ce3ececddcc5804d9eecb73e376afc8b8fb2a7e7",
+      "bytes": 47475080
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/3-candidate/repeat.index.tsv": {
+      "sha256": "0049db211d3bb9e09bb29bb2ce3ececddcc5804d9eecb73e376afc8b8fb2a7e7",
+      "bytes": 47475080
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/3-candidate/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/3-candidate/fixture/truth.json": {
+      "sha256": "feec0d21804658d55b6606f530802919aff330cfa53ec509e28c0242cfeb3cc6",
+      "bytes": 24082442
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/3-candidate/profile/data/fsearch/fsearch.db": {
+      "sha256": "9c22ca6096660d1a0b3ba4e608cf3eb2c82316fbbf1ad4c724601134cf7be68f",
+      "bytes": 14330553
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/3-baseline/first.log": {
+      "sha256": "a598a343ca8b233c3f46a2c7fe83952ad6e90eeb3ad34702ea22f7e4de530551",
+      "bytes": 407
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/3-baseline/repeat.log": {
+      "sha256": "c035caaab265902f6a6255fc47755cad32c8d529aadd3b283c30b61f5dd3c133",
+      "bytes": 412
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/3-baseline/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/3-baseline/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/3-baseline/first.index.tsv": {
+      "sha256": "7bfdb304673cdef2be85285f63d5fb170d4ff28902380db03dae39d1b2b246ef",
+      "bytes": 47155401
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/3-baseline/repeat.index.tsv": {
+      "sha256": "7bfdb304673cdef2be85285f63d5fb170d4ff28902380db03dae39d1b2b246ef",
+      "bytes": 47155401
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/3-baseline/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/3-baseline/fixture/truth.json": {
+      "sha256": "feec0d21804658d55b6606f530802919aff330cfa53ec509e28c0242cfeb3cc6",
+      "bytes": 24082442
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/3-baseline/profile/data/fsearch/fsearch.db": {
+      "sha256": "2bfe065c891d28a350de13d9065f2d75882d269f003c1ea67fd59b642cd8fcd1",
+      "bytes": 14330551
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/3-local/first.log": {
+      "sha256": "19c35e60e3aa3cb41e9daf82958a61f7742032a550b11fa8896d4cc9f2570730",
+      "bytes": 411
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/3-local/repeat.log": {
+      "sha256": "6c23581eee80a97ebe3f49038a3e85ae3295e32a4d0e95172c2318a00e582d28",
+      "bytes": 411
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/3-local/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/3-local/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/3-local/first.index.tsv": {
+      "sha256": "0658f31d88e065153df93ea9cbb28078c917573d4c4af5fd1fceddf3e24df739",
+      "bytes": 46196364
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/3-local/repeat.index.tsv": {
+      "sha256": "0658f31d88e065153df93ea9cbb28078c917573d4c4af5fd1fceddf3e24df739",
+      "bytes": 46196364
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/3-local/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/3-local/fixture/truth.json": {
+      "sha256": "feec0d21804658d55b6606f530802919aff330cfa53ec509e28c0242cfeb3cc6",
+      "bytes": 24082442
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/dense-319k/3-local/profile/data/fsearch/fsearch.db": {
+      "sha256": "63d25acb301a939061f3475705f27dd46d296032109749b2c2c6db7f51ff6e8c",
+      "bytes": 14330545
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/1-baseline/first.log": {
+      "sha256": "0dc03a3b6d8f8dbda27c85e381bdcfd924309b81a39bc683efa7eef504649746",
+      "bytes": 412
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/1-baseline/repeat.log": {
+      "sha256": "a8b8e249ba77d00c8ecde1d18dbfa428af0bb9d3edd3d0c2af458e5f6228a2a1",
+      "bytes": 412
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/1-baseline/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/1-baseline/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/1-baseline/first.index.tsv": {
+      "sha256": "4f8b6b9aeaf013506db1e4a16daf7fbdac772aeacefd2ea4458c9ec6ec8a22dd",
+      "bytes": 82051129
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/1-baseline/repeat.index.tsv": {
+      "sha256": "4f8b6b9aeaf013506db1e4a16daf7fbdac772aeacefd2ea4458c9ec6ec8a22dd",
+      "bytes": 82051129
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/1-baseline/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/1-baseline/fixture/truth.json": {
+      "sha256": "56e28441dd241324745752fba32eefa3fc3f7e6b24ab550e52430d81f664362f",
+      "bytes": 56757827
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/1-baseline/profile/data/fsearch/fsearch.db": {
+      "sha256": "6f081b004cac82b85834b24a383e75c6041c651e67e966a72c30f37e9fcd7982",
+      "bytes": 15672188
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/1-candidate/first.log": {
+      "sha256": "b27b6ab8fcf1eacf4d1548c49c048f3c5ed43b7ad3ca539f6b1d6d07ebc00753",
+      "bytes": 413
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/1-candidate/repeat.log": {
+      "sha256": "ff941d0a332f0792ff8c8cb48688dd0ad2b6a5ea7561519bbcfd51b740a1196d",
+      "bytes": 413
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/1-candidate/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/1-candidate/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/1-candidate/first.index.tsv": {
+      "sha256": "93816496ce800b3b7c0323d2667f00b593ae3b3f1886ec70805a00ba491a34e1",
+      "bytes": 82378879
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/1-candidate/repeat.index.tsv": {
+      "sha256": "93816496ce800b3b7c0323d2667f00b593ae3b3f1886ec70805a00ba491a34e1",
+      "bytes": 82378879
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/1-candidate/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/1-candidate/fixture/truth.json": {
+      "sha256": "56e28441dd241324745752fba32eefa3fc3f7e6b24ab550e52430d81f664362f",
+      "bytes": 56757827
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/1-candidate/profile/data/fsearch/fsearch.db": {
+      "sha256": "ff1f305089b9205098ab97989bf8089061fc3a215685d902ec46b3e61396ffc3",
+      "bytes": 15672190
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/1-local/first.log": {
+      "sha256": "bc6244ac19a1df86931511d967e6cbf96810176d29ed2bdb6815406c039724c4",
+      "bytes": 411
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/1-local/repeat.log": {
+      "sha256": "6d147e3b6bead2fadc68b602402dcbebf0728eff98145e8c99ca381b386b7b93",
+      "bytes": 411
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/1-local/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/1-local/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/1-local/first.index.tsv": {
+      "sha256": "9ffebe0e5530311e1f786709e93549a3e20f2eb64a1a73a34403c624ec376783",
+      "bytes": 81067879
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/1-local/repeat.index.tsv": {
+      "sha256": "9ffebe0e5530311e1f786709e93549a3e20f2eb64a1a73a34403c624ec376783",
+      "bytes": 81067879
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/1-local/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/1-local/fixture/truth.json": {
+      "sha256": "56e28441dd241324745752fba32eefa3fc3f7e6b24ab550e52430d81f664362f",
+      "bytes": 56757827
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/1-local/profile/data/fsearch/fsearch.db": {
+      "sha256": "7582c3687b391d526a27f64b98da2953351ab843f2725cae28d9892c5575908c",
+      "bytes": 15672182
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/2-local/first.log": {
+      "sha256": "c00993412aaaf32e45e48569ab66175048bcc0fd5e129d11e481e06453d01ac9",
+      "bytes": 411
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/2-local/repeat.log": {
+      "sha256": "908ec36bff3189a2a1fe7b991f128a02cb9d82d5cc52c1713de087c6fb550135",
+      "bytes": 411
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/2-local/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/2-local/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/2-local/first.index.tsv": {
+      "sha256": "e5f113261badbc4d800c661fe785abafdaed670484af8c44a42ac7e81e626649",
+      "bytes": 81067879
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/2-local/repeat.index.tsv": {
+      "sha256": "e5f113261badbc4d800c661fe785abafdaed670484af8c44a42ac7e81e626649",
+      "bytes": 81067879
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/2-local/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/2-local/fixture/truth.json": {
+      "sha256": "56e28441dd241324745752fba32eefa3fc3f7e6b24ab550e52430d81f664362f",
+      "bytes": 56757827
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/2-local/profile/data/fsearch/fsearch.db": {
+      "sha256": "0c06741e80749d0a343ed977df3af105f494d49a77c69baaee5638b32ee91e54",
+      "bytes": 15672182
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/2-candidate/first.log": {
+      "sha256": "7a17f34f7269acff09877fa7a1b75106da8e9a1017d8c4ddbfb115ca886c3edc",
+      "bytes": 413
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/2-candidate/repeat.log": {
+      "sha256": "b388196bb30e9c0f6f27310ac77a307b8740a7e50c337066942a77149d37c167",
+      "bytes": 413
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/2-candidate/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/2-candidate/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/2-candidate/first.index.tsv": {
+      "sha256": "4adaadc33b0e5c322c0dc7b8ac35adc696c18914afdf84d5308460554cda4f74",
+      "bytes": 82378879
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/2-candidate/repeat.index.tsv": {
+      "sha256": "4adaadc33b0e5c322c0dc7b8ac35adc696c18914afdf84d5308460554cda4f74",
+      "bytes": 82378879
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/2-candidate/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/2-candidate/fixture/truth.json": {
+      "sha256": "56e28441dd241324745752fba32eefa3fc3f7e6b24ab550e52430d81f664362f",
+      "bytes": 56757827
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/2-candidate/profile/data/fsearch/fsearch.db": {
+      "sha256": "417a5c8e7ba9c77d1998f20ebbca8cf39f04655db65f668a3ae131ecbaef5c8e",
+      "bytes": 15672190
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/2-baseline/first.log": {
+      "sha256": "516e7b8d39a8487991f9eb1acf28800e3b90f7862e3aa050e6cafce331b3d9c8",
+      "bytes": 412
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/2-baseline/repeat.log": {
+      "sha256": "ae2fbd46045c4b40492eca36e75390f9c08947e88afe69a51a8d0ec2a6e09c2c",
+      "bytes": 413
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/2-baseline/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/2-baseline/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/2-baseline/first.index.tsv": {
+      "sha256": "719a76bd84ade566892e5b25b7a3d710610e13d09b859cef19e524699a79820c",
+      "bytes": 82051129
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/2-baseline/repeat.index.tsv": {
+      "sha256": "719a76bd84ade566892e5b25b7a3d710610e13d09b859cef19e524699a79820c",
+      "bytes": 82051129
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/2-baseline/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/2-baseline/fixture/truth.json": {
+      "sha256": "56e28441dd241324745752fba32eefa3fc3f7e6b24ab550e52430d81f664362f",
+      "bytes": 56757827
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/2-baseline/profile/data/fsearch/fsearch.db": {
+      "sha256": "66830bddcb7fdc781df2af38612b25705c3aeff655c73bc7a0744155f5d70c2e",
+      "bytes": 15672188
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/3-candidate/first.log": {
+      "sha256": "b62ceac7068f5ce95b2dd87d0d0a4c0a87c88812daa4aef653897397ce16fc93",
+      "bytes": 413
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/3-candidate/repeat.log": {
+      "sha256": "3231c22536937871cd6f9bc0affad18b01047763f3a5244206786d300919186b",
+      "bytes": 413
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/3-candidate/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/3-candidate/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/3-candidate/first.index.tsv": {
+      "sha256": "22bba9fa0b76528983bd660a8e18985b71c05796829498c6e310f0c6cd69b7e4",
+      "bytes": 82378879
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/3-candidate/repeat.index.tsv": {
+      "sha256": "22bba9fa0b76528983bd660a8e18985b71c05796829498c6e310f0c6cd69b7e4",
+      "bytes": 82378879
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/3-candidate/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/3-candidate/fixture/truth.json": {
+      "sha256": "56e28441dd241324745752fba32eefa3fc3f7e6b24ab550e52430d81f664362f",
+      "bytes": 56757827
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/3-candidate/profile/data/fsearch/fsearch.db": {
+      "sha256": "450f3975738082cc5e62e8ae74b1cde8b6acd8410161c0444e90e723b0049563",
+      "bytes": 15672190
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/3-baseline/first.log": {
+      "sha256": "4982af5d22b610fd0d3127201d8a841cb043e83e634c278b833b437e9991b0fe",
+      "bytes": 412
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/3-baseline/repeat.log": {
+      "sha256": "385976fe9c64fb78671bcbaf378c98026025359beace61958af7e5ee88f978c2",
+      "bytes": 412
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/3-baseline/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/3-baseline/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/3-baseline/first.index.tsv": {
+      "sha256": "e00d003fbfe9d2e89ee7acd45aa837899e55436471d753ea2a0b9d311f6963fe",
+      "bytes": 82051129
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/3-baseline/repeat.index.tsv": {
+      "sha256": "e00d003fbfe9d2e89ee7acd45aa837899e55436471d753ea2a0b9d311f6963fe",
+      "bytes": 82051129
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/3-baseline/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/3-baseline/fixture/truth.json": {
+      "sha256": "56e28441dd241324745752fba32eefa3fc3f7e6b24ab550e52430d81f664362f",
+      "bytes": 56757827
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/3-baseline/profile/data/fsearch/fsearch.db": {
+      "sha256": "0f463c143b70f5843d69c259965eee7f1fd6682cb317a4b6c14269faaa654ee2",
+      "bytes": 15672188
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/3-local/first.log": {
+      "sha256": "f6c29296edca7f1cf8646fdb0b7f3054ccbed82b3474039341421c120a80b7a7",
+      "bytes": 411
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/3-local/repeat.log": {
+      "sha256": "101daec266bd6ad7d62bdb947b2242b7c5922ca19625cacf43a13d0f17d370ea",
+      "bytes": 411
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/3-local/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/3-local/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/3-local/first.index.tsv": {
+      "sha256": "6065d63a50da8b839c15efe4a8ba8e005e5d59b5e3091e39bbba802e917ba982",
+      "bytes": 81067879
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/3-local/repeat.index.tsv": {
+      "sha256": "6065d63a50da8b839c15efe4a8ba8e005e5d59b5e3091e39bbba802e917ba982",
+      "bytes": 81067879
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/3-local/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/3-local/fixture/truth.json": {
+      "sha256": "56e28441dd241324745752fba32eefa3fc3f7e6b24ab550e52430d81f664362f",
+      "bytes": 56757827
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/primary-001/manifest-327750/3-local/profile/data/fsearch/fsearch.db": {
+      "sha256": "fa6dc3acc131b9531c27423d458bc92213acf8b039ac25f35dead92edb8cd9c4",
+      "bytes": 15672182
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/100k/1-baseline/first.log": {
+      "sha256": "34237ab37bee0bab22cf75f9a05a59411ba0cec34abdfabfe8167a7aef3525b3",
+      "bytes": 411
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/100k/1-baseline/repeat.log": {
+      "sha256": "8d78475540d9986457661eea1654f51ec1fa48f4efc43b85574f302ea49b6138",
+      "bytes": 411
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/100k/1-baseline/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/100k/1-baseline/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/100k/1-baseline/first.index.tsv": {
+      "sha256": "ef225774748d7aaa9724a57a71f5138748f3ef8f42861fa46ac10030f180e1fb",
+      "bytes": 14992273
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/100k/1-baseline/repeat.index.tsv": {
+      "sha256": "ef225774748d7aaa9724a57a71f5138748f3ef8f42861fa46ac10030f180e1fb",
+      "bytes": 14992273
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/100k/1-baseline/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/100k/1-baseline/fixture/truth.json": {
+      "sha256": "5df0d56a63d57c3c621ae4e3b1728c18f55747527c254d0d95dad8301a40b9f3",
+      "bytes": 7943239
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/100k/1-baseline/profile/data/fsearch/fsearch.db": {
+      "sha256": "18ad8f7a94015a0f9b8ec02c35b47413336a80ad252c1d0475e42f73ca560cdd",
+      "bytes": 4598823
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/100k/1-candidate/first.log": {
+      "sha256": "dcb4c9cca8141c773fd55bd75f1afc19008113dcac7234a47b644273be15e4ed",
+      "bytes": 411
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/100k/1-candidate/repeat.log": {
+      "sha256": "ec87a1a28802eb05b338aaac86b21213323635c51e0e5c0913650f788a9587c3",
+      "bytes": 411
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/100k/1-candidate/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/100k/1-candidate/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/100k/1-candidate/first.index.tsv": {
+      "sha256": "b436952989738ca4b1ac2b4d47923eddfa157e7abc03312c26a8fb4ca144f7f9",
+      "bytes": 15094403
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/100k/1-candidate/repeat.index.tsv": {
+      "sha256": "b436952989738ca4b1ac2b4d47923eddfa157e7abc03312c26a8fb4ca144f7f9",
+      "bytes": 15094403
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/100k/1-candidate/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/100k/1-candidate/fixture/truth.json": {
+      "sha256": "5df0d56a63d57c3c621ae4e3b1728c18f55747527c254d0d95dad8301a40b9f3",
+      "bytes": 7943239
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/100k/1-candidate/profile/data/fsearch/fsearch.db": {
+      "sha256": "b31e6d02bd2657e09f4b7368c52914b46f1155235328e78e560b114731797118",
+      "bytes": 4598825
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/100k/1-local/first.log": {
+      "sha256": "c6d56395c8cf0477aaa7c7836c7d7fe43a59260d693858e657b4952b5216e457",
+      "bytes": 411
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/100k/1-local/repeat.log": {
+      "sha256": "f0ba0373f8cf87d0f16789ad36c39777cf7ad4addb6f73b00d0caebdd31ce3cf",
+      "bytes": 411
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/100k/1-local/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/100k/1-local/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/100k/1-local/first.index.tsv": {
+      "sha256": "98006eee1de6654c09927847e6df11ec4fc7206842a949767948279721c9f616",
+      "bytes": 14685883
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/100k/1-local/repeat.index.tsv": {
+      "sha256": "98006eee1de6654c09927847e6df11ec4fc7206842a949767948279721c9f616",
+      "bytes": 14685883
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/100k/1-local/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/100k/1-local/fixture/truth.json": {
+      "sha256": "5df0d56a63d57c3c621ae4e3b1728c18f55747527c254d0d95dad8301a40b9f3",
+      "bytes": 7943239
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/100k/1-local/profile/data/fsearch/fsearch.db": {
+      "sha256": "606e6ae77cda41df2024c95bf94895b8d59d31d0438431a15a9533f3a5811faa",
+      "bytes": 4598817
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/dense-319k/1-baseline/first.log": {
+      "sha256": "52749fc89ef93e776fd78358d9d363af1f42e6150f302e6e55cbff58c8cfa573",
+      "bytes": 412
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/dense-319k/1-baseline/repeat.log": {
+      "sha256": "aa2b26bbed826031cbfeb810b094d0b6de6a8e38c4c92f634d9474f8708ca584",
+      "bytes": 412
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/dense-319k/1-baseline/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/dense-319k/1-baseline/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/dense-319k/1-baseline/first.index.tsv": {
+      "sha256": "345685ab1bc86152e6387cc12b1d3d9fe9623b715523ab351e19acbbe9409c6e",
+      "bytes": 48114438
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/dense-319k/1-baseline/repeat.index.tsv": {
+      "sha256": "345685ab1bc86152e6387cc12b1d3d9fe9623b715523ab351e19acbbe9409c6e",
+      "bytes": 48114438
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/dense-319k/1-baseline/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/dense-319k/1-baseline/fixture/truth.json": {
+      "sha256": "feec0d21804658d55b6606f530802919aff330cfa53ec509e28c0242cfeb3cc6",
+      "bytes": 24082442
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/dense-319k/1-baseline/profile/data/fsearch/fsearch.db": {
+      "sha256": "eee04acb4e48694bf69069de46d8c3a86f86a5d21e6ceed51521563f26817a08",
+      "bytes": 14330557
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/dense-319k/1-candidate/first.log": {
+      "sha256": "bc9f2046a83f9a0441b8ca4e3e96cf37250b8490b9ee781b4345a44dc262c19f",
+      "bytes": 412
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/dense-319k/1-candidate/repeat.log": {
+      "sha256": "79e02facd605307b318d387810a2b2dfaed08c9618ce84858da6cff4581284f8",
+      "bytes": 412
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/dense-319k/1-candidate/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/dense-319k/1-candidate/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/dense-319k/1-candidate/first.index.tsv": {
+      "sha256": "c5bfe6d6cc4b3b4b0bdbf987b7aaf1c2f2454f82ba8bd998009698e500143a92",
+      "bytes": 48434117
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/dense-319k/1-candidate/repeat.index.tsv": {
+      "sha256": "c5bfe6d6cc4b3b4b0bdbf987b7aaf1c2f2454f82ba8bd998009698e500143a92",
+      "bytes": 48434117
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/dense-319k/1-candidate/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/dense-319k/1-candidate/fixture/truth.json": {
+      "sha256": "feec0d21804658d55b6606f530802919aff330cfa53ec509e28c0242cfeb3cc6",
+      "bytes": 24082442
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/dense-319k/1-candidate/profile/data/fsearch/fsearch.db": {
+      "sha256": "e4bed637a90b2ae115b108051f9de9f9495cdcee60323cff8a67f8132e5bc4c7",
+      "bytes": 14330559
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/dense-319k/1-local/first.log": {
+      "sha256": "c26aa5b9c0d969f126b574a7e939af00f239f6be9135e056a1b3b9287c8d1483",
+      "bytes": 411
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/dense-319k/1-local/repeat.log": {
+      "sha256": "60c486202ae914f32e31c4a459cd4841c70d08e079d24e5d5f59cbc8ac20732f",
+      "bytes": 411
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/dense-319k/1-local/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/dense-319k/1-local/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/dense-319k/1-local/first.index.tsv": {
+      "sha256": "708f2c56e796206091372e3dc820f8f69d035bf8f8bcc8ad6a4e4e92a03ad3d0",
+      "bytes": 47155401
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/dense-319k/1-local/repeat.index.tsv": {
+      "sha256": "708f2c56e796206091372e3dc820f8f69d035bf8f8bcc8ad6a4e4e92a03ad3d0",
+      "bytes": 47155401
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/dense-319k/1-local/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/dense-319k/1-local/fixture/truth.json": {
+      "sha256": "feec0d21804658d55b6606f530802919aff330cfa53ec509e28c0242cfeb3cc6",
+      "bytes": 24082442
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/dense-319k/1-local/profile/data/fsearch/fsearch.db": {
+      "sha256": "91d8c99db6778d0dc99d94658f0796513b9e58c09dca17304c5741e1e9bf3516",
+      "bytes": 14330551
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/manifest-327750/1-baseline/first.log": {
+      "sha256": "28234c26e25bac93662f5fc2d8ea0581129621ad6aebeb31ac5fbdbc1896e77d",
+      "bytes": 412
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/manifest-327750/1-baseline/repeat.log": {
+      "sha256": "f96fda98da15c687ae3b58ddbf4e37d39e25633f023b705fc0c43451fd756297",
+      "bytes": 412
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/manifest-327750/1-baseline/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/manifest-327750/1-baseline/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/manifest-327750/1-baseline/first.index.tsv": {
+      "sha256": "0f008ff5f33128f4df3a43d1efc264acbe3df54e0a806c9c494243495e34553a",
+      "bytes": 83034379
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/manifest-327750/1-baseline/repeat.index.tsv": {
+      "sha256": "0f008ff5f33128f4df3a43d1efc264acbe3df54e0a806c9c494243495e34553a",
+      "bytes": 83034379
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/manifest-327750/1-baseline/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/manifest-327750/1-baseline/fixture/truth.json": {
+      "sha256": "56e28441dd241324745752fba32eefa3fc3f7e6b24ab550e52430d81f664362f",
+      "bytes": 56757827
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/manifest-327750/1-baseline/profile/data/fsearch/fsearch.db": {
+      "sha256": "6ebb48a5a1338801eef081ba3e1dcb04fa36bbf0fbfdc24fe654e33957da86d2",
+      "bytes": 15672194
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/manifest-327750/1-candidate/first.log": {
+      "sha256": "c48747724a9cee8f40a27a85ade006c4eae72c8399fb6f24faa41b7f09940937",
+      "bytes": 413
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/manifest-327750/1-candidate/repeat.log": {
+      "sha256": "ea0522042a19bd9a2a5fb82309fd88eb6a6130434f5bc127acb332c936f40c96",
+      "bytes": 413
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/manifest-327750/1-candidate/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/manifest-327750/1-candidate/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/manifest-327750/1-candidate/first.index.tsv": {
+      "sha256": "c10c7b7705f4b8ddb30c0b81597300092758ec70044a4e354f265e119bb2720d",
+      "bytes": 83362129
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/manifest-327750/1-candidate/repeat.index.tsv": {
+      "sha256": "c10c7b7705f4b8ddb30c0b81597300092758ec70044a4e354f265e119bb2720d",
+      "bytes": 83362129
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/manifest-327750/1-candidate/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/manifest-327750/1-candidate/fixture/truth.json": {
+      "sha256": "56e28441dd241324745752fba32eefa3fc3f7e6b24ab550e52430d81f664362f",
+      "bytes": 56757827
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/manifest-327750/1-candidate/profile/data/fsearch/fsearch.db": {
+      "sha256": "1dfff165592e8a492ffe607b78d371dbbcec4960eecde0685842e1ae07ff32ec",
+      "bytes": 15672196
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/manifest-327750/1-local/first.log": {
+      "sha256": "4eb4215ddd9f8f04813dca94fd8017651d10e0b8fa57990990fde7beaa8cac65",
+      "bytes": 411
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/manifest-327750/1-local/repeat.log": {
+      "sha256": "0f7be7e6815f2ee3cd01624344cc2970bab52f219b9564ae6b4f988375a7cb67",
+      "bytes": 411
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/manifest-327750/1-local/first.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/manifest-327750/1-local/repeat.audit.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/manifest-327750/1-local/first.index.tsv": {
+      "sha256": "0205ec73e67ec8ae8c34b6c41a22a6e8fd3a1567e156f97803e2df8a6adf5ef8",
+      "bytes": 82051129
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/manifest-327750/1-local/repeat.index.tsv": {
+      "sha256": "0205ec73e67ec8ae8c34b6c41a22a6e8fd3a1567e156f97803e2df8a6adf5ef8",
+      "bytes": 82051129
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/manifest-327750/1-local/fixture.stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/manifest-327750/1-local/fixture/truth.json": {
+      "sha256": "56e28441dd241324745752fba32eefa3fc3f7e6b24ab550e52430d81f664362f",
+      "bytes": 56757827
+    },
+    "/home/drive-native-test/.local/state/drive-native-ultra-benchmark/diagnostic-001/manifest-327750/1-local/profile/data/fsearch/fsearch.db": {
+      "sha256": "4d6a63832d900170b60b190ba86c2fb74508b3ec6a8d30d6c431869241101cc9",
+      "bytes": 15672188
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "candidate_commit": "c744729141ca8b23bde63c61ca8a644bdfdaee81",
+  "old_readers_copied_from": "/home/drive-native-test/.local/state/drive-native-ultra-validation/schema-g4-001/bins",
+  "old_reader_sha256": {
+    "23": "e9d4eae462a1ab57411dbeeb9c7c03f898e749e11c68f297949f21b743cf868a",
+    "24": "7122704c3652b264fc594e945dc8d4a8862ee2e3e84422ba950225b73cff07cc"
+  },
+  "old_schema23_source": "d555944bfe3058cb223bf7d8ebc71244f1e4d7a3",
+  "old_schema24_source": "ed1fabf91ec54bc1ba09d3537128b7d229a12936"
+}

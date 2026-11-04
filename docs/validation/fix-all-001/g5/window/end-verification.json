@@ -1,0 +1,15 @@
+{
+  "diagnostic_end_utc": "2026-11-04T17:15:35.657136Z",
+  "verifier_end_check_utc": "2026-11-04T17:15:57Z",
+  "primary_scans": 54,
+  "diagnostic_scans": 18,
+  "saved_index_truth_all_zero": true,
+  "hydration_all_zero": true,
+  "normal_fixture_stops": 36,
+  "forced_cleanup": false,
+  "current_benchmark_owned_mounts": [],
+  "windows_sampler_closed_utc": "2026-11-04T15:52:54.9829366Z",
+  "windows_cim_failed_samples": 21,
+  "windows_host_load_measured": false,
+  "coordinator_notified_END": true
+}

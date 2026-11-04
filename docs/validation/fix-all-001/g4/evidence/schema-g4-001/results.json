@@ -1,0 +1,16 @@
+{
+  "complete": false,
+  "results": [
+    {
+      "command": [
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/schema-g4-001/bins/schema23",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/schema-g4-001/state/v23"
+      ],
+      "exit_code": 0,
+      "stdout": "OPEN_OK schema=23\n",
+      "stderr": "",
+      "expected_accept": true,
+      "passed": true
+    }
+  ]
+}

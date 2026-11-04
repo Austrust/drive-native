@@ -1,0 +1,101 @@
+{
+  "candidate_commit": "bae1ef1ddc4061df586221557011f4e30f04d134",
+  "baseline_commit": "d555944bfe3058cb223bf7d8ebc71244f1e4d7a3",
+  "timing_basis": "time.monotonic elapsed; wider UTC spans separately audited, not strict host wall clock",
+  "correctness_all_passed": true,
+  "scan_count": 72,
+  "primary_scans": 54,
+  "diagnostic_scans": 18,
+  "tree_and_directory_targets": [
+    {
+      "tree": "100k",
+      "state": "first",
+      "median_seconds": 6.48200474600003,
+      "target_seconds": 2.0,
+      "target_met": false,
+      "median_ms_per_directory": 3.1374659951597432,
+      "directory_target_ms": 0.15,
+      "directory_target_met": false
+    },
+    {
+      "tree": "100k",
+      "state": "repeat",
+      "median_seconds": 6.431585423000001,
+      "target_seconds": 1.6,
+      "target_met": false,
+      "median_ms_per_directory": 3.113061676185867,
+      "directory_target_ms": 0.15,
+      "directory_target_met": false
+    },
+    {
+      "tree": "dense-319k",
+      "state": "first",
+      "median_seconds": 63.02766012300003,
+      "target_seconds": 13.0,
+      "target_met": false,
+      "median_ms_per_directory": 1.124028679096892,
+      "directory_target_ms": 0.15,
+      "directory_target_met": false
+    },
+    {
+      "tree": "dense-319k",
+      "state": "repeat",
+      "median_seconds": 61.325762261000136,
+      "target_seconds": 12.0,
+      "target_met": false,
+      "median_ms_per_directory": 1.0936772111533204,
+      "directory_target_ms": 0.15,
+      "directory_target_met": false
+    },
+    {
+      "tree": "manifest-327750",
+      "state": "first",
+      "median_seconds": 112.5134450170001,
+      "target_seconds": 15.0,
+      "target_met": false,
+      "median_ms_per_directory": 1.989486950825761,
+      "directory_target_ms": 0.15,
+      "directory_target_met": false
+    },
+    {
+      "tree": "manifest-327750",
+      "state": "repeat",
+      "median_seconds": 115.8752682270001,
+      "target_seconds": null,
+      "target_met": null,
+      "median_ms_per_directory": 2.048931432383211,
+      "directory_target_ms": 0.15,
+      "directory_target_met": false
+    }
+  ],
+  "index_ready_without_degradation": false,
+  "diagnostic_index_hits_all_scans": false,
+  "load": {
+    "windows_host": "未实测；CIM资源无法访问；错误及失败启动原件保留",
+    "wsl_guest": {
+      "primary": {
+        "samples": 3262,
+        "average_guest_busy_percent": 9.295284459482067,
+        "start_loadavg": "0.91 0.50 0.22 2/343 465",
+        "end_loadavg": "1.07 1.12 1.09 1/262 19721"
+      },
+      "diagnostic": {
+        "samples": 1331,
+        "average_guest_busy_percent": 9.288294534269104,
+        "start_loadavg": "1.07 1.12 1.09 2/261 19723",
+        "end_loadavg": "0.96 1.01 1.05 1/265 26747"
+      }
+    }
+  },
+  "all_mounts_stopped_normally": true,
+  "residual_mounts": [],
+  "performance_complete": true,
+  "all_specified_performance_targets_passed": false,
+  "performance_target_counts": {
+    "tree_passed": 0,
+    "tree_failed": 5,
+    "tree_not_specified": 1,
+    "directory_passed": 0,
+    "directory_failed": 6
+  }
+}

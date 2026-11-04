@@ -1,0 +1,4 @@
+dbus-daemon[1982]: [session uid=1000 pid=1982] Activating service name='org.gtk.vfs.Daemon' requested by ':1.0' (uid=1000 pid=1996 comm="/home/drive-native-test/fsearch-bench/bin/fsearch-" label="kernel")
+dbus-daemon[1982]: [session uid=1000 pid=1982] Successfully activated service 'org.gtk.vfs.Daemon'
+[fsearch] database update finished successfully in 1.10 seconds
+A connection to the bus can't be made

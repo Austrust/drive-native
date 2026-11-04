@@ -1,0 +1,105 @@
+   Compiling sproto v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-005/source/crates/sproto)
+   Compiling fuser v0.16.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-005/source/vendor/fuser)
+warning: unused import: `validate_path`
+ --> /home/drive-native-test/.local/state/drive-native-ultra-validation/g4-005/source/crates/sproto/src/actions/transfer.rs:4:36
+  |
+4 | use super::native::{NativeVersion, validate_path};
+  |                                    ^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `AsyncReadExt` and `AsyncSeekExt`
+  --> /home/drive-native-test/.local/state/drive-native-ultra-validation/g4-005/source/crates/sproto/src/actions/transfer.rs:14:17
+   |
+14 | use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWrite};
+   |                 ^^^^^^^^^^^^  ^^^^^^^^^^^^
+
+warning: function `binary_parts` is never used
+  --> /home/drive-native-test/.local/state/drive-native-ultra-validation/g4-005/source/crates/sproto/src/pstream/encode.rs:68:15
+   |
+68 | pub(crate) fn binary_parts(obj: &PObject) -> Result<(Vec<u8>, Vec<u8>, u64)> {
+   |               ^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `send_binary` is never used
+  --> /home/drive-native-test/.local/state/drive-native-ultra-validation/g4-005/source/crates/sproto/src/channel.rs:80:25
+   |
+77 | impl Channel {
+   | ------------ method in this implementation
+...
+80 |     pub(crate) async fn send_binary<R: AsyncRead + Unpin>(
+   |                         ^^^^^^^^^^^
+
+warning: struct `cuse_init_in` is never constructed
+   --> /home/drive-native-test/.local/state/drive-native-ultra-validation/g4-005/source/vendor/fuser/src/ll/fuse_abi.rs:814:12
+    |
+814 | pub struct cuse_init_in {
+    |            ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: struct `cuse_init_out` is never constructed
+   --> /home/drive-native-test/.local/state/drive-native-ultra-validation/g4-005/source/vendor/fuser/src/ll/fuse_abi.rs:823:12
+    |
+823 | pub struct cuse_init_out {
+    |            ^^^^^^^^^^^^^
+
+warning: struct `fuse_ioctl_iovec` is never constructed
+   --> /home/drive-native-test/.local/state/drive-native-ultra-validation/g4-005/source/vendor/fuser/src/ll/fuse_abi.rs:868:12
+    |
+868 | pub struct fuse_ioctl_iovec {
+    |            ^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_out` is never constructed
+   --> /home/drive-native-test/.local/state/drive-native-ultra-validation/g4-005/source/vendor/fuser/src/ll/fuse_abi.rs:996:12
+    |
+996 | pub struct fuse_notify_retrieve_out {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_in` is never constructed
+    --> /home/drive-native-test/.local/state/drive-native-ultra-validation/g4-005/source/vendor/fuser/src/ll/fuse_abi.rs:1006:12
+     |
+1006 | pub struct fuse_notify_retrieve_in {
+     |            ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `fuser` (lib) generated 5 warnings
+   Compiling drive-core v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-005/source/crates/drive-core)
+warning: `sproto` (lib) generated 4 warnings (run `cargo fix --lib -p sproto` to apply 2 suggestions)
+warning: method `verify_root` is never used
+  --> /home/drive-native-test/.local/state/drive-native-ultra-validation/g4-005/source/crates/drive-core/src/native_root_guard.rs:86:25
+   |
+26 | impl NativeReadSession {
+   | ---------------------- method in this implementation
+...
+86 |     pub(super) async fn verify_root(&self) -> Result<()> {
+   |                         ^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+   Compiling drive-fs v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-005/source/crates/drive-fs)
+   Compiling drive-runtime v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-005/source/crates/drive-runtime)
+warning: `drive-core` (lib) generated 1 warning
+   Compiling history-ipc-probe v0.0.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-005/history-scale-pinned/probe)
+error[E0599]: no method named `unwrap` found for struct `zbus::connection::Builder<'a>` in the current scope
+  --> src/main.rs:35:76
+   |
+34 |       let _actual = zbus::connection::Builder::session()
+   |  ___________________-
+35 | |         .name("org.drivenative.Client1.i00000000000000000000000000000002").unwrap()
+   | |                                                                           -^^^^^^ method not found in `zbus::connection::Builder<'_>`
+   | |___________________________________________________________________________|
+   |
+
+error[E0599]: no method named `unwrap` found for struct `zbus::connection::Builder<'a>` in the current scope
+  --> src/main.rs:38:76
+   |
+37 |       let _delayed = zbus::connection::Builder::session()
+   |  ____________________-
+38 | |         .name("org.drivenative.Client1.i00000000000000000000000000000001").unwrap()
+   | |                                                                           -^^^^^^ method not found in `zbus::connection::Builder<'_>`
+   | |___________________________________________________________________________|
+   |
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `history-ipc-probe` (bin "history-ipc-probe") due to 2 previous errors

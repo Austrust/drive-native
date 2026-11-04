@@ -1,0 +1,1595 @@
+   Compiling sproto v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/source/crates/sproto)
+   Compiling fuser v0.16.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/source/vendor/fuser)
+warning: struct `cuse_init_in` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:814:12
+    |
+814 | pub struct cuse_init_in {
+    |            ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: struct `cuse_init_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:823:12
+    |
+823 | pub struct cuse_init_out {
+    |            ^^^^^^^^^^^^^
+
+warning: struct `fuse_ioctl_iovec` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:868:12
+    |
+868 | pub struct fuse_ioctl_iovec {
+    |            ^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:996:12
+    |
+996 | pub struct fuse_notify_retrieve_out {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_in` is never constructed
+    --> vendor/fuser/src/ll/fuse_abi.rs:1006:12
+     |
+1006 | pub struct fuse_notify_retrieve_in {
+     |            ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `fuser` (lib) generated 5 warnings
+   Compiling drive-core v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/source/crates/drive-core)
+   Compiling drive-fs v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/source/crates/drive-fs)
+   Compiling drive-runtime v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/source/crates/drive-runtime)
+warning: unused variable: `op`
+  --> crates/drive-runtime/src/namespace_schedule_tests.rs:57:10
+   |
+57 |     let (op, child_file) = {
+   |          ^^ help: if this is intentional, prefix it with an underscore: `_op`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `drive-runtime` (lib test) generated 1 warning (run `cargo fix --lib -p drive-runtime --tests` to apply 1 suggestion)
+warning: function `states` is never used
+  --> crates/drive-runtime/examples/support/service.rs:51:14
+   |
+51 | pub async fn states(p: &zbus::Proxy<'_>, path: &str) -> Result<serde_json::Value> {
+   |              ^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `wait_state` is never used
+  --> crates/drive-runtime/examples/support/service.rs:76:14
+   |
+76 | pub async fn wait_state(p: &zbus::Proxy<'_>, path: &str, status: &str) -> Result<()> {
+   |              ^^^^^^^^^^
+
+warning: `drive-runtime` (example "native_access_service") generated 2 warnings
+warning: `drive-runtime` (example "native_trust_roundtrip") generated 2 warnings (2 duplicates)
+warning: variable does not need to be mutable
+   --> crates/drive-core/tests/conflicts.rs:215:13
+    |
+215 |     let (d, mut s) = fixture();
+    |             ----^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: `drive-core` (test "conflicts") generated 1 warning (run `cargo fix --test "conflicts" -p drive-core` to apply 1 suggestion)
+warning: variable does not need to be mutable
+   --> crates/drive-fs/examples/fsearch_fixture.rs:321:21
+    |
+321 |                 let mut value =
+    |                     ----^^^^^
+    |                     |
+    |                     help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: `drive-fs` (example "fsearch_fixture") generated 1 warning (run `cargo fix --example "fsearch_fixture" -p drive-fs` to apply 1 suggestion)
+warning: unused imports: `MetadataExt` and `PermissionsExt`
+  --> crates/drive-fs/tests/preview_plus_revoke.rs:11:20
+   |
+11 |         unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
+   |                    ^^^^^^^^^^^                  ^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `names` is never used
+   --> crates/drive-fs/tests/preview_plus_revoke.rs:144:4
+    |
+144 | fn names(p: &Path) -> std::io::Result<Vec<String>> {
+    |    ^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `drive-fs` (test "preview_plus_revoke") generated 2 warnings (run `cargo fix --test "preview_plus_revoke" -p drive-fs` to apply 1 suggestion)
+warning: variable does not need to be mutable
+  --> crates/drive-core/tests/package_upgrade.rs:19:9
+   |
+19 |     let mut store=Store::open(directory.path()).unwrap();
+   |         ----^^^^^
+   |         |
+   |         help: remove this `mut`
+   |
+   = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: `drive-core` (test "package_upgrade") generated 1 warning (run `cargo fix --test "package_upgrade" -p drive-core` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 19s
+     Running unittests src/lib.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/drive_core-ac22ab4fe45be44d)
+
+running 402 tests
+test filesystem::directory_scale_tests::identity_query_rejects_file_deleted_node_and_missing_or_deleted_parent ... ok
+test filesystem::directory_stamp_tests::rollback_keeps_stamp_but_open_transaction_or_unconfirmed_bulk_cannot_be_cached ... ok
+test filesystem::directory_scale_tests::cached_directory_query_rechecks_acl_and_overlay_ancestors_on_every_execution ... ok
+test filesystem::inodes::tests::concurrent_mount_backfills_are_serialized_and_allocate_each_missing_node_once ... ok
+test filesystem::directory_scale_tests::lazy_inode_repair_preserves_budget_and_rolls_back_on_child_failure ... ok
+test filesystem::directory_stamp_tests::inode_allocations_and_private_metadata_do_not_change_directory_stamp ... ok
+test filesystem::inodes::tests::completeness_marker_is_set_by_install_and_cleared_by_node_inserts ... ok
+test filesystem::directory_stamp_tests::overlay_acl_revocation_changes_stamp_and_hides_moved_descendant ... ok
+test filesystem::inodes::tests::install_allocates_every_live_node_and_pins_the_root ... ok
+test filesystem::directory_stamp_tests::unlinking_local_shadow_reveals_remote_entry_with_a_new_stamp ... ok
+test filesystem::directory_scale_tests::unicode_budget_shadow_and_dirty_body_remain_metadata_only ... ok
+test initialization_events::tests::directory_entry_keeps_u64_identity_and_rejects_wrong_json_type ... ok
+test initialization_events::tests::event_sync_upper_bound_matches_parser_without_a_lower_bound ... ok
+test initialization_events::tests::outgoing_move_retains_source_and_destination_while_normalized_delete_is_valid ... ok
+test initialization_events::tests::page_correspondence_paths_and_selected_change_are_not_advisory ... ok
+test initialization_events::tests::pure_page_roundtrip_rejects_unknown_envelope_or_hint_fields ... ok
+test filesystem::directory_stamp_tests::creation_echo_inode_deletion_is_covered_by_same_transaction_semantic_writes ... ok
+test initialization_store::subtree_tests::production_recursive_plan_uses_both_run_and_parent_index_constraints ... ok
+test initialization_store::subtree_tests::recursive_invalidation_visits_only_selected_branch_and_run ... ok
+test initialization_store::subtree_tests::recursive_union_still_terminates_a_cycle_and_delete_transaction_rolls_back ... ok
+test initialization_store::subtree_tests::repeated_pending_invalidation_skips_coverage_writes_but_clears_fence ... ok
+test initialization_store::subtree_tests::subtree_delete_preserves_siblings_other_run_counters_and_coverage_cascades ... ok
+test initialization_store::subtree_tests::all_three_production_statements_scale_with_subtree_not_its_square ... ok
+test filesystem::inodes::tests::mount_backfill_repairs_an_older_install_once ... ok
+test filesystem::directory_stamp_tests::pruning_history_is_not_a_namespace_change_but_overflow_reset_and_reopen_are ... ok
+test filesystem::inodes::tests::nodes_created_after_install_allocate_lazily_without_moving_the_root ... ok
+test filesystem::inodes::tests::opendir_after_install_commits_no_write ... ok
+test filesystem::inodes::tests::remote_event_inserts_clear_the_completeness_marker ... ok
+test filesystem::posix_tests::bounded_directory_page_matches_single_record_projection ... ok
+test filesystem::inodes::tests::repeated_install_is_idempotent_and_keeps_identities ... ok
+test filesystem::posix_tests::broken_body_or_missing_metadata_is_not_reported_as_successful_stat ... ok
+test filesystem::posix_tests::acl_overlay_and_local_name_shadow_use_authoritative_visibility ... ok
+test filesystem::posix_tests::online_cached_dirty_and_unlinked_attributes_match_without_mutating_queues ... ok
+test initialization_store::tests::candidate_is_separate_from_authoritative_tree_cursor_and_dirty_data ... ok
+test initialization_store::tests::changed_restore_candidate_may_publish_lower_cursor_in_new_domain ... ok
+test initialization_store::tests::directory_relocation_into_its_subtree_rejects_whole_receipt ... ok
+test initialization_store::tests::directory_paths_require_connected_bounded_directory_ancestry_and_canonical_scope ... ok
+test initialization_store::tests::active_and_failed_candidate_block_ordinary_receipt_and_preexisting_inbox ... ok
+test initialization_store::tests::directory_ticket_clock_overflow_rolls_back_without_changing_coverage_or_gate ... ok
+test initialization_store::tests::delayed_root_reply_cannot_cross_root_event_or_newer_probe ... ok
+test initialization_store::tests::directory_ticket_current_rejects_deleted_recreated_or_invalidated_children ... ok
+test initialization_store::tests::duplicate_directory_receipt_is_idempotent_but_reused_sequence_and_generation_are_rejected ... ok
+test initialization_store::tests::coverage_failure_and_failed_run_remain_blocked_after_reopen ... ok
+test initialization_store::tests::cursor_reset_requires_exact_current_epoch_authorization_and_new_fence ... ok
+test initialization_store::tests::atomic_final_commit_rolls_back_authority_and_gate_on_injected_failure ... ok
+test initialization_store::tests::event_coverage::complete_coverage_with_unresolved_parent_uses_original_conservative_fallback ... ok
+test initialization_store::tests::event_coverage::directory_race_fallback_applies_receipt_and_invalidates_coverage_atomically ... ok
+test initialization_store::tests::event_coverage::root_removal_in_deferred_batch_remains_an_error_without_application ... ok
+test initialization_store::tests::event_coverage::loading_ancestor_is_not_complete_even_with_empty_pending_frontier ... ok
+test initialization_store::tests::event_coverage::deferred_move_rechecks_old_and_new_parents_and_preserves_same_name_replacement ... ok
+test initialization_store::tests::event_coverage::sequence_only_lookup_does_not_decode_body_but_rejects_missing_receipts ... ok
+test initialization_store::tests::event_gaps_body_reuse_and_late_directory_results_never_confirm_coverage ... ok
+test initialization_store::tests::event_coverage::unfinished_parent_dependency_preserves_completed_branches_and_newer_content ... ok
+test initialization_store::tests::event_coverage::deferred_receipt_survives_reopen_without_product_checkpoint_or_writeback ... ok
+test initialization_store::tests::directory_path_rejects_depth_past_128 ... ok
+test initialization_store::tests::event_coverage::sequence_only_lookup_rejects_old_epoch_and_tracks_applied_head ... ok
+test initialization_store::tests::hint_store::current_file_maximum_can_exceed_the_event_page_cursor ... ok
+test initialization_store::tests::event_receipt_and_invalidation_survive_crash_without_advancing_product_cursor ... ok
+test initialization_store::tests::hint_store::duplicate_native_page_is_immutable_and_legacy_replay_cannot_remove_evidence ... ok
+test initialization_store::tests::hint_store::legacy_and_native_directory_receipts_do_not_retroactively_assert_identity ... ok
+test initialization_store::tests::fence_reply_crossing_candidate_mutation_new_probe_or_epoch_is_rejected ... ok
+test initialization_store::tests::final_install_preserves_unuploaded_draft_and_rejects_bad_native_tokens ... ok
+test initialization_store::tests::hint_store::corruption_of_batch_or_sidecar_fails_before_read_and_application ... ok
+test initialization_store::tests::hint_store::actual_schema20_legacy_receipts_migrate_without_hints_and_preserve_dirty_queue ... ok
+test initialization_store::tests::hint_store::legacy_receipt_never_gains_retrospective_hints ... ok
+test initialization_store::tests::hint_store::event_page_gap_and_stale_epoch_cannot_store_sidecars ... ok
+test initialization_store::tests::hint_store::native_directory_identity_is_exact_u64_and_changed_identity_invalidates_descendants ... ok
+test initialization_store::tests::hint_store::native_identity_budget_failure_rolls_back_listing_and_can_retry_same_ticket ... ok
+test initialization_store::tests::hint_store::native_identity_bytes_and_rows_follow_subtree_cascade_and_mapping_digest ... ok
+test initialization_store::tests::local_recheck::child_finishing_before_unchanged_parent_is_retained_only_from_new_generation ... ok
+test initialization_store::tests::hint_store::native_identity_survives_epoch_but_is_bound_to_exact_candidate_node ... ok
+test initialization_store::tests::hint_store::native_receipt_keeps_original_batch_and_compact_hint_evidence_across_reopen ... ok
+test initialization_store::tests::local_recheck::directory_metadata_refresh_preserves_sticky_denial_and_rolls_back_atomically ... ok
+test initialization_store::tests::hint_store::page_byte_budget_and_sidecar_insert_failure_roll_back_batch_and_cursor ... ok
+test initialization_store::tests::hint_store::move_in_move_out_and_current_tombstone_metadata_preserve_existing_semantics ... ok
+test initialization_store::tests::local_recheck::directory_metadata_refresh_retains_discovery_but_revokes_all_subtree_coverage ... ok
+test initialization_store::tests::local_recheck::corrupt_directory_identity_still_rejects_unchanged_and_metadata_refresh ... ok
+test initialization_store::tests::local_recheck::failed_later_root_delete_rolls_back_all_planned_local_coverage ... ok
+test initialization_store::tests::local_recheck::known_directory_mixed_with_unknown_file_parent_keeps_complete_fallback ... ok
+test initialization_store::tests::local_recheck::cross_parent_move_is_correct_in_both_parent_commit_orders ... ok
+test initialization_store::tests::local_recheck::known_directory_modify_schedules_only_subtree_and_direct_parent_and_clears_fence ... ok
+test initialization_store::tests::local_recheck::late_parent_and_child_tickets_cannot_publish_after_local_event ... ok
+test initialization_store::tests::hint_store::recomputed_digest_cannot_hide_wrong_run_sequence_or_batch_binding ... ok
+test initialization_store::tests::local_recheck::mixed_root_event_prevents_partial_local_optimization_and_does_not_touch_drafts ... ok
+test initialization_store::tests::local_recheck::unknown_directory::corrupt_parent_native_binding_fails_without_advancing_or_changing_coverage ... ok
+test initialization_store::tests::local_recheck::unknown_directory::denied_parent_revokes_parallel_old_descendant_receipt ... ok
+test initialization_store::tests::local_recheck::unknown_directory::diagnosed_coverage_wait_has_no_successful_plan_counts ... ok
+test initialization_store::tests::hint_store::raw_event_upper_bound_rejects_without_writes_but_zero_and_older_events_remain_valid ... ok
+test initialization_store::tests::local_recheck::local_coverage_survives_reopen_and_does_not_restore_old_tickets ... ok
+test initialization_store::tests::local_recheck::directory_replacement_or_rename_still_discards_old_discovery ... ok
+test initialization_store::tests::local_recheck::unknown_directory::failure_to_persist_parent_obligation_cannot_advance_event_cursor ... ok
+test initialization_store::tests::local_recheck::unknown_directory::nested::nested_nodes_only_appear_after_separate_native_lists_and_fence_waits ... ok
+test initialization_store::tests::local_recheck::unknown_directory::diagnosed_full_recheck_reports_priority_and_zero_local_plans ... ok
+test initialization_store::tests::event_coverage::dangerous_events_in_either_order_are_never_hidden_by_missing_file_parent ... ok
+test initialization_store::tests::local_recheck::unknown_directory::nested::unknown_remove_retains_full_fallback_even_when_path_names_a_current_replacement ... ok
+test initialization_store::tests::local_recheck::parent_denial_replacement_or_numeric_change_revokes_parallel_child_receipt ... ok
+test initialization_store::tests::local_recheck::unknown_directory::nested::known_parent_move_and_nested_dependencies_schedule_both_locations_in_either_order ... ok
+test initialization_store::tests::local_recheck::unknown_directory::oversized_unknown_directory_plan_uses_bounded_conservative_fallback ... ok
+test initialization_store::tests::local_recheck::unknown_directory::real_parent_list_creates_identity_and_child_coverage_is_still_required ... ok
+test initialization_store::tests::missing_coverage_row_is_not_a_completed_directory ... ok
+test initialization_store::tests::local_recheck::unknown_directory::mixed_page_plans_before_children_and_atomically_preserves_unrelated_coverage ... ok
+test initialization_store::tests::native_binding_reader_preserves_pair_and_rejects_partial_binding ... ok
+test initialization_store::tests::local_recheck::unknown_directory::nested::real_nested_listing_absence_denial_or_replacement_does_not_replay_hint_contents ... ok
+test initialization_store::tests::node_and_event_budgets_rollback_whole_receipts ... ok
+test initialization_store::tests::migration_from_actual_v18_shape_backs_up_and_preserves_pending_content ... ok
+test initialization_store::tests::local_recheck::known_delete_is_local_but_unknown_delete_and_bad_or_legacy_evidence_stay_conservative ... ok
+test initialization_store::tests::pending_frontier_promotes_larger_id_ancestor_and_deduplicates_overlapping_paths ... ok
+test initialization_store::tests::pending_frontier_skips_loading_ancestor_without_claiming_completion ... ok
+test initialization_store::tests::pending_frontier_without_pending_ancestors_returns_independent_leaves ... ok
+test initialization_store::tests::local_recheck::unknown_directory::parent_absence_replacement_or_denial_converges_without_inventing_event_identity ... ok
+test initialization_store::tests::permission_denied_is_explicit_coverage_and_root_denial_is_not_empty_success ... ok
+test initialization_store::tests::hint_store::malformed_scope_restore_ordinals_identity_and_paths_leave_no_receipt ... ok
+test initialization_store::tests::priority_tests::at_most_eight_dependencies_are_cached_and_others_remain_normally_claimable ... ok
+test initialization_store::tests::priority_tests::complete_path_gap_does_not_invalidate_or_invent_dependencies ... ok
+test initialization_store::tests::priority_tests::old_plan_cannot_claim_after_applied_head_advances_within_same_epoch ... ok
+test initialization_store::tests::priority_tests::priority_claim_failure_after_loading_rolls_back_clock_ticket_and_fence ... ok
+test initialization_store::tests::priority_tests::priority_claim_walks_current_known_ancestors_and_reuses_one_validated_head ... ok
+test initialization_store::tests::priority_tests::replaced_path_is_only_a_hint_to_current_identity_not_an_old_ticket ... ok
+test initialization_store::tests::moved_file_or_directory_converges_in_both_parent_orders_without_old_receipts ... ok
+test initialization_store::tests::local_recheck::unknown_directory::nested::nested_path_id_cycle_and_same_name_ambiguities_never_bootstrap_a_plan ... ok
+test initialization_store::tests::probe_clock_exhaustion_rolls_back_and_negative_sql_counters_are_rejected ... ok
+test initialization_store::tests::priority_tests::stale_priority_cannot_cross_reopen_epoch ... ok
+test initialization_store::tests::priority_tests::corrupt_receipt_or_native_proof_is_an_error_not_a_skipped_priority ... ok
+test initialization_store::tests::private_candidate_mutations_do_not_publish_status_changes_final_install_resets_once ... ok
+test initialization_store::tests::priority_tests::legacy_oversized_and_mixed_dangerous_pages_have_no_priority ... ok
+test initialization_store::tests::pending_queue_uses_partial_index_and_rediscovers_earlier_invalidated_directory ... ok
+test initialization_store::tests::root_event_requires_current_root_refresh_and_rescanned_coverage ... ok
+test initialization_store::tests::same_restore_candidate_cannot_publish_before_committed_cursor ... ok
+test initialization_store::tests::same_directory_identity_recreated_by_parent_cannot_reuse_an_old_ticket ... ok
+test initialization_store::tests::priority_tests::denied_or_loading_or_unproved_ancestry_never_gets_priority ... ok
+test initialization_store::tests::restore_metadata_tree_cursor_ready_and_dirty_protection_share_final_transaction ... ok
+test initialization_store::tests::restarting_failed_candidate_changes_restore_only_with_same_task_scope_and_root ... ok
+test initialization_store::tests::same_restore_candidate_may_start_behind_and_catch_up_before_publication ... ok
+test initialization_store::tests::relocating_nested_identities_is_independent_of_incoming_child_order ... ok
+test initialization_store::tests::restart_preserves_complete_lists_but_reissues_inflight_work_and_rejects_late_epochs ... ok
+test initialization_store::tests::scheduler_tests::claim_failure_rolls_back_all_issued_tickets_and_clock ... ok
+test initialization_store::tests::scheduler_tests::claim_fills_after_promoted_descendants_and_issues_atomic_unique_tickets ... ok
+test initialization_store::tests::scheduler_tests::loading_prefix_is_bounded_and_continuation_reaches_independent_work ... ok
+test initialization_store::tests::local_recheck::unknown_directory::untrusted_or_uncovered_dependencies_keep_conservative_recheck ... ok
+test namespace_index::tests::acl_overlay_edges_and_revocation_are_not_bypassed ... ok
+test initialization_store::tests::verified_restore_begin_preserves_old_authority_until_final_commit ... ok
+test initialization_store::tests::scheduler_tests::claim_cursor_cannot_cross_reopen_epoch_and_no_claim_preserves_fence ... ok
+test namespace_index::tests::ambiguous_names_use_sql_error_and_preserve_directory_order ... ok
+test namespace_index::tests::batch_projection_matches_sql_without_writes_or_hydration ... ok
+test namespace_index::tests::budgets_discard_partial_generations_and_do_not_retry_unchanged_state ... ok
+test namespace_index::tests::explicit_atime_refresh_does_not_depend_on_status_journal ... ok
+test namespace_index::tests::dirty_body_attributes_are_never_served_from_index ... ok
+test namespace_index::tests::clean_blob_size_and_local_mode_use_posix_precedence ... ok
+test native::directory::tests::directory_recovery_requires_author_identity_parent_and_newer_event ... ok
+test native::directory::tests::foreign_or_ambiguous_creation_is_never_adopted ... ok
+test native::native_snapshot::initialization::tests::directory_requests_bind_token_path_root_and_parent_before_network ... ok
+test native::native_snapshot::initialization::tests::directory_serialization_preserves_same_list_row_numeric_identity ... ok
+test native::native_snapshot::initialization::tests::listing_filters_links_but_never_hides_identity_collisions ... ok
+test native::native_snapshot::initialization::tests::only_child_12290_is_denied_not_root_or_transport_failure ... ok
+test native::native_snapshot::initialization::tests::pull_cursor_and_serialized_requests_are_closed ... ok
+test native::native_snapshot::initialization::tests::root_refresh_queries_current_metadata_once_without_watermark_or_legacy ... ok
+test native::native_snapshot::initialization::tests::root_refresh_rejects_every_identity_field_and_does_not_hide_transport_errors ... ok
+test native::native_snapshot::initialization::tests::root_refresh_retains_only_verified_legacy_fallbacks ... ok
+test native::native_snapshot::initialization::tests::seed_uses_current_contract_and_only_known_parent_denial_falls_back ... ok
+test native::native_snapshot::race_tests::empty_global_advance_and_unrelated_events_cannot_explain_collision ... ok
+test native::native_snapshot::race_tests::failed_collision_verification_preserves_transport_error ... ok
+test native::native_snapshot::race_tests::incomplete_collision_probe_is_bounded_and_keeps_original_failure ... ok
+test native::native_snapshot::race_tests::matching_event_still_requires_forward_cursor_and_no_recovery_signal ... ok
+test native::native_snapshot::race_tests::matching_identity_movement_retains_bounded_namespace_race_recovery ... ok
+test native::native_snapshot::race_tests::permission_transport_protocol_capacity_and_root_errors_do_not_probe_or_become_races ... ok
+test native::native_snapshot::race_tests::related_event_on_later_page_is_not_lost_after_empty_global_advancement ... ok
+test native::native_snapshot::race_tests::same_name_collision_tracks_both_identities_without_global_tree_copy ... ok
+test native::native_snapshot::race_tests::unrelated_pages_stop_at_boundary_and_never_authorize_retry ... ok
+test native::native_snapshot::race_tests::verified_collision_is_the_only_path_that_requests_race_retry ... ok
+test initialization_store::tests::scheduler_tests::generation_overflow_and_denied_ancestry_never_partially_claim_or_clear_fence ... ok
+test namespace_index::tests::explicit_hint_invalidates_clones_even_without_revision_change ... ok
+test native::native_snapshot::reconcile::tests::an_intermediate_repair_is_not_published_when_next_fence_is_unsafe_or_fails ... ok
+test native::native_snapshot::reconcile::tests::cancellation_while_rechecking_does_not_return_a_candidate_or_advance_any_cursor ... ok
+test native::native_snapshot::reconcile::tests::changing_file_rechecks_only_its_parent_and_fences_after_every_recheck ... ok
+test native::native_snapshot::reconcile::tests::cross_parent_rename_replaces_both_direct_lists_as_one_private_update ... ok
+test native::native_snapshot::reconcile::tests::deepest_enumerable_file_is_valid_but_cycles_and_wrong_scope_tokens_are_not ... ok
+test native::native_snapshot::reconcile::tests::deletion_same_name_replacement_uses_current_listing_not_historical_event_metadata ... ok
+test native::native_snapshot::reconcile::tests::directory_changes_moves_acl_and_missing_parents_retain_full_retry ... ok
+test native::native_snapshot::reconcile::tests::duplicate_names_identities_and_cross_unqueried_parent_replacements_fall_back ... ok
+test native::native_snapshot::reconcile::tests::future_current_listing_is_not_downgraded_by_later_old_event_metadata ... ok
+test native::native_snapshot::reconcile::tests::historical_move_rechecks_third_parent_where_enumeration_already_saw_file ... ok
+test native::native_snapshot::reconcile::tests::leaf_delete_and_moves_across_scope_recheck_only_known_in_scope_parents ... ok
+test native::native_snapshot::reconcile::tests::listing_new_removed_or_changed_directory_cannot_silently_drop_descendants ... ok
+test native::native_snapshot::reconcile::tests::permission_denial_retries_but_transport_errors_keep_their_category ... ok
+test native::native_snapshot::reconcile::tests::absolute_deadline_cancels_pending_listing_and_fetch ... ok
+test native::native_snapshot::reconcile::tests::stationary_nonempty_backwards_root_loss_and_global_recovery_are_rejected ... ok
+test native::native_snapshot::reconcile::tests::stationary_success_preserves_exclusions_and_never_requeries_the_tree ... ok
+test native::native_snapshot::reconcile::tests::unsafe_event_fallback_emits_exact_redacted_reason_before_any_local_query ... ok
+test native::native_snapshot::scoped_fence_tests::empty_advancing_page_is_not_a_complete_fence ... ok
+test native::native_snapshot::seed_tests::cancelled_reseed_keeps_only_the_previous_completed_boundary ... ok
+test native::native_snapshot::seed_tests::fresh_seed_still_requires_selected_root_and_stationary_empty_boundary ... ok
+test native::native_snapshot::seed_tests::interrupted_or_invalid_reseed_cannot_publish_partial_root_and_cursor ... ok
+test native::native_snapshot::seed_tests::retry_starts_at_completed_seed_and_reduces_root_updates_before_new_boundary ... ok
+test native::native_snapshot::seed_tests::root_deletion_replacement_and_type_change_abort_cached_seed ... ok
+test native::native_snapshot::seed_tests::seed_binding_cannot_cross_scope_or_server_identity ... ok
+test native::native_snapshot::seed_tests::unchanged_cached_seed_and_normalized_return_keep_the_selected_identity ... ok
+test native::native_snapshot::watermark_seed::tests::history_length_does_not_add_requests_and_boundary_precedes_root_read ... ok
+test native::native_snapshot::watermark_seed::tests::missing_root_never_returns_a_seed ... ok
+test native::native_snapshot::watermark_seed::tests::one_deadline_bounds_a_pending_root_listing ... ok
+test native::native_snapshot::watermark_seed::tests::only_known_parent_access_denial_allows_legacy_metadata_bootstrap ... ok
+test native::native_snapshot::watermark_seed::tests::root_and_server_binding_are_required_even_after_successful_watermark ... ok
+test native::native_snapshot::watermark_seed::tests::root_change_after_current_boundary_reseeds_before_final_fence ... ok
+test native::native_snapshot::watermark_seed::tests::root_without_parent_query_contract_fails_before_any_request ... ok
+test native::native_snapshot::watermark_seed::tests::unavailable_watermark_never_reads_root_or_falls_back_to_skipping_history ... ok
+test native::root_guard::history_tests::historical_move_requires_current_identity_and_a_return_event ... ok
+test native::root_guard::history_tests::only_successful_verified_root_normalization_counts_filtered_events ... ok
+test native::root_guard::tests::root_disappearance_is_never_translated_into_recursive_local_delete ... ok
+test native::root_guard::tests::root_metadata_and_child_tombstones_remain_valid ... ok
+test native::tests::advancing_empty_initialization_page_counts_projection_once ... ok
+test native::tests::empty_advanced_page_and_stationary_reply_keep_existing_meaning ... ok
+test native::tests::hints_preserve_move_paths_without_claiming_current_metadata_is_source_parent ... ok
+test native::tests::initialization_page_and_ordinary_batch_share_exact_normalized_changes ... ok
+test native::tests::move_uses_destination_parent_and_leaving_scope_deletes_only_local_index ... ok
+test namespace_index::tests::immutable_arc_survives_refresh_but_new_lookup_uses_new_generation ... ok
+test native::tests::ordinary_translation_collects_no_hints_and_matches_all_supported_changes ... ok
+test native::tests::outgoing_move_and_historical_current_tombstone_hints_survive_translation ... ok
+test native::tests::stationary_events_are_observed_as_nonempty_not_as_missing_subscription ... ok
+test native::tests::unknown_recovery_scope_and_symlinks_fail_closed ... ok
+test native::upload_origin::tests::equal_bytes_do_not_prove_creation_ownership ... ok
+test native::upload_origin::tests::restored_parent_metadata_does_not_erase_a_post_boundary_delete ... ok
+test namespace_index::tests::initial_degraded_holder_recovers_without_replacing_the_mount ... ok
+test native::native_snapshot::reconcile::tests::advancing_empty_pages_and_continuous_local_work_share_the_original_bound ... ok
+test namespace_index::tests::local_creation_shadows_remote_without_synthesizing_attributes ... ok
+test namespace_index::tests::missing_inode_forces_directory_fallback_without_allocating ... ok
+test namespace_index::tests::selected_subdirectory_is_normalized_to_authoritative_inode_one ... ok
+test initialization_store::tests::local_recheck::unknown_directory::nested::nested_plan_is_order_independent_and_only_the_real_anchor_becomes_pending ... ok
+test namespace_index::tests::uncommitted_boundary_cannot_publish_and_rollback_recovers ... ok
+test preview::tests::ancestry_invalidation_and_denial_revoke_held_views_and_hide_children ... ok
+test preview::tests::complete_promotes_exact_inodes_in_same_authoritative_commit ... ok
+test preview::tests::denied_directory_stays_hidden_through_retry_until_new_successful_list ... ok
+test native::tests::native_events_are_durable_and_replayed_tombstones_do_not_resurrect ... ok
+test native::native_snapshot::reconcile::tests::reconciled_snapshot_still_uses_transactional_install_and_protects_dirty_draft ... ok
+test preview::tests::page_generation_and_budget_do_not_publish_partial_views_or_allocate_on_failure ... ok
+test preview::tests::confirmed_root_denial_survives_failure_resume_and_reopen_until_verified_reply ... ok
+test preview::tests::final_ready_failure_rolls_back_namespace_cursor_and_inode_promotion_together ... ok
+test preview::tests::explicit_root_event_revokes_preview_and_old_probe_cannot_restore_it ... ok
+test preview::tests::promotion_keeps_preview_inos_and_batch_allocation_skips_reserved_rows ... ok
+test preview::tests::received_parent_exposes_metadata_but_pending_child_is_not_empty ... ok
+test preview::tests::ordinary_root_probe_failure_preserves_preview_but_not_final_fence_across_reopen ... ok
+test initialization_store::tests::schema19_candidate_migrates_with_reset_permit_closed_and_old_data_preserved ... ok
+test preview::tests::rename_keeps_inode_but_changed_numeric_identity_and_name_replacement_do_not ... ok
+test removals::upload_remove_scope_tests::only_same_or_nested_paths_are_related ... ok
+test preview::tests::reservation_limit_and_visibility_overflow_fail_atomically ... ok
+test preview::tests::root_can_mount_before_list_without_authoritative_node_or_false_empty ... ok
+test preview::tests::root_listing_cannot_clear_confirmed_root_denial_without_verified_root_reply ... ok
+test preview::tests::rejected_durable_root_event_commits_only_revocation_not_coverage_or_cursor ... ok
+test preview::tests::reopen_keeps_mappings_but_revokes_old_epoch_and_revalidates_binding ... ok
+test shared_store::tests::budget_shrink_that_discards_history_is_an_invalidation ... ok
+test shared_store::tests::cleanup_does_not_feedback_but_a_lagging_cursor_still_detects_prune ... ok
+test shared_store::tests::extracting_unique_store_invalidates_the_old_domain ... ok
+test shared_store::tests::failed_initial_watermark_is_invalid_not_ready_zero ... ok
+test shared_store::tests::committed_snapshot_gap_wakes_even_when_later_diagnostic_fails ... ok
+test preview::tests::schema21_migration_backs_up_private_candidates_and_future_reader_rejects ... ok
+test preview::tests::restarted_run_rebinds_root_without_gui_and_can_commit_without_any_new_reader ... ok
+test preview::tests::warm_schema21_migration_preserves_dirty_content_and_never_enables_preview ... ok
+test shared_store::tests::journal_read_failure_on_drop_invalidates_instead_of_panicking ... ok
+test shared_store::tests::receiver_disconnects_when_store_is_gone ... ok
+test preview::tests::orphan_draft_or_symlink_blocks_cold_preview_even_after_sealing_without_touching_contents ... ok
+test snapshot_progress::tests::observations_are_task_scoped_and_not_implicitly_inherited ... ok
+test shared_store::tests::outer_error_after_commit_wakes_once_for_the_entire_guard ... ok
+test preview::tests::populated_or_damaged_authoritative_state_is_never_cold_preview ... ok
+test shared_store::tests::projection_lease_covers_atime_without_changing_semantic_notifications ... ok
+test shared_store::tests::readonly_noop_rollback_and_savepoint_rollback_do_not_wake ... ok
+test shared_store::tests::real_draft_io_failure_after_dirty_commit_still_wakes ... ok
+test shared_store::tests::panic_with_readonly_guard_invalidates_even_without_sql_changes ... ok
+test shared_store::tests::try_lock_and_poison_recovery_keep_the_boundary_wrapper ... ok
+test shared_store::tests::uncommitted_boundary_invalidates_without_publishing_internal_sequence ... ok
+test shared_store::tests::uncommitted_projection_never_becomes_a_verified_reply_token ... ok
+test state::sync_history::tests::download_history_never_copies_unstructured_error_bodies ... ok
+test state::sync_history::tests::downloaded_receipt_merges_with_transfer_completion ... ok
+test initialization_store::tests::scheduler_tests::pending_index_vm_work_does_not_scale_with_completed_candidate_rows ... ok
+test state::sync_history::tests::history_is_atomic_with_operation_and_is_not_built_by_queries ... ok
+test state::sync_history::tests::failed_download_retries_merge_without_claiming_cancellation_as_success ... ok
+test status_aggregate::tests::aggregate_revision_exhaustion_rejects_changes_before_mutation ... ok
+test status_aggregate::tests::directory_priority_counts_remove_cleanly_without_stale_high_priority_state ... ok
+test status_aggregate::tests::errors_have_deterministic_successors_and_retry_clear_removes_details ... ok
+test status_aggregate::tests::identical_updates_and_failed_budget_changes_do_not_damage_previous_summary ... ok
+test status_aggregate::tests::leaf_preserves_version_availability_pin_and_every_transfer_failure_state ... ok
+test status_aggregate::tests::local_edits_and_conflicts_are_not_overwritten_by_active_downloads_or_failures ... ok
+test status_aggregate::tests::move_contributions_update_old_and_new_parents_and_nested_mixed_status ... ok
+test status_aggregate::tests::pin_and_offline_are_independent_and_unknown_children_remain_visible_to_aggregation ... ok
+test status_aggregate::tests::unverified_or_contradictory_content_never_reports_complete ... ok
+test state::sync_history::tests::history_does_not_impose_a_new_depth_limit_on_remote_events_or_uploads ... ok
+test state::sync_history::tests::failed_migration_rolls_back_schema_and_keeps_coherent_backup ... ok
+test state::sync_history::tests::pages_filter_literal_names_and_keep_monotonic_sequence_after_clear ... ok
+test state::sync_history::tests::preparation_failure_merges_attempts_without_submitting_or_reclassifying_uncertain_work ... ok
+test state::sync_history::tests::history_survives_store_restart ... ok
+test state::sync_history::tests::remote_events_are_recorded_once_in_application_transaction ... ok
+test state::sync_history::tests::retention_and_clear_preserve_local_content_and_operations ... ok
+test state::sync_history::tests::version_keys_do_not_collide_on_delimiters ... ok
+test status_changes::tests::budget_shrink_invalidates_and_cursor_ahead_is_rejected ... ok
+test status_changes::tests::committed_write_survives_a_later_outer_error_and_unchanged_updates_are_ignored ... ok
+test shared_store::tests::full_wake_queue_coalesces_without_losing_latest_revision_or_holding_store ... ok
+test status_changes::tests::complete_snapshot_publishes_one_gap_and_incremental_writes_resume ... ok
+test state::sync_history::tests::rename_move_and_remove_follow_verified_namespace_receipts ... ok
+test status_changes::tests::creation_shadow_and_early_remote_identity_fold_are_observable ... ok
+test status_changes::tests::incorrectly_committed_bulk_flag_and_nested_transaction_are_rejected ... ok
+test state::sync_history::tests::schema_23_upgrade_preserves_dirty_data_and_future_schema_is_rejected ... ok
+test status_changes::tests::inode_lru_settings_and_received_but_unapplied_events_do_not_change_status_watermark ... ok
+test status_changes::tests::permission_and_overlay_changes_invalidate_descendants_and_replace_captures_delete ... ok
+test status_changes::tests::recursive_remote_delete_records_every_affected_identity ... ok
+test status_changes::tests::pruning_overflow_and_oversized_rows_report_explicit_gaps_with_bounded_accounting ... ok
+test status_changes::tests::related_status_tables_emit_and_download_error_clearing_is_not_lost ... ok
+test status_changes::tests::repeated_budget_and_acknowledgement_do_not_create_coarse_notifications ... ok
+test status_index::tests::aggregate_patch_cannot_be_committed_to_another_directory ... ok
+test status_index::tests::aggregate_patch_preflight_is_atomic_and_rejects_stale_commit ... ok
+test status_index::tests::atomic_sibling_swap_and_directory_type_change_require_complete_children ... ok
+test status_index::tests::deletion_acl_hiding_and_invalid_parent_never_publish_partial_state ... ok
+test status_index::tests::duplicate_receipts_are_noops_but_modified_old_batches_and_gaps_are_rejected ... ok
+test status_index::tests::generation_exhaustion_does_not_half_commit_transient_cursor_or_flights ... ok
+test status_index::tests::inherited_pin_requires_descendant_projection_and_empty_folders_are_complete ... ok
+test status_index::tests::move_and_rename_publish_paths_and_both_parents_together ... ok
+test status_changes::tests::epoch_changes_on_reopen_and_main_schema_external_readers_remain_unchanged ... ok
+test status_index::tests::no_change_batch_advances_cursor_without_icon_generation ... ok
+test status_index::tests::publication_generation_cannot_wrap_after_preflight ... ok
+test status_index::tests::moving_a_wide_directory_keeps_descendant_paths_without_rebuilding_children ... ok
+test status_index::tests::shrinking_batch_must_budget_old_live_generation_plus_preparation ... ok
+test status_index::tests::sibling_collision_cycle_and_budget_rejection_leave_previous_generation ... ok
+test status_changes::tests::schema_inventory_requires_an_explicit_decision_for_new_tables_and_columns ... ok
+test status_changes::tests::snapshot_error_and_panic_restore_main_rows_journal_and_trigger_gate ... ok
+test status_index::tests::randomized_leaf_changes_and_moves_match_fresh_aggregation ... ok
+test status_index::tests::single_leaf_updates_only_its_ancestors_and_unknown_never_completes ... ok
+test status_changes::tests::snapshot_savepoint_failure_and_sequence_exhaustion_fail_closed ... ok
+test status_changes::tests::statement_failure_rolls_back_trigger_rows_and_read_only_queries_do_not_write ... ok
+test status_changes::tests::timestamp_sidecars_do_not_hide_semantic_changes_or_invalidate_namespace_for_atime ... ok
+test status_changes::tests::rename_and_atomic_replace_keep_both_identities_and_old_new_locations ... ok
+test status_changes::tests::uncommitted_rows_are_unreadable_and_savepoint_rollback_restores_sequence_and_budget ... ok
+test status_changes::tests::snapshot_statements_handle_absent_metadata_rollback_and_later_incremental_upserts ... ok
+test status_projection::tests::acl_and_remote_overlay_edges_hide_and_restore_descendants ... ok
+test status_projection::tests::ancestor_overlay_and_pin_are_derived_without_body_reads ... ok
+test status_projection::tests::full_commit_is_returned_or_budget_rebuild_never_a_transaction_prefix ... ok
+test status_projection::tests::invalid_parent_graph_and_remote_cycles_require_rebuild ... ok
+test status_projection::tests::irrelevant_failure_payload_does_not_override_directory_or_pending_state ... ok
+test status_projection::tests::dirty_draft_conflict_unlink_and_current_version_failure_follow_core_rules ... ok
+test status_projection::tests::atomic_replace_keeps_source_identity_and_removes_target_in_one_batch ... ok
+test status_projection::tests::explicit_gap_epoch_and_budget_fail_closed_without_mutating_journal ... ok
+test status_projection::tests::local_creation_shadow_and_unshadow_project_both_identities_and_old_new_buckets ... ok
+test status_snapshot::tests::default_budget_admits_210k_node_snapshot_without_holding_store ... ignored, explicit 210k metadata fixture; run in a coordinated functional-load window
+test status_projection::tests::moving_directory_reprojects_descendant_inheritance_and_both_parent_buckets ... ok
+test status_projection::tests::permission_removal_of_a_shadowed_directory_does_not_reveal_remote_children ... ok
+test status_projection::tests::rollback_is_empty_and_commit_before_outer_failure_remains_projectable ... ok
+test status_projection::tests::ordinary_leaf_and_directory_status_do_not_expand_unchanged_descendants ... ok
+test status_snapshot::tests::busy_or_uncommitted_store_never_yields_a_snapshot ... ok
+test status_projection::tests::hidden_history_with_missing_ancestors_does_not_block_visible_snapshot_or_delta ... ok
+test status_projection::tests::snapshot_is_visible_metadata_only_and_content_references_are_unverified ... ok
+test status_snapshot::tests::bytes_and_work_are_cumulative_and_deadline_includes_between_page_time ... ok
+test status_snapshot::tests::empty_main_table_is_pinned_before_first_page_not_just_begin ... ok
+test status_snapshot::tests::page_size_and_resource_caps_reject_unbounded_configuration ... ok
+test status_transient::tests::acknowledged_consumer_never_overflows_merely_because_of_total_history_length ... ok
+test status_transient::tests::actual_blob_key_survives_remote_version_but_new_body_needs_new_evidence ... ok
+test status_transient::tests::cancelled_and_foreign_epoch_tickets_do_not_consume_current_probe ... ok
+test status_transient::tests::deleting_metadata_does_not_cancel_other_flights_or_require_rebuilding_the_tree ... ok
+test status_transient::tests::distinct_versions_and_tokens_survive_old_completion_and_partial_cancel ... ok
+test status_transient::tests::draft_generation_is_actual_identity_but_checkpoint_and_remote_expectation_are_not ... ok
+test status_transient::tests::exact_replay_is_noop_but_gap_overlap_mutated_replay_and_wrong_epoch_are_rejected ... ok
+test status_transient::tests::folded_unbind_then_different_body_cannot_hide_explicit_proof_revocation ... ok
+test status_transient::tests::gap_snapshot_revokes_unproven_old_body_when_unbind_history_is_gone ... ok
+test status_transient::tests::malformed_second_change_cannot_publish_the_first_change ... ok
+test status_transient::tests::missing_body_and_epoch_reset_never_publish_complete ... ok
+test status_transient::tests::overflow_requires_snapshot_associated_with_the_current_database ... ok
+test status_transient::tests::probe_exhaustion_budget_and_failed_result_preserve_retryable_current_ticket ... ok
+test status_snapshot::tests::failed_reader_releases_checkpoint_without_waiting_for_caller_drop ... ok
+test status_transient::tests::same_key_probe_aba_and_out_of_order_completion_cannot_restore_missing_content ... ok
+test status_transient::tests::source_and_owner_budget_failures_leave_cursors_and_summaries_unchanged ... ok
+test status_transient::tests::source_sequence_exhaustion_and_invalid_payloads_fail_before_mutation ... ok
+test status_transient::tests::stale_inbound_body_observation_cannot_overwrite_current_verified_content ... ok
+test status_snapshot::tests::main_reader_is_readonly_and_cannot_read_writer_temp_journal ... ok
+test status_snapshot::tests::journal_gap_after_snapshot_is_an_explicit_rebuild ... ok
+test status_snapshot::tests::incomplete_and_failed_reads_never_publish_prefixes ... ok
+test status_snapshot::tests::non_wal_main_database_is_rejected_without_changing_its_mode ... ok
+test task_control::tests::fifo_startup_intent_is_rejected_without_waiting_for_writer ... ok
+test status_snapshot::tests::pages_use_one_wal_view_while_writer_commits_and_delta_catches_up ... ok
+test status_snapshot::tests::rollback_during_pages_changes_neither_snapshot_nor_committed_cursor ... ok
+test status_snapshot::tests::cancel_and_drop_release_the_read_transaction ... ok
+test status_changes::tests::directory_content_and_conflict_updates_do_not_invalidate_descendants ... ok
+test task_control::tests::unsafe_or_mismatched_intents_are_never_consumed ... ok
+test task_control::tests::rejected_commit_preserves_pause_and_corruption_is_not_resumed ... ok
+test status_transient::tests::real_zero_length_creation_and_dirty_draft_produce_valid_content_keys ... ok
+test write_permissions::tests::a_new_draft_rechecks_its_parents_create_permission ... ok
+test write_permissions::tests::action_classes_are_independent ... ok
+test task_control::tests::old_backend_handover_intent_is_committed_before_consumption ... ok
+test status_snapshot::tests::store_reopen_has_a_different_source_epoch_even_at_same_path ... ok
+test transfer_policy::tests::limits_validate_and_persist_without_creating_remote_operations ... ok
+test write_permissions::tests::cached_reply_lease_does_not_wait_for_ordinary_metadata_store ... ok
+test write_permissions::tests::denied_namespace_intent_does_not_block_independent_sibling ... ok
+test write_permissions::tests::explicit_and_space_limits_override_child_allow ... ok
+test write_permissions::tests::definite_refusal_preserves_bytes_and_uncertain_is_never_reset ... ok
+test write_permissions::tests::first_denial_publication_waits_for_existing_bounded_reply ... ok
+test write_permissions::tests::independent_subroot_stops_at_its_own_ancestry_boundary ... ok
+test write_permissions::tests::precise_source_wins_over_a_late_observed_success ... ok
+test write_permissions::tests::malformed_pending_intent_keeps_the_existing_fail_closed_barrier ... ok
+test write_permissions::tests::decisions_survive_restart_and_recheck_preserves_data ... ok
+test write_permissions::tests::recheck_resets_observed_but_never_explicit_read_only ... ok
+test write_permissions::tests::recheck_releases_only_the_typed_read_refusal_retry_gate ... ok
+test status_changes::tests::inherited_namespace_and_visibility_updates_still_invalidate_subtrees ... ok
+test write_permissions::tests::remote_overlay_ancestry_is_not_bypassed_by_local_move ... ok
+test write_permissions::tests::revision_conflict_does_not_replace_a_user_policy ... ok
+test write_permissions::tests::root_denial_does_not_become_a_child_write_policy ... ok
+test task_control::tests::pause_survives_reopen_and_is_task_local ... ok
+test write_permissions::tests::traverse_is_distinct_from_list ... ok
+test write_permissions::tests::unknown_attempt_does_not_persist_allow ... ok
+test write_permissions::tests::schema24_migration_preserves_history_dirty_bytes_and_backup ... ok
+
+test result: ok. 401 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 37.04s
+
+     Running unittests src/bin/drive-native-lab.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/drive_native_lab-068413dee5a17cd3)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/cache_policy.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/cache_policy-9e8e9211c11b228b)
+
+running 6 tests
+test garbage_collection_preserves_dirty_and_open_drafts_then_reclaims_closed_clean_copy ... ok
+test stale_complete_version_remains_available_when_update_has_not_finished ... ok
+test recent_download_active_transfer_and_open_handle_are_protected ... ok
+test inherited_pin_and_pending_or_conflicted_writes_cannot_be_evicted ... ok
+test default_disabled_and_lru_survives_restart_without_icon_query_touching_it ... ok
+test schema_11_upgrade_keeps_contents_and_creates_backup_and_policy_tables ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.62s
+
+     Running tests/conflicts.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/conflicts-fd535663bd87f633)
+
+running 8 tests
+test committed_directory_with_remote_alias_is_not_a_namespace_conflict_issue ... ok
+test issue_query_is_local_and_task_scoped ... ok
+test closed_uncheckpointed_draft_survives_remote_deletion ... ok
+test unknown_commit_and_namespace_conflicts_cannot_be_bypassed ... ok
+test stale_decision_names_and_live_handles_are_rejected ... ok
+test database_failure_rolls_back_resolution_and_keeps_original_bytes ... ok
+test keep_both_survives_restart_preserves_local_and_never_uploads_original ... ok
+test issue_pages_are_bounded_and_do_not_skip_boundary_identity ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.80s
+
+     Running tests/creation_conflicts.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/creation_conflicts-48c15030cc116675)
+
+running 7 tests
+test latest_closed_draft_is_copied_without_reverting_to_last_snapshot ... ok
+test creation_resolution_rejects_open_uncertain_and_changed_decisions ... ok
+test missing_peer_index_stays_absent_until_real_event_and_never_adopts_peer ... ok
+test unconfirmed_creation_commit_cannot_be_resolved ... ok
+test same_named_remote_directory_and_children_remain_intact ... ok
+test retirement_failure_rolls_back_copy_queue_and_path_claim ... ok
+test creation_keep_both_retires_only_local_identity_and_survives_restart ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.64s
+
+     Running tests/creations.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/creations-92498a99e895c779)
+
+running 5 tests
+test newer_remote_echo_cannot_be_erased_by_creation_receipt ... ok
+test snapshot_does_not_delete_unsubmitted_creation_and_maps_bound_identity ... ok
+test early_server_echo_folds_into_local_identity_and_duplicates_remain_idempotent ... ok
+test creation_is_durable_but_not_submitted_before_save ... ok
+test v4_upgrade_preserves_cached_and_unsubmitted_content_and_saves_consistent_backup ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.46s
+
+     Running tests/directories.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/directories-a87161d399f77e10)
+
+running 10 tests
+test directory_early_echo_folds_children_without_losing_local_inode ... ok
+test mkdir_type_collision_and_invalid_name_are_rejected_before_journaling ... ok
+test moving_existing_file_into_unconfirmed_parent_uses_confirmed_parent_version ... ok
+test directory_subtree_event_rebases_moves_but_not_pending_deletion ... ok
+test prepared_author_survives_restart_and_cannot_be_replaced_after_uncertainty ... ok
+test lost_read_only_preparation_can_be_repeated_after_restart ... ok
+test pre_mutation_directory_observation_is_durable_and_rejects_own_revision_changes ... ok
+test legacy_uncertain_job_cannot_gain_provenance_after_schema_upgrade ... ok
+test create_rename_remove_preserves_order_and_does_not_replay_unknown_mkdir ... ok
+test nested_offline_directories_keep_inode_and_block_children_until_confirmed ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.22s
+
+     Running tests/directory_conflicts.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/directory_conflicts-ab35cf75730a61f3)
+
+running 8 tests
+test outward_pending_move_is_not_orphaned_by_parent_resolution ... ok
+test mixed_remote_identity_or_dependent_move_prevents_local_tree_rewrite ... ok
+test uncertain_directory_or_child_commit_is_not_rewritten ... ok
+test journal_failure_rolls_back_names_children_and_old_conflict ... ok
+test invalid_or_occupied_names_do_not_modify_local_tree ... ok
+test child_edits_and_new_children_invalidate_old_decision ... ok
+test new_attempt_discards_old_provenance_but_archives_it_and_rejects_late_receipt ... ok
+test nested_directory_conflict_keeps_inode_content_and_journal_order_across_restart ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.86s
+
+     Running tests/download_jobs.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/download_jobs-2ad86dbd0aadbab2)
+
+running 5 tests
+test failure_is_bound_to_version_and_preserves_complete_old_content ... ok
+test release_cancels_failed_read_intent_without_remote_operation ... ok
+test in_flight_read_survives_restart_and_local_edits_block_background_retry ... ok
+test v9_upgrade_backs_up_and_preserves_cache_cursor_and_download_intent ... ok
+test failure_backoff_survives_restart_and_stops_until_explicit_retry ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.61s
+
+     Running tests/download_publication.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/download_publication-e1c9a79a9242247a)
+
+running 6 tests
+test integrity_read_fault_and_cancellation_keep_old_body_and_release_reservations ... ok
+test slow_copy_and_pre_verification_do_not_hold_store_and_gc_protects_both_phases ... ok
+test competing_publication_remote_version_and_different_identity_reject_late_body ... ok
+test prepared_body_is_bound_to_store_lifetime_and_not_reusable_after_reopen ... ok
+test startup_reclaims_only_generated_staging_files_after_writer_ownership ... ok
+test dirty_blob_and_live_draft_prevent_prepared_download_from_overwriting_edits ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.64s
+
+     Running tests/drafts.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/drafts-41817d4e9037ac9c)
+
+running 8 tests
+test checkpointed_edit_during_upload_advances_base_without_losing_content ... ok
+test a_new_handle_joins_only_the_matching_clean_or_dirty_draft ... ok
+test remote_update_during_unsaved_draft_is_conflict_and_cannot_replace_it ... ok
+test stale_draft_handle_cannot_write_into_newer_working_copy ... ok
+test uploaded_draft_handle_still_protects_cache_from_eviction ... ok
+test unsnapshotted_edit_prevents_uploading_older_snapshot ... ok
+test confirming_snapshot_preserves_later_draft_and_advances_its_base ... ok
+test random_writes_and_truncate_survive_reopen_and_checkpoint ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.69s
+
+     Running tests/filesystem_metadata.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/filesystem_metadata-142128658a8361fa)
+
+running 11 tests
+test cancelling_pin_inherits_parent_rule_and_does_not_evict_content ... ok
+test permissions_follow_inode_not_reused_name_or_server_identity ... ok
+test failed_refresh_reports_actual_old_content_size_and_preserves_open_version ... ok
+test desktop_pages_match_local_creation_shadow_and_deleted_visibility ... ok
+test local_permissions_survive_remote_refresh_rename_and_restart_without_upload ... ok
+test streamed_local_save_failure_preserves_previous_durable_edit ... ok
+test lookup_is_metadata_only_and_inode_survives_move_restart_and_replacement ... ok
+test v2_migration_requires_missing_metadata_recovery_without_faking_zero_length ... ok
+test v8_permissions_migration_backs_up_existing_state_and_preserves_contents ... ok
+test desktop_pages_preserve_order_boundaries_and_do_not_allocate_inodes ... ok
+test directory_projection_is_bounded_and_does_not_inspect_body_or_status ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.40s
+
+     Running tests/metadata_performance.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/metadata_performance-a827ac3681452b17)
+
+running 2 tests
+test desktop_namespace_navigation_never_allocates_filesystem_inodes ... ok
+test repeated_metadata_queries_do_not_write_or_advance_inode_sequence ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.31s
+
+     Running tests/namespace.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/namespace-b6722cd892eb5154)
+
+running 12 tests
+test late_pre_ack_move_event_cannot_revert_a_confirmed_chain ... ok
+test invalid_rename_never_changes_existing_namespace ... ok
+test never_submitted_creation_moves_without_creating_a_remote_rename ... ok
+test native_old_echo_after_new_content_commit_does_not_regress_path_or_version ... ok
+test remote_ancestor_deletion_does_not_silently_accept_a_pending_move_out ... ok
+test pending_write_waits_for_move_then_uses_confirmed_base ... ok
+test already_started_upload_finishes_before_move_and_rebases_it ... ok
+test remote_change_after_ack_is_not_regressed_or_uploaded_over ... ok
+test old_open_content_version_can_edit_after_pure_move_but_not_after_new_content ... ok
+test recovery_keeps_local_move_and_remote_deletion_remains_conflict ... ok
+test chained_offline_moves_keep_inode_and_late_echo_cannot_undo_local_path ... ok
+test uncertain_upload_retains_submitted_path_after_local_move_and_restart ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.37s
+
+     Running tests/namespace_schedule.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/namespace_schedule-9934f012e2406d28)
+
+running 7 tests
+test deferred_inspection_cannot_bypass_executable_mutation_gate ... ok
+test conflict_is_a_dependency_barrier_but_not_a_global_head_of_line_block ... ok
+test permission_gated_parent_keeps_its_subtree_blocked_but_not_other_root_children ... ok
+test unknown_mkdir_keeps_children_and_drafts_but_independent_shared_parent_rename_runs ... ok
+test same_identity_ancestor_and_destination_name_depend_on_prior_intent ... ok
+test malformed_and_unrecognized_intents_fail_closed_without_hiding_exact_counts ... ok
+test inflight_outside_budget_owns_the_serial_lane_and_truncation_is_explicit ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.46s
+
+     Running tests/native_access.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/native_access-662e540b19e20618)
+
+running 6 tests
+test blocked_namespace_job_does_not_stop_accessible_sibling ... ok
+test malformed_denial_cannot_quarantine_root_or_nonexistent_identity ... ok
+test initial_partial_tree_hides_denied_entry_but_preserves_siblings ... ok
+test filtered_link_replacement_retains_unsynced_content_and_count_after_restart ... ok
+test revocation_preserves_cache_draft_and_pin_across_restart_and_restoration ... ok
+test schema17_upgrade_backs_up_and_preserves_pending_content ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.63s
+
+     Running tests/native_snapshot.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/native_snapshot-f09b34ef5b7bd6d2)
+
+running 2 tests
+test checked_snapshot_rejects_stale_scope_restore_and_corrupted_version_without_changes ... ok
+test local_changes_after_enumeration_survive_install_and_restart ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+
+     Running tests/package_upgrade.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/package_upgrade-079685bb32f99f55)
+
+running 1 test
+test schema14_upgrade_keeps_pending_bytes_pin_and_coherent_backup ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s
+
+     Running tests/removals.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/removals-99e896c270fdfe9a)
+
+running 9 tests
+test creation_inflight_then_unlink_binds_remote_identity_before_remove ... ok
+test never_submitted_file_deleted_locally_makes_no_native_remove ... ok
+test server_echo_snapshot_and_tombstone_do_not_resurrect_or_self_conflict ... ok
+test unlink_checks_type_nonempty_and_captured_identity ... ok
+test unlink_open_file_preserves_handle_and_same_name_new_identity ... ok
+test rename_chain_then_unlink_keeps_global_order ... ok
+test v6_migration_preserves_queued_move_and_inflight_becomes_uncertain ... FAILED
+test orphan_checkpoint_survives_restart_without_upload_and_unrelated_state_is_clean ... ok
+test inflight_upload_reconciles_after_unlink_and_rebases_remove ... ok
+
+failures:
+
+---- v6_migration_preserves_queued_move_and_inflight_becomes_uncertain stdout ----
+
+thread 'v6_migration_preserves_queued_move_and_inflight_becomes_uncertain' (17231) panicked at crates/drive-core/tests/removals.rs:221:118:
+called `Result::unwrap()` on an `Err` value: SqliteFailure(Error { code: Unknown, extended_code: 1 }, Some("error in trigger history_namespace after drop column: no such column: NEW.kind"))
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/std/src/panicking.rs:679:5
+   1: core::panicking::panic_fmt
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/panicking.rs:80:14
+   2: core::result::unwrap_failed
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/result.rs:1871:5
+   3: <core::result::Result<(), rusqlite::error::Error>>::unwrap
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/result.rs:1232:23
+   4: removals::v6_migration_preserves_queued_move_and_inflight_becomes_uncertain
+             at ./tests/removals.rs:221:118
+   5: removals::v6_migration_preserves_queued_move_and_inflight_becomes_uncertain::{closure#0}
+             at ./tests/removals.rs:214:71
+   6: <removals::v6_migration_preserves_queued_move_and_inflight_becomes_uncertain::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/ops/function.rs:250:5
+   7: <fn() -> core::result::Result<(), alloc::string::String> as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+
+
+failures:
+    v6_migration_preserves_queued_move_and_inflight_becomes_uncertain
+
+test result: FAILED. 8 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.94s
+
+error: test failed, to rerun pass `-p drive-core --test removals`
+     Running tests/replace_origin.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/replace_origin-3d43d59deaff676c)
+
+running 3 tests
+test replacement_provenance_rejects_different_node_path_hash_and_queue_head ... ok
+test schema_13_uncertain_replace_keeps_content_without_inventing_provenance ... ok
+test replacement_origin_is_durable_and_cannot_change_after_submission ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.42s
+
+     Running tests/replacements.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/replacements-ed172f9028cd02ef)
+
+running 11 tests
+test acknowledged_changed_content_does_not_rebase_an_old_cached_reader ... ok
+test newer_target_event_prevents_confirmation_and_keeps_original_bindings ... ok
+test later_save_and_gc_preserve_snapshot_of_replacement_operation ... ok
+test unsent_source_never_creates_remote_temp_and_target_is_not_deleted ... ok
+test inflight_source_and_target_uploads_rebase_replacement_before_it_starts ... ok
+test later_edits_and_moves_use_new_binding_and_old_source_cleanup_cannot_remove_destination ... ok
+test two_unsent_files_become_one_server_creation_with_stable_source_inode ... ok
+test empty_temp_creation_ack_does_not_make_preexisting_empty_handle_stale ... ok
+test local_replace_is_one_namespace_change_and_preserves_both_open_versions ... ok
+test chained_offline_replacements_keep_sequence_and_rebase_second_destination ... ok
+test upload_and_cleanup_unknown_states_survive_restart_separately ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.29s
+
+     Running tests/snapshot_recovery.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/snapshot_recovery-2e5628c79e0361d2)
+
+running 3 tests
+test incomplete_cyclic_or_ambiguous_snapshot_cannot_advance_cursor ... ok
+test recovery_cannot_switch_roots_and_clean_versions_are_not_needlessly_invalidated ... ok
+test snapshot_recovery_preserves_dirty_missing_file_pins_and_complete_old_content ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.25s
+
+     Running tests/state_scenarios.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/state_scenarios-f0df9651f883c666)
+
+running 15 tests
+test directory_delete_preserves_dirty_descendants_as_conflicts ... ok
+test invalid_path_rolls_back_entire_batch_and_cycle_is_rejected ... ok
+test absent_cache_returns_offline_error_and_never_empty_content ... ok
+test event_gaps_and_reused_identity_fail_without_advancing_cursor ... ok
+test moving_directory_into_descendant_rolls_back ... ok
+test pin_inherits_new_children_and_unpin_does_not_evict ... ok
+test rename_does_not_change_identity_and_delayed_download_cannot_target_replacement ... ok
+test failed_hash_or_stale_download_never_replaces_complete_version ... ok
+test open_handle_keeps_old_version_and_prevents_eviction ... ok
+test editing_old_open_handle_preserves_its_base_and_detects_conflict ... ok
+test received_events_survive_restart_and_duplicates_are_idempotent ... ok
+test dirty_data_survives_remote_conflict_and_restart ... ok
+test stale_server_confirmation_cannot_clear_a_new_remote_conflict ... ok
+test uncertain_upload_cannot_be_retried_or_overtaken ... ok
+test unpinned_doc_is_refreshed_without_reopening_and_available_after_restart ... ok
+
+test result: ok. 15 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.40s
+
+     Running tests/streaming_recovery.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/streaming_recovery-96176119efe66c4f)
+
+running 9 tests
+test migration_backs_up_v1_and_rejects_future_schema ... ok
+test releasing_a_clean_cache_reclaims_physical_bytes_without_remote_delete ... ok
+test streamed_import_keeps_complete_old_content_on_hash_size_and_read_failure ... ok
+test gc_preserves_open_old_version_and_dirty_journal_then_reclaims_released_data ... ok
+test closed_writer_unlocks_even_while_a_forked_helper_inherits_the_descriptor ... ok
+test only_one_state_writer_can_open_a_task ... ok
+test native_scope_binding_is_atomic_and_rejects_different_task ... ok
+test restore_identity_and_duplicate_transfer_intent_survive_restart ... ok
+test restart_preserves_an_inflight_upload_as_uncertain ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.97s
+
+     Running tests/timestamps.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/timestamps-e70ac52514d1cc6f)
+
+running 12 tests
+test native_seconds_bounds_are_explicit_and_fractional_input_is_normalized ... ok
+test cached_rename_never_substitutes_cache_creation_time_for_remote_mtime ... ok
+test atime_only_is_persistent_and_never_queues_or_hydrates ... ok
+test local_atime_tracks_stable_created_identity_and_not_folded_echo ... ok
+test unlinked_open_file_times_survive_without_uploading_deleted_path ... ok
+test mismatching_remote_time_never_confirms_new_request ... ok
+test older_timestamp_ack_cannot_clear_newer_dirty_draft ... ok
+test replacement_retains_source_time_and_atime_while_old_target_handles_keep_their_own ... ok
+test failed_intent_insert_rolls_back_operation_and_node_generation_but_retains_draft ... ok
+test unchanged_body_timestamp_is_durable_queued_and_copied_to_snapshot ... ok
+test legacy_uncertain_replacement_does_not_gain_a_time_intent_on_restart ... ok
+test schema22_upgrade_does_not_invent_mtime_for_uncertain_requests ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.26s
+
+     Running tests/upload_origin.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/upload_origin-03f9b22554044121)
+
+running 3 tests
+test different_path_content_identity_or_superseded_save_cannot_reuse_provenance ... ok
+test schema_12_upgrade_preserves_unknown_writes_without_fabricating_origin ... ok
+test provenance_survives_restart_before_and_after_submission ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.35s
+
+     Running tests/upload_remove_scope.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/upload_remove_scope-50e27ae6381d884d)
+
+running 4 tests
+test unrelated_trash_remove_does_not_block_ordinary_upload ... ok
+test deleted_ancestor_remove_blocks_upload_by_identity ... ok
+test recreated_same_name_upload_still_waits_for_pending_remove ... ok
+test uncertain_same_path_remove_still_blocks_upload ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.35s
+
+     Running unittests src/lib.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/drive_fs-21ecd37583ab9a89)
+
+running 48 tests
+test cached_close_tests::cached_readonly_sync_and_close_ignore_metadata_backlog ... ignored, requires ordinary Linux user and /dev/fuse; run explicitly
+test cached_close_tests::draft_and_writable_fsync_still_wait_for_metadata_checkpoint ... ignored, requires ordinary Linux user and /dev/fuse; run explicitly
+test cached_close_tests::failed_draft_release_reports_error_and_survives_gc_and_reopen ... ignored, requires ordinary Linux user and /dev/fuse; run explicitly
+test directory::index_tests::old_index_view_keeps_cookies_and_releases_through_reserved_reclaimer ... ok
+test directory::tests::reclaim_channel_holds_every_reserved_view_without_returning_capacity_early ... ok
+test directory::index_tests::index_views_share_the_original_byte_and_handle_budget ... ok
+test directory::tests::last_reader_can_outlive_the_handle_table_and_drain_reclaimer ... ok
+test directory::stamp_tests::authoritative_rename_delete_and_create_rebuild_new_opens_but_hold_old_cookies ... ok
+test inline_metadata_tests::inline_path_defers_missing_names_and_inodes_to_the_offloaded_routing ... ok
+test inline_metadata_tests::inline_getattr_reports_open_handle_state_like_the_offloaded_path ... ok
+test inline_metadata_tests::inline_authority_lookup_and_getattr_answer_without_writes ... ok
+test isolation_tests::held_content_reads_survive_all_metadata_workers_waiting_for_store ... ignored, requires ordinary Linux user and /dev/fuse; run explicitly
+test directory::stamp_tests::cache_selection_waits_for_the_store_commit_and_reads_the_current_namespace ... ok
+test directory::tests::exhausted_budgets_reject_new_views_without_losing_existing_handles ... ok
+test directory::tests::shared_views_keep_old_namespace_and_release_their_budget ... ok
+test directory::stamp_tests::closed_hot_view_reuses_allocations_and_semantic_commit_invalidates_it ... ok
+test directory::stamp_tests::candidate_receipts_and_inode_housekeeping_reuse_the_same_held_view ... ok
+test directory::stamp_tests::changed_store_epoch_never_reuses_a_view_with_the_same_sequence ... ok
+test inline_metadata_tests::inline_path_defers_when_the_store_is_busy ... ok
+test inode_backfill_tests::mount_initialization_keeps_an_already_complete_mapping_untouched ... ok
+test namespace_index_glue::tests::busy_projection_falls_back_without_waiting_for_store ... ok
+test inode_backfill_tests::a_mount_without_an_installed_notifier_stays_at_zero_ttl ... ok
+test namespace_index_glue::tests::local_atime_invalidates_even_without_semantic_status_notification ... ok
+test preview::ttl_tests::entry_ttl_is_always_zero_and_only_clean_authority_attributes_cache ... ok
+test namespace_index_glue::tests::explicit_hint_refreshes_without_a_store_revision_change ... ok
+test publication::tests::invalidation_delivery_never_blocks_metadata_replies ... ok
+test publication::tests::zero_ttl_and_failure_disable_caching ... ok
+test shutdown_tests::held_file_and_directory_do_not_hold_session_join_and_dirty_bytes_survive ... ignored, requires an ordinary Linux user and /dev/fuse
+test shutdown_tests::private_wake_stops_idle_session_even_with_live_sender ... ok
+test shutdown_tests::stop_cancels_unfinished_network_read_without_waiting_for_download_timeout ... ignored, requires an ordinary Linux user and /dev/fuse
+test shutdown_tests::stop_drains_accepted_local_jobs_and_preserves_successful_fsync ... ignored, requires an ordinary Linux user and /dev/fuse
+test namespace_index_glue::tests::dirty_draft_is_not_an_index_attribute_hit ... ok
+test publication::tests::a_touched_directory_suppresses_entry_ttls_until_it_is_stable ... ok
+test namespace_index_glue::tests::dropped_notification_cannot_keep_an_old_generation_current ... FAILED
+test namespace_index_glue::tests::namespace_hit_preserves_posix_projection_and_never_leases_names ... ok
+test writable::timestamp_setattr::tests::invalid_mtime_rejects_combined_request_before_atime_mutation ... ok
+test writable::timestamp_setattr::tests::omitted_times_stay_absent_and_now_is_one_instant ... ok
+test namespace_index_glue::tests::notify_failure_forces_sql_even_at_unchanged_revision ... ok
+test inode_backfill_tests::mount_initialization_backfills_a_state_directory_installed_without_mappings ... ok
+test preview::publication_tests::candidate_reply_holds_validation_guard_through_send ... ok
+test preview::publication_tests::a_promoted_candidate_cannot_publish_its_old_directory_view ... ok
+test writable::sync_routing_tests::readonly_route_captures_before_promotion_and_draft_routes_to_metadata ... ok
+test writable::sync_routing_tests::removed_readonly_handle_does_not_release_an_inflight_reader ... ok
+test preview::publication_tests::busy_store_never_bypasses_preview_revoke ... ok
+test namespace_index_glue::tests::separate_mount_indexes_do_not_share_generations_or_identities ... FAILED
+test writable::sync_routing_tests::rejected_release_job_drops_removed_reference_and_slow_release_guard ... ok
+test writable::sync_routing_tests::writable_cached_missing_and_invalid_handles_never_take_fast_route ... ok
+test directory::stamp_tests::hot_cache_is_bounded_and_eviction_does_not_destroy_held_cookies ... ok
+
+failures:
+
+---- namespace_index_glue::tests::dropped_notification_cannot_keep_an_old_generation_current stdout ----
+
+thread 'namespace_index_glue::tests::dropped_notification_cannot_keep_an_old_generation_current' (17334) panicked at crates/drive-fs/src/namespace_index_tests.rs:51:46:
+called `Option::unwrap()` on a `None` value
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/std/src/panicking.rs:679:5
+   1: core::panicking::panic_fmt
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/panicking.rs:80:14
+   2: core::panicking::panic
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/panicking.rs:150:5
+   3: core::option::unwrap_failed
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/option.rs:2248:5
+   4: <core::option::Option<alloc::sync::Arc<drive_core::namespace_index::EntrySlot>>>::unwrap
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/option.rs:1014:21
+   5: drive_fs::namespace_index_glue::tests::dropped_notification_cannot_keep_an_old_generation_current
+             at ./src/namespace_index_tests.rs:51:46
+   6: drive_fs::namespace_index_glue::tests::dropped_notification_cannot_keep_an_old_generation_current::{closure#0}
+             at ./src/namespace_index_tests.rs:44:64
+   7: <drive_fs::namespace_index_glue::tests::dropped_notification_cannot_keep_an_old_generation_current::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/ops/function.rs:250:5
+   8: <fn() -> core::result::Result<(), alloc::string::String> as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+
+---- namespace_index_glue::tests::separate_mount_indexes_do_not_share_generations_or_identities stdout ----
+
+thread 'namespace_index_glue::tests::separate_mount_indexes_do_not_share_generations_or_identities' (17378) panicked at crates/drive-fs/src/namespace_index_tests.rs:115:5:
+assertion failed: a.index.lookup(1, "only-first").is_some()
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/std/src/panicking.rs:679:5
+   1: core::panicking::panic_fmt
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/panicking.rs:80:14
+   2: core::panicking::panic
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/panicking.rs:150:5
+   3: drive_fs::namespace_index_glue::tests::separate_mount_indexes_do_not_share_generations_or_identities
+             at ./src/namespace_index_tests.rs:115:5
+   4: drive_fs::namespace_index_glue::tests::separate_mount_indexes_do_not_share_generations_or_identities::{closure#0}
+             at ./src/namespace_index_tests.rs:106:67
+   5: <drive_fs::namespace_index_glue::tests::separate_mount_indexes_do_not_share_generations_or_identities::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/ops/function.rs:250:5
+   6: <fn() -> core::result::Result<(), alloc::string::String> as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+
+
+failures:
+    namespace_index_glue::tests::dropped_notification_cannot_keep_an_old_generation_current
+    namespace_index_glue::tests::separate_mount_indexes_do_not_share_generations_or_identities
+
+test result: FAILED. 39 passed; 2 failed; 7 ignored; 0 measured; 0 filtered out; finished in 4.10s
+
+error: test failed, to rerun pass `-p drive-fs --lib`
+     Running tests/deadlock_regression.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/deadlock_regression-fac81e3a5b6d43f2)
+
+running 2 tests
+test invalidation_delivery_never_stalls_other_requests ... ignored, requires ordinary Linux user and /dev/fuse; run explicitly
+test rename_and_delete_under_ttl_do_not_deadlock_concurrent_old_path_stats ... ignored, requires ordinary Linux user and /dev/fuse; run explicitly
+
+test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/directory_views.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/directory_views-813c4e533223fdee)
+
+running 1 test
+test directory_continuation_and_seek_keep_one_view_without_waiting_for_store ... ignored, requires ordinary Linux user and /dev/fuse; run explicitly
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/entry_revalidation.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/entry_revalidation-06583f3df9d0a522)
+
+running 2 tests
+test new_open_of_old_name_does_not_truncate_renamed_object ... ignored, ordinary Linux user and /dev/fuse; explicit kernel validation
+test new_open_of_old_path_does_not_truncate_object_moved_to_another_parent ... ignored, ordinary Linux user and /dev/fuse; explicit kernel validation
+
+test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/interrupted.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/interrupted-400f2c028c4da890)
+
+running 1 test
+test fatal_signal_cancels_kernel_read_and_frees_hydration_worker ... ignored, requires ordinary Linux user and /dev/fuse
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/mounted.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/mounted-0fe276bd12628b57)
+
+running 6 tests
+test kernel_atomic_replace_keeps_source_inode_and_old_target_handle ... ignored, requires ordinary Linux user and /dev/fuse; run explicitly
+test kernel_cache_mount_metadata_reads_version_switch_and_offline_error ... ignored, requires ordinary Linux user and /dev/fuse; run explicitly
+test kernel_offline_nested_mkdir_moves_and_restart_preserve_tree_and_child_bytes ... ignored, requires ordinary Linux user and /dev/fuse; run explicitly
+test kernel_permissions_owner_restore_and_local_capacity_are_real ... ignored, requires ordinary Linux user and /dev/fuse; run explicitly
+test kernel_random_write_shared_handles_truncate_fsync_and_recovery ... ignored, requires ordinary Linux user and /dev/fuse; run explicitly
+test kernel_unlink_open_handles_same_name_recreate_and_offline_missing_guard ... ignored, requires ordinary Linux user and /dev/fuse; run explicitly
+
+test result: ok. 0 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/namespace_index_kernel.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/namespace_index_kernel-28b6f7ef26fdabf4)
+
+running 2 tests
+test indexed_plain_continuation_and_seek_do_not_wait_for_store ... ignored, requires ordinary Linux user and /dev/fuse; NSI enabled
+test indexed_plus_continuation_and_seek_do_not_wait_for_store ... ignored, requires ordinary Linux user and /dev/fuse; NSI enabled
+
+test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/permissions_kernel.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/permissions_kernel-2538d34a317c38c5)
+
+running 3 tests
+test live_revocation_restoration_and_list_vs_traverse ... ignored, requires ordinary Linux user, /dev/fuse and test-seams; isolated ACL truth
+test root_a_b_and_action_classes_are_enforced_in_one_mount ... ignored, requires ordinary Linux user, /dev/fuse and test-seams; isolated ACL truth
+test target_parent_cover_target_and_independent_submount ... ignored, requires ordinary Linux user, /dev/fuse and test-seams; isolated ACL truth
+
+test result: ok. 0 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/preview_plus_revoke.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/preview_plus_revoke-8d538d7122848797)
+
+running 1 test
+test preview_plus_cannot_disclose_denied_names_while_store_is_busy ... ignored, ordinary Linux user, /dev/fuse and DRIVE_NATIVE_FS_DIAGNOSTICS=1; explicit kernel validation
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/preview_tests.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/preview_tests-8dd2088cbc6d5017)
+
+running 7 tests
+test cold_preview_browses_received_parent_and_pending_is_not_empty ... ignored, requires ordinary Linux user and /dev/fuse; run explicitly
+test parent_preview_stream_is_revoked_when_a_listed_child_is_denied ... ignored, requires ordinary Linux user and /dev/fuse; run explicitly
+test preview_content_and_all_supported_mutations_reject_without_hydration_or_journal ... ignored, requires ordinary Linux user and /dev/fuse; run explicitly
+test preview_directory_continuation_is_revoked_after_denial ... ignored, requires ordinary Linux user and /dev/fuse; run explicitly
+test promotion_preserves_mount_and_inode_and_enables_authoritative_content_and_writes ... ignored, requires ordinary Linux user and /dev/fuse; run explicitly
+test restarted_candidate_recovers_same_mount_without_promoting_old_preview_handles ... ignored, requires ordinary Linux user and /dev/fuse; run explicitly
+test warm_authoritative_mount_does_not_read_the_pending_candidate ... ignored, requires ordinary Linux user and /dev/fuse; run explicitly
+
+test result: ok. 0 passed; 0 failed; 7 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/readdirplus.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/readdirplus-250db0d29fffe3b1)
+
+running 2 tests
+test readdirplus_continuation_does_not_wait_for_a_busy_store ... ignored, requires ordinary Linux user and /dev/fuse; run explicitly
+test readdirplus_pages_stay_consistent_with_plain_metadata_and_invalidate ... ignored, requires ordinary Linux user and /dev/fuse; run explicitly
+
+test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/timestamps.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/timestamps-26ef7120c9bdac18)
+
+running 2 tests
+test atime_omit_does_not_download_and_directory_mtime_is_honestly_unsupported ... ignored, requires ordinary Linux user and /dev/fuse; run explicitly
+test touch_and_cp_preserve_file_mtime_with_durable_upload_intent ... ignored, requires ordinary Linux user and /dev/fuse; run explicitly
+
+test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/drive_runtime-a3339dac1c16b0f4)
+
+running 142 tests
+test bridge::cancel_bridge_tests::backoff::kernel_cancel_in_backoff_clears_retry_and_later_read_gets_complete_body ... ignored, requires ordinary Linux user and /dev/fuse; local IPC fault injection only
+test bridge::cancel_bridge_tests::abandoned_read_cancels_rpc_without_failure_or_retry_and_later_read_succeeds ... ok
+test bridge::cancel_bridge_tests::backoff::all_readers_can_abandon_one_shared_backoff ... ok
+test bridge::connection_diagnostic_categories::staged_timeouts_preserve_event_and_download_retry_semantics ... ok
+test bridge::download_publication_tests::publication_classification_preserves_storage_errors ... ok
+test bridge::cancel_bridge_tests::cancelled_waiter_detaches_promptly_while_original_reader_keeps_downloading ... ok
+test bridge::cancel_bridge_tests::backoff::cancelled_follower_cannot_report_success_when_shared_body_finishes ... ok
+test bridge::cancel_bridge_tests::backoff::preexisting_durable_retry_is_not_owned_by_a_new_cancellable_reader ... ok
+test bridge::cancel_bridge_tests::cancelling_owner_does_not_cancel_another_reader_of_same_version ... ok
+test bridge::download_publication_tests::publication_preparation_releases_store_and_rejects_replaced_connection_or_abandoned_demand ... ok
+test bridge::cancel_bridge_tests::backoff::cancelling_in_backoff_removes_only_read_intent_and_survives_restart ... ok
+test bridge::cancel_bridge_tests::pinned_body_finishes_after_its_only_foreground_reader_cancels ... ok
+test bridge::event_transfer_tests::event_subscription_is_not_blocked_by_pending_hydration ... ok
+test bridge::download_scheduler_tests::foreground_reads_respect_terminal_failure_and_worker_disconnect ... ok
+test bridge::initialization_gate_tests::initialization_started_after_attach_is_rechecked_by_every_dispatch_entry ... ok
+test bridge::initialization_gate_tests::ordinary_complete_store_attach_still_wakes_writeback_without_creating_an_initialization ... ok
+test bridge::initialization_gate_tests::reopened_candidate_resume_uses_current_handle_and_keeps_writeback_closed ... ok
+test bridge::initialization_owner::payload_tests::checked_stream_rejects_corruption_length_and_trailing_messages ... ok
+test bridge::cancel_bridge_tests::backoff::foreground_joining_background_flight_waits_for_retry ... ok
+test bridge::cancel_bridge_tests::backoff::a_reader_joining_during_backoff_preserves_retry_after_owner_cancels ... ok
+test bridge::cancel_bridge_tests::backoff::old_complete_cache_keeps_background_refresh_through_cancelled_backoff ... ok
+test bridge::cancel_bridge_tests::backoff::pin_added_in_backoff_keeps_retry_when_reader_leaves ... ok
+test bridge::download_scheduler_tests::concurrent_foreground_reads_wait_for_shared_retry_without_reopen ... ok
+test bridge::cancel_bridge_tests::backoff::a_retry_attempt_is_still_cancellable_and_not_promoted_to_background ... ok
+test bridge::initialization_owner::tests::advancing_empty_event_pages_yield_to_directory_work_after_sixteen_pages ... ok
+test bridge::initialization_owner::tests::cold_owner_uses_reliable_steps_and_commits_only_after_separate_fence ... ok
+test bridge::initialization_owner::tests::complete_store_reconnect_uses_ordinary_cursor_pull_without_seed ... ok
+test bridge::initialization_owner::tests::changed_restore_accepts_its_own_lower_cursor_without_pulling_old_domain ... ok
+test bridge::initialization_owner::tests::cancelled_connection_during_directory_receipt_preserves_cache_draft_and_writeback_gate ... ok
+test bridge::initialization_owner::tests::deferred_event_priority_uses_one_window_slot_and_preserves_ordinary_progress ... ok
+test bridge::download_scheduler_tests::concurrent_retry_observer_can_resume_after_request_is_queued ... ok
+test bridge::download_scheduler_tests::concurrent_foreground_reads_wait_for_transport_backoff_after_reconnect ... ok
+test bridge::download_scheduler_tests::durable_retry_wakes_without_remote_event_and_clears_failure ... ok
+test bridge::initialization_owner::tests::deferred_file_parent_pauses_pull_while_multiple_directory_rounds_make_progress ... ok
+test bridge::initialization_gate_tests::ordinary_complete_store_still_dispatches_pending_and_uncertain_operations ... ok
+test bridge::initialization_owner::tests::deferred_page_directory_race_resumes_pull_before_relisting_changed_path ... ok
+test bridge::initialization_owner::tests::delayed_directory_race_cannot_reticket_old_path_after_sibling_moves_identity ... ok
+test bridge::initialization_owner::tests::directory_window_commits_and_refills_while_one_independent_response_is_held ... ok
+test bridge::initialization_owner::tests::four_directory_requests_are_in_flight_before_any_child_reply_and_fence_is_separate ... ok
+test bridge::notification_queue_tests::disconnected_feeder_disables_leases_and_keeps_failure_observable ... ok
+test bridge::notification_queue_tests::upstream_queue_overflow_disables_mount_leases_without_blocking ... ok
+test bridge::root_diagnostics_tests::scoped_root_failure_has_a_typed_non_retryable_diagnostic ... ok
+test bridge::initialization_owner::tests::permanently_absent_parent_gets_one_conservative_recheck_not_an_owner_spin ... ok
+test bridge::snapshot_bridge_tests::corrupted_snapshot_descriptor_cannot_publish_index ... ok
+test bridge::initialization_owner::tests::cold_preview_root_rejection_revokes_but_transport_and_generic_failure_preserve_lists ... ok
+test bridge::initialization_owner::tests::mismatched_native_hint_page_header_is_rejected_before_persistent_receipt ... ok
+test bridge::initialization_owner::tests::directory_window_refills_past_eighty_descendants_of_a_held_ancestor ... ok
+test bridge::snapshot_bridge_tests::recovery_waits_for_remote_mutation_and_blocks_next_commit_while_local_store_remains_available ... ok
+test bridge::upload_tests::blocked_upload_surfaces_the_dependency_reason ... ok
+test bridge::initialization_owner::tests::repeated_coverage_races_exhaust_budget_without_publishing_or_losing_dirty_state ... ok
+test bridge::initialization_owner::tests::replaced_rpc_cannot_commit_ordinary_pull_or_finish_new_sessions_catchup ... ok
+test bridge::initialization_owner::tests::same_restore_lower_watermark_requires_explicit_reset_response ... ok
+test bridge::upload_tests::definite_permission_refusal_retains_body_allows_sibling_and_rechecks ... ok
+test bridge::upload_tests::directory_move_refresh_is_persisted_before_a_second_conditional_request ... ok
+test bridge::snapshot_bridge_tests::snapshot_descriptor_and_cursor_reset_recover_through_rpc ... ok
+test bridge::upload_tests::directory_preparation_is_persisted_before_send_and_survives_uncertain_reply ... ok
+test bridge::initialization_owner::tests::interrupted_active_and_failed_candidates_resume_received_root_after_store_reopen ... ok
+test bridge::initialization_owner::tests::deferred_page_does_not_turn_transport_permission_or_root_errors_into_rechecks ... ok
+test bridge::upload_tests::lost_read_only_replacement_preparation_leaves_operation_pending ... ok
+test bridge::upload_tests::new_file_provenance_is_durable_before_upload_and_preserved_for_reconciliation ... ok
+test bridge::upload_tests::stopped_worker_leaves_saved_operation_pending_without_marking_it_submitted ... ok
+test connection_diagnostics::tests::invalid_or_symlinked_diagnostics_are_not_trusted_or_followed ... ok
+test connection_diagnostics::tests::persistence_failure_keeps_old_complete_record_and_reports_memory_failure ... ok
+test connection_diagnostics::tests::restart_retains_failure_and_requested_stop_does_not_replace_it ... ok
+test connection_diagnostics::tests::worker_observation_distinguishes_live_cleanup_from_an_existing_exit ... ok
+test bridge::upload_tests::namespace_schedule_tests::lost_mkdir_ack_does_not_head_of_line_block_independent_rename_or_replay_create ... ok
+test bridge::upload_tests::timestamp_upload_tests::wrong_time_commit_is_uncertain_and_reconciles_without_reupload ... ok
+test index_progress::tests::boundary_and_completion_flush_actual_final_counts ... ok
+test index_progress::tests::saturated_ipc_keeps_only_latest_and_does_not_block ... ok
+test initialization::tests::changed_notification_without_advancement_is_distinct_from_idle_wait ... ok
+test initialization::tests::observation_is_not_activity_and_session_end_freezes_elapsed ... ok
+test initialization::tests::retry_cause_survives_next_attempt_without_counting_as_completed_work ... ok
+test initialization::tests::stages_are_bounded_and_completed_stage_timing_survives_event_churn ... ok
+test initialization::tests::watermark_and_local_reconciliation_have_distinct_observed_stages ... ok
+test initialization_metrics::tests::event_plans_count_committed_pages_and_keep_waits_distinct ... ok
+test initialization_metrics::tests::stalled_spans_visible_and_early_error_drop_recorded ... ok
+test instance::tests::separate_instances_and_legacy_never_share_a_destination ... ok
+test mount_registry::tests::mount_identity_handles_escaped_names_and_rejects_overmounts ... ok
+test mount_registry::tests::process_identity_handles_parentheses_and_uses_start_time ... ok
+test mount_registry::tests::registry_rejects_shared_or_symlinked_runtime_and_unrelated_files ... ok
+test mount_registry::tests::teardown_never_removes_another_generation ... ok
+test rpc::index_rpc_tests::alternating_reconciliation_progress_keeps_the_real_rpc_connected ... ok
+test rpc::index_rpc_tests::current_boundary_and_local_recheck_progress_allow_only_the_fence_cycle ... ok
+test rpc::index_rpc_tests::index_progress_does_not_complete_request_and_callback_can_query_pending ... ok
+test bridge::upload_tests::uncertain_commit_uses_read_only_reconciliation_and_never_replays_upload ... ok
+test rpc::index_rpc_tests::index_progress_on_other_command_disconnects ... ok
+test rpc::index_rpc_tests::index_validation_rejects_regression_and_out_of_budget_counts ... ok
+test rpc::index_rpc_tests::late_index_progress_cannot_reanimate_timed_out_request ... ok
+test rpc::index_rpc_tests::retry_progress_requires_a_bounded_reason_and_new_attempt_to_resume ... ok
+test rpc::index_rpc_tests::snapshot_without_ui_observer_still_drains_valid_progress ... ok
+test bridge::upload_tests::replacement_prepares_durable_target_creation_before_upload_and_reuses_it_after_uncertainty ... ok
+test rpc::initialization_diagnostics_tests::diagnostics_are_nonfinal_delivered_before_failure_and_callback_has_no_pending_lock ... ok
+test rpc::initialization_diagnostics_tests::diagnostics_for_another_command_kind_disconnect ... ok
+test rpc::initialization_diagnostics_tests::diagnostics_reject_unexpected_descriptor_or_invalid_bounded_shape ... ok
+test rpc::initialization_diagnostics_tests::duplicate_current_diagnostics_disconnect_after_only_one_callback ... ok
+test rpc::initialization_diagnostics_tests::late_diagnostics_after_timeout_do_not_revive_or_poison_the_next_command ... ok
+test rpc::tests::out_of_order_responses_are_matched_without_head_of_line_blocking ... ok
+test rpc::tests::protocol_version_mismatch_disconnects_all_waiters ... ok
+test bridge::upload_tests::replacement_upload_and_cleanup_have_independent_uncertainty_barriers ... ok
+test rpc::transfer_rpc_tests::malformed_progress_disconnects_waiter_and_clears_registry ... ok
+test rpc::tests::timeout_sends_cancellation_and_late_response_cannot_poison_next_request ... ok
+test rpc::transfer_rpc_tests::registry_rejects_regressions_ignores_duplicates_and_resets_new_epoch ... ok
+test bridge::upload_tests::uncertain_remove_reconciles_identity_without_resending_and_unblocks_recreation ... ok
+test rpc::transfer_rpc_tests::stalled_progress_is_cancelled_and_late_update_cannot_resurrect_entry ... ok
+test bridge::upload_tests::uncertain_rename_is_reconciled_without_resending_and_rebases_waiting_upload ... ok
+test rpc::wait_rpc_tests::progress_on_non_wait_request_and_future_timestamps_fail_closed ... ok
+test rpc::index_rpc_tests::index_progress_does_not_renew_the_total_request_budget ... ok
+test rpc::wait_rpc_tests::cancellation_still_interrupts_a_wait_with_active_progress ... ok
+test bridge::upload_tests::unknown_directory_receipt_never_replays_creation_or_releases_child_uploads ... ok
+test desktop::preview::tests::unready_permission_and_preview_status_remain_distinct_from_authoritative_empty_state ... ok
+test bridge::upload_tests::unrelated_pending_remove_does_not_stall_upload_queue ... ok
+test rpc::wait_rpc_tests::silence_cancels_and_late_progress_cannot_extend_another_request ... ok
+test rpc::initialization_diagnostics_tests::diagnostics_do_not_renew_the_original_deadline ... ok
+test rpc::transfer_rpc_tests::progress_outlives_initial_timeout_and_full_payload_waits_for_terminal_receipt ... ok
+test desktop::preview::tests::desktop_pages_share_a_generation_until_the_direct_listing_is_replaced ... ok
+test service::trust_service_tests::failed_save_and_recovery_preserve_pause ... ok
+test service::trust_service_tests::issue_recheck_never_bypasses_trust_durability_or_restarts_a_stopping_mount ... ok
+test service::trust_service_tests::issue_recheck_queues_without_store_lock_and_reconnects_without_clearing_state ... ok
+test service::trust_service_tests::issue_recheck_reports_busy_without_waiting_for_control_or_store ... ok
+test service::trust_service_tests::issue_recheck_preserves_pause_and_authentication_attention ... ok
+test shutdown::tests::repeated_stop_does_not_restart_stage_or_deadline ... ok
+test transport::tests::descriptor_survives_sender_close_and_messages_remain_framed ... ok
+test transport::tests::oversized_and_truncated_frames_fail_closed ... ok
+test wait_activity::tests::delayed_and_duplicate_messages_do_not_freshen_the_clock ... ok
+test wait_activity::tests::saturated_output_is_nonblocking_and_progress_is_cumulative ... ok
+test worker::capacity_categories::fixed_categories_do_not_leak_messages ... ok
+test worker::download_diagnostics_tests::numeric_server_code_never_includes_reason ... ok
+test worker::download_diagnostics_tests::timeout_stages_have_fixed_content_free_categories ... ok
+test bridge::initialization_gate_tests::reopened_active_and_failed_candidates_block_pending_and_uncertain_rpc_without_losing_drafts ... ok
+test worker::initialization_payload_tests::budget_failure_leaves_no_named_partial_payload ... ok
+test worker::initialization_payload_tests::initialization_commands_never_accept_incoming_descriptors ... ok
+test worker::initialization_payload_tests::payload_fd_roundtrips_at_exact_budget_and_starts_at_zero ... ok
+test rpc::wait_rpc_tests::actual_progress_outlives_initial_ipc_budget_and_completes ... ok
+test service::trust_service_tests::missing_worker_image_cannot_fall_back_to_replaced_path ... ok
+test service::trust_service_tests::installed_worker_replacement_keeps_old_executable_inode ... ok
+test service::trust_service_tests::durable_pause_controls_handover_and_unlock ... ok
+test service::trust_service_tests::pre_rename_sync_failure_preserves_old_settings_and_connection_generation ... ok
+test service::trust_service_tests::post_rename_sync_failure_adopts_visible_removal_blocks_unlock_and_requires_current_save ... ok
+test service::trust_service_tests::live_transfer_setting_acknowledgement_is_required_without_losing_saved_policy ... ok
+test service::trust_service_tests::transfer_settings_are_task_bound_persisted_and_preserve_pause ... ok
+test service::trust_service_tests::restart_confirms_visible_settings_and_startup_sync_failure_keeps_cache_available ... ok
+test bridge::initialization_owner::tests::directory_window_timeout_keeps_other_receipts_and_reopen_reuses_them ... ok
+
+test result: ok. 141 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 9.69s
+
+     Running unittests src/bin/drive-native-fsd.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/drive_native_fsd-4534cc6d1672d27d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/drive-native-setup.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/drive_native_setup-cb9a9c4aef7c85c6)
+
+running 2 tests
+test classification_tests::distinct_failure_classes_do_not_suggest_password_retries_for_protocol_errors ... ok
+test classification_tests::rejected_login_is_phase_scoped_and_does_not_echo_server_reason ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/drive-native-worker.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/drive_native_worker-da1ec03199311bdd)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/connection_diagnostics.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/connection_diagnostics-73c05e5bbdc0e616)
+
+running 3 tests
+test supervisor_uses_original_pinned_elf_after_install_path_is_replaced ... ok
+test pause_interrupts_wait_without_inventing_a_failure_or_resetting_the_cursor ... ok
+test actual_supervisor_persists_stage_and_pre_cleanup_state_without_losing_cache ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.46s
+
+     Running tests/desktop.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/desktop-25c8a8c3f9d4fd41)
+
+running 25 tests
+test handshake_failures_distinguish_transient_disconnect_from_rejected_login ... ok
+test failed_trust_publication_does_not_change_runtime_settings ... ok
+test legacy_profiles_keep_their_original_read_only_choice ... ok
+test cache_settings_are_task_bound_and_never_erase_content_while_paused ... ok
+test history_ipc_busy_returns_without_waiting_for_store_or_control ... ok
+test initialization_remains_available_while_store_and_control_are_held ... ok
+test history_target_follows_renamed_identity_instead_of_event_path ... ok
+test history_target_can_open_an_offline_dirty_draft_without_any_cached_blob ... ok
+test history_target_handles_online_offline_cached_deleted_and_unmounted ... ok
+test folder_completion_follows_every_child_and_stale_cache_remains_visible ... ok
+test private_profile_refuses_extra_secret_fields_symlink_and_shared_permissions ... ok
+test recovery_action_real_dbus_preserves_unknown_queue_and_user_pause ... ignored, run under a dedicated dbus-run-session; no network worker or NAS
+test history_queries_clear_only_history_and_reject_unsafe_clear_requests ... FAILED
+test locked_service_has_no_worker_and_pause_resume_stop_need_no_credentials ... ok
+test missing_content_does_not_claim_offline_ready_or_folder_synced ... ok
+test metadata_queries_reject_traversal_and_never_hydrate ... ok
+test overview_reports_exact_unknown_commits_without_running_dependency_scheduler ... FAILED
+test permission_overview_query_and_user_policy_revision_are_consistent ... ok
+test shutdown_diagnostics_remain_available_while_store_and_control_are_held ... ok
+test permanent_startup_failure_requires_explicit_action_and_diagnostics_hide_credentials ... ok
+test trust_settings_bind_task_and_version_and_preserve_pause_and_cached_content ... ok
+test persistent_download_failure_propagates_to_folder_and_retry_is_read_only ... ok
+test directory_pages_are_complete_without_inode_allocation_or_downloads ... FAILED
+test directory_pages_are_bounded_stable_and_available_before_unlock ... ok
+test large_online_only_tree_has_bounded_local_status_cost ... ok
+
+failures:
+
+---- history_queries_clear_only_history_and_reject_unsafe_clear_requests stdout ----
+
+thread 'history_queries_clear_only_history_and_reject_unsafe_clear_requests' (18577) panicked at crates/drive-runtime/tests/desktop.rs:158:5:
+assertion failed: desktop::clear_sync_history(&service,
+        r#"{"mode":"all","unexpected":true}"#).is_err()
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/std/src/panicking.rs:679:5
+   1: core::panicking::panic_fmt
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/panicking.rs:80:14
+   2: core::panicking::panic
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/panicking.rs:150:5
+   3: desktop::history_queries_clear_only_history_and_reject_unsafe_clear_requests
+             at ./tests/desktop.rs:158:5
+   4: desktop::history_queries_clear_only_history_and_reject_unsafe_clear_requests::{closure#0}
+             at ./tests/desktop.rs:150:73
+   5: <desktop::history_queries_clear_only_history_and_reject_unsafe_clear_requests::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/ops/function.rs:250:5
+   6: <fn() -> core::result::Result<(), alloc::string::String> as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+
+---- overview_reports_exact_unknown_commits_without_running_dependency_scheduler stdout ----
+
+thread 'overview_reports_exact_unknown_commits_without_running_dependency_scheduler' (18624) panicked at crates/drive-runtime/tests/desktop.rs:266:50:
+called `Result::unwrap()` on an `Err` value: State("directory not queue head")
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/std/src/panicking.rs:679:5
+   1: core::panicking::panic_fmt
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/panicking.rs:80:14
+   2: core::result::unwrap_failed
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/result.rs:1871:5
+   3: <core::result::Result<drive_core::directories::DirectoryJob, drive_core::state::Error>>::unwrap
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/result.rs:1232:23
+   4: desktop::overview_reports_exact_unknown_commits_without_running_dependency_scheduler
+             at ./tests/desktop.rs:266:50
+   5: desktop::overview_reports_exact_unknown_commits_without_running_dependency_scheduler::{closure#0}
+             at ./tests/desktop.rs:255:81
+   6: <desktop::overview_reports_exact_unknown_commits_without_running_dependency_scheduler::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/ops/function.rs:250:5
+   7: <fn() -> core::result::Result<(), alloc::string::String> as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+
+---- directory_pages_are_complete_without_inode_allocation_or_downloads stdout ----
+
+thread 'directory_pages_are_complete_without_inode_allocation_or_downloads' (18572) panicked at crates/drive-runtime/tests/desktop.rs:347:5:
+assertion `left == right` failed
+  left: 2069
+ right: 2068
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/std/src/panicking.rs:679:5
+   1: core::panicking::panic_fmt
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/panicking.rs:80:14
+   2: core::panicking::assert_failed_inner
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/panicking.rs:452:17
+   3: core::panicking::assert_failed::<u64, u64>
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/panicking.rs:407:5
+   4: desktop::directory_pages_are_complete_without_inode_allocation_or_downloads
+             at ./tests/desktop.rs:347:5
+   5: desktop::directory_pages_are_complete_without_inode_allocation_or_downloads::{closure#0}
+             at ./tests/desktop.rs:314:72
+   6: <desktop::directory_pages_are_complete_without_inode_allocation_or_downloads::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/ops/function.rs:250:5
+   7: <fn() -> core::result::Result<(), alloc::string::String> as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+
+
+failures:
+    directory_pages_are_complete_without_inode_allocation_or_downloads
+    history_queries_clear_only_history_and_reject_unsafe_clear_requests
+    overview_reports_exact_unknown_commits_without_running_dependency_scheduler
+
+test result: FAILED. 21 passed; 3 failed; 1 ignored; 0 measured; 0 filtered out; finished in 2.84s
+
+error: test failed, to rerun pass `-p drive-runtime --test desktop`
+     Running tests/status_index_oracle.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/status_index_oracle-34bec2b68b9e9377)
+
+running 1 test
+test committed_index_matches_real_desktop_for_cache_pin_update_failure_edit_conflict_and_move ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.23s
+
+     Running tests/trust.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/trust-022a4c3b793d33fd)
+
+running 3 tests
+test invalid_settings_are_never_published_and_existing_trust_remains ... ok
+test shared_file_symlink_fifo_unknown_fields_and_bad_version_fail_closed ... ok
+test task_trust_is_private_persistent_and_empty_override_removes_profile_defaults ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/trust_worker.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/trust_worker-f34643d863e80d07)
+
+running 1 test
+test invalid_trust_rejection_is_delivered_before_worker_exit ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+
+     Running unittests src/lib.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/sproto-2a0abaa89347e580)
+
+running 163 tests
+test actions::list::strict_metadata_tests::malformed_remote_path_is_rejected ... ok
+test actions::list::strict_metadata_tests::missing_identity_is_not_defaulted ... ok
+test actions::list::strict_metadata_tests::unknown_file_type_is_not_silently_a_regular_file ... ok
+test actions::list::team_catalog_tests::ambiguous_view_identity_is_rejected ... ok
+test actions::list::team_catalog_tests::missing_denied_and_readonly_views_never_gain_write_access ... ok
+test actions::list::team_catalog_tests::unlimited_catalog_omits_zero_limit_like_official_linux ... ok
+test actions::list::team_catalog_tests::separate_native_responses_join_by_view_not_order_or_name ... ok
+test actions::list::recorded_snapshot_pages::replay_real_page_accepts_verified_empty_files_and_rejects_merged_zero_identity ... ok
+test actions::mutations::tests::content_equality_does_not_hide_identity_or_version_race ... ok
+test actions::mutations::tests::malformed_intents_are_rejected_before_network ... ok
+test actions::mutations::tests::same_content_cannot_confirm_timestamp_intent_but_legacy_none_is_preserved ... ok
+test actions::list_observer::tests::observer_failure_is_not_silently_treated_as_a_complete_page ... ok
+test actions::list_observer::tests::barrier_does_not_leak_into_observer_tasks_or_following_operations ... ok
+test actions::namespace::tests::identity_remove_keeps_conditions_and_rejects_invalid_ids ... ok
+test actions::namespace::tests::identity_delete_reconciliation_follows_parent_move_but_stays_in_watch ... ok
+test actions::namespace::tests::invalid_namespace_never_reaches_wire ... ok
+test actions::namespace::tests::deletion_can_preserve_replacement_and_cannot_hide_restored_identity ... ok
+test actions::namespace::tests::incomplete_or_replaced_receipts_are_uncertain ... ok
+test actions::namespace::tests::path_absence_and_historical_payload_are_not_delete_confirmation ... ok
+test actions::namespace::tests::rename_requires_original_identity_at_new_path_and_no_old_entry ... ok
+test actions::namespace::tests::reconciliation_watch_must_cover_target ... ok
+test actions::native::minimal_tombstones::deleted_content_may_be_pruned_but_live_metadata_remains_mandatory ... ok
+test actions::native::tests::committer_fingerprint_never_exposes_token_and_rejects_disagreement ... ok
+test actions::namespace_observer::tests::observer_does_not_apply_to_independent_requests_or_silence_failure ... ok
+test actions::native::pull_diagnostic_tests::real_parser_observes_stationary_nonempty_and_advancing_empty_responses ... ok
+test actions::native::tests::fail_closed_on_missing_or_regressing_cursor ... ok
+test actions::native::tests::replay_live_future_cursor_response_requires_explicit_recovery ... ok
+test actions::download::regression_tests::metadata_only_is_not_success ... ok
+test actions::native::tests::scope_paths_are_component_checked ... ok
+test actions::native::tests::unknown_recovery_signal_does_not_advance_normally ... ok
+test actions::transfer::identity_path_tests::explicit_mtime_envelope_uses_unsigned_seconds_and_no_reference ... ok
+test actions::transfer::identity_path_tests::identity_upload_address_cannot_escape_to_another_path ... ok
+test actions::transfer::tests::stale_version_and_bad_checksum_never_publish ... ok
+test actions::download::regression_tests::interrupted_transfer_keeps_old_file_and_cleans_temporary ... ok
+test actions::transfer::tests::hashing_writer_checks_size_and_standard_md4_vector ... ok
+test actions::watermark::tests::boundary_is_strict_unsigned_and_not_a_file_version ... ok
+test actions::watermark::tests::invalid_root_is_rejected_before_a_request ... ok
+test actions::transfer::tests::streaming_encoder_roundtrips_empty_and_nonempty ... ok
+test actions::watermark::tests::selected_root_requires_all_identity_fields ... ok
+test actions::upload_observer::tests::observer_does_not_apply_to_independent_requests_or_silence_failure ... ok
+test actions::watermark::tests::reconstructed_context_does_not_confuse_root_or_event_fields ... ok
+test channel::continuation_regressions::error_in_final_continuation_is_not_discarded ... ok
+test channel::continuation_regressions::changed_metadata_across_continuations_is_rejected ... ok
+test channel::continuation_regressions::unsupported_download_continuation_fails_closed ... ok
+test channel::idle_tests::eof_remains_transport_error_and_send_is_bounded_separately ... ok
+test channel::idle_tests::legal_quiet_response_after_old_450_second_deadline_succeeds ... ok
+test channel::idle_tests::partial_response_then_silence_expires_from_last_actual_read ... ok
+test channel::tests::recv_download_binary_drains_correctly ... ok
+test channel::tests::recv_download_no_binary_data ... ok
+test channel::tests::recv_download_binary_ex_drains_correctly ... ok
+test channel::tests::recv_download_skips_keepalives ... ok
+test channel::tests::recv_download_streams_binary_data ... ok
+test channel::idle_tests::split_frames_and_keepalives_extend_receive_idle_not_total_time ... ok
+test channel::tests::recv_merges_arrays_absent_from_header_frame ... ok
+test channel::tests::recv_reassembles_body_continue_frames ... ok
+test channel::tests::recv_returns_single_frame_without_body_continue ... ok
+test diagnostics::tests::buffered_consumption_and_eof_do_not_count_as_new_transport_reads ... ok
+test diagnostics::tests::cancellation_is_recorded_and_observer_runs_outside_capture_lock ... ok
+test diagnostics::tests::cancelled_pool_wait_and_setup_are_visible_without_a_request ... ok
+test diagnostics::tests::cancelling_after_positive_reads_keeps_complete_bounded_offsets ... ok
+test actions::namespace::tests::replay_real_namespace_receipts_and_conditional_errors ... ok
+test diagnostics::tests::merge_is_bounded_preserves_failures_and_does_not_sum_concurrency ... ok
+test diagnostics::tests::partial_progress_does_not_reset_total_response_deadline ... ok
+test diagnostics::tests::continuation_counts_and_safe_serialization_keep_payload_private ... ok
+test diagnostics::tests::pull_counts_distinguish_raw_empty_no_advance_and_normalized_empty ... ok
+test diagnostics::tests::positive_read_offsets_are_bounded_and_zero_reads_do_not_change_them ... ok
+test client::auth_regression::auth_uses_preauth_restore_and_complete_agent_envelope ... ok
+test error::tests::no_error_field ... ok
+test error::tests::error_missing_fields ... ok
+test diagnostics::tests::send_timeout_is_distinct_from_receive_timeout ... ok
+test error::tests::null_error ... ok
+test error::tests::server_error ... ok
+test actions::native::tests::replay_recorded_native_events_and_notifications ... ok
+test error::tests::session_invalid_errors ... ok
+test flow::tests::progress_comes_from_actual_bytes_and_has_no_synced_phase ... ok
+test flow::tests::directional_budget_is_shared_and_no_initial_burst ... ok
+test diagnostics::tests::bounded_totals_do_not_store_untrusted_action_or_server_reason ... ok
+test frame::tests::bad_magic ... ok
+test frame::tests::header_byte_layout ... ok
+test frame::tests::recv_response_reads_raw_pobject ... ok
+test frame::tests::send_message_all_scmd_types ... ok
+test frame::tests::version_boundaries ... ok
+test pool::cancellation_tests::cancelled_request_never_returns_connection_to_pool ... ok
+test frame::tests::roundtrip_via_duplex ... ok
+test pool::cancellation_tests::cancelled_partial_notification_closes_stream_and_releases_permit ... ok
+test pool::cancellation_tests::new_borrow_invalidates_prior_success ... ok
+test pool::cancellation_tests::keepalive_then_truncated_metadata_eof_is_not_success_or_reusable ... ok
+test pool::cancellation_tests::only_completed_request_is_reusable ... ok
+test pool::tests::warm_holds_permits_while_creating ... ok
+test pool::tests::zero_max_channels_returns_error ... ok
+test pstream::decode::regression_tests::binary_ex_without_payload_is_rejected ... ok
+test pstream::decode::regression_tests::duplicate_map_key_rejected ... ok
+test pool::tests::warm_releases_permits_on_connection_failure ... ok
+test pool::tests::warm_skips_existing_idle_channels ... ok
+test pstream::decode::regression_tests::multiple_binary_chunks_and_followup_remain_decodable ... ok
+test pstream::decode::regression_tests::nested_arrays_respect_depth_limit ... ok
+test pstream::decode::resource_limit_tests::bad_null_padding_is_rejected ... ok
+test pstream::decode::tests::binary_ex_send_hash_after_binary ... ok
+test pstream::decode::tests::binary_ex_streams_and_captures_send_hash ... ok
+test pstream::decode::tests::binary_streams_to_writer ... ok
+test pstream::decode::tests::empty_buffer ... ok
+test pstream::decode::tests::binary_without_writer_is_error ... ok
+test pstream::decode::tests::invalid_integer_size ... ok
+test pstream::decode::tests::map_non_string_key ... ok
+test pstream::decode::tests::map_with_binary_preserves_trailing_fields ... ok
+test pstream::decode::tests::truncated_integer ... ok
+test pstream::decode::tests::truncated_string ... ok
+test pstream::decode::tests::unexpected_end_marker ... ok
+test pstream::decode::tests::unknown_tag ... ok
+test pstream::decode::tests::unterminated_array ... ok
+test pstream::encode::tests::spec_array_wire_format ... ok
+test pstream::encode::tests::spec_integer_minimum_width ... ok
+test pstream::decode::tests::unterminated_map ... ok
+test pstream::encode::tests::spec_null_wire_format ... ok
+test pstream::encode::tests::spec_string_wire_format ... ok
+test pstream::encode::tests::spec_underscore_stripping_rule ... ok
+test pstream::encode::tests::spec_map_wire_format ... ok
+test pstream::tests::accessors_return_none_on_wrong_type ... ok
+test pstream::tests::from_bool_conversion ... ok
+test pstream::tests::at_proto_key_not_stripped ... ok
+test pstream::tests::is_keep_alive_detection ... ok
+test pstream::tests::golden_vector_update_settings ... ok
+test pstream::tests::pmap_macro ... ok
+test actions::download::regression_tests::empty_file_is_materialized ... ok
+test pstream::tests::roundtrip_array ... ok
+test pstream::tests::roundtrip_empty_array ... ok
+test pstream::tests::nested_structures ... ok
+test pstream::tests::roundtrip_empty_map ... ok
+test pstream::tests::roundtrip_empty_string ... ok
+test pstream::tests::roundtrip_map ... ok
+test pstream::tests::roundtrip_null ... ok
+test pstream::tests::roundtrip_integers ... ok
+test pstream::tests::roundtrip_u64_max ... ok
+test pstream::tests::roundtrip_string ... ok
+test pstream::tests::spec_keep_alive_message ... ok
+test pstream::tests::roundtrip_unicode_string ... ok
+test pstream::tests::spec_magic_bytes ... ok
+test pstream::tests::spec_version_byte ... ok
+test pstream::tests::spec_proto_envelope_structure ... ok
+test pstream::tests::underscore_stripping ... ok
+test pstream::tests::underscore_not_stripped_from_values ... ok
+test pstream::tests::underscore_stripping_multiple_keys ... ok
+test receive_activity::tests::buffer_hits_and_empty_reads_do_not_emit_or_renew ... ok
+test receive_activity::tests::eof_is_immediate_and_never_reported_as_progress ... ok
+test receive_activity::tests::actual_progress_can_outlive_the_initial_deadline ... ok
+test receive_activity::tests::observer_is_request_scoped_and_not_inherited_by_other_tasks ... ok
+test research::tests::notification_is_not_accepted_as_a_file_event_batch ... ok
+test receive_activity::tests::transport_errors_remain_distinct_from_idle_timeouts ... ok
+test receive_activity::tests::partial_frame_then_silence_expires_from_the_last_real_byte ... ok
+test research::tests::reconstructed_body_preserves_subscription_identity ... ok
+test trust::tests::extra_trust_parser_accepts_public_cert_and_rejects_private_keys_or_junk ... ok
+test actions::download::regression_tests::successful_transfer_atomically_replaces_destination ... ok
+test actions::download::regression_tests::cancelled_transfer_keeps_old_file ... ok
+test client::diagnostics_tests::two_directory_pages_share_one_channel_and_count_actual_validated_nodes ... ok
+test pstream::decode::resource_limit_tests::valid_large_event_sized_response_decodes ... ok
+test channel::continuation_regressions::invalid_custom_ca_is_rejected ... ok
+test trust::tests::explicit_trust_never_bypasses_hostname_check ... ok
+test trust::tests::private_chain_is_rejected_without_explicit_task_trust ... ok
+test trust::tests::explicit_trust_never_bypasses_expired_server_certificate ... ok
+test trust::tests::explicit_trust_enables_private_chain ... ok
+test flow::tests::changed_limit_wakes_pacing_and_cancel_releases_no_shared_lock ... ok
+test flow::tests::progressing_transfer_can_outlive_deadline_but_stalled_transfer_cannot ... ok
+test pstream::decode::resource_limit_tests::flat_collection_cannot_exhaust_memory ... ok
+
+test result: ok. 163 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.33s
+
+   Doc-tests drive_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests drive_fs
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests drive_runtime
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests sproto
+
+running 3 tests
+test crates/sproto/src/pstream/mod.rs - pstream::pmap (line 130) ... ignored
+test crates/sproto/src/client.rs - client::Config (line 39) ... ok
+test crates/sproto/src/client.rs - client::Credentials (line 91) ... ok
+
+test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+all doctests ran in 1.56s; merged doctests compilation took 1.55s
+error: 3 targets failed:
+    `-p drive-core --test removals`
+    `-p drive-fs --lib`
+    `-p drive-runtime --test desktop`

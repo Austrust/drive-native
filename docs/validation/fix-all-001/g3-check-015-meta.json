@@ -1,0 +1,13 @@
+{
+  "candidate_commit": "bae1ef1ddc4061df586221557011f4e30f04d134",
+  "command": "cargo check --workspace --all-targets --all-features --locked --offline -j2",
+  "target_directory": "/home/drive-native-test/.cache/ultra-acl-target",
+  "execution_session": 52687,
+  "observed_exit_code": 0,
+  "reported_duration_seconds": 16.32,
+  "log": "g3-check-015.log",
+  "log_bytes": 4727,
+  "log_nul_bytes": 80,
+  "log_sha256": "33bf79804280bf4dc1becef06f537a65629b76ed62c02a4dcb8634f001cb00a7",
+  "note": "Raw output retained unchanged, including NUL bytes; this compilation check is not a runtime test."
+}

@@ -1,0 +1,7 @@
+{
+  "candidate_commit": "bae1ef1ddc4061df586221557011f4e30f04d134",
+  "source": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-005/source",
+  "target": "own G4 run target; sequential after main matrix; never shared with root/G5",
+  "server_source_sha256": "c5b5bbd92144291bd1fe95f01b72980ede6b5230539bc3b2e3b8fd49fdf02582",
+  "python_source_sha256": "f0038ddf5cc2ca9f347718fb44f3493dba7db469f83d5156bc483ad07f285791"
+}
