@@ -64,6 +64,100 @@ fn get(s: &Service, path: &str) -> serde_json::Value {
         .clone()
 }
 
+fn remote_history(service: &Service) -> i64 {
+    let mut store=service.bridge.store.lock().unwrap();
+    let mut changed=store.node("one").unwrap();
+    changed.version="v2".into();
+    store.receive(&Batch { from:"1".into(),to:"2".into(),events:vec![Event {
+        id:"history-event".into(),change:Change::Upsert(changed),
+    }]}).unwrap();
+    store.drain().unwrap();
+    store.sync_history(&Default::default()).unwrap().records[0].id
+}
+
+#[test]
+fn history_target_handles_online_offline_cached_deleted_and_unmounted() {
+    let (_dir,service)=fixture();
+    let id=remote_history(&service);
+    let query=serde_json::json!({"id":id}).to_string();
+    service.mounted.store(true,std::sync::atomic::Ordering::Release);
+    service.control.lock().unwrap().state=ConnectionState::Online;
+    let target=||serde_json::from_str::<serde_json::Value>(&desktop::resolve_history_target(&service,&query).unwrap()).unwrap();
+    let online=target();
+    assert_eq!(online["reason"],"online_only");
+    assert_eq!(online["exists"],true);
+    assert_eq!(online["offline_available"],false);
+    assert_eq!(online["node"],"one");
+    assert_eq!(online["path"],"/tmp/drive-native-test-mount/folder/one");
+    service.control.lock().unwrap().state=ConnectionState::Offline;
+    let offline=target();
+    assert_eq!(offline["reason"],"offline");
+    assert!(offline["path"].is_null());
+    {
+        let mut store=service.bridge.store.lock().unwrap();
+        store.publish_download(&drive_core::DownloadTicket{id:"one".into(),version:"v2".into()},b"abc",&drive_core::sha256(b"abc")).unwrap();
+    }
+    let cached=target();
+    assert_eq!(cached["offline_available"],true);
+    assert!(!cached["path"].is_null());
+    assert!(cached["reason"].is_null());
+    {
+        let mut store=service.bridge.store.lock().unwrap();
+        store.receive(&Batch{from:"2".into(),to:"3".into(),events:vec![Event{id:"history-deletion".into(),change:Change::Delete{id:"one".into()}}]}).unwrap();
+        store.drain().unwrap();
+    }
+    let deleted=target();
+    assert_eq!(deleted["reason"],"deleted");
+    assert_eq!(deleted["exists"],false);
+    assert_eq!(deleted["parent_path"],"/tmp/drive-native-test-mount/folder");
+    service.mounted.store(false,std::sync::atomic::Ordering::Release);
+    let unmounted=target();
+    assert!(unmounted["path"].is_null());
+    assert!(unmounted["parent_path"].is_null());
+}
+
+#[test]
+fn history_target_follows_renamed_identity_instead_of_event_path() {
+    let (_dir,service)=fixture();
+    let id=remote_history(&service);
+    service.mounted.store(true,std::sync::atomic::Ordering::Release);
+    service.control.lock().unwrap().state=ConnectionState::Online;
+    service.bridge.store.lock().unwrap().rename_local("folder","one","root","renamed.txt",true).unwrap();
+    let result:serde_json::Value=serde_json::from_str(&desktop::resolve_history_target(&service,&serde_json::json!({"id":id}).to_string()).unwrap()).unwrap();
+    assert_eq!(result["path"],"/tmp/drive-native-test-mount/renamed.txt");
+    assert_eq!(result["parent_path"],"/tmp/drive-native-test-mount/");
+}
+
+#[test]
+fn history_queries_clear_only_history_and_reject_unsafe_clear_requests() {
+    let (_dir,service)=fixture();
+    remote_history(&service);
+    service.bridge.store.lock().unwrap().save_local("two",b"keep dirty body").unwrap();
+    let page:serde_json::Value=serde_json::from_str(&desktop::sync_history(&service,r#"{"mount":"root","result":"ok","name":"ONE","limit":1}"#).unwrap()).unwrap();
+    assert_eq!(page["records"].as_array().unwrap().len(),1);
+    assert_eq!(page["records"][0]["action"],"remote_change");
+    assert!(desktop::clear_sync_history(&service,r#"{"mode":"older_than_days","days":-2}"#).is_err());
+    assert!(desktop::clear_sync_history(&service,r#"{"mode":"all","unexpected":true}"#).is_err());
+    let cleared:serde_json::Value=serde_json::from_str(&desktop::clear_sync_history(&service,r#"{"mode":"all"}"#).unwrap()).unwrap();
+    assert_eq!(cleared["removed"],1);
+    let store=service.bridge.store.lock().unwrap();
+    assert_eq!(store.open_cached("two").unwrap().size().unwrap(),15);
+    assert_eq!(store.pending_operations().unwrap(),1);
+}
+
+#[test]
+fn history_ipc_busy_returns_without_waiting_for_store_or_control() {
+    let (_dir,service)=fixture();
+    let _store=service.bridge.store.lock().unwrap();
+    for response in [desktop::sync_history(&service,"{}"),desktop::recent_activity(&service,"{}"),
+        desktop::clear_sync_history(&service,r#"{"mode":"all"}"#),desktop::resolve_history_target(&service,r#"{"id":1}"#)] {
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&response.unwrap()).unwrap()["error"],"busy");
+    }
+    drop(_store);
+    let _control=service.control.lock().unwrap();
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&desktop::resolve_history_target(&service,r#"{"id":1}"#).unwrap()).unwrap()["error"],"busy");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "run under a dedicated dbus-run-session; no network worker or NAS"]
 async fn recovery_action_real_dbus_preserves_unknown_queue_and_user_pause() {
@@ -101,6 +195,18 @@ async fn recovery_action_real_dbus_preserves_unknown_queue_and_user_pause() {
     assert_eq!(store.queue_health().unwrap().upload_uncertain, 1);
     assert_eq!(store.pending_operations().unwrap(), 1);
     drop(store);
+    let history:String=proxy.call("GetSyncHistory", &(r#"{"limit":1}"#,)).await.unwrap();
+    let history:serde_json::Value=serde_json::from_str(&history).unwrap();
+    assert_eq!(history["records"][0]["result"],"pending");
+    assert_eq!(history["records"][0]["error_kind"],"uncertain_commit");
+    let recent:String=proxy.call("GetRecentActivity", &(r#"{"limit":12}"#,)).await.unwrap();
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&recent).unwrap()["records"].as_array().unwrap().len(),1);
+    let target_request=serde_json::json!({"id":history["records"][0]["id"]}).to_string();
+    let target:String=proxy.call("ResolveHistoryTarget", &(target_request,)).await.unwrap();
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&target).unwrap()["exists"],false);
+    let cleared:String=proxy.call("ClearSyncHistory", &(r#"{"mode":"all"}"#,)).await.unwrap();
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&cleared).unwrap()["removed"],1);
+    assert_eq!(service.bridge.store.lock().unwrap().pending_operations().unwrap(),1);
     drop(proxy);drop(client);drop(server);
 }
 

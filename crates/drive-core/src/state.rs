@@ -1,6 +1,8 @@
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+#[path = "sync_history.rs"]
+pub mod sync_history;
 use std::{
     collections::HashMap,
     fs::{self, File},
@@ -148,7 +150,7 @@ impl Drop for ReadHandle {
 }
 
 /// Version of the durable state contract, including journal semantics.
-pub const STATE_SCHEMA_VERSION: i64 = 23;
+pub const STATE_SCHEMA_VERSION: i64 = 24;
 
 impl Store {
     /// One store per account + sync root. Independent accounts never share event IDs or cursors.
@@ -248,6 +250,7 @@ impl Store {
         }
         crate::initialization_store::migrate(&db)?;
         crate::preview::migrate(&db)?;
+        sync_history::migrate(&db)?;
         db.pragma_update(None, "user_version", STATE_SCHEMA_VERSION)?;
         db.execute_batch("COMMIT;")?;
         crate::initialization_store::recover_open(&db)?;
@@ -533,6 +536,7 @@ impl Store {
                 "INSERT INTO seen VALUES (?1,?2)",
                 params![event.id, payload],
             )?;
+            sync_history::record_remote_event(&tx, event)?;
         }
         tx.execute("UPDATE inbox SET done=1 WHERE seq=?1", [seq])?;
         tx.execute(

@@ -389,6 +389,120 @@ pub fn overview(service: &Service) -> io::Result<String> {
         "initialization":service.bridge.initialization.snapshot(),
         "host":service.profile.host,"username":service.profile.username,"scope_path":service.profile.scope.path}).to_string())
 }
+
+fn history_request<T: serde::de::DeserializeOwned>(body: &str) -> io::Result<T> {
+    if body.len() > 8192 {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "history query too large"));
+    }
+    serde_json::from_str(body).map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid history query"))
+}
+
+/// History never waits on Store/control while transfers or shutdown own them.
+pub fn sync_history(service: &Service, body: &str) -> io::Result<String> {
+    let query: drive_core::sync_history::HistoryQuery = history_request(body)?;
+    let Ok(store) = service.bridge.store.try_lock() else {
+        return Ok(serde_json::json!({"error":"busy"}).to_string());
+    };
+    let page = store.sync_history(&query).map_err(|_| other())?;
+    serde_json::to_string(&page).map_err(io::Error::other)
+}
+
+pub fn recent_activity(service: &Service, body: &str) -> io::Result<String> {
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Query { limit: Option<u32> }
+    let request: Query = history_request(body)?;
+    let limit = request.limit.unwrap_or(12);
+    if limit == 0 || limit > 100 {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid recent activity limit"));
+    }
+    let Ok(store) = service.bridge.store.try_lock() else {
+        return Ok(serde_json::json!({"error":"busy"}).to_string());
+    };
+    let page = store.sync_history(&drive_core::sync_history::HistoryQuery {
+        limit: Some(limit), ..Default::default()
+    }).map_err(|_| other())?;
+    Ok(serde_json::json!({"records":page.records}).to_string())
+}
+
+pub fn clear_sync_history(service: &Service, body: &str) -> io::Result<String> {
+    let request: drive_core::sync_history::ClearHistory = history_request(body)?;
+    let Ok(mut store) = service.bridge.store.try_lock() else {
+        return Ok(serde_json::json!({"error":"busy"}).to_string());
+    };
+    let removed = store.clear_sync_history(&request).map_err(|_| other())?;
+    Ok(serde_json::json!({"removed":removed}).to_string())
+}
+
+/// Resolve identity now, not the event's obsolete pathname. This function only
+/// reads metadata and cached bodies; it never touches FUSE or the network.
+pub fn resolve_history_target(service: &Service, body: &str) -> io::Result<String> {
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Query { id: i64 }
+    let request: Query = history_request(body)?;
+    if request.id<=0 { return Err(io::Error::new(io::ErrorKind::InvalidInput,"invalid history id")); }
+    let Ok(control) = service.control.try_lock() else {
+        return Ok(serde_json::json!({"error":"busy"}).to_string());
+    };
+    let mounted = service.mounted.load(Ordering::Acquire);
+    let online = mounted && control.state == crate::service::ConnectionState::Online;
+    drop(control);
+    let Ok(store) = service.bridge.store.try_lock() else {
+        return Ok(serde_json::json!({"error":"busy"}).to_string());
+    };
+    let record = store.sync_history_record(request.id).map_err(|_| other())?;
+    let mut response = serde_json::json!({"path":null,"exists":false,"mount_online":online,
+        "reason":"not_found","parent_path":null,"offline_available":false,"node":null});
+    let Some(record) = record else { return Ok(response.to_string()); };
+    if record.mount != service.profile.scope.file_id { return Ok(response.to_string()); }
+    let Some(id) = record.node else { return Ok(response.to_string()); };
+    let id = store.local_identity(&id).map_err(|_| other())?;
+    response["node"] = id.clone().into();
+    if store.is_inaccessible(&id).map_err(|_| other())? {
+        response["reason"] = "permission_denied".into();
+        return Ok(response.to_string());
+    }
+    // Parent fallback comes from the current node identity, never by joining an
+    // unchecked historical path. Deleted nodes can still retain a parent identity.
+    if mounted {
+        if let Some(parent) = store.sync_history_parent(&id).map_err(|_| other())? {
+            if let Some(path) = history_current_path(&store, service, &parent)? {
+                response["parent_path"] = path.into();
+            }
+        }
+    }
+    let node = match store.node(&id) {
+        Ok(node) => node,
+        Err(error) if error.is_not_found() => {
+            response["reason"] = "deleted".into();
+            return Ok(response.to_string());
+        }
+        Err(_) => { response["reason"]="unavailable".into(); return Ok(response.to_string()); }
+    };
+    if !mounted { response["reason"]="unavailable".into(); return Ok(response.to_string()); }
+    let Some(path) = history_current_path(&store,service,&id)? else {
+        response["reason"]="unavailable".into(); return Ok(response.to_string());
+    };
+    let cached = node.directory || store.open_cached(&id).is_ok();
+    response["offline_available"]=cached.into();
+    response["exists"]=true.into();
+    if cached || online {
+        response["path"]=path.into();
+        response["reason"] = if cached { serde_json::Value::Null } else { "online_only".into() };
+    } else { response["reason"]="offline".into(); }
+    Ok(response.to_string())
+}
+
+fn history_current_path(store: &Store, service: &Service, id: &str) -> io::Result<Option<String>> {
+    if store.is_inaccessible(id).map_err(|_| other())? { return Ok(None); }
+    let relative = match store.transfer_path(id) { Ok(path)=>path,Err(_)=>return Ok(None) };
+    let resolved = match resolve(store,&service.profile.scope.file_id,&service.profile.mount,&relative) {
+        Ok(node)=>node,Err(_)=>return Ok(None)
+    };
+    if resolved.id!=id { return Ok(None); }
+    Ok(Some(service.profile.mount.join(relative).to_string_lossy().into_owned()))
+}
 fn pin(service: &Service, path: &str, value: bool) -> io::Result<()> {
     let mut store = service.bridge.store.lock().unwrap();
     let node = resolve(
@@ -624,6 +738,22 @@ async fn local<T: Send + 'static>(
 }
 #[zbus::interface(name = "org.drivenative.Client1")]
 impl Desktop {
+    async fn get_sync_history(&self, body: String) -> zbus::fdo::Result<String> {
+        let s=self.0.clone();
+        local(move || sync_history(&s,&body)).await
+    }
+    async fn get_recent_activity(&self, body: String) -> zbus::fdo::Result<String> {
+        let s=self.0.clone();
+        local(move || recent_activity(&s,&body)).await
+    }
+    async fn resolve_history_target(&self, body: String) -> zbus::fdo::Result<String> {
+        let s=self.0.clone();
+        local(move || resolve_history_target(&s,&body)).await
+    }
+    async fn clear_sync_history(&self, body: String) -> zbus::fdo::Result<String> {
+        let s=self.0.clone();
+        local(move || clear_sync_history(&s,&body)).await
+    }
     async fn get_trust_settings(&self) -> zbus::fdo::Result<String> {
         let s = self.0.clone();
         local(move || trust_settings(&s)).await
