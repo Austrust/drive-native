@@ -32,6 +32,8 @@ pub struct ShareInfo {
 }
 
 /// Metadata for a file or directory within a share.
+/// The currently decoded native response has no effective per-action ACL.
+/// Neither synthesized POSIX mode nor ShareInfo.writable proves a node grant.
 #[derive(Debug, Clone)]
 pub struct NodeInfo {
     /// Server-assigned numeric node identifier.

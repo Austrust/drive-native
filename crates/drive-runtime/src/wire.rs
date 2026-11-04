@@ -110,6 +110,12 @@ pub enum Response {
         node: Node,
     },
     Conflict,
+    /// Only a verified, definite operation refusal may use this response.
+    /// Unclassified numeric NAS codes remain Failed/Uncertain; no guessed map.
+    PermissionDenied {
+        node: String,
+        action: drive_core::write_permissions::Action,
+    },
     Uncertain,
     Connected {
         restore: String,

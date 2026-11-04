@@ -53,6 +53,7 @@ impl Bridge {
             {
                 return Ok(done);
             }
+            let permission_targets=drive_core::write_permissions::namespace_targets("rename",&serde_json::to_string(&queued.job)?).map_err(io::Error::other)?;
             let op = queued.job.operation.clone();
             let fresh = self
                 .store
@@ -89,10 +90,15 @@ impl Bridge {
                         if let Ok(record) = store.record(&node.id) {
                             self.enqueue_invalidation(Invalidation::Inode(record.ino));
                         }
+                        drive_core::write_permissions::observe_targets(&store,&permission_targets,true).map_err(io::Error::other)?;
                         done += 1;
                         if done >= limit {
                             return Ok(done);
                         }
+                    }
+                    Response::PermissionDenied{node,action} if !reconcile => {
+                        drive_core::write_permissions::refuse_operation(&store,&op,true,&permission_targets,&node,action).map_err(io::Error::other)?;
+                        return Ok(done);
                     }
                     Response::Conflict => {
                         store.conflict_rename(&op).map_err(io::Error::other)?;
@@ -240,6 +246,7 @@ impl Bridge {
         {
             return Ok(0);
         }
+        let permission_targets=drive_core::write_permissions::namespace_targets("remove",&serde_json::to_string(&queued.job)?).map_err(io::Error::other)?;
         let op = queued.job.operation.clone();
         let outcome = rpc.call(
             Command::Remove {
@@ -255,7 +262,11 @@ impl Bridge {
                     store
                         .confirm_remove(&op, &identity)
                         .map_err(io::Error::other)?;
+                    drive_core::write_permissions::observe_targets(&store,&permission_targets,true).map_err(io::Error::other)?;
                     Ok(1)
+                }
+                Response::PermissionDenied{node,action} if !reconcile => {
+                    drive_core::write_permissions::refuse_operation(&store,&op,true,&permission_targets,&node,action).map_err(io::Error::other)?;Ok(0)
                 }
                 Response::Conflict => {
                     store.conflict_remove(&op).map_err(io::Error::other)?;
@@ -300,6 +311,7 @@ impl Bridge {
         else {
             return Ok(0);
         };
+        let permission_targets=drive_core::write_permissions::namespace_targets("replace",&serde_json::to_string(&queued.job)?).map_err(io::Error::other)?;
         let op = queued.job.operation.clone();
         let mut target_remote = queued.job.target_remote.clone();
         let cleanup = matches!(
@@ -423,6 +435,9 @@ impl Bridge {
         let mut s = self.store.lock().unwrap();
         let result = match outcome {
             Ok(reply) => match reply.body {
+                Response::PermissionDenied{node,action} if !reconcile => {
+                    drive_core::write_permissions::refuse_operation(&s,&op,true,&permission_targets,&node,action).map_err(io::Error::other)?;return Ok(0);
+                }
                 Response::Removed { identity } if cleanup => {
                     Some(s.confirm_replace_cleanup(&op, &identity))
                 }
@@ -444,7 +459,7 @@ impl Bridge {
             Err(_) => None,
         };
         match result {
-            Some(Ok(())) => Ok(1),
+            Some(Ok(())) => {drive_core::write_permissions::observe_targets(&s,&permission_targets,true).map_err(io::Error::other)?;Ok(1)},
             _ => {
                 if !reconcile {
                     s.mark_replace_uncertain(&op).map_err(io::Error::other)?;
@@ -478,6 +493,7 @@ impl Bridge {
             "uncertain" => true,
             _ => return Ok(0),
         };
+        let permission_targets=drive_core::write_permissions::namespace_targets("mkdir",&serde_json::to_string(&q.job)?).map_err(io::Error::other)?;
         let op = q.job.operation.clone();
         let job = if reconcile {
             q.job
@@ -497,8 +513,12 @@ impl Bridge {
                 }
                 Response::Created { node, remote } => {
                     if s.confirm_directory(&op, &node, &remote).is_ok() {
+                        drive_core::write_permissions::observe_targets(&s,&permission_targets,true).map_err(io::Error::other)?;
                         return Ok(1);
                     }
+                }
+                Response::PermissionDenied{node,action} if !reconcile => {
+                    drive_core::write_permissions::refuse_operation(&s,&op,true,&permission_targets,&node,action).map_err(io::Error::other)?;return Ok(0);
                 }
                 Response::Conflict => {
                     s.conflict_directory(&op).map_err(io::Error::other)?;

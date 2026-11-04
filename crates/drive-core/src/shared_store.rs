@@ -150,7 +150,8 @@ impl SharedStore {
     }
     /// Independent of ordinary Store work: cached reads remain nonblocking
     /// during metadata work, but the first denial waits for bounded replies.
-    /// Never acquire Store while retaining this guard.
+    /// Never block acquiring Store while retaining this guard. Directory
+    /// continuations may try_lock for a read-only projection (no ACL mutation).
     pub fn permission_clear_lease(&self) -> Option<RwLockReadGuard<'_, ()>> {
         let guard=self.permission_publication.read().ok()?;
         (!self.has_permission_denials()).then_some(guard)

@@ -89,6 +89,32 @@ fn handshake(socket: &mut UnixStream) {
     .unwrap();
 }
 #[test]
+fn definite_permission_refusal_retains_body_allows_sibling_and_rechecks() {
+    let (a,mut b)=UnixStream::pair().unwrap();b.set_read_timeout(Some(Duration::from_secs(8))).unwrap();
+    let server=std::thread::spawn(move||{
+        handshake(&mut b);
+        for (position,expected) in ["2","3","2"].into_iter().enumerate(){
+            let(req,fd)=crate::transport::receive::<Envelope<Command>>(&mut b).unwrap();assert!(fd.is_some());
+            let response=match req.body{Command::Upload{mut node,mtime,reconcile,..}=>{
+                assert!(!reconcile);assert_eq!(node.id,expected);
+                if position==0{Response::PermissionDenied{node:node.id,action:drive_core::write_permissions::Action::WriteContent}}
+                else{node.version="v2".into();node.metadata.as_mut().unwrap().mtime=u64::from(mtime.unwrap());Response::Committed{node}}
+            },_=>panic!("only upload expected")};
+            crate::transport::send(&mut b,&Envelope{version:VERSION,id:req.id,body:response},None).unwrap();
+        }
+        assert!(crate::transport::receive::<Envelope<Command>>(&mut b).is_err());
+    });
+    let(_d,store,bridge)=fixture(a);
+    {let mut s=store.lock().unwrap();s.ensure_fs_root("1").unwrap();let root=s.node("1").unwrap();let mut sibling=node("v1");sibling.id="3".into();sibling.name="B.doc".into();s.install_remote_snapshot(&[root,node("v1"),sibling],"2","fixture").unwrap();s.save_local("3",b"new").unwrap();}
+    assert_eq!(bridge.upload_pending(false).unwrap(),1);
+    {let s=store.lock().unwrap();assert_eq!(s.pending_operations().unwrap(),1);assert_eq!(drive_core::write_permissions::decide(&s,"1","2",drive_core::write_permissions::Action::WriteContent).unwrap(),drive_core::write_permissions::Decision::Deny);let history=s.sync_history(&drive_core::sync_history::HistoryQuery::default()).unwrap();assert!(history.records.iter().any(|r|r.error_kind.as_deref()==Some("permission_denied")));}
+    assert_eq!(bridge.upload_pending(false).unwrap(),0);
+    drive_core::write_permissions::reset_session(&store.lock().unwrap()).unwrap();
+    assert_eq!(bridge.upload_pending(false).unwrap(),1);
+    assert_eq!(store.lock().unwrap().pending_operations().unwrap(),0);
+    bridge.disconnect();server.join().unwrap();
+}
+#[test]
 fn uncertain_commit_uses_read_only_reconciliation_and_never_replays_upload() {
     use std::io::Read;
     let (a, mut b) = UnixStream::pair().unwrap();

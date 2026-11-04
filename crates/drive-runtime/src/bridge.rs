@@ -141,6 +141,7 @@ impl Bridge {
             store
                 .bind_native_scope(restore, scope)
                 .map_err(io::Error::other)?;
+            drive_core::write_permissions::reset_session(&store).map_err(io::Error::other)?;
             store
                 .initialization_writeback_blocked()
                 .map_err(io::Error::other)?
@@ -572,6 +573,7 @@ impl Bridge {
             .map_err(|_| libc::EIO)?;
         match self.transfer_once(node, flight) {
             Ok(()) => {
+                drive_core::write_permissions::observe_targets(&self.store.lock().unwrap(),&[(node.id.clone(),drive_core::write_permissions::Action::Read)],true).map_err(|_|libc::EIO)?;
                 self.store
                     .lock()
                     .unwrap()
@@ -632,6 +634,11 @@ impl Bridge {
                     None,
                 )
             })?;
+        if let Response::PermissionDenied{node:refused,action:drive_core::write_permissions::Action::Read}=&response.body {
+            if refused!=&node.id{return Err((libc::EIO,InvalidContent,None));}
+            drive_core::write_permissions::observe_targets(&self.store.lock().unwrap(),&[(node.id.clone(),drive_core::write_permissions::Action::Read)],false).map_err(|_|(libc::EIO,LocalStorage,None))?;
+            return Err((libc::EACCES,ServerRejected,None));
+        }
         if let Response::Failed { category } = &response.body {
             let (kind, code) = download_failure_category(category);
             if kind == SessionExpired {
@@ -1112,6 +1119,7 @@ impl Bridge {
                 let store = self.store.lock().unwrap();
                 if self.recheck_requested.swap(false, Ordering::AcqRel) {
                     store.request_namespace_recheck();
+                    if drive_core::write_permissions::reset_session(&store).is_err(){*self.last_error.lock().unwrap()=Some("permission recheck unavailable".into());}
                 }
                 store
                     .next_download_retry()
@@ -1194,6 +1202,10 @@ impl Bridge {
                     s.scope_path().map_err(io::Error::other)?,
                 )
             };
+            let permission_targets=drive_core::write_permissions::upload_targets(&job.node);
+            if !reconcile && drive_core::write_permissions::targets_denied(&self.store.lock().unwrap(),&permission_targets).map_err(io::Error::other)? {
+                blocked=Some("permission_denied".into());continue;
+            }
             // Preparation is read-only remotely. A failed attempt is history,
             // not an uncertain mutation, and its raw error is never persisted.
             let record_preparation_failure = |kind: &str| -> io::Result<()> {
@@ -1327,6 +1339,7 @@ impl Bridge {
                         }
                         s.confirm_upload_identity(&op, &node.version, Some(&remote))
                             .map_err(io::Error::other)?;
+                        drive_core::write_permissions::observe_targets(&s,&permission_targets,true).map_err(io::Error::other)?;
                         confirmed += 1;
                     }
                     Response::Committed { node } => {
@@ -1338,7 +1351,12 @@ impl Bridge {
                         }
                         s.confirm_upload(&op, &node.version)
                             .map_err(io::Error::other)?;
+                        drive_core::write_permissions::observe_targets(&s,&permission_targets,true).map_err(io::Error::other)?;
                         confirmed += 1;
+                    }
+                    Response::PermissionDenied{node,action} if !reconcile => {
+                        drive_core::write_permissions::refuse_operation(&s,&op,false,&permission_targets,&node,action).map_err(io::Error::other)?;
+                        blocked=Some("permission_denied".into());
                     }
                     Response::Conflict => {
                         s.conflict_upload(&op).map_err(io::Error::other)?;
