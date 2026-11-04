@@ -152,8 +152,15 @@ impl NamespaceIndex {
     pub fn invalidate(&self, _hint: InvalidateHint) {
         // Hints are optional and may be lost. Conservatively invalidate the
         // whole generation; never claim unrefreshed siblings are current.
-        let _ = self.inner.invalidation.fetch_update(Ordering::AcqRel, Ordering::Acquire,
-            |value| Some(value.saturating_add(1)));
+        let mut previous = self.inner.invalidation.load(Ordering::Acquire);
+        loop {
+            match self.inner.invalidation.compare_exchange_weak(
+                previous, previous.saturating_add(1), Ordering::AcqRel, Ordering::Acquire,
+            ) {
+                Ok(_) => break,
+                Err(actual) => previous = actual,
+            }
+        }
     }
 
     pub fn ensure_fresh(&self, store: &Store) -> RefreshOutcome {
@@ -218,7 +225,7 @@ fn load(store: &Store, epoch: u64, budget: Budget) -> Result<Snapshot> {
         by_ino: HashMap::new(), dirs: HashMap::new(), bytes: 0,
         partial: false, degraded: false,
     };
-    let mut children: HashMap<u64, Vec<DirEntryLite>> = HashMap::new();
+    let mut children: HashMap<u64, Vec<(Arc<str>, DirEntryLite)>> = HashMap::new();
     let mut directories: HashMap<u64, u64> = HashMap::new();
     let mut incomplete: HashSet<u64> = HashSet::new();
     let mut count = 0usize;
@@ -241,18 +248,19 @@ fn load(store: &Store, epoch: u64, budget: Budget) -> Result<Snapshot> {
         };
         let parent = if row.root { ino } else { row.parent_ino.unwrap_or(0) };
         let name: Arc<str> = Arc::from(row.name);
+        let node: Arc<str> = Arc::from(row.id);
         if row.directory && row.parent_visible && parent != 0 {
             directories.insert(ino, parent);
         }
         if !row.root && row.visible_child && parent != 0 {
-            children.entry(parent).or_default().push(DirEntryLite {
+            children.entry(parent).or_default().push((Arc::clone(&node), DirEntryLite {
                 ino, name: Arc::clone(&name),
                 kind: if row.directory { FileKind::Directory } else { FileKind::File },
-            });
+            }));
         }
         if let Some(record) = row.attributes {
             snapshot.by_ino.insert(ino, Arc::new(EntrySlot {
-                ino, node: Arc::from(row.id), parent, name, directory: row.directory,
+                ino, node, parent, name, directory: row.directory,
                 size: record.size, mtime: record.mtime,
                 atime: (record.atime, record.atime_nsec), mode: record.mode as u16,
                 blocks: record.blocks, dirty: false, preview: false,
@@ -273,8 +281,9 @@ fn load(store: &Store, epoch: u64, budget: Budget) -> Result<Snapshot> {
     }
     for (ino, parent) in directories {
         if incomplete.contains(&ino) { continue; }
-        let mut entries = children.remove(&ino).unwrap_or_default();
-        entries.sort_unstable_by(|a, b| a.name.cmp(&b.name).then(a.ino.cmp(&b.ino)));
+        let mut ordered = children.remove(&ino).unwrap_or_default();
+        ordered.sort_unstable_by(|a, b| a.1.name.cmp(&b.1.name).then(a.0.cmp(&b.0)));
+        let mut entries: Vec<_> = ordered.into_iter().map(|(_, entry)| entry).collect();
         // reserve first so moving dot entries does not grow on every push.
         entries.reserve(2);
         entries.insert(0, DirEntryLite { ino: parent, name: Arc::from(".."), kind: FileKind::Directory });
@@ -292,6 +301,278 @@ fn load(store: &Store, epoch: u64, budget: Budget) -> Result<Snapshot> {
     if store.local_revision() != revision || store.directory_view_stamp()? != stamp {
         return Err(Error::State("namespace changed during index build".into()));
     }
+    if start.elapsed() > budget.duration {
+        return Ok(Snapshot::empty(revision, epoch, Some(stamp)));
+    }
     snapshot.bytes = charged;
     Ok(snapshot)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Batch, Change, DownloadTicket, Event, Node, NodeMetadata};
+
+    fn node(id: &str, parent: Option<&str>, directory: bool) -> Node {
+        Node {
+            id: id.into(), parent: parent.map(Into::into), name: id.into(),
+            version: "1".into(), directory,
+            metadata: Some(NodeMetadata {
+                size: if directory { 0 } else { 3 }, mtime: 1_700_000_000,
+                mode: if directory { 0o755 } else { 0o644 },
+            }),
+        }
+    }
+    fn fixture() -> (tempfile::TempDir, Store) {
+        let path = tempfile::tempdir().unwrap();
+        let mut store = Store::open(path.path()).unwrap();
+        store.install_remote_snapshot(&[
+            node("root", None, true), node("A", Some("root"), true),
+            node("B", Some("root"), true), node("file", Some("A"), false),
+        ], "1", "synthetic").unwrap();
+        store.ensure_fs_root("root").unwrap();
+        (path, store)
+    }
+    fn ino_for(store: &Store, id: &str) -> Result<u64> {
+        let ino: i64 = store.db.query_row("SELECT ino FROM fs_inodes WHERE node=?1", [id],
+            |row| row.get(0))?;
+        u64::try_from(ino).map_err(|_| Error::State("invalid fixture inode".into()))
+    }
+    fn assert_record(entry: &EntrySlot, expected: &PosixRecord) {
+        assert_eq!(entry.ino, expected.ino);
+        assert_eq!(entry.node.as_ref(), expected.id);
+        assert_eq!(entry.directory, expected.directory);
+        assert_eq!(entry.size, expected.size);
+        assert_eq!(entry.mtime, expected.mtime);
+        assert_eq!(entry.atime, (expected.atime, expected.atime_nsec));
+        assert_eq!(u32::from(entry.mode), expected.mode);
+        assert_eq!(entry.blocks, expected.blocks);
+        assert!(!entry.dirty && !entry.preview);
+    }
+
+    #[test]
+    fn batch_projection_matches_sql_without_writes_or_hydration() {
+        let (path, store) = fixture();
+        let before = store.local_revision();
+        let index = build(&store).unwrap();
+        assert!(!index.is_degraded());
+        assert_eq!(index.revision(), before);
+        assert!(index.bytes() > 0 && index.bytes() <= MAX_BYTES);
+        for parent in [1, ino_for(&store, "A").unwrap(), ino_for(&store, "B").unwrap()] {
+            let expected = store.directory_snapshot(parent, MAX_BYTES).unwrap();
+            let actual = index.dir_block(parent).unwrap();
+            assert_eq!(actual.entries.len(), expected.entries.len());
+            for (a, e) in actual.entries.iter().zip(&expected.entries) {
+                assert_eq!((a.ino, a.name.as_ref(), a.kind == FileKind::Directory),
+                    (e.ino, e.name.as_str(), e.directory));
+                assert_record(&index.entry_by_ino(a.ino).unwrap(), &store.posix_record_by_inode(e.ino).unwrap());
+            }
+        }
+        assert_eq!(store.local_revision(), before);
+        assert!(store.downloads_needed().unwrap().is_empty());
+        assert_eq!(std::fs::read_dir(path.path().join("blobs")).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn immutable_arc_survives_refresh_but_new_lookup_uses_new_generation() {
+        let (_path, mut store) = fixture();
+        let index = build(&store).unwrap();
+        let parent = ino_for(&store, "A").unwrap();
+        let old = index.lookup(parent, "file").unwrap();
+        let old_directory = index.dir_block(parent).unwrap();
+        let mut changed = node("file", Some("B"), false);
+        changed.name = "renamed".into();
+        changed.version = "2".into();
+        changed.metadata.as_mut().unwrap().size = 71;
+        store.receive(&Batch { from: "1".into(), to: "2".into(), events: vec![Event {
+            id: "rename".into(), change: Change::Upsert(changed),
+        }] }).unwrap();
+        store.drain().unwrap();
+        assert_eq!(index.ensure_fresh(&store), RefreshOutcome::Refreshed);
+        assert!(index.lookup(parent, "file").is_none());
+        let fresh = index.lookup(ino_for(&store, "B").unwrap(), "renamed").unwrap();
+        assert_eq!((fresh.ino, fresh.size), (old.ino, 71));
+        assert_eq!((old.name.as_ref(), old.size), ("file", 3));
+        assert_eq!(old_directory.entries[2].name.as_ref(), "file");
+        assert_ne!(old_directory.version, index.dir_block(parent).unwrap().version);
+    }
+
+    #[test]
+    fn explicit_hint_invalidates_clones_even_without_revision_change() {
+        let (_path, store) = fixture();
+        let index = build(&store).unwrap();
+        let cloned = index.clone();
+        cloned.invalidate(InvalidateHint::Node { node_id: "file".into(), parent_dir_ino: None });
+        assert!(index.is_degraded());
+        assert!(index.entry_by_ino(1).is_none());
+        assert!(index.dir_block(1).is_none());
+        assert_eq!(index.ensure_fresh(&store), RefreshOutcome::Refreshed);
+        assert!(!cloned.is_degraded());
+        assert_eq!(cloned.ensure_fresh(&store), RefreshOutcome::Fresh);
+    }
+
+    #[test]
+    fn uncommitted_boundary_cannot_publish_and_rollback_recovers() {
+        let (_path, store) = fixture();
+        let index = build(&store).unwrap();
+        store.db.execute_batch("BEGIN; UPDATE node_metadata SET size=88 WHERE node='file';").unwrap();
+        assert_eq!(index.ensure_fresh(&store), RefreshOutcome::Degraded);
+        assert!(index.entry_by_ino(1).is_none());
+        assert!(NamespaceIndex::build(&store).is_err());
+        store.db.execute_batch("ROLLBACK").unwrap();
+        assert_eq!(index.ensure_fresh(&store), RefreshOutcome::Refreshed);
+        assert_eq!(index.entry_by_ino(ino_for(&store, "file").unwrap()).unwrap().size, 3);
+    }
+
+    #[test]
+    fn explicit_atime_refresh_does_not_depend_on_status_journal() {
+        let (_path, mut store) = fixture();
+        let index = build(&store).unwrap();
+        let stamp = store.directory_view_stamp().unwrap();
+        store.set_local_atime("file", 1_777_000_000, 42).unwrap();
+        assert_eq!(store.directory_view_stamp().unwrap(), stamp);
+        assert_eq!(index.ensure_fresh(&store), RefreshOutcome::Refreshed);
+        assert_eq!(index.entry_by_ino(ino_for(&store, "file").unwrap()).unwrap().atime,
+            (1_777_000_000, 42));
+    }
+
+    #[test]
+    fn dirty_body_attributes_are_never_served_from_index() {
+        let (_path, mut store) = fixture();
+        let draft = store.begin_draft("file", "1", None).unwrap();
+        store.draft_write(&draft, 0, b"local draft", false).unwrap();
+        let inode = ino_for(&store, "file").unwrap();
+        let parent = ino_for(&store, "A").unwrap();
+        let index = build(&store).unwrap();
+        assert!(index.is_partial());
+        assert!(index.entry_by_ino(inode).is_none());
+        assert!(index.lookup(parent, "file").is_none());
+        assert_eq!(index.dir_block(parent).unwrap().entries[2].ino, inode);
+        assert_eq!(store.posix_record_by_inode(inode).unwrap().size, 11);
+        // External changes to an already-dirty draft need not bump SQLite.
+        let file = std::fs::read_dir(store.root.join("drafts")).unwrap().next().unwrap().unwrap();
+        std::fs::OpenOptions::new().write(true).open(file.path()).unwrap().set_len(41).unwrap();
+        assert_eq!(index.ensure_fresh(&store), RefreshOutcome::Fresh);
+        assert!(index.entry_by_ino(inode).is_none());
+        assert_eq!(store.posix_record_by_inode(inode).unwrap().size, 41);
+    }
+
+    #[test]
+    fn clean_blob_size_and_local_mode_use_posix_precedence() {
+        let (_path, mut store) = fixture();
+        store.publish_download(&DownloadTicket { id: "file".into(), version: "1".into() },
+            b"abc", &crate::sha256(b"abc")).unwrap();
+        store.db.execute("UPDATE node_metadata SET size=999 WHERE node='file'", []).unwrap();
+        store.set_local_mode("file", 0o600).unwrap();
+        let inode = ino_for(&store, "file").unwrap();
+        let index = build(&store).unwrap();
+        let entry = index.entry_by_ino(inode).unwrap();
+        assert_record(&entry, &store.posix_record_by_inode(inode).unwrap());
+        assert_eq!((entry.size, entry.mode, entry.blocks), (3, 0o600, 1));
+    }
+
+    #[test]
+    fn acl_overlay_edges_and_revocation_are_not_bypassed() {
+        let (_path, store) = fixture();
+        let index = build(&store).unwrap();
+        let parent = ino_for(&store, "A").unwrap();
+        let inode = ino_for(&store, "file").unwrap();
+        let remote = node("file", Some("B"), false);
+        store.db.execute("INSERT INTO namespace_overlay(node,remote) VALUES('file',?1)",
+            [serde_json::to_string(&remote).unwrap()]).unwrap();
+        store.db.execute("INSERT INTO access_denied(node) VALUES('B')", []).unwrap();
+        assert_eq!(index.ensure_fresh(&store), RefreshOutcome::Refreshed);
+        assert!(index.entry_by_ino(inode).is_none());
+        assert!(index.lookup(parent, "file").is_none());
+        assert_eq!(index.dir_block(parent).unwrap().entries.len(), 2);
+        store.db.execute("DELETE FROM access_denied", []).unwrap();
+        assert_eq!(index.ensure_fresh(&store), RefreshOutcome::Refreshed);
+        assert!(index.lookup(parent, "file").is_some());
+    }
+
+    #[test]
+    fn missing_inode_forces_directory_fallback_without_allocating() {
+        let (_path, store) = fixture();
+        let parent = ino_for(&store, "A").unwrap();
+        store.db.execute("DELETE FROM fs_inodes WHERE node='file'", []).unwrap();
+        let revision = store.local_revision();
+        let index = build(&store).unwrap();
+        assert!(index.is_partial());
+        assert!(index.dir_block(parent).is_none());
+        assert!(index.lookup(parent, "file").is_none());
+        assert_eq!(store.local_revision(), revision);
+        assert_eq!(store.db.query_row("SELECT count(*) FROM fs_inodes WHERE node='file'", [],
+            |row| row.get::<_, i64>(0)).unwrap(), 0);
+    }
+
+    #[test]
+    fn budgets_discard_partial_generations_and_do_not_retry_unchanged_state() {
+        let (_path, store) = fixture();
+        for budget in [
+            Budget { entries: 1, ..Budget::default() },
+            Budget { bytes: 1, ..Budget::default() },
+            Budget { duration: Duration::ZERO, ..Budget::default() },
+        ] {
+            let index = NamespaceIndex::build_with_budget(&store, budget).unwrap();
+            assert!(index.is_partial() && index.is_degraded());
+            assert_eq!(index.bytes(), 0);
+            assert!(index.entry_by_ino(1).is_none());
+            assert!(index.dir_block(1).is_none());
+            assert_eq!(index.ensure_fresh(&store), RefreshOutcome::Degraded);
+        }
+    }
+
+    #[test]
+    fn local_creation_shadows_remote_without_synthesizing_attributes() {
+        let (_path, mut store) = fixture();
+        let local = store.create_local_file("A", "new-name", 0o644).unwrap();
+        let mut remote = node("file", Some("A"), false);
+        remote.name = "new-name".into();
+        remote.version = "2".into();
+        store.receive(&Batch { from: "1".into(), to: "2".into(), events: vec![Event {
+            id: "colliding-remote".into(), change: Change::Upsert(remote),
+        }] }).unwrap();
+        store.drain().unwrap();
+        let parent = ino_for(&store, "A").unwrap();
+        let expected = store.directory_snapshot(parent, MAX_BYTES).unwrap();
+        let index = build(&store).unwrap();
+        let actual = index.dir_block(parent).unwrap();
+        assert_eq!(actual.entries.len(), expected.entries.len());
+        assert_eq!(actual.entries[2].ino, ino_for(&store, &local.id).unwrap());
+        assert_eq!(actual.entries[2].name.as_ref(), "new-name");
+    }
+
+    #[test]
+    fn selected_subdirectory_is_normalized_to_authoritative_inode_one() {
+        // native::project maps the selected root's parent to None. An index
+        // must use the same scope as ensure_fs_root, not its remote ancestor.
+        let path = tempfile::tempdir().unwrap();
+        let mut store = Store::open(path.path()).unwrap();
+        store.install_remote_snapshot(&[
+            node("selected-A", None, true), node("file", Some("selected-A"), false),
+        ], "1", "synthetic").unwrap();
+        store.ensure_fs_root("selected-A").unwrap();
+        let index = build(&store).unwrap();
+        assert_eq!(index.entry_by_ino(1).unwrap().node.as_ref(), "selected-A");
+        assert_eq!(index.entry_by_ino(1).unwrap().parent, 1);
+        assert_eq!(index.dir_block(1).unwrap().entries[1].ino, 1);
+        assert!(index.lookup(1, "file").is_some());
+    }
+
+    #[test]
+    fn ambiguous_names_use_sql_error_and_preserve_directory_order() {
+        let (_path, store) = fixture();
+        store.db.execute("INSERT INTO nodes(id,parent,name,remote_version,directory)
+            VALUES('other','A','file','1',0)", []).unwrap();
+        store.db.execute("INSERT INTO node_metadata VALUES('other',3,1700000000,420)", []).unwrap();
+        store.db.execute("INSERT INTO fs_inodes(node) VALUES('other')", []).unwrap();
+        let parent = ino_for(&store, "A").unwrap();
+        let index = build(&store).unwrap();
+        assert!(index.lookup(parent, "file").is_none());
+        assert!(store.posix_lookup_by_inode(parent, "file").is_err());
+        let expected = store.directory_snapshot(parent, MAX_BYTES).unwrap();
+        let actual = index.dir_block(parent).unwrap();
+        assert_eq!(actual.entries.iter().map(|entry| entry.ino).collect::<Vec<_>>(),
+            expected.entries.iter().map(|entry| entry.ino).collect::<Vec<_>>());
+    }
 }
