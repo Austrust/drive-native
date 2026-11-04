@@ -89,7 +89,7 @@ class HistoryActions(QObject):
             self.message.emit("此文件正在下载，完成后会打开。"); return
         process = QProcess(self)
         process.setProperty("history_key", (source.slot, row["id"]))
-        process.setProcessChannelMode(QProcess.ForwardedErrorChannel)
+        process.setProcessChannelMode(QProcess.SeparateChannels)
         process.setStandardErrorFile(QProcess.nullDevice())
         process.setStandardOutputFile(QProcess.nullDevice())
         timer = QTimer(process); timer.setSingleShot(True); timer.setInterval(300000)

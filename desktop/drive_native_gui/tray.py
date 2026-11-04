@@ -100,6 +100,7 @@ class MountTray:
     def __init__(self, manager):
         self.manager = manager
         self.paused_by_all = {}
+        self.pause_intents = {}
         self.bulk_pending = set()
         self.stop_requested = {}
         self.stop_failures = set()
@@ -201,7 +202,7 @@ class MountTray:
 
     def pause(self, slot):
         if slot not in self.manager.records or self.stopping or slot in self.bulk_pending: return
-        self.paused_by_all.pop(slot, None)
+        self.manual_pause_intent(slot)
         state = self.manager.overviews.get(slot, {}).get('connection')
         if state is None or state == 'stopping': return
         def done(_data, error):
@@ -210,6 +211,12 @@ class MountTray:
                 self.manager.activate(slot or 'legacy')
             self.manager.refresh_status(slot)
         self.manager.buses[slot].call('Resume' if state == 'paused' else 'Pause', callback=done)
+
+    def manual_pause_intent(self, slot):
+        # A later manual action owns the pause even when the earlier bulk
+        # request has not replied yet. Its late callback cannot reclaim it.
+        self.pause_intents[slot] = self.pause_intents.get(slot, 0) + 1
+        self.paused_by_all.pop(slot, None)
 
     def pause_all(self):
         if self.stopping or self.bulk_pending: return
@@ -228,10 +235,14 @@ class MountTray:
 
     def bulk_action(self, slot, task, method):
         bus = self.manager.buses[slot]
+        intent = self.pause_intents.get(slot, 0)
         self.bulk_pending.add(slot)
         def done(data, error):
             self.bulk_pending.discard(slot)
             if self.manager.buses.get(slot) is not bus or self.manager.records.get(slot, {}).get('task_id') != task: return
+            if intent != self.pause_intents.get(slot, 0):
+                self.manager.refresh_status(slot)
+                return
             if error or (isinstance(data, dict) and data.get('error')):
                 self.manager.message.setText('部分挂载暂停／恢复尚未确认，请查看各挂载状态。')
             elif method == 'Pause': self.paused_by_all[slot] = task
@@ -257,8 +268,9 @@ class MountTray:
         self.manager.message.setText('正在正常停止全部挂载，确认停止后退出；不会强制结束后台。')
         for slot, (task, bus) in list(self.stop_requested.items()):
             if not getattr(bus, 'owner', None):
-                # No process to stop; do not autostart an absent service.
-                self.stop_requested.pop(slot, None)
+                # Losing the bus name is not evidence of process exit or
+                # unmount. Keep the unresolved task and leave the UI reachable.
+                self.stop_failures.add(slot)
                 continue
             self.stop_identity_pending.add(slot)
             self.capture_stop_identity(slot, task, bus)
@@ -305,6 +317,7 @@ class MountTray:
         if not self.stopping: return
         complete = []
         for slot, (task, bus) in self.stop_requested.items():
+            if slot in self.stop_failures: continue
             if self.manager.records.get(slot, {}).get('task_id') != task or self.manager.buses.get(slot) is not bus:
                 self.stop_failures.add(slot); continue
             if slot in self.stop_identity_pending: continue
@@ -325,13 +338,15 @@ class MountTray:
             self.stop_requested.pop(slot, None)
             fd = self.stop_pidfds.pop(slot, None)
             if fd is not None: os.close(fd)
-        if self.stop_failures:
+        if self.stop_failures and not (set(self.stop_requested) - self.stop_failures):
             self.stop_poll.stop(); self.stopping = False
             self.stop_generation += 1
             self.close_stop_fds()
             self.manager.message.setText('部分挂载尚未确认正常停止，界面保持打开。请检查停止阶段；不会强杀后台或清理数据。')
         elif not self.stop_requested:
             self.stop_poll.stop(); self.stopping = False; self.quit_interface()
+        elif self.stop_failures:
+            self.manager.message.setText('正在停止其余挂载；部分挂载身份或停止结果尚未确认，全部完成前保持界面打开。')
 
     def quit_interface(self):
         self.stop_generation += 1

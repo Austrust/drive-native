@@ -386,6 +386,7 @@ class MainWindow(QMainWindow):
         if self.issues_dialog is None:
             self.issues_dialog = IssuesDialog(self.bus, self, configure=self.configure_account)
             self.issues_dialog.resolved.connect(self.schedule_refresh)
+            self.issues_dialog.pause_intent.connect(self.pause_intent.emit)
             self.issues_dialog.setWindowFlags(Qt.Widget)
             self.issues_dialog.setMinimumSize(0, 0)
             for button in self.issues_dialog.findChildren(QPushButton):

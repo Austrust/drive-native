@@ -164,6 +164,48 @@ class UnifiedTests(unittest.TestCase):
         self.assertIn('Resume', self.window.buses[A].calls)
         self.assertNotIn('Resume', self.window.buses[B].calls)
 
+    def test_late_bulk_pause_reply_cannot_reclaim_manual_pause_from_any_page(self):
+        self.complete_overview(A, 'online'); self.complete_overview(B, 'paused')
+        self.window.activate_task(A)
+        page = self.window.pages[A]
+        page.overview = self.window.overviews[A]
+        for origin in ('manager', 'mount', 'issues'):
+            with self.subTest(origin=origin):
+                self.window.overviews[A]['connection'] = 'online'
+                self.window.items[A].setData(1, Qt.UserRole, 'online')
+                self.window.tray.pause_all()
+                bulk_callback = [cb for method, cb in self.window.buses[A].waiting if method == 'Pause'][-1]
+                if origin == 'manager':
+                    self.window.table.setCurrentItem(self.window.items[A]); self.window.pause()
+                elif origin == 'mount':
+                    page.toggle_pause()
+                else:
+                    page.show_issues(); page.issues_dialog.pause_task()
+                    self.assertIn('Pause', page.bus.calls)
+                bulk_callback(None, None)
+                self.assertNotIn(A, self.window.tray.paused_by_all)
+                self.window.overviews[A]['connection'] = 'paused'
+                before = self.window.buses[A].calls.count('Resume')
+                self.window.tray.resume_all()
+                self.assertEqual(self.window.buses[A].calls.count('Resume'), before)
+
+    def test_catalog_replacement_restarts_visible_history_and_ignores_old_reply(self):
+        self.window.show_history()
+        old_bus = self.window.buses[A]
+        old_reply = [cb for method, cb in old_bus.waiting if method == 'GetSyncHistory'][-1]
+        self.records[0] = (A, dict(self.records[0][1], task_id='replacement'))
+        self.window.refresh_catalog()
+        new_bus = self.window.buses[A]
+        self.assertIsNot(new_bus, old_bus)
+        new_reply = [cb for method, cb in new_bus.waiting if method == 'GetSyncHistory'][-1]
+        row = {'id': 1, 'seq': 1, 'completed_at': 1793750400, 'name': 'new.txt',
+               'path_at_event': 'new.txt', 'action': 'upload', 'result': 'ok'}
+        old_reply({'records': [dict(row, name='stale.txt')], 'next_cursor': None}, None)
+        self.assertIn(A, self.window.history_page.pending)
+        new_reply({'records': [row], 'next_cursor': None}, None)
+        self.assertNotIn(A, self.window.history_page.pending)
+        self.assertEqual([record['name'] for _, record in self.window.history_page.model.records], ['new.txt'])
+
     def test_tray_menu_has_history_settings_and_two_exit_choices(self):
         self.window.tray.rebuild_menu()
         labels = [action.text() for action in self.window.tray.menu.actions()]
@@ -201,6 +243,16 @@ class UnifiedTests(unittest.TestCase):
                 self.window.shutdown_watchers[slot].mounted = False
             tray.poll_stopping(); quit_app.assert_called_once()
         for bus in self.window.buses.values(): self.assertNotIn('StopMount', bus.calls)
+
+    def test_stop_all_owner_loss_is_not_process_or_unmount_confirmation(self):
+        from PySide6.QtWidgets import QMessageBox
+        for bus in self.window.buses.values(): bus.owner = ''
+        with patch.object(QMessageBox, 'question', return_value=QMessageBox.Yes), patch.object(QApplication, 'quit') as quit_app:
+            self.window.tray.stop_all_and_quit()
+            quit_app.assert_not_called()
+        self.assertEqual(set(self.window.tray.stop_requested), {A, B})
+        self.assertTrue(self.window.isVisible())
+        self.assertIn('尚未确认正常停止', self.window.message.text())
 
     def test_tray_disappearance_restores_window(self):
         self.window.hide()

@@ -155,6 +155,9 @@ class MountManager(QMainWindow):
                 if hasattr(bus, "shutdown_changed"): watcher.refresh()
             self.refresh_status(slot)
         self.rebuild_navigation()
+        self.history_page.refresh()
+        for page in self.pages.values(): page.history_page.refresh()
+        if hasattr(self, "tray"): self.tray.activity.history.refresh()
         if hasattr(self, "tray"): self.tray.refresh()
         if not records: self.message.setText("点击“添加挂载”，为第一个目录设置名称和本地位置。")
         else: self.message.setText(f"共 {len(records)} 个挂载。双击任务可登录、查看传输或处理错误。")
@@ -268,7 +271,7 @@ class MountManager(QMainWindow):
             page = MainWindow(self.stack, instance=slot, new_name=name)
             page.setWindowFlags(Qt.Widget)
             page.ready.connect(self.refresh_catalog)
-            page.pause_intent.connect(lambda key=slot: self.tray.paused_by_all.pop(key, None))
+            page.pause_intent.connect(lambda key=slot: self.tray.manual_pause_intent(key))
             self.pages[slot] = page; self.stack.addWidget(page)
             self.rebuild_navigation()
         page = self.pages[slot]
@@ -336,7 +339,7 @@ class MountManager(QMainWindow):
     def pause(self):
         slot = self.selected()
         if slot is None: return
-        self.tray.paused_by_all.pop(slot, None)
+        self.tray.manual_pause_intent(slot)
         state = self.items[slot].data(1, Qt.UserRole)
         if state is None:
             self.message.setText("状态未确认，请稍后重试。"); return

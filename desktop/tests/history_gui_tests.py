@@ -1,6 +1,9 @@
-"""Synthetic history contracts; no real backend, files, or network."""
+"""Synthetic history contracts; helper tests read isolated temporary files only."""
 import json
+import tempfile
+import time
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 from PySide6.QtCore import QObject, QCoreApplication, QEvent, Qt
 from PySide6.QtWidgets import QApplication, QMessageBox
@@ -77,9 +80,14 @@ class HistoryTests(unittest.TestCase):
 
     def test_replaced_profile_rejects_old_service_record(self):
         reply = self.a.last('GetSyncHistory')[2]
-        self.sources['a'] = HistorySource('a', 'A', self.a, 'replacement', '/mnt/a')
+        replacement_bus = Bus()
+        self.sources['a'] = HistorySource('a', 'A', replacement_bus, 'replacement', '/mnt/a')
         reply({'records': [record()], 'next_cursor': None}, None)
         self.assertEqual(self.page.model.rowCount(), 0)
+        self.assertEqual(len(replacement_bus.calls), 1)
+        self.reply(replacement_bus, [record(2)])
+        self.assertNotIn('a', self.page.pending)
+        self.assertEqual([row['id'] for _, row in self.page.model.records], [2])
 
     def test_clear_all_has_no_days_and_no_file_mutation_calls(self):
         with patch.object(QMessageBox, 'question', return_value=QMessageBox.Yes):
@@ -153,6 +161,71 @@ class HistoryActionTests(unittest.TestCase):
             self.actions.open(self.source, record())
             self.sources.clear(); self.resolve()
             opened.assert_not_called()
+
+
+class HydrationProcessTests(unittest.TestCase):
+    """Exercise the actual QProcess and reader script, without a FUSE or NAS."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(prefix='history-helper-')
+        self.path = Path(self.tmp.name) / 'nonempty.bin'
+        self.body = b'isolated-history-content\0' * 100000
+        self.path.write_bytes(self.body)
+        self.bus = Bus()
+        self.source = HistorySource('a', 'A', self.bus, 'task-a', self.tmp.name)
+        self.sources = {'a': self.source}
+        self.actions = HistoryActions(lambda: self.sources)
+        self.messages = []; self.actions.message.connect(self.messages.append)
+
+    def tearDown(self):
+        for process in list(self.actions.jobs):
+            process.kill(); process.waitForFinished(3000)
+        self.actions.deleteLater(); QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        self.tmp.cleanup()
+
+    def wait_helper(self):
+        deadline = time.monotonic() + 10
+        while self.actions.jobs and time.monotonic() < deadline:
+            APP.processEvents(); time.sleep(.005)
+        self.assertFalse(self.actions.jobs, 'history read helper did not finish')
+
+    def current_response(self, **changes):
+        data = dict(path=str(self.path), exists=True, offline_available=True, node='node-a')
+        data.update(changes)
+        self.bus.last('ResolveHistoryTarget')[2](data, None)
+
+    def test_actual_reader_success_revalidates_before_open_and_preserves_content(self):
+        with patch.object(self.actions, 'open_url') as opened:
+            self.actions.hydrate(self.source, record(), str(self.path), 'node-a')
+            opened.assert_not_called()
+            self.wait_helper()
+            self.assertEqual([entry[0] for entry in self.bus.calls], ['ResolveHistoryTarget'])
+            opened.assert_not_called()
+            self.current_response()
+            opened.assert_called_once_with(str(self.path))
+        self.assertEqual(self.path.read_bytes(), self.body)
+        self.assertEqual(list(Path(self.tmp.name).iterdir()), [self.path])
+
+    def test_actual_reader_failure_never_opens_or_claims_completion(self):
+        with patch.object(self.actions, 'open_url') as opened:
+            self.actions.hydrate(self.source, record(), str(self.path.with_name('missing')), 'node-a')
+            self.wait_helper(); opened.assert_not_called()
+        self.assertEqual(self.bus.calls, [])
+        self.assertIn('下载尚未完成', self.messages[-1])
+
+    def test_task_replacement_during_real_read_discards_completion(self):
+        with patch.object(self.actions, 'open_url') as opened:
+            self.actions.hydrate(self.source, record(), str(self.path), 'node-a')
+            self.sources['a'] = HistorySource('a', 'A', self.bus, 'replacement', self.tmp.name)
+            self.wait_helper(); opened.assert_not_called()
+        self.assertEqual(self.bus.calls, [])
+
+    def test_node_replacement_after_real_read_never_opens_replacement(self):
+        with patch.object(self.actions, 'open_url') as opened:
+            self.actions.hydrate(self.source, record(), str(self.path), 'node-a')
+            self.wait_helper()
+            self.current_response(node='replacement-node')
+            opened.assert_not_called()
+        self.assertIn('状态或位置已变化', self.messages[-1])
 
 
 if __name__ == '__main__': unittest.main()

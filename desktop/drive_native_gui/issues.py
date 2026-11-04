@@ -26,6 +26,7 @@ REASONS = {
 
 class IssuesDialog(QDialog):
     resolved = Signal()
+    pause_intent = Signal()
 
     def __init__(self, bus, parent=None, *, configure=None):
         super().__init__(parent)
@@ -278,6 +279,7 @@ class IssuesDialog(QDialog):
     def pause_task(self):
         if not self.pause_sync.isEnabled() or self.busy:
             return
+        self.pause_intent.emit()
         self.busy = True
         self.selection_changed()
         self.message.setText("正在请求暂停此任务…")

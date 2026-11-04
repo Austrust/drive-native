@@ -212,7 +212,13 @@ class HistoryPage(QWidget):
             if self.name_filter.text(): query["name"] = self.name_filter.text()
             if self.cursors.get(source.slot): query["cursor"] = self.cursors[source.slot]
         def received(data, error):
-            if generation != self.generation or not self.source_current(source): return
+            if generation != self.generation: return
+            if not self.source_current(source):
+                # A task can be replaced while a page is open. Invalidate every
+                # cursor from the old generation and request current services;
+                # never leave its slot permanently pending.
+                self.refresh()
+                return
             self.pending.discard(source.slot)
             error = service_error(data, error)
             if error or not isinstance(data, dict) or not isinstance(data.get("records"), list):
