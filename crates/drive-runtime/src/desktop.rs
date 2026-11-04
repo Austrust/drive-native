@@ -370,11 +370,15 @@ pub fn overview(service: &Service) -> io::Result<String> {
     let pending = store.pending_operations().map_err(|_| other())?
         + store.pending_namespace_operations().map_err(|_| other())?;
     let preview_only = preview::active(&store, &service.profile.scope.file_id)?;
+    let permission = drive_core::write_permissions::policy(&store, &service.profile.scope.file_id).map_err(|_|other())?;
+    let writable = drive_core::write_permissions::mount_writable(&store, &service.profile.scope.file_id).map_err(|_|other())?;
     Ok(serde_json::json!({"schema":1,"task_id":service.profile.task_id,"mount":service.profile.mount,
         "connection":state,"error":error,"background_error":*service.bridge.last_error.lock().unwrap(),
         "upload_block":*service.bridge.upload_block.lock().unwrap(),
         "recovery_actions":{"recheck_issues":true},
-        "mounted":service.mounted.load(Ordering::Acquire),"writable":service.profile.writable && !preview_only,
+        "mounted":service.mounted.load(Ordering::Acquire),"writable":writable && !preview_only,
+        "writable_source":permission.writable_source,"local_policy":permission.local_policy,
+        "server_capability":permission.server_capability,"write_policy_revision":permission.write_policy_revision,
         "configured_writable":service.profile.writable,"preview_only":preview_only,
         "skipped_symlinks":store.skipped_symlink_count().map_err(|_|other())?,
         "skipped_permission_directories":store.inaccessible_count().map_err(|_|other())?,
@@ -459,18 +463,18 @@ pub fn resolve_history_target(service: &Service, body: &str) -> io::Result<Strin
     let Some(id) = record.node else { return Ok(response.to_string()); };
     let id = store.local_identity(&id).map_err(|_| other())?;
     response["node"] = id.clone().into();
-    if store.is_inaccessible(&id).map_err(|_| other())? {
-        response["reason"] = "permission_denied".into();
-        return Ok(response.to_string());
-    }
     // Parent fallback comes from the current node identity, never by joining an
     // unchecked historical path. Deleted nodes can still retain a parent identity.
     if mounted {
         if let Some(parent) = store.sync_history_parent(&id).map_err(|_| other())? {
             if let Some(path) = history_current_path(&store, service, &parent)? {
-                response["parent_path"] = path.into();
+                if drive_core::write_permissions::decide(&store,&service.profile.scope.file_id,&parent,drive_core::write_permissions::Action::List).map_err(|_|other())?!=drive_core::write_permissions::Decision::Deny {response["parent_path"] = path.into();}
             }
         }
+    }
+    if store.is_inaccessible(&id).map_err(|_| other())? || drive_core::write_permissions::decide(&store,&service.profile.scope.file_id,&id,drive_core::write_permissions::Action::Read).map_err(|_|other())?==drive_core::write_permissions::Decision::Deny {
+        response["reason"] = "permission_denied".into();
+        return Ok(response.to_string());
     }
     let node = match store.node(&id) {
         Ok(node) => node,
@@ -497,12 +501,32 @@ pub fn resolve_history_target(service: &Service, body: &str) -> io::Result<Strin
 
 fn history_current_path(store: &Store, service: &Service, id: &str) -> io::Result<Option<String>> {
     if store.is_inaccessible(id).map_err(|_| other())? { return Ok(None); }
+    if drive_core::write_permissions::decide(store,&service.profile.scope.file_id,id,drive_core::write_permissions::Action::Traverse).map_err(|_|other())?==drive_core::write_permissions::Decision::Deny{return Ok(None);}
     let relative = match store.transfer_path(id) { Ok(path)=>path,Err(_)=>return Ok(None) };
     let resolved = match resolve(store,&service.profile.scope.file_id,&service.profile.mount,&relative) {
         Ok(node)=>node,Err(_)=>return Ok(None)
     };
     if resolved.id!=id { return Ok(None); }
     Ok(Some(service.profile.mount.join(relative).to_string_lossy().into_owned()))
+}
+pub fn directory_permissions(service:&Service,body:&str)->io::Result<String> {
+    #[derive(serde::Deserialize)] #[serde(deny_unknown_fields)] struct Query{path:String}
+    let q:Query=history_request(body)?;
+    let store=service.bridge.store.lock().unwrap();
+    let node=resolve(&store,&service.profile.scope.file_id,&service.profile.mount,&q.path)?;
+    let mut value=drive_core::write_permissions::snapshot(&store,&service.profile.scope.file_id,&node.id).map_err(io::Error::other)?;
+    value["task_id"]=service.profile.task_id.clone().into();value["path"]=q.path.into();
+    Ok(value.to_string())
+}
+pub fn set_write_policy(service:&Service,body:&str)->io::Result<String> {
+    #[derive(serde::Deserialize)] #[serde(deny_unknown_fields)]
+    struct Query{task_id:String,expected_revision:u64,local_policy:drive_core::write_permissions::LocalPolicy}
+    let q:Query=history_request(body)?;
+    if q.task_id!=service.profile.task_id{return Err(io::Error::other("wrong task"));}
+    if q.local_policy==drive_core::write_permissions::LocalPolicy::FollowRemote && !cfg!(feature="native-research"){return Err(io::Error::other("writable native protocol release gate is closed"));}
+    let store=service.bridge.store.lock().unwrap();
+    drive_core::write_permissions::set_local_policy_checked(&store,&service.profile.scope.file_id,q.local_policy,q.expected_revision).map_err(io::Error::other)?;
+    Ok(serde_json::json!({"saved":true,"remount_required":service.mounted.load(Ordering::Acquire)}).to_string())
 }
 fn pin(service: &Service, path: &str, value: bool) -> io::Result<()> {
     let mut store = service.bridge.store.lock().unwrap();
@@ -750,6 +774,12 @@ impl Desktop {
     async fn resolve_history_target(&self, body: String) -> zbus::fdo::Result<String> {
         let s=self.0.clone();
         local(move || resolve_history_target(&s,&body)).await
+    }
+    async fn get_directory_permissions(&self,body:String)->zbus::fdo::Result<String>{
+        let s=self.0.clone();local(move||directory_permissions(&s,&body)).await
+    }
+    async fn set_write_policy(&self,body:String)->zbus::fdo::Result<String>{
+        let s=self.0.clone();local(move||set_write_policy(&s,&body)).await
     }
     async fn clear_sync_history(&self, body: String) -> zbus::fdo::Result<String> {
         let s=self.0.clone();

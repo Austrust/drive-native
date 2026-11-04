@@ -78,7 +78,8 @@ impl Root {
     }
     fn entry(&self) -> serde_json::Value {
         serde_json::json!({"name":self.name,"path":"/","view_id":self.view,
-            "scope":self.scope(),"writable":self.writable,"available":self.allowed,
+            "scope":self.scope(),"view_writable_hint":self.writable,"available":self.allowed,
+            "local_policy":"follow_remote","writable_source":"user","server_capability":"unknown",
             "personal":self.personal})
     }
 }
@@ -124,10 +125,12 @@ async fn folders(client:&Client,root:&mut Root,path:&str) -> sproto::Result<serd
     let nodes=client.list_dir(root.view,path).await?;
     let dirs:Vec<_>=nodes.into_iter().filter(|n|n.file_type==FileType::Dir&&!n.is_removed).map(|n|{
         let path=format!("{}/{}",path.trim_end_matches('/'),n.name);
-        serde_json::json!({"name":n.name,"path":path,"view_id":root.view,"writable":root.writable,
+        // A view/root hint is not evidence of this child's effective ACL.
+        serde_json::json!({"name":n.name,"path":path,"view_id":root.view,
+            "local_policy":"follow_remote","writable_source":"user","server_capability":"unknown",
             "available":true,"scope":{"view_id":root.view,"node_id":n.node_id,"file_id":n.file_id,"path":path}})
     }).collect();
-    Ok(serde_json::json!({"path":path,"view_id":root.view,"folders":dirs,"root_scope":root.scope(),"writable":root.writable}))
+    Ok(serde_json::json!({"path":path,"view_id":root.view,"folders":dirs,"root_scope":root.scope(),"view_writable_hint":root.writable,"local_policy":"follow_remote","writable_source":"user","server_capability":"unknown"}))
 }
 #[tokio::main]
 async fn main() {

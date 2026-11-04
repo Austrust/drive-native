@@ -97,6 +97,9 @@ class SetupWizard(QDialog):
         location.addWidget(self.mount, 1)
         location.addWidget(browse)
         choose_layout.addLayout(location)
+        self.read_only = QCheckBox("此任务仅供读取（不上传本地修改）")
+        self.read_only.setToolTip("默认按远端每个目录的权限尝试操作；权限由服务器最终确认。")
+        choose_layout.addWidget(self.read_only)
         self.remember = QCheckBox("在系统钥匙环中保存登录凭据")
         self.remember.setChecked(True)
         choose_layout.addWidget(self.remember)
@@ -265,7 +268,9 @@ class SetupWizard(QDialog):
                 "device_id": self.device_id,
                 "scope": selection["scope"],
                 "mount": str(mount.resolve()),
-                "writable": bool(selection.get("writable", False)),
+                "writable": not self.read_only.isChecked(),
+                "local_policy": "explicit_read_only" if self.read_only.isChecked() else "follow_remote",
+                "writable_source": "user",
             }
             save_profile(profile, self.instance)
             self.profile = profile

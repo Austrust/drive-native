@@ -114,6 +114,10 @@ pub fn record_observed(store: &Store, root: &str, node: &str,
 GetOverview 追加字段：`writable_source`（user/legacy），`local_policy`（explicit_read_only/follow_remote），`server_capability`（unknown/allowed/space_forbidden），`write_policy_revision`（非负整数）。保留旧 writable 字段兼容，表示挂载层允许尝试写入，不代表所有节点允许。逐节点来源为 native/file_station/observed/unknown，附 verified_at/revision。
 旧 profile false→explicit_read_only/legacy；true→follow_remote/legacy。新向导显式保存策略，不能复制共享根 ACL 为所有子目录权限。重连、恢复、重新核对使 observed 状态回 unknown 并 bump revision，不修改用户只读策略。File Station 可选且默认关闭；无已验证逐节点 native 字段时明确标注未实测/不可得，不猜字段。
 
+G3 追加两个 JSON-string IPC：`GetDirectoryPermissions({path})` 返回 `{task_id,path,node,policy,actions:{action:{state,source,verified_at,revision}}}`，state 为 allowed/denied/unknown；`SetWritePolicy({task_id,expected_revision,local_policy})` 用 revision 比较后保存，返回 `{saved:true,remount_required:bool}`。已挂载任务须重新挂载完整应用 RO/RW 选项；策略门禁立即限制新增写入。版本不符必须刷新，不覆盖另一窗口的选择。
+
+已核实的逐操作拒绝可经 worker `PermissionDenied{node,action}` 接收；必须匹配本次 durable intent 的目标，保留本地字节并在重新核对前停止该操作。未核实的 NAS 数字错误码不映射为此响应，保留既有 uncertain/reconcile。当前原生协议适配器不产生此 typed 响应，真实 NAS 拒绝分类属于外部未实测边界；隔离夹具覆盖接收行为。
+
 ## C4 FUSE 集成点、TTL 与权限门禁
 
 ```rust
@@ -129,6 +133,8 @@ NotifyHub 失败/丢消息与 publication degraded 联动，不能因索引命�
 **DefaultPermissions 决策：保留。** 采用 PLAN-7 §4.2 明确允许的兼容方案。unknown/allowed 的远端合成展示 mode 为目录0755/文件0644；known write denied 可去掉相应写位，但不能因为父根不能 create 就错误掩盖其他允许动作；本地显式 mode/uid/gid/sticky/umask 仍由既有 POSIX/内核规则执行。access() 在 unknown 下仅为乐观值，服务端仍最终裁决；必须在报告说明。逐操作实际入口仍检查 C3，mode 不是 ACL 证据。不得用 chmod/chown 改 NAS 权限。
 
 诊断名称固定：`IndexHits`、`IndexMisses`、`IndexFallback`、`IndexDegraded`、`IndexBuildUs`、`IndexBytes`、`PermissionDenied`、`SpaceForbidden`，另暴露 index_partial。诊断不得包含名称/路径/凭据。
+
+G3 在 SharedStore 发布已知拒绝后暂停 NSI 回复，走权威逐操作检查。无拒绝时保留内存路径。正文/目录续读使用独立的 `permission_clear_lease()` 持至有界回复；首个拒绝的发布等待此前回复完成，但普通元数据事务不阻塞已缓存正文读取。持此租约不得阻塞获取 Store（目录续读仅 try_lock）；已知拒绝的回复在 Store 内重验后发布。所有权限检查同时覆盖本地祖先和未确认 namespace_overlay 的远端祖先，不继承其写动作。
 
 ## 验收与证据
 

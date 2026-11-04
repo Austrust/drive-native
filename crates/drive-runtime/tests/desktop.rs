@@ -58,6 +58,24 @@ fn fixture() -> (tempfile::TempDir, std::sync::Arc<Service>) {
         Service::new(profile(), s, PathBuf::from("/nonexistent-worker")).unwrap(),
     )
 }
+#[test]
+fn legacy_profiles_keep_their_original_read_only_choice() {
+    let original=profile();let mut value=serde_json::to_value(&original).unwrap();
+    value.as_object_mut().unwrap().remove("local_policy");value.as_object_mut().unwrap().remove("writable_source");
+    for (writable,expected) in [(false,drive_core::write_permissions::LocalPolicy::ExplicitReadOnly),(true,drive_core::write_permissions::LocalPolicy::FollowRemote)] {
+        value["writable"]=writable.into();let decoded:Profile=serde_json::from_value(value.clone()).unwrap();assert_eq!(decoded.effective_local_policy(),expected);
+    }
+}
+#[test]
+fn permission_overview_query_and_user_policy_revision_are_consistent() {
+    let(_d,s)=fixture();
+    let overview:serde_json::Value=serde_json::from_str(&desktop::overview(&s).unwrap()).unwrap();
+    assert_eq!(overview["local_policy"],"explicit_read_only");assert_eq!(overview["writable_source"],"legacy");assert_eq!(overview["server_capability"],"unknown");
+    let query:serde_json::Value=serde_json::from_str(&desktop::directory_permissions(&s,r#"{"path":"folder"}"#).unwrap()).unwrap();
+    assert_eq!(query["actions"]["create_dir"]["state"],"denied");assert_eq!(query["actions"]["list"]["state"],"unknown");
+    let request=serde_json::json!({"task_id":s.profile.task_id,"expected_revision":overview["write_policy_revision"],"local_policy":"explicit_read_only"}).to_string();
+    desktop::set_write_policy(&s,&request).unwrap();assert!(desktop::set_write_policy(&s,&request).is_err());
+}
 fn get(s: &Service, path: &str) -> serde_json::Value {
     serde_json::from_str::<serde_json::Value>(&desktop::states(s, vec![path.into()]).unwrap())
         .unwrap()["entries"][0]
