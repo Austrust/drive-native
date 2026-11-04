@@ -27,7 +27,7 @@ class SelectorTests(unittest.TestCase):
         self.w.finish_setup()
         self.assertIsNone(self.w.profile)
         self.assertTrue(next(root.child(i) for i in range(root.childCount()) if root.child(i).text(0)=='Denied').isDisabled())
-    def test_expansion_uses_selected_view_and_keeps_readonly(self):
+    def test_expansion_uses_selected_view_and_keeps_remote_hint(self):
         calls=[]
         def request(message,callback):
             calls.append(message)
@@ -44,17 +44,30 @@ class SelectorTests(unittest.TestCase):
         team=self.team();self.w.expand(team)
         self.assertFalse(team.data(0,Qt.UserRole)['loaded'])
         self.assertIn('不一致',self.w.message.text())
-    def test_team_selection_saves_team_scope_and_permissions(self):
+    def save_team_profile(self, read_only=False):
         team=self.team();record=team.data(0,Qt.UserRole)
         record['scope']={'view_id':70,'node_id':2,'file_id':'team-root','path':'/'}
         team.setData(0,Qt.UserRole,record);self.w.tree.setCurrentItem(team)
         self.w.connection_snapshot={'host':'test.invalid','tls_name':'test.invalid','username':'test'}
         self.w.remember.setChecked(False)
+        self.w.read_only.setChecked(read_only)
         with tempfile.TemporaryDirectory() as tmp,patch('drive_native_gui.wizard.save_profile') as save:
             self.w.mount.setText(tmp);self.w.finish_setup()
-            profile=save.call_args.args[0]
-            self.assertEqual(profile['scope']['view_id'],70)
-            self.assertFalse(profile['writable'])
+            return save.call_args.args[0]
+    def test_team_selection_saves_team_scope_and_permissions(self):
+        profile=self.save_team_profile()
+        self.assertEqual(profile['scope'],{'view_id':70,'node_id':2,'file_id':'team-root','path':'/'})
+        # A remote root hint is not an explicit user policy for the whole task.
+        # Actual per-action server refusals remain enforced by the backend.
+        self.assertTrue(profile['writable'])
+        self.assertEqual(profile['local_policy'],'follow_remote')
+        self.assertEqual(profile['writable_source'],'user')
+    def test_team_selection_preserves_explicit_user_read_only(self):
+        profile=self.save_team_profile(read_only=True)
+        self.assertEqual(profile['scope'],{'view_id':70,'node_id':2,'file_id':'team-root','path':'/'})
+        self.assertFalse(profile['writable'])
+        self.assertEqual(profile['local_policy'],'explicit_read_only')
+        self.assertEqual(profile['writable_source'],'user')
     def test_profile_backup_restore_preserves_original(self):
         with tempfile.TemporaryDirectory() as tmp,patch.dict(os.environ,{'XDG_CONFIG_HOME':tmp}):
             original={'schema':1,'task_id':'original','mount':'/tmp/example'}
