@@ -32,8 +32,17 @@ pub struct Profile {
     pub scope: Scope,
     pub mount: PathBuf,
     pub writable: bool,
+    #[serde(default)]
+    pub local_policy: Option<drive_core::write_permissions::LocalPolicy>,
+    #[serde(default)]
+    pub writable_source: Option<String>,
 }
 impl Profile {
+    pub fn effective_local_policy(&self) -> drive_core::write_permissions::LocalPolicy {
+        self.local_policy.unwrap_or(if self.writable {
+            drive_core::write_permissions::LocalPolicy::FollowRemote
+        } else { drive_core::write_permissions::LocalPolicy::ExplicitReadOnly })
+    }
     pub fn read(path: &Path) -> io::Result<Self> {
         use std::io::Read;
         let file = fs::OpenOptions::new()
@@ -91,7 +100,10 @@ impl Profile {
                 "invalid extra trust certificates",
             )
         })?;
-        if self.writable && !cfg!(feature = "native-research") {
+        if self.writable_source.as_deref().is_some_and(|s| !matches!(s,"user"|"legacy")) {
+            return Err(io::Error::other("invalid local permission policy source"));
+        }
+        if self.effective_local_policy() == drive_core::write_permissions::LocalPolicy::FollowRemote && !cfg!(feature = "native-research") {
             return Err(io::Error::other(
                 "writable native protocol release gate is closed in this build",
             ));
@@ -234,6 +246,9 @@ impl Service {
             &profile.trusted_ca_pem,
         )?;
         let worker_image = fs::File::open(&worker).ok();
+        drive_core::write_permissions::initialize_policy(&store, &profile.scope.file_id,
+            profile.effective_local_policy(), profile.writable_source.as_deref().unwrap_or("legacy"))
+            .map_err(io::Error::other)?;
         let paused = store.sync_paused().map_err(io::Error::other)?;
         let trust_pending_durability = sync(store.storage_directory()).is_err();
         let diagnostics = crate::connection_diagnostics::Recorder::open(store.storage_directory());
@@ -532,6 +547,7 @@ impl Service {
             .set_sync_paused(false)
             .map_err(io::Error::other)?;
         c.paused = false;
+        drive_core::write_permissions::reset_session(&self.bridge.store.lock().unwrap()).map_err(io::Error::other)?;
         // Authentication/certificate/recovery failures require a fresh explicit
         // unlock; pause/resume must not silently retry rejected credentials.
         c.state = if c.attention {
@@ -672,14 +688,17 @@ impl Service {
                 }
             }
         }
-        if self.profile.writable {
+        let writable = drive_core::write_permissions::mount_writable(
+            &self.bridge.store.lock().unwrap(), &self.profile.scope.file_id).map_err(io::Error::other)?;
+        if writable && !cfg!(feature="native-research"){return Err(io::Error::other("writable native protocol release gate is closed"));}
+        if writable {
             fs = fs.with_writes_enabled();
         }
         let session = fuser::spawn_mount2(
             fs,
             &self.profile.mount,
             &[
-                if self.profile.writable {
+                if writable {
                     fuser::MountOption::RW
                 } else {
                     fuser::MountOption::RO

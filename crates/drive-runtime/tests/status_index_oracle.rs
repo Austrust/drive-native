@@ -134,7 +134,7 @@ fn committed_index_matches_real_desktop_for_cache_pin_update_failure_edit_confli
             path: "/synthetic".into(),
         },
         mount: temp.path().join("mount"),
-        writable: false,
+        writable: false, local_policy: None, writable_source: None,
     };
     let service: Arc<Service> = Service::new(
         profile,

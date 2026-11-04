@@ -45,7 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         host:"example.invalid".into(),tls_name:"example.invalid".into(),trusted_ca_pem:vec![],
         username:"synthetic".into(),device_id:uuid::Uuid::new_v4().to_string(),
         scope:drive_core::native::Scope {view_id:1,node_id:1,file_id:"root".into(),path:"/".into()},
-        mount:PathBuf::from("/tmp/desktop-page-bench"),writable:false},store,PathBuf::from("/nonexistent-worker"))?;
+        mount:PathBuf::from("/tmp/desktop-page-bench"),writable: false, local_policy: None, writable_source: None},store,PathBuf::from("/nonexistent-worker"))?;
     let mut legacy = vec![];
     let mut paged = vec![];
     for round in 0..35 {

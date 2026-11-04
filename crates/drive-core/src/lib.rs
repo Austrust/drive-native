@@ -8,6 +8,7 @@ pub mod preview;
 pub mod state;
 pub use state::*;
 pub mod shared_store;
+pub mod write_permissions;
 pub use shared_store::SharedStore;
 
 pub mod drafts;

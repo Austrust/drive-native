@@ -34,7 +34,7 @@ fn profile() -> Profile {
             path: "/test".into(),
         },
         mount: PathBuf::from("/tmp/drive-native-test-mount"),
-        writable: false,
+        writable: false, local_policy: None, writable_source: None,
     }
 }
 fn fixture() -> (tempfile::TempDir, std::sync::Arc<Service>) {

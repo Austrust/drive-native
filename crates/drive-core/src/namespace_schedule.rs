@@ -267,6 +267,8 @@ impl Store {
                 state,
                 body,
             };
+            let denied = denied || (matches!(q.state.as_str(), "pending" | "cleanup_pending")
+                && crate::write_permissions::targets_denied(self,&crate::write_permissions::namespace_targets(&q.kind,&q.body)?)?);
             if !matches!(
                 q.state.as_str(),
                 "pending"

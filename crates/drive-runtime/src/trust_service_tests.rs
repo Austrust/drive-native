@@ -19,7 +19,7 @@ fn profile() -> Profile {
             path: "/test".into(),
         },
         mount: PathBuf::from("/tmp/trust-fault-test-unused"),
-        writable: false,
+        writable: false, local_policy: None, writable_source: None,
     }
 }
 fn fixture() -> (tempfile::TempDir, Arc<Service>) {

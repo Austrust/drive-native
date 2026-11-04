@@ -17,7 +17,7 @@ fn main()->Result<(),Box<dyn std::error::Error>> {
  let start=Instant::now();for _ in 0..100 {let mut b=Vec::new();store.open_cached("f0")?.read_to_end(&mut b)?;assert_eq!(b,bytes);}let cached=start.elapsed();
  let p=Profile{schema:1,task_id:uuid::Uuid::new_v4().to_string(),host:"example.invalid".into(),tls_name:"example.invalid".into(),
  trusted_ca_pem:vec![],username:"benchmark".into(),device_id:uuid::Uuid::new_v4().to_string(),
- scope:drive_core::native::Scope{view_id:1,node_id:1,file_id:"root".into(),path:"/".into()},mount:PathBuf::from("/tmp/metadata-bench"),writable:false};
+ scope:drive_core::native::Scope{view_id:1,node_id:1,file_id:"root".into(),path:"/".into()},mount:PathBuf::from("/tmp/metadata-bench"),writable: false, local_policy: None, writable_source: None};
  let svc=Service::new(p,store,PathBuf::from("/nonexistent-worker"))?;
  let start=Instant::now();desktop::states(&svc,vec![".".into()])?;let status=start.elapsed();
  let mount=tempfile::tempdir()?;

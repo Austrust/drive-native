@@ -122,7 +122,7 @@ async fn main() -> Result<()> {
             path: root.clone(),
         },
         mount: mount.clone(),
-        writable: true,
+        writable: true, local_policy: None, writable_source: None,
     };
     let config = scratch.path().join("profile.json");
     std::fs::write(&config, serde_json::to_vec(&profile)?)?;

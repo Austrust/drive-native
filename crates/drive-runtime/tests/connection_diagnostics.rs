@@ -109,7 +109,7 @@ fn fixture(mode: &str) -> (tempfile::TempDir, Arc<Service>) {
             path: "/synthetic".into(),
         },
         mount: root.path().join("mount"),
-        writable: false,
+        writable: false, local_policy: None, writable_source: None,
     };
     // This fixture represents an already authenticated native task. Preserve
     // the same restore/scope binding production establishes before importing.

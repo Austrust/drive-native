@@ -7,7 +7,7 @@ use std::{
     sync::{
         Arc, LockResult, Mutex, MutexGuard, PoisonError, TryLockError, TryLockResult,
         RwLock, RwLockReadGuard, RwLockWriteGuard,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TryRecvError},
     },
     time::Duration,
@@ -58,6 +58,8 @@ pub struct SharedStore {
     // every SQLite mutation. Lock order is projection -> inner everywhere.
     projection: RwLock<()>,
     projection_word: AtomicU64,
+    permission_denials: AtomicBool,
+    permission_publication: RwLock<()>,
 }
 
 /// A short metadata publication lease. It never holds SQLite/Store; callers
@@ -109,6 +111,7 @@ impl CommitNotifications {
 }
 impl SharedStore {
     pub fn new(store: Store) -> Self {
+        let permission_denials = crate::write_permissions::has_denials(&store).unwrap_or(true);
         let boundary = boundary(&store).ok();
         let unverified = boundary.is_none();
         let total_changes = store.db.total_changes();
@@ -130,6 +133,8 @@ impl SharedStore {
             receiver: Mutex::new(Some(receiver)),
             projection: RwLock::new(()),
             projection_word: AtomicU64::new(if unverified { 1 } else { 0 }),
+            permission_denials: AtomicBool::new(permission_denials),
+            permission_publication: RwLock::new(()),
         }
     }
     pub fn change_state(&self) -> CommitState {
@@ -138,6 +143,17 @@ impl SharedStore {
     /// Observation only. A reply must additionally hold try_projection_read().
     pub fn projection_state(&self) -> CommitState {
         state(self.projection_word.load(Ordering::Acquire))
+    }
+    /// Conservative fast-path guard, published under the projection write lease.
+    pub fn has_permission_denials(&self) -> bool {
+        self.permission_denials.load(Ordering::Acquire)
+    }
+    /// Independent of ordinary Store work: cached reads remain nonblocking
+    /// during metadata work, but the first denial waits for bounded replies.
+    /// Never acquire Store while retaining this guard.
+    pub fn permission_clear_lease(&self) -> Option<RwLockReadGuard<'_, ()>> {
+        let guard=self.permission_publication.read().ok()?;
+        (!self.has_permission_denials()).then_some(guard)
     }
     pub fn try_projection_read(&self) -> Option<ProjectionReadGuard<'_>> {
         let guard = self.projection.try_read().ok()?;
@@ -271,6 +287,11 @@ impl StoreGuard<'_> {
         guard.total_changes = hint;
         let verified = !guard.unverified;
         if projection_changed || projection_before.verified != verified {
+            let denied=crate::write_permissions::has_denials(&guard.store).unwrap_or(true);
+            if denied != self.shared.has_permission_denials() {
+                let _publication=self.shared.permission_publication.write().unwrap_or_else(PoisonError::into_inner);
+                self.shared.permission_denials.store(denied,Ordering::Release);
+            }
             let next = projection_before.revision.checked_add(1).filter(|n| *n < (1 << 63));
             self.shared.projection_word.store(
                 next.map_or(u64::MAX, |n| (n << 1) | u64::from(!verified)), Ordering::Release,
