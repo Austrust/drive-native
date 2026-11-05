@@ -1,0 +1,4 @@
+{"server_build":17892,"stage":"connect","success":true}
+{"count":4,"stage":"shares","success":true}
+{"node_id":1,"stage":"personal_root","success":true,"view_id":1,"writable":true}
+{"completed":false,"dirs":5000,"elapsed_s":159.14529268,"nodes":20476,"stage":"enumeration","stats":{"attempt_histogram":[{"attempts":1,"requests":5001}],"disconnects":0,"elapsed_s":159.145297885,"first_error_after":null,"requests":5001,"retries":0,"server_errors":0},"stop_reason":"deadline_or_dir_cap"}

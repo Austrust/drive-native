@@ -15,19 +15,21 @@ impl NativeReadSession {
             &self.scope,
             self.client.restore_identity(),
             attempt,
-            || async { Ok(self.client.current_sync_watermark(&watch).await?) },
             || async {
-                let info = self
-                    .client
-                    .current_selected_node(
+                Ok(super::super::retry::read(|| self.client.current_sync_watermark(&watch)).await?)
+            },
+            || async {
+                let info = super::super::retry::read(|| {
+                    self.client.current_selected_node(
                         self.scope.view_id,
                         &self.scope.path,
                         &self.scope.file_id,
                         self.scope.node_id,
                     )
-                    .await
-                    .map_err(root_query_error)?
-                    .ok_or(Error::RootUnavailable)?;
+                })
+                .await
+                .map_err(root_query_error)?
+                .ok_or(Error::RootUnavailable)?;
                 self.snapshot_node(&self.scope.file_id, &info)
             },
         )

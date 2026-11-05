@@ -129,7 +129,7 @@ impl NativeReadSession {
                     let client = self.client.clone();
                     let view = self.scope.view_id;
                     requests.spawn(async move {
-                        let result = client.list_dir(view, &path).await;
+                        let result = super::retry::list_dir(&client, view, &path).await;
                         (parent, path, depth, result)
                     });
                 }
@@ -366,7 +366,7 @@ impl NativeReadSession {
                     async move { self.scoped_events(&watch).await }
                 },
                 |parent, path| async move {
-                    let children = self.client.list_dir(self.scope.view_id, &path).await?;
+                    let children = super::retry::list_dir(&self.client, self.scope.view_id, &path).await?;
                     let mut nodes = Vec::new();
                     for child in children.into_iter().filter(|child| !child.is_removed) {
                         // No proof that a skipped target/ACL change is confined

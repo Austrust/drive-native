@@ -1,0 +1,4 @@
+{"server_build":17892,"stage":"connect","success":true}
+{"count":4,"stage":"shares","success":true}
+{"node_id":1,"stage":"personal_root","success":true,"view_id":1,"writable":true}
+{"completed":false,"elapsed_s":422.68357308,"events":126129,"label":"HOME","no_retry_phase":{"completed":false,"elapsed_s":7.643739312,"error":{"category":"io","kind":"UnexpectedEof"},"events":4509,"failed_cursor":56000,"pages":28},"node_id":1,"pages":289,"retry_phase":{"attempt_histogram":[{"attempts":1,"requests":255},{"attempts":2,"requests":5},{"attempts":3,"requests":1}],"disconnects":7,"elapsed_s":422.683594178,"first_error_after":[56000,8.335633873999999],"requests":261,"retries":7,"server_errors":0},"stage":"seed","stop_reason":"deadline_or_page_cap","view_id":1}

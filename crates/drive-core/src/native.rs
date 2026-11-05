@@ -850,6 +850,9 @@ pub enum NativeDirectoryOutcome {
 #[path = "native_directory.rs"]
 mod directory;
 
+#[path = "native_retry.rs"]
+mod retry;
+
 #[path = "native_snapshot.rs"]
 mod native_snapshot;
 pub use native_snapshot::{InitializationBody, InitializationReply, InitializationRequest};

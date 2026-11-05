@@ -79,12 +79,14 @@ impl NativeReadSession {
                     &self.scope,
                     self.client.restore_identity(),
                     || {
-                        self.client.current_selected_node(
-                            self.scope.view_id,
-                            &self.scope.path,
-                            &self.scope.file_id,
-                            self.scope.node_id,
-                        )
+                        super::super::retry::read(|| {
+                            self.client.current_selected_node(
+                                self.scope.view_id,
+                                &self.scope.path,
+                                &self.scope.file_id,
+                                self.scope.node_id,
+                            )
+                        })
                     },
                     || async { Ok(self.legacy_initialization_seed().await?.root) },
                     |info| self.snapshot_node(&self.scope.file_id, info),
@@ -99,7 +101,7 @@ impl NativeReadSession {
                     &node,
                     &path,
                 )?;
-                let result = self.client.list_dir(self.scope.view_id, &path).await;
+                let result = super::super::retry::list_dir(&self.client, self.scope.view_id, &path).await;
                 directory_reply(&self.scope, &node, result, |info| {
                     self.snapshot_node(&node.id, info)
                 })

@@ -34,9 +34,7 @@ impl NativeReadSession {
         if self.root_lost.load(Ordering::Acquire) {
             return Err(Error::RootUnavailable);
         }
-        let result = self
-            .client
-            .pull_events(watch)
+        let result = super::retry::pull_events(&self.client, watch)
             .await
             .map_err(|error| match error {
                 sproto::Error::Server { code: 12291, .. } => Error::RootUnavailable,
@@ -72,13 +70,12 @@ impl NativeReadSession {
             return Ok(false);
         }
         let (parent, name) = self.scope.path.rsplit_once('/').unwrap();
-        let entries = self
-            .client
-            .list_dir(
-                self.scope.view_id,
-                if parent.is_empty() { "/" } else { parent },
-            )
-            .await?;
+        let entries = super::retry::list_dir(
+            &self.client,
+            self.scope.view_id,
+            if parent.is_empty() { "/" } else { parent },
+        )
+        .await?;
         let mut matched = entries.iter().filter(|n| n.name == name && !n.is_removed);
         Ok(matches!((matched.next(),matched.next()),(Some(n),None)
             if n.file_id==self.scope.file_id && n.node_id==self.scope.node_id && n.file_type==FileType::Dir))

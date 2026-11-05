@@ -196,3 +196,121 @@ async fn cancelled_reseed_keeps_only_the_previous_completed_boundary() {
     assert_eq!(old.cursor, EventCursor(15));
     assert_eq!(old.root, original_root);
 }
+
+
+#[tokio::test]
+async fn seed_retries_transport_failures_from_the_same_cursor_then_completes() {
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+    let page = Rc::new(Cell::new(0u32));
+    let attempts = Rc::new(Cell::new(0u32));
+    let attempted_cursors = Rc::new(RefCell::new(Vec::<u64>::new()));
+    let page_outer = page.clone();
+    let attempts_inner = attempts.clone();
+    let cursors_inner = attempted_cursors.clone();
+    let result = collect_snapshot_seed(&scope(), "server", None, 1, |cursor| {
+        page_outer.set(page_outer.get() + 1);
+        let this_page = page_outer.get();
+        let attempts = attempts_inner.clone();
+        let cursors = cursors_inner.clone();
+        async move {
+            super::super::retry::read(move || {
+                attempts.set(attempts.get() + 1);
+                cursors.borrow_mut().push(cursor.0);
+                std::future::ready(if this_page == 2 && attempts.get() <= 4 {
+                    Err(sproto::Error::Io(std::io::Error::from(
+                        std::io::ErrorKind::UnexpectedEof,
+                    )))
+                } else if this_page == 1 {
+                    Ok(root(2000, 5))
+                } else {
+                    Ok(empty(4000))
+                })
+            })
+            .await
+            .map_err(Error::Native)
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(result.cursor, EventCursor(4000));
+    assert_eq!(
+        attempted_cursors.borrow().as_slice(),
+        &[0, 2000, 2000, 2000, 2000, 4000]
+    );
+    assert_eq!(attempts.get(), 6);
+}
+
+#[tokio::test]
+async fn seed_stops_after_bounded_retries_without_skipping_a_page() {
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+    let page = Rc::new(Cell::new(0u32));
+    let attempts = Rc::new(Cell::new(0u32));
+    let attempted_cursors = Rc::new(RefCell::new(Vec::<u64>::new()));
+    let page_outer = page.clone();
+    let attempts_inner = attempts.clone();
+    let cursors_inner = attempted_cursors.clone();
+    let result = collect_snapshot_seed(&scope(), "server", None, 1, |cursor| {
+        page_outer.set(page_outer.get() + 1);
+        let this_page = page_outer.get();
+        let attempts = attempts_inner.clone();
+        let cursors = cursors_inner.clone();
+        async move {
+            super::super::retry::read(move || {
+                attempts.set(attempts.get() + 1);
+                cursors.borrow_mut().push(cursor.0);
+                std::future::ready(if this_page == 1 {
+                    Ok(root(2000, 5))
+                } else {
+                    Err(sproto::Error::Io(std::io::Error::from(
+                        std::io::ErrorKind::UnexpectedEof,
+                    )))
+                })
+            })
+            .await
+            .map_err(Error::Native)
+        }
+    })
+    .await;
+    assert!(result.is_err());
+    assert_eq!(attempts.get(), 1 + super::super::retry::MAX_ATTEMPTS);
+    assert_eq!(
+        attempted_cursors.borrow().as_slice(),
+        &[0, 2000, 2000, 2000, 2000, 2000]
+    );
+}
+
+#[tokio::test]
+async fn seed_does_not_retry_a_server_refusal() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+    let page = Rc::new(Cell::new(0u32));
+    let attempts = Rc::new(Cell::new(0u32));
+    let page_outer = page.clone();
+    let attempts_inner = attempts.clone();
+    let result = collect_snapshot_seed(&scope(), "server", None, 1, |_cursor| {
+        page_outer.set(page_outer.get() + 1);
+        let this_page = page_outer.get();
+        let attempts = attempts_inner.clone();
+        async move {
+            super::super::retry::read(move || {
+                attempts.set(attempts.get() + 1);
+                std::future::ready(if this_page == 1 {
+                    Ok(root(2000, 5))
+                } else {
+                    Err(sproto::Error::Server {
+                        code: 12290,
+                        reason: "denied".into(),
+                    })
+                })
+            })
+            .await
+            .map_err(Error::Native)
+        }
+    })
+    .await;
+    assert!(result.is_err());
+    assert_eq!(attempts.get(), 2);
+    assert_eq!(page.get(), 2);
+}

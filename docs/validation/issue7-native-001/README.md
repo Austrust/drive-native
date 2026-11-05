@@ -13,5 +13,6 @@
 - [空间只读来源复核 II](l2-source-002/REPORT.md)：NodeCapability 共享权限注入、评估器边界、profile 只读过滤与给 T3 的实验设计（证据包在仓库外，路径/SHA 见目录 README）。
 - [精确写拒绝自动学习增量](write-learning/REPORT.md)：可证窄子集（upload/0x9003/已存在节点）、实现锚点、测试矩阵与未实测项。
 - [真实 NAS 挂载健康检查（阻塞）](../real-nas-initial-index-20261105/REPORT.md)：`0.1.0~dev20261105.2` 在 build 17892 的 `initial_index` 断连阻塞、探针证据、归因边界与后续建议。
+- [根系初始化韧性 R2](../real-nas-initial-index-20261105/REPORT-R2-RESILIENCE-20261105.md)：真实 NAS 只读测量（团队根 76 页/102k 事件/215s/25 次断连恢复）、有界每请求重试+断点续拉实现、测试计数与 release 产物；HOME 超大根为残余。
 - [真实 NAS 受限验收（部分通过）](../real-nas-t7-20261105/T7-RESULT.md)：T3 在 build 17892 的子目录 scope 完整挂载/写矩阵 6/6 committed、根 scope 仍阻塞、场景与缺口状态；复制核验见同目录 COPY-VERIFY。
 - [当前功能报告](../../FIX_7_REPORT.md)：用户可观察行为、验收矩阵及未实测项。
