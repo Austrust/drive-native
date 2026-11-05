@@ -339,7 +339,12 @@ pub fn invalidate_remote_permissions(store: &Store, root: &str) -> Result<()> {
     reset_evidence(store, root, false)
 }
 fn reset_evidence(store: &Store, root: &str, observed_only: bool) -> Result<()> {
+    if root.is_empty() { return Err(invalid()); }
     let tx = store.db.unchecked_transaction()?;
+    // The first profile notification can precede the first observation. Make
+    // its revision visible even when this Store has not yet persisted a policy.
+    // INSERT OR IGNORE preserves every existing user/service choice.
+    tx.execute("INSERT OR IGNORE INTO write_policy VALUES(?1,'follow_remote','legacy','unknown','legacy',0,unixepoch())", [root])?;
     // Clear the terminal retry gate paired with a typed Read refusal as well.
     tx.execute("UPDATE transfers SET state='pending',error=NULL WHERE direction='download' AND state IN ('failed','retry')
       AND json_valid(error) AND json_extract(error,'$.kind')='server_rejected' AND json_extract(error,'$.server_code') IS NULL
