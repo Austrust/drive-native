@@ -1,0 +1,84 @@
+{
+  "scope": "all defined function dynamic-symbol extents; not a proof against computed codes or unexported code",
+  "function_extents": 3593,
+  "matches": [
+    {
+      "function": "_ZN18BackgroundTaskUtil11CopyHandler15CheckPermissionER7RequestR8ResponseRSt10unique_ptrIN2db11ViewManagerENS6_12ViewDBReturnEERKNS6_4NodeE",
+      "start": "0x624730",
+      "address": "0x62505a",
+      "instruction": "mov esi, 0x9004"
+    },
+    {
+      "function": "_ZN18BackgroundTaskUtil11CopyHandler15CheckPermissionER7RequestR8ResponseRSt10unique_ptrIN2db11ViewManagerENS6_12ViewDBReturnEERKNS6_4NodeE",
+      "start": "0x624730",
+      "address": "0x6255e2",
+      "instruction": "mov esi, 0x9004"
+    },
+    {
+      "function": "_ZN13RemoveACLTest11HandleErrorEv",
+      "start": "0x2232f0",
+      "address": "0x22342b",
+      "instruction": "mov esi, 0xa004"
+    },
+    {
+      "function": "_ZN13RemoveACLTest11HandleErrorEv",
+      "start": "0x2232f0",
+      "address": "0x2234a3",
+      "instruction": "mov esi, 0xa003"
+    },
+    {
+      "function": "_ZN21UpdateFileInfoHandler6HandleER7RequestR8Response",
+      "start": "0x481200",
+      "address": "0x4819ae",
+      "instruction": "mov esi, 0x9004"
+    },
+    {
+      "function": "_ZN13UploadHandler10TestFilterER7RequestR8Response",
+      "start": "0x4b7da0",
+      "address": "0x4b81ac",
+      "instruction": "cmp eax, 0x9004"
+    },
+    {
+      "function": "_ZN13UploadHandler10TestFilterER7RequestR8Response",
+      "start": "0x4b7da0",
+      "address": "0x4b84f9",
+      "instruction": "mov esi, 0x9004"
+    },
+    {
+      "function": "_ZN13CreateACLTest11HandleErrorEv",
+      "start": "0x223140",
+      "address": "0x2231f3",
+      "instruction": "mov esi, 0x9004"
+    },
+    {
+      "function": "_ZN13CreateACLTest11HandleErrorEv",
+      "start": "0x223140",
+      "address": "0x22329b",
+      "instruction": "mov esi, 0x9003"
+    },
+    {
+      "function": "_ZN20RemoveBackgroundTask15PermanentDeleteEv",
+      "start": "0x5d7190",
+      "address": "0x5d8837",
+      "instruction": "mov esi, 0xa004"
+    },
+    {
+      "function": "_ZN18BackgroundTaskUtil13RemoveHandler6HandleER7RequestR8Response",
+      "start": "0x6433b0",
+      "address": "0x644d06",
+      "instruction": "mov esi, 0xa004"
+    },
+    {
+      "function": "_ZN13RemoveHandler10TestFilterER7RequestRN2db4NodeER8Response",
+      "start": "0x41f2b0",
+      "address": "0x41f5cd",
+      "instruction": "cmp eax, 0x9004"
+    },
+    {
+      "function": "_ZN13RemoveHandler10TestFilterER7RequestRN2db4NodeER8Response",
+      "start": "0x41f2b0",
+      "address": "0x41f981",
+      "instruction": "mov esi, 0xa004"
+    }
+  ]
+}

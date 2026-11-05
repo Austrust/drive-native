@@ -36,13 +36,12 @@ pub(super) fn remove(
     store: &Store,
     parent: &str,
     id: &str,
-    directory: bool,
+    _directory: bool,
 ) -> drive_core::Result<()> {
-    node(store, parent, Action::Delete)?;
+    // Delete is the target's effective operation, including the server's
+    // parent ACL rules. A parent's own can_delete is not delete_child.
+    node(store, parent, Action::Traverse)?;
     node(store, id, Action::Delete)?;
-    if directory {
-        node(store, parent, Action::CreateDir)?;
-    }
     Ok(())
 }
 pub(super) fn rename(
@@ -52,11 +51,10 @@ pub(super) fn rename(
     target_parent: &str,
     target: Option<&str>,
 ) -> drive_core::Result<()> {
-    node(store, parent, Action::RenameSource)?;
+    node(store, parent, Action::Traverse)?;
     node(store, id, Action::RenameSource)?;
     node(store, target_parent, Action::RenameTarget)?;
     if let Some(target) = target {
-        node(store, target_parent, Action::Delete)?;
         node(store, target, Action::Delete)?;
     }
     Ok(())
@@ -113,20 +111,14 @@ pub(super) fn project(
     if !drive_core::write_permissions::mount_writable(store, &root)? {
         return Ok(());
     }
+    // Directory action rows describe this directory and creation into it;
+    // they do not enumerate the effective Delete/Rename rights of each child.
+    // Removing its write mode could make default_permissions reject a legal
+    // child deletion before our target-specific check. Keep original POSIX mode.
+    if record.directory { return Ok(()); }
     // A single denied directory operation must not make DefaultPermissions
     // reject a different allowed operation. Unknown access() stays optimistic.
-    let actions: &[Action] = if record.directory {
-        &[
-            Action::CreateFile,
-            Action::CreateDir,
-            Action::Delete,
-            Action::RenameSource,
-            Action::RenameTarget,
-            Action::Setattr,
-        ]
-    } else {
-        &[Action::WriteContent, Action::Setattr]
-    };
+    let actions = &[Action::WriteContent, Action::Setattr];
     let mut all_denied = true;
     for action in actions {
         all_denied &= decide(store, &root, &record.id, *action)? == Decision::Deny;

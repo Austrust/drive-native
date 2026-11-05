@@ -112,6 +112,39 @@ fn denied<T: std::fmt::Debug>(r: std::io::Result<T>) {
 
 #[test]
 #[ignore = "requires ordinary Linux user, /dev/fuse and test-seams; isolated ACL truth"]
+fn parent_self_permissions_do_not_deny_independent_child_removal_or_rename() {
+    {
+        let f = Fixture::new("root");
+        for action in [Action::CreateFile, Action::CreateDir, Action::Delete,
+            Action::RenameSource, Action::RenameTarget, Action::Setattr] {
+            f.decision("root", "A", action, Decision::Deny);
+        }
+        f.decision("root", "file", Action::Delete, Decision::Allow);
+        // default_permissions must not turn the parent's self-action denials
+        // into a mode-based child deletion refusal before FUSE sees the target.
+        fs::remove_file(f.mount.join("A/file")).unwrap();
+        denied(fs::remove_dir(f.mount.join("A")));
+        denied(fs::create_dir(f.mount.join("A/forbidden")));
+        denied(fs::write(f.mount.join("A/forbidden-file"), b"no"));
+    }
+    {
+        let f = Fixture::new("root");
+        f.decision("root", "root", Action::Delete, Decision::Deny);
+        f.decision("root", "root", Action::CreateDir, Decision::Deny);
+        f.decision("root", "A", Action::RenameSource, Decision::Deny);
+        f.decision("root", "B", Action::Delete, Decision::Deny);
+        f.decision("root", "file", Action::RenameSource, Decision::Allow);
+        f.decision("root", "target", Action::Delete, Decision::Allow);
+        fs::rename(f.mount.join("A/file"), f.mount.join("B/target")).unwrap();
+        assert_eq!(fs::read(f.mount.join("B/target")).unwrap(), b"old");
+        // Removing now-empty A does not require the root's create-directory
+        // permission, nor permission to remove root itself.
+        fs::remove_dir(f.mount.join("A")).unwrap();
+    }
+}
+
+#[test]
+#[ignore = "requires ordinary Linux user, /dev/fuse and test-seams; isolated ACL truth"]
 fn root_a_b_and_action_classes_are_enforced_in_one_mount() {
     let f = Fixture::new("root");
     for node in ["root", "B"] {

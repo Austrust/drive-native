@@ -135,7 +135,9 @@ pub const ENTRY_TTL: Duration = Duration::ZERO;
 `DRIVE_NATIVE_FS_TTL_MS` **只控制 attr TTL**，默认1000ms、0关闭。脏/预览/不确定/失效属性 TTL=0；所有正、负目录项及 READDIRPLUS entry TTL 恒0。ReplyEntry::entry_with_timeouts(entry_ttl,attr_ttl) 调底层 new_entry(attr_ttl,entry_ttl)，保留协议四字段 ABI 回归。
 NotifyHub 失败/丢消息与 publication degraded 联动，不能因索引命中绕过现有保护。索引集成只在 lookup/getattr/opendir/readdir/readdirplus/releasedir 读路径；G3 在各实际读写入口叠加 C3 判定，不复制 SQL 授权逻辑到缓存。
 
-**DefaultPermissions 决策：保留。** 采用 PLAN-7 §4.2 明确允许的兼容方案。unknown/allowed 的远端合成展示 mode 为目录0755/文件0644；known write denied 可去掉相应写位，但不能因为父根不能 create 就错误掩盖其他允许动作；本地显式 mode/uid/gid/sticky/umask 仍由既有 POSIX/内核规则执行。access() 在 unknown 下仅为乐观值，服务端仍最终裁决；必须在报告说明。逐操作实际入口仍检查 C3，mode 不是 ACL 证据。不得用 chmod/chown 改 NAS 权限。
+**DefaultPermissions 决策：保留。** 采用 PLAN-7 §4.2 明确允许的兼容方案。unknown/allowed 的远端合成展示 mode 为目录0755/文件0644；文件 WriteContent 与 Setattr 同时已知拒绝才去掉写位。目录保持原 POSIX 写位：目录自身及创建动作的拒绝不能枚举每个子项的有效 Delete/Rename 权限，收窄父目录 mode 会在 FUSE 之前误拒合法子项操作。本地显式 mode/uid/gid/sticky/umask 仍由既有 POSIX/内核规则执行。access() 对目录及 unknown 仅为乐观值，服务端仍最终裁决；逐操作实际入口检查 C3，mode 不是 ACL 证据。不得用 chmod/chown 改 NAS 权限。
+
+**有效动作的对象边界（服务端静态证据澄清）：** Delete 表示目标自身的有效删除权限（已包含服务端父链 ACL），不是 delete_child；RenameSource 也表示源节点自身。unlink/rmdir 检查父 Traverse + 目标 Delete，不从父自身 Delete 或 CreateDir 推断子项删除。rename 检查源父 Traverse + 源 RenameSource + 目标父 RenameTarget + 覆盖目标 Delete。该语义同时用于 FUSE 与持久队列；父遍历和目标拒绝仍阻断操作。参见 [官方服务端证据](validation/issue7-native-001/server-static/REPORT.md)。
 
 G4 错误码校正：只有逐节点所有相关写动作均 denied 才投影去掉写位；L1/L2 整任务限制不借 mode 抢先产生 EACCES，仍由挂载只读选项或实际操作入口返回 EROFS。预览 inode 保留自己的身份与拒绝检查，正文 EAGAIN、写操作 EROFS，不提前改成权威 ENOENT。
 

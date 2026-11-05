@@ -1,0 +1,573 @@
+{
+  "header_signature_verified": true,
+  "entry_digests_verified": 80,
+  "pynacl_version": "1.6.2",
+  "msgpack_version": "1.2.4",
+  "binary_executed": false,
+  "entries": [
+    {
+      "member": "INFO",
+      "size": 10284,
+      "encoded_offset": 13445,
+      "encoded_bytes": 10837,
+      "entry_digest_verified": true,
+      "output": "package-INFO.txt",
+      "sha256": "196bcd09581ae9bfd44dee2c73bf7f1c2aae9a3b60493ebeb453110d85c502d3"
+    },
+    {
+      "member": "PACKAGE_ICON.PNG",
+      "size": 2963,
+      "encoded_offset": 24282,
+      "encoded_bytes": 3516,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "PACKAGE_ICON_256.PNG",
+      "size": 25831,
+      "encoded_offset": 27798,
+      "encoded_bytes": 26384,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "package.tgz",
+      "size": 37058964,
+      "encoded_offset": 54182,
+      "encoded_bytes": 37059653,
+      "entry_digest_verified": true,
+      "output": "package.tgz",
+      "sha256": "8465acfa404b662dd13a2759f7d5226e2095ed39c4624a90e620ebc9454df9e4"
+    },
+    {
+      "member": "WIZARD_UIFILES/uninstall_uifile.sh",
+      "size": 3919,
+      "encoded_offset": 37113835,
+      "encoded_bytes": 4472,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/uninstall_uifile_ger.sh",
+      "size": 4007,
+      "encoded_offset": 37118307,
+      "encoded_bytes": 4560,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/uninstall_uifile_trk.sh",
+      "size": 3998,
+      "encoded_offset": 37122867,
+      "encoded_bytes": 4551,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/uninstall_uifile_nld.sh",
+      "size": 3968,
+      "encoded_offset": 37127418,
+      "encoded_bytes": 4521,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/install_uifile_spn.sh",
+      "size": 6528,
+      "encoded_offset": 37131939,
+      "encoded_bytes": 7081,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/install_uifile_dan.sh",
+      "size": 6533,
+      "encoded_offset": 37139020,
+      "encoded_bytes": 7086,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/install_uifile_ptb.sh",
+      "size": 6578,
+      "encoded_offset": 37146106,
+      "encoded_bytes": 7131,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/install_uifile_krn.sh",
+      "size": 6646,
+      "encoded_offset": 37153237,
+      "encoded_bytes": 7199,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/install_uifile_trk.sh",
+      "size": 6516,
+      "encoded_offset": 37160436,
+      "encoded_bytes": 7069,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/install_uifile_csy.sh",
+      "size": 6768,
+      "encoded_offset": 37167505,
+      "encoded_bytes": 7321,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/install_uifile.sh",
+      "size": 6504,
+      "encoded_offset": 37174826,
+      "encoded_bytes": 7057,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/install_uifile_plk.sh",
+      "size": 6648,
+      "encoded_offset": 37181883,
+      "encoded_bytes": 7201,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/uninstall_uifile_fre.sh",
+      "size": 4073,
+      "encoded_offset": 37189084,
+      "encoded_bytes": 4626,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/uninstall_uifile_enu.sh",
+      "size": 3919,
+      "encoded_offset": 37193710,
+      "encoded_bytes": 4472,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/install_uifile_cht.sh",
+      "size": 6391,
+      "encoded_offset": 37198182,
+      "encoded_bytes": 6944,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/uninstall_uifile_hun.sh",
+      "size": 4041,
+      "encoded_offset": 37205126,
+      "encoded_bytes": 4594,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/install_uifile_hun.sh",
+      "size": 6694,
+      "encoded_offset": 37209720,
+      "encoded_bytes": 7247,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/install_uifile_nld.sh",
+      "size": 6537,
+      "encoded_offset": 37216967,
+      "encoded_bytes": 7090,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/install_uifile_enu.sh",
+      "size": 6504,
+      "encoded_offset": 37224057,
+      "encoded_bytes": 7057,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/uninstall_uifile_nor.sh",
+      "size": 3939,
+      "encoded_offset": 37231114,
+      "encoded_bytes": 4492,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/install_uifile_tha.sh",
+      "size": 7656,
+      "encoded_offset": 37235606,
+      "encoded_bytes": 8209,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/uninstall_uifile_rus.sh",
+      "size": 4257,
+      "encoded_offset": 37243815,
+      "encoded_bytes": 4810,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/uninstall_uifile_dan.sh",
+      "size": 3938,
+      "encoded_offset": 37248625,
+      "encoded_bytes": 4491,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/install_uifile_nor.sh",
+      "size": 6500,
+      "encoded_offset": 37253116,
+      "encoded_bytes": 7053,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/uninstall_uifile_spn.sh",
+      "size": 4021,
+      "encoded_offset": 37260169,
+      "encoded_bytes": 4574,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/uninstall_uifile_csy.sh",
+      "size": 3993,
+      "encoded_offset": 37264743,
+      "encoded_bytes": 4546,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/uninstall_uifile_chs.sh",
+      "size": 3878,
+      "encoded_offset": 37269289,
+      "encoded_bytes": 4431,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/uninstall_uifile_ita.sh",
+      "size": 3994,
+      "encoded_offset": 37273720,
+      "encoded_bytes": 4547,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/uninstall_uifile_jpn.sh",
+      "size": 4016,
+      "encoded_offset": 37278267,
+      "encoded_bytes": 4569,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/uninstall_uifile_plk.sh",
+      "size": 4007,
+      "encoded_offset": 37282836,
+      "encoded_bytes": 4560,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/uninstall_uifile_sve.sh",
+      "size": 3963,
+      "encoded_offset": 37287396,
+      "encoded_bytes": 4516,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/install_uifile_rus.sh",
+      "size": 7251,
+      "encoded_offset": 37291912,
+      "encoded_bytes": 7804,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/uninstall_uifile_tha.sh",
+      "size": 4456,
+      "encoded_offset": 37299716,
+      "encoded_bytes": 5009,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/uninstall_uifile_krn.sh",
+      "size": 3964,
+      "encoded_offset": 37304725,
+      "encoded_bytes": 4517,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/install_uifile_sve.sh",
+      "size": 6510,
+      "encoded_offset": 37309242,
+      "encoded_bytes": 7063,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/uninstall_uifile_cht.sh",
+      "size": 3890,
+      "encoded_offset": 37316305,
+      "encoded_bytes": 4443,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/install_uifile_chs.sh",
+      "size": 6329,
+      "encoded_offset": 37320748,
+      "encoded_bytes": 6882,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/install_uifile_ita.sh",
+      "size": 6524,
+      "encoded_offset": 37327630,
+      "encoded_bytes": 7077,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/install_uifile_ptg.sh",
+      "size": 6648,
+      "encoded_offset": 37334707,
+      "encoded_bytes": 7201,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/uninstall_uifile_ptg.sh",
+      "size": 4037,
+      "encoded_offset": 37341908,
+      "encoded_bytes": 4590,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/uninstall_uifile_ptb.sh",
+      "size": 4011,
+      "encoded_offset": 37346498,
+      "encoded_bytes": 4564,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/install_uifile_jpn.sh",
+      "size": 6748,
+      "encoded_offset": 37351062,
+      "encoded_bytes": 7301,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/install_uifile_fre.sh",
+      "size": 6695,
+      "encoded_offset": 37358363,
+      "encoded_bytes": 7248,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "WIZARD_UIFILES/install_uifile_ger.sh",
+      "size": 6583,
+      "encoded_offset": 37365611,
+      "encoded_bytes": 7136,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "conf/systemd/pkg-synologydrive-syncd.service",
+      "size": 737,
+      "encoded_offset": 37372747,
+      "encoded_bytes": 1290,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "conf/systemd/pkg-synologydrive-apid.service",
+      "size": 901,
+      "encoded_offset": 37374037,
+      "encoded_bytes": 1454,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "conf/systemd/pkg-synologydrive-authd.service",
+      "size": 739,
+      "encoded_offset": 37375491,
+      "encoded_bytes": 1292,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "conf/systemd/pkg-synologydrive-clientd.service",
+      "size": 757,
+      "encoded_offset": 37376783,
+      "encoded_bytes": 1310,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "conf/systemd/pkg-synologydrive-redis.service",
+      "size": 689,
+      "encoded_offset": 37378093,
+      "encoded_bytes": 1242,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "conf/systemd/pkg-synologydrive-notifyd.service",
+      "size": 751,
+      "encoded_offset": 37379335,
+      "encoded_bytes": 1304,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "conf/systemd/pkg-synologydrive-vmtouchd.service",
+      "size": 758,
+      "encoded_offset": 37380639,
+      "encoded_bytes": 1311,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "conf/systemd/override/pkg-service",
+      "size": 57,
+      "encoded_offset": 37381950,
+      "encoded_bytes": 610,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "conf/systemd/pkg-synologydrive-workerd.service",
+      "size": 766,
+      "encoded_offset": 37382560,
+      "encoded_bytes": 1319,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "conf/privilege",
+      "size": 165,
+      "encoded_offset": 37383879,
+      "encoded_bytes": 718,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "conf/notification",
+      "size": 96,
+      "encoded_offset": 37384597,
+      "encoded_bytes": 649,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "conf/applauncher",
+      "size": 176,
+      "encoded_offset": 37385246,
+      "encoded_bytes": 729,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "conf/resource",
+      "size": 10297,
+      "encoded_offset": 37385975,
+      "encoded_bytes": 10850,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "scripts/backup/config",
+      "size": 34,
+      "encoded_offset": 37396825,
+      "encoded_bytes": 587,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "scripts/backup/can_export",
+      "size": 12442,
+      "encoded_offset": 37397412,
+      "encoded_bytes": 12995,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "scripts/backup/can_import",
+      "size": 53842,
+      "encoded_offset": 37410407,
+      "encoded_bytes": 54395,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "scripts/backup/export",
+      "size": 210411,
+      "encoded_offset": 37464802,
+      "encoded_bytes": 210964,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "scripts/backup/info",
+      "size": 27,
+      "encoded_offset": 37675766,
+      "encoded_bytes": 580,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "scripts/backup/estimate_exportion",
+      "size": 58018,
+      "encoded_offset": 37676346,
+      "encoded_bytes": 58571,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "scripts/backup/import",
+      "size": 164955,
+      "encoded_offset": 37734917,
+      "encoded_bytes": 165508,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "scripts/backup/version",
+      "size": 3,
+      "encoded_offset": 37900425,
+      "encoded_bytes": 556,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "scripts/backup/info.dynamic",
+      "size": 53922,
+      "encoded_offset": 37900981,
+      "encoded_bytes": 54475,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "scripts/preinst",
+      "size": 1148,
+      "encoded_offset": 37955456,
+      "encoded_bytes": 1701,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "scripts/preupgrade",
+      "size": 1817,
+      "encoded_offset": 37957157,
+      "encoded_bytes": 2370,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "scripts/diagnose",
+      "size": 253,
+      "encoded_offset": 37959527,
+      "encoded_bytes": 806,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "scripts/pkg_utils",
+      "size": 1682,
+      "encoded_offset": 37960333,
+      "encoded_bytes": 2235,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "scripts/postupgrade",
+      "size": 408,
+      "encoded_offset": 37962568,
+      "encoded_bytes": 961,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "scripts/postuninst",
+      "size": 18,
+      "encoded_offset": 37963529,
+      "encoded_bytes": 571,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "scripts/cstn_upgrade",
+      "size": 408,
+      "encoded_offset": 37964100,
+      "encoded_bytes": 961,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "scripts/preuninst",
+      "size": 2386,
+      "encoded_offset": 37965061,
+      "encoded_bytes": 2939,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "scripts/start-stop-status",
+      "size": 2100,
+      "encoded_offset": 37968000,
+      "encoded_bytes": 2653,
+      "entry_digest_verified": true
+    },
+    {
+      "member": "scripts/postinst",
+      "size": 3451,
+      "encoded_offset": 37970653,
+      "encoded_bytes": 4004,
+      "entry_digest_verified": true
+    }
+  ]
+}

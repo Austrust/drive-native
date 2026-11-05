@@ -1,0 +1,3320 @@
+{
+  "sha256": "cfcad81883c49285b34a986eec78dc4702bf8312d4b1d847a07b095fbb93ab3b",
+  "bytes": 8374811,
+  "machine": "x86-64",
+  "has_section_table": false,
+  "dynamic_symbol_count": 10479,
+  "pattern": "^_ZN13FilterChecker(4Test|14TestFileFilter|19TestDirectoryFilter|8SetError)",
+  "functions": [
+    {
+      "name": "_ZN13FilterChecker14TestFileFilterERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEm",
+      "address": "0x2607f0",
+      "size": 10458,
+      "disassembly": "function-2607f0.asm",
+      "references": [
+        {
+          "address": "0x26083f",
+          "instruction": "call 0x1b4ed0",
+          "references": [
+            "PLT:_ZN10ProfileSet4sizeEv"
+          ]
+        },
+        {
+          "address": "0x26085b",
+          "instruction": "call 0x1b4ed0",
+          "references": [
+            "PLT:_ZN10ProfileSet4sizeEv"
+          ]
+        },
+        {
+          "address": "0x2608b5",
+          "instruction": "call 0x1b39e0",
+          "references": [
+            "PLT:_ZN10ProfileSet12TestFilePathERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x2608ed",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x2608fc",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44fdcc]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x260927",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x260947",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x26096c",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x260974",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x26099d",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x2609b0",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44fd18]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x2609bc",
+          "instruction": "lea r9, [rip + 0x44f7d1]",
+          "references": [
+            "filter-checker.cpp.o"
+          ]
+        },
+        {
+          "address": "0x260a31",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x260a52",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x260a75",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x260a86",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44fc52]",
+          "references": [
+            "filtered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x260abd",
+          "instruction": "call 0x1b4da0",
+          "references": [
+            "PLT:_ZN13FilterChecker8SetErrorEiRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x260aeb",
+          "instruction": "call 0x1aef00",
+          "references": [
+            "PLT:_ZStplIcSt11char_traitsIcESaIcEENSt7__cxx1112basic_stringIT_T0_T1_EERKS8_SA_"
+          ]
+        },
+        {
+          "address": "0x260af4",
+          "instruction": "call 0x1af3f0",
+          "references": [
+            "PLT:_ZN10BlackList211getInstanceEii"
+          ]
+        },
+        {
+          "address": "0x260aff",
+          "instruction": "call 0x1aa090",
+          "references": [
+            "PLT:_ZN10BlackList212TestFilePathERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x260b42",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x260b5a",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44fb6e]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x260b7c",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x260b9c",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x260baa",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x260bdb",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x260c04",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x260c1f",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44faa9]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x260c27",
+          "instruction": "lea r9, [rip + 0x44f566]",
+          "references": [
+            "filter-checker.cpp.o"
+          ]
+        },
+        {
+          "address": "0x260c5b",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x260c7a",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x260c9d",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x260cb2",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44fa46]",
+          "references": [
+            "blacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x260cc1",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44fa47]",
+          "references": [
+            "ilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x260cf1",
+          "instruction": "call 0x1b4da0",
+          "references": [
+            "PLT:_ZN13FilterChecker8SetErrorEiRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x260d07",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x260d25",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x260d38",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x260d50",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44f978]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x260d72",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x260d95",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x260db4",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x260de5",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x260e0e",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x260e21",
+          "instruction": "lea r9, [rip + 0x44f36c]",
+          "references": [
+            "filter-checker.cpp.o"
+          ]
+        },
+        {
+          "address": "0x260e28",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44f8a0]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x260e6d",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x260e8d",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x260e96",
+          "instruction": "call 0x1af3f0",
+          "references": [
+            "PLT:_ZN10BlackList211getInstanceEii"
+          ]
+        },
+        {
+          "address": "0x260ea1",
+          "instruction": "call 0x1af280",
+          "references": [
+            "PLT:_ZN10BlackList212TestFileSizeEm"
+          ]
+        },
+        {
+          "address": "0x260ecc",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x260ee4",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44f7e4]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x260f06",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x260f22",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x260f42",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x260f73",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x260f9c",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x260fb3",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44f715]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x260fc1",
+          "instruction": "lea r9, [rip + 0x44f1cc]",
+          "references": [
+            "filter-checker.cpp.o"
+          ]
+        },
+        {
+          "address": "0x261002",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x261023",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x26108a",
+          "instruction": "lea rsi, [rip + 0x44f55c]",
+          "references": [
+            " filtered by file size."
+          ]
+        },
+        {
+          "address": "0x261094",
+          "instruction": "call 0x1afaf0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_appendEPKcm"
+          ]
+        },
+        {
+          "address": "0x2610a4",
+          "instruction": "call 0x1b4da0",
+          "references": [
+            "PLT:_ZN13FilterChecker8SetErrorEiRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x2610dd",
+          "instruction": "call 0x1b39e0",
+          "references": [
+            "PLT:_ZN10ProfileSet12TestFilePathERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x261115",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x261124",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44f5a4]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x26114f",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x26116f",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x261189",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x261191",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x2611ba",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x2611cc",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44f4fc]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x2611d8",
+          "instruction": "lea r9, [rip + 0x44efb5]",
+          "references": [
+            "filter-checker.cpp.o"
+          ]
+        },
+        {
+          "address": "0x261241",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x261262",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x261285",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x261296",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44f442]",
+          "references": [
+            "filtered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x2612cd",
+          "instruction": "call 0x1b4da0",
+          "references": [
+            "PLT:_ZN13FilterChecker8SetErrorEiRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x2612e7",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2612f8",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x261307",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44f3c1]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x261332",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x261355",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x26137f",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x26138b",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x2613b4",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x2613c4",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44f304]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x26141f",
+          "instruction": "lea r9, [rip + 0x44ed6e]",
+          "references": [
+            "filter-checker.cpp.o"
+          ]
+        },
+        {
+          "address": "0x261445",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x261466",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x261475",
+          "instruction": "call 0x1b4260",
+          "references": [
+            "PLT:_ZN10ProfileSet12TestFileSizeEm"
+          ]
+        },
+        {
+          "address": "0x2614a3",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x2614b2",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44f216]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x2614dd",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x2614fd",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x261522",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x26152a",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x261553",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x261562",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44f166]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x26157a",
+          "instruction": "lea r9, [rip + 0x44ec13]",
+          "references": [
+            "filter-checker.cpp.o"
+          ]
+        },
+        {
+          "address": "0x2615dc",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x2615fd",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x261620",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x261634",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44f0e4]",
+          "references": [
+            "filtered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x26165a",
+          "instruction": "call 0x1b4da0",
+          "references": [
+            "PLT:_ZN13FilterChecker8SetErrorEiRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x261679",
+          "instruction": "call 0x1ab780",
+          "references": [
+            "PLT:_ZN17SessionProfileSet4sizeEv"
+          ]
+        },
+        {
+          "address": "0x2616aa",
+          "instruction": "call 0x1aa500",
+          "references": [
+            "PLT:_ZN17SessionProfileSet12TestFilePathERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEES7_"
+          ]
+        },
+        {
+          "address": "0x2616e2",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x2616f1",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44efd7]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x26171c",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x26173c",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x261761",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x261769",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x261792",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x2617a5",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44ef23]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x2617b1",
+          "instruction": "lea r9, [rip + 0x44e9dc]",
+          "references": [
+            "filter-checker.cpp.o"
+          ]
+        },
+        {
+          "address": "0x261829",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x26184a",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x26186d",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x261881",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44ee57]",
+          "references": [
+            "filtered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x261894",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44ee94]",
+          "references": [
+            "path (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x2618af",
+          "instruction": "call 0x1b4da0",
+          "references": [
+            "PLT:_ZN13FilterChecker8SetErrorEiRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x2618de",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x2618f6",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44edd2]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x261918",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x26193b",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x26194f",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x261980",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x2619a9",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x2619bc",
+          "instruction": "lea r9, [rip + 0x44e7d1]",
+          "references": [
+            "filter-checker.cpp.o"
+          ]
+        },
+        {
+          "address": "0x2619c3",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44ed05]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x261a04",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x261a25",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x261a2e",
+          "instruction": "call 0x1af3f0",
+          "references": [
+            "PLT:_ZN10BlackList211getInstanceEii"
+          ]
+        },
+        {
+          "address": "0x261a3a",
+          "instruction": "call 0x1ad6d0",
+          "references": [
+            "PLT:_ZN10BlackList216TestFullPathSizeEm"
+          ]
+        },
+        {
+          "address": "0x261a60",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x261a70",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x261a7f",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44ec49]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x261aaa",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x261acd",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x261aec",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x261af8",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x261b21",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x261b30",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44eb98]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x261b7c",
+          "instruction": "lea r9, [rip + 0x44e611]",
+          "references": [
+            "filter-checker.cpp.o"
+          ]
+        },
+        {
+          "address": "0x261ba5",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x261bc4",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x261bd3",
+          "instruction": "call 0x1b4260",
+          "references": [
+            "PLT:_ZN10ProfileSet12TestFileSizeEm"
+          ]
+        },
+        {
+          "address": "0x261c01",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x261c10",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44eab8]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x261c3b",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x261c5e",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x261c72",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x261c7e",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x261ca7",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x261cb6",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44ea12]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x261cce",
+          "instruction": "lea r9, [rip + 0x44e4bf]",
+          "references": [
+            "filter-checker.cpp.o"
+          ]
+        },
+        {
+          "address": "0x261d24",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x261d43",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x261d53",
+          "instruction": "call 0x1b2220",
+          "references": [
+            "PLT:_ZN10ProfileSet16TestFullPathSizeEm"
+          ]
+        },
+        {
+          "address": "0x261d7e",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x261d8d",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44e93b]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x261db8",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x261dd8",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x261df4",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x261dfc",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x261e25",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x261e3c",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44e88c]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x261e44",
+          "instruction": "lea r9, [rip + 0x44e349]",
+          "references": [
+            "filter-checker.cpp.o"
+          ]
+        },
+        {
+          "address": "0x261e9f",
+          "instruction": "lea rdx, [rip + 0x44e40a]",
+          "references": [
+            "(%5d:%5d) [INFO] %s(%d): User (%d) donwloading (%s) rejected by file size filtered."
+          ]
+        },
+        {
+          "address": "0x261eab",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x261ecc",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x261eef",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x261f03",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44e7d5]",
+          "references": [
+            "filtered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x261f33",
+          "instruction": "call 0x1b4da0",
+          "references": [
+            "PLT:_ZN13FilterChecker8SetErrorEiRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x261f40",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x261f4f",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44e779]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x261f7a",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x261f9d",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x261fbc",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x261fc8",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x261ff1",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x262008",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44e6c0]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x262055",
+          "instruction": "lea r9, [rip + 0x44e138]",
+          "references": [
+            "filter-checker.cpp.o"
+          ]
+        },
+        {
+          "address": "0x26207b",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x26209c",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2620ac",
+          "instruction": "call 0x1b2220",
+          "references": [
+            "PLT:_ZN10ProfileSet16TestFullPathSizeEm"
+          ]
+        },
+        {
+          "address": "0x2620d7",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x2620e6",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44e5e2]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x262111",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x262131",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x262158",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x262160",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x262189",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x26219d",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44e52b]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x2621ec",
+          "instruction": "lea r9, [rip + 0x44dfa1]",
+          "references": [
+            "filter-checker.cpp.o"
+          ]
+        },
+        {
+          "address": "0x262214",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x262235",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x262258",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x26226c",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44e46c]",
+          "references": [
+            "filtered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x26229c",
+          "instruction": "call 0x1b4da0",
+          "references": [
+            "PLT:_ZN13FilterChecker8SetErrorEiRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x2622b0",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x2622bf",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44e409]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x2622ea",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x26230a",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x262323",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x262332",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x26235b",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x262372",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44e356]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x26237a",
+          "instruction": "lea r9, [rip + 0x44de13]",
+          "references": [
+            "filter-checker.cpp.o"
+          ]
+        },
+        {
+          "address": "0x2623e4",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x262405",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x26246c",
+          "instruction": "lea rsi, [rip + 0x44e192]",
+          "references": [
+            " has been filtered by size."
+          ]
+        },
+        {
+          "address": "0x262476",
+          "instruction": "call 0x1afaf0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_appendEPKcm"
+          ]
+        },
+        {
+          "address": "0x262486",
+          "instruction": "call 0x1b4da0",
+          "references": [
+            "PLT:_ZN13FilterChecker8SetErrorEiRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x2624c6",
+          "instruction": "call 0x1a8890",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x2624fe",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x262516",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44e1b2]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x262538",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x262551",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x26255f",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x26258d",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x2625b6",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x2625d1",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44e0f7]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x2625d9",
+          "instruction": "lea r9, [rip + 0x44dbb4]",
+          "references": [
+            "filter-checker.cpp.o"
+          ]
+        },
+        {
+          "address": "0x26260d",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x26262d",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x262650",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x262668",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44e070]",
+          "references": [
+            "filtered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x262694",
+          "instruction": "call 0x1b4da0",
+          "references": [
+            "PLT:_ZN13FilterChecker8SetErrorEiRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x2626a8",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x2626c8",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x2626d7",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44dff1]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x262702",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x262725",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x26274f",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x26275b",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x262784",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x262794",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44df34]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x2627ef",
+          "instruction": "lea r9, [rip + 0x44d99e]",
+          "references": [
+            "filter-checker.cpp.o"
+          ]
+        },
+        {
+          "address": "0x262818",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x262839",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x26284f",
+          "instruction": "call 0x1ad460",
+          "references": [
+            "PLT:_ZN17SessionProfileSet12TestFileSizeERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEm"
+          ]
+        },
+        {
+          "address": "0x262883",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x262892",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44de36]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x2628bd",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x2628dd",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x262902",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x26290a",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x262933",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x262946",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44dd82]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x262952",
+          "instruction": "lea r9, [rip + 0x44d83b]",
+          "references": [
+            "filter-checker.cpp.o"
+          ]
+        },
+        {
+          "address": "0x2629ca",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x2629eb",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x262a0e",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x262a22",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44dcf6]",
+          "references": [
+            "filtered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x262a35",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44dd03]",
+          "references": [
+            "size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x262a50",
+          "instruction": "call 0x1b4da0",
+          "references": [
+            "PLT:_ZN13FilterChecker8SetErrorEiRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x262a70",
+          "instruction": "call 0x1a8890",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x262a8d",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x262aa6",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x262ab5",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44dc13]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x262ae0",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x262b03",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x262b22",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x262b2e",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x262b57",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x262b6e",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44db5a]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x262bbb",
+          "instruction": "lea r9, [rip + 0x44d5d2]",
+          "references": [
+            "filter-checker.cpp.o"
+          ]
+        },
+        {
+          "address": "0x262be4",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x262c05",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x262c1c",
+          "instruction": "call 0x1b26f0",
+          "references": [
+            "PLT:_ZN17SessionProfileSet16TestFullPathSizeERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEm"
+          ]
+        },
+        {
+          "address": "0x262c47",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x262c56",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44da72]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x262c81",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x262ca1",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x262cc8",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x262cd0",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x262cf9",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x262d0d",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44d9bb]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x262d5c",
+          "instruction": "lea r9, [rip + 0x44d431]",
+          "references": [
+            "filter-checker.cpp.o"
+          ]
+        },
+        {
+          "address": "0x262d87",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x262da8",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x262dcb",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x262ddf",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44d8f9]",
+          "references": [
+            "filtered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x262e0f",
+          "instruction": "call 0x1b4da0",
+          "references": [
+            "PLT:_ZN13FilterChecker8SetErrorEiRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x262e19",
+          "instruction": "call 0x1aac10",
+          "references": [
+            "PLT:__stack_chk_fail"
+          ]
+        },
+        {
+          "address": "0x262e1e",
+          "instruction": "lea rdi, [rip + 0x44c37e]",
+          "references": [
+            "basic_string::append"
+          ]
+        },
+        {
+          "address": "0x262e25",
+          "instruction": "call 0x1adf90",
+          "references": [
+            "PLT:_ZSt20__throw_length_errorPKc"
+          ]
+        },
+        {
+          "address": "0x262e2a",
+          "instruction": "lea rdi, [rip + 0x44c372]",
+          "references": [
+            "basic_string::append"
+          ]
+        },
+        {
+          "address": "0x262e31",
+          "instruction": "call 0x1adf90",
+          "references": [
+            "PLT:_ZSt20__throw_length_errorPKc"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "_ZN13FilterChecker8SetErrorEiRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE",
+      "address": "0x25edd0",
+      "size": 24,
+      "disassembly": "function-25edd0.asm",
+      "references": [
+        {
+          "address": "0x25ede3",
+          "instruction": "jmp 0x1b4560",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_assignERKS4_"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "_ZN13FilterChecker4TestERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEm17SupportedFileType",
+      "address": "0x2630d0",
+      "size": 1122,
+      "disassembly": "function-2630d0.asm",
+      "references": [
+        {
+          "address": "0x263125",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x263137",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44d591]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x26315d",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x263179",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2631b3",
+          "instruction": "call 0x1b4da0",
+          "references": [
+            "PLT:_ZN13FilterChecker8SetErrorEiRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x2631c9",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2631ff",
+          "instruction": "jmp 0x1aa650",
+          "references": [
+            "PLT:_ZN13FilterChecker14TestFileFilterERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEm"
+          ]
+        },
+        {
+          "address": "0x26322f",
+          "instruction": "jmp 0x1b0d70",
+          "references": [
+            "PLT:_ZN13FilterChecker19TestDirectoryFilterERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x26324c",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x263258",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44d470]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x263283",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x26329c",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2632aa",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x2632b5",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x2632d5",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x2632e1",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44d3e7]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x2632ed",
+          "instruction": "lea r9, [rip + 0x44cea0]",
+          "references": [
+            "filter-checker.cpp.o"
+          ]
+        },
+        {
+          "address": "0x263351",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x26336b",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x263388",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x263399",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44d3af]",
+          "references": [
+            "unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x2633bf",
+          "instruction": "call 0x1b4da0",
+          "references": [
+            "PLT:_ZN13FilterChecker8SetErrorEiRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x2633d5",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x26340a",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x263416",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x263436",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x263444",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x44d284]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x263495",
+          "instruction": "lea r9, [rip + 0x44ccf8]",
+          "references": [
+            "filter-checker.cpp.o"
+          ]
+        },
+        {
+          "address": "0x2634bd",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x2634db",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2634e5",
+          "instruction": "call 0x1aac10",
+          "references": [
+            "PLT:__stack_chk_fail"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "_ZN13FilterChecker19TestDirectoryFilterERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE",
+      "address": "0x25f470",
+      "size": 4989,
+      "disassembly": "function-25f470.asm",
+      "references": [
+        {
+          "address": "0x25f4b9",
+          "instruction": "call 0x1b4ed0",
+          "references": [
+            "PLT:_ZN10ProfileSet4sizeEv"
+          ]
+        },
+        {
+          "address": "0x25f4ce",
+          "instruction": "call 0x1b4ed0",
+          "references": [
+            "PLT:_ZN10ProfileSet4sizeEv"
+          ]
+        },
+        {
+          "address": "0x25f529",
+          "instruction": "call 0x1b1ad0",
+          "references": [
+            "PLT:_ZN10ProfileSet17TestDirectoryPathERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x25f553",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x25f562",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x451166]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x25f58d",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x25f5a6",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x25f5d8",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x25f5e0",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x25f602",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x25f61c",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x4510ac]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x25f629",
+          "instruction": "lea r9, [rip + 0x450b64]",
+          "references": [
+            "filter-checker.cpp.o"
+          ]
+        },
+        {
+          "address": "0x25f69d",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x25f6b7",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x25f6d3",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x25f6e4",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x450ff4]",
+          "references": [
+            "filtered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x25f71b",
+          "instruction": "call 0x1b4da0",
+          "references": [
+            "PLT:_ZN13FilterChecker8SetErrorEiRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x25f746",
+          "instruction": "call 0x1aef00",
+          "references": [
+            "PLT:_ZStplIcSt11char_traitsIcESaIcEENSt7__cxx1112basic_stringIT_T0_T1_EERKS8_SA_"
+          ]
+        },
+        {
+          "address": "0x25f74f",
+          "instruction": "call 0x1af3f0",
+          "references": [
+            "PLT:_ZN10BlackList211getInstanceEii"
+          ]
+        },
+        {
+          "address": "0x25f75a",
+          "instruction": "call 0x1abe30",
+          "references": [
+            "PLT:_ZN10BlackList217TestDirectoryPathERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x25f790",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x25f7a8",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x450f20]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x25f7ca",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x25f7e6",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x25f80b",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x25f83c",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x25f85e",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x25f871",
+          "instruction": "lea r9, [rip + 0x45091c]",
+          "references": [
+            "filter-checker.cpp.o"
+          ]
+        },
+        {
+          "address": "0x25f878",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x450e50]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x25f8c0",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x25f8d8",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x25f8f4",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x25f909",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x450dcf]",
+          "references": [
+            "filtered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x25f939",
+          "instruction": "call 0x1b4da0",
+          "references": [
+            "PLT:_ZN13FilterChecker8SetErrorEiRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x25f94f",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x25f96d",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x25f980",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x25f998",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x450d30]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x25f9ba",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x25f9d3",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x25f9eb",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x25fa1c",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x25fa3e",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x25fa51",
+          "instruction": "lea r9, [rip + 0x45073c]",
+          "references": [
+            "filter-checker.cpp.o"
+          ]
+        },
+        {
+          "address": "0x25fa58",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x450c70]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x25fa9c",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x25fab6",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x25fabf",
+          "instruction": "call 0x1af3f0",
+          "references": [
+            "PLT:_ZN10BlackList211getInstanceEii"
+          ]
+        },
+        {
+          "address": "0x25facb",
+          "instruction": "call 0x1ad6d0",
+          "references": [
+            "PLT:_ZN10BlackList216TestFullPathSizeEm"
+          ]
+        },
+        {
+          "address": "0x25faf1",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x25fb19",
+          "instruction": "call 0x1b1ad0",
+          "references": [
+            "PLT:_ZN10ProfileSet17TestDirectoryPathERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x25fb43",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x25fb52",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x450b76]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x25fb7d",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x25fb96",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x25fbbd",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x25fbc5",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x25fbe7",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x25fbfb",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x450acd]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x25fc07",
+          "instruction": "lea r9, [rip + 0x450586]",
+          "references": [
+            "filter-checker.cpp.o"
+          ]
+        },
+        {
+          "address": "0x25fc75",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x25fc8f",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x25fcab",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x25fcbc",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x450a1c]",
+          "references": [
+            "filtered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x25fcf3",
+          "instruction": "call 0x1b4da0",
+          "references": [
+            "PLT:_ZN13FilterChecker8SetErrorEiRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x25fd0d",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x25fd20",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x25fd2f",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x450999]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x25fd5a",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x25fd76",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x25fd9b",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x25fda7",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x25fdc9",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x25fdd8",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x4508f0]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x25fe24",
+          "instruction": "lea r9, [rip + 0x450369]",
+          "references": [
+            "filter-checker.cpp.o"
+          ]
+        },
+        {
+          "address": "0x25fe50",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x25fe68",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x25fe7b",
+          "instruction": "call 0x1b2220",
+          "references": [
+            "PLT:_ZN10ProfileSet16TestFullPathSizeEm"
+          ]
+        },
+        {
+          "address": "0x25fe9f",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x25feb3",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x450825]",
+          "references": [
+            "filtered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x25fee3",
+          "instruction": "call 0x1b4da0",
+          "references": [
+            "PLT:_ZN13FilterChecker8SetErrorEiRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x25fefa",
+          "instruction": "call 0x1ab780",
+          "references": [
+            "PLT:_ZN17SessionProfileSet4sizeEv"
+          ]
+        },
+        {
+          "address": "0x25ff28",
+          "instruction": "call 0x1ad320",
+          "references": [
+            "PLT:_ZN17SessionProfileSet17TestDirectoryPathERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEES7_"
+          ]
+        },
+        {
+          "address": "0x25ff56",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x25ff65",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x450763]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x25ff90",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x25ffac",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x25ffd1",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x25ffdd",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x25ffff",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x26000e",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x4506ba]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x26005a",
+          "instruction": "lea r9, [rip + 0x450133]",
+          "references": [
+            "filter-checker.cpp.o"
+          ]
+        },
+        {
+          "address": "0x260086",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x26009e",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2600b8",
+          "instruction": "call 0x1b26f0",
+          "references": [
+            "PLT:_ZN17SessionProfileSet16TestFullPathSizeERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEm"
+          ]
+        },
+        {
+          "address": "0x2600dc",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x2600f0",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x4505e8]",
+          "references": [
+            "filtered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x260120",
+          "instruction": "call 0x1b4da0",
+          "references": [
+            "PLT:_ZN13FilterChecker8SetErrorEiRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x260130",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x26013f",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x450589]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x26016a",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x260186",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2601ab",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x2601b7",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x2601d9",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x2601e8",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x4504e0]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x260234",
+          "instruction": "lea r9, [rip + 0x44ff59]",
+          "references": [
+            "filter-checker.cpp.o"
+          ]
+        },
+        {
+          "address": "0x260260",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x260279",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x26028c",
+          "instruction": "call 0x1b2220",
+          "references": [
+            "PLT:_ZN10ProfileSet16TestFullPathSizeEm"
+          ]
+        },
+        {
+          "address": "0x2602b0",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x2602bf",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x450409]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x2602ea",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x260303",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x26032a",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x260332",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x260354",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x26036b",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x45035d]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x260373",
+          "instruction": "lea r9, [rip + 0x44fe1a]",
+          "references": [
+            "filter-checker.cpp.o"
+          ]
+        },
+        {
+          "address": "0x2603d6",
+          "instruction": "lea rdx, [rip + 0x44fed3]",
+          "references": [
+            "(%5d:%5d) [INFO] %s(%d): User (%d) donwloading (%s) rejected by file size filtered."
+          ]
+        },
+        {
+          "address": "0x2603e2",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x2603fc",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x260418",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x26042c",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x4502ac]",
+          "references": [
+            "filtered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x26045c",
+          "instruction": "call 0x1b4da0",
+          "references": [
+            "PLT:_ZN13FilterChecker8SetErrorEiRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x260487",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x26049f",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x450229]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x2604c1",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x2604da",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2604e8",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x26051d",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x26053f",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x260552",
+          "instruction": "lea r9, [rip + 0x44fc3b]",
+          "references": [
+            "filter-checker.cpp.o"
+          ]
+        },
+        {
+          "address": "0x260559",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x45016f]",
+          "references": [
+            "filter_checker_dfiltered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x26059d",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x2605b7",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2605d3",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x2605eb",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x4500ed]",
+          "references": [
+            "filtered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x260617",
+          "instruction": "call 0x1b4da0",
+          "references": [
+            "PLT:_ZN13FilterChecker8SetErrorEiRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x260642",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x260654",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x450084]",
+          "references": [
+            "filtered by path of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x26067f",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x450069]",
+          "references": [
+            " of read only prblacklist filterilter it by pathfiltered by sizepath (read only)size (read only)unknown file typfs-commit.cpp.o"
+          ]
+        },
+        {
+          "address": "0x26069a",
+          "instruction": "call 0x1b4da0",
+          "references": [
+            "PLT:_ZN13FilterChecker8SetErrorEiRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x2606a4",
+          "instruction": "call 0x1aac10",
+          "references": [
+            "PLT:__stack_chk_fail"
+          ]
+        }
+      ]
+    }
+  ],
+  "binary_executed": false,
+  "method": "PT_DYNAMIC and GNU/SysV hash; bounded dynamic symbols; RIP references and direct/PLT calls; no execution"
+}

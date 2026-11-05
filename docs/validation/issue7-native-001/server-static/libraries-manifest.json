@@ -1,0 +1,23 @@
+[
+  {
+    "member": "lib/libsynosyncserver.so",
+    "file": "libsynosyncserver.so.elf",
+    "bytes": 3193715,
+    "sha256": "1677fcc08004cb9128ebd4efccd0d7053586de87042dd54880bc3e2e124b617c",
+    "executed": false
+  },
+  {
+    "member": "lib/libsynosyncservercore.so",
+    "file": "libsynosyncservercore.so.elf",
+    "bytes": 8374811,
+    "sha256": "cfcad81883c49285b34a986eec78dc4702bf8312d4b1d847a07b095fbb93ab3b",
+    "executed": false
+  },
+  {
+    "member": "lib/libsynodrivecommon.so.7.0",
+    "file": "libsynodrivecommon.so.7.0.elf",
+    "bytes": 276753,
+    "sha256": "9f213f24bd8c4a3e9e3bbfbd5033e27086f98176b01cd824196e1846a057f32e",
+    "executed": false
+  }
+]

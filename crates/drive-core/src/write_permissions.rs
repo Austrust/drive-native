@@ -388,7 +388,7 @@ pub fn namespace_targets(kind: &str, body: &str) -> Result<Vec<(String, Action)>
         "rename" => {
             let j: crate::namespace::RenameJob = serde_json::from_str(body)?;
             if let Some(p) = j.node.parent {
-                targets.push((p, Action::RenameSource));
+                targets.push((p, Action::Traverse));
             }
             targets.push((j.node.id, Action::RenameSource));
             targets.push((j.parent_node.id, Action::RenameTarget));
@@ -396,22 +396,18 @@ pub fn namespace_targets(kind: &str, body: &str) -> Result<Vec<(String, Action)>
         "remove" => {
             let j: crate::removals::RemoveJob = serde_json::from_str(body)?;
             if let Some(p) = j.node.parent {
-                targets.push((p.clone(), Action::Delete));
-                if j.node.directory {
-                    targets.push((p, Action::CreateDir));
-                }
+                targets.push((p, Action::Traverse));
             }
             targets.push((j.node.id, Action::Delete));
         }
         "replace" => {
             let j: crate::replacements::ReplaceJob = serde_json::from_str(body)?;
             if let Some(p) = j.source.parent {
-                targets.push((p, Action::RenameSource));
+                targets.push((p, Action::Traverse));
             }
             targets.push((j.source.id, Action::RenameSource));
             if let Some(p) = j.target.parent {
-                targets.push((p.clone(), Action::RenameTarget));
-                targets.push((p, Action::Delete));
+                targets.push((p, Action::RenameTarget));
             }
             targets.push((j.target.id, Action::Delete));
         }
@@ -919,6 +915,37 @@ mod tests {
         assert_eq!(decide(&s, "root", &file.id, Action::WriteContent).unwrap(), Decision::Deny);
         inject(&s, "root", "A", Action::CreateFile, Decision::Unknown).unwrap();
         assert_eq!(decide(&s, "root", &file.id, Action::WriteContent).unwrap(), Decision::Allow);
+    }
+
+    #[test]
+    fn parent_self_denials_do_not_stall_child_remove_or_rename_journals() {
+        let (_d, mut s) = fixture();
+        inject(&s, "root", "A", Action::Delete, Decision::Deny).unwrap();
+        inject(&s, "root", "A", Action::CreateDir, Decision::Deny).unwrap();
+        inject(&s, "root", "f", Action::Delete, Decision::Allow).unwrap();
+        s.unlink_local("A", "f", "f", false).unwrap();
+        let job = s.scheduled_remove().unwrap().unwrap();
+        assert_eq!(job.job.node.id, "f");
+        inject(&s, "root", "A", Action::Traverse, Decision::Deny).unwrap();
+        assert!(s.scheduled_remove().unwrap().is_none());
+        inject(&s, "root", "A", Action::Traverse, Decision::Unknown).unwrap();
+        inject(&s, "root", "f", Action::Delete, Decision::Deny).unwrap();
+        assert!(s.scheduled_remove().unwrap().is_none());
+        inject(&s, "root", "f", Action::Delete, Decision::Allow).unwrap();
+        assert_eq!(s.scheduled_remove().unwrap().unwrap().job.operation, job.job.operation);
+
+        let (_d, mut s) = fixture();
+        inject(&s, "root", "A", Action::RenameSource, Decision::Deny).unwrap();
+        inject(&s, "root", "B", Action::Delete, Decision::Deny).unwrap();
+        s.rename_local("A", "f", "B", "moved", false).unwrap();
+        assert!(s.scheduled_rename().unwrap().is_some());
+        inject(&s, "root", "B", Action::RenameTarget, Decision::Deny).unwrap();
+        assert!(s.scheduled_rename().unwrap().is_none());
+        inject(&s, "root", "B", Action::RenameTarget, Decision::Unknown).unwrap();
+        inject(&s, "root", "f", Action::RenameSource, Decision::Deny).unwrap();
+        assert!(s.scheduled_rename().unwrap().is_none());
+        inject(&s, "root", "f", Action::RenameSource, Decision::Allow).unwrap();
+        assert!(s.scheduled_rename().unwrap().is_some());
     }
 
 }

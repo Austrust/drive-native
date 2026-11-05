@@ -1,0 +1,952 @@
+{
+  "sha256": "e2288b191e8db97673c3468595e3a2d441579d2da365927c1108c000549fdf9c",
+  "bytes": 8052033,
+  "machine": "x86-64",
+  "has_section_table": false,
+  "dynamic_symbol_count": 7522,
+  "pattern": "^_ZN8SyncTask(13RunFlowHeader|11RunFlowBody)",
+  "functions": [
+    {
+      "name": "_ZN8SyncTask13RunFlowHeaderEv",
+      "address": "0x220f00",
+      "size": 2626,
+      "disassembly": "function-220f00.asm",
+      "references": [
+        {
+          "address": "0x220f36",
+          "instruction": "call 0xedf60",
+          "references": [
+            "PLT:_Znwm"
+          ]
+        },
+        {
+          "address": "0x220f7c",
+          "instruction": "call 0xeef70",
+          "references": [
+            "PLT:gettimeofday"
+          ]
+        },
+        {
+          "address": "0x220fc7",
+          "instruction": "call 0x53b920",
+          "references": [
+            "_ZNK10Connection9GetStatusEv"
+          ]
+        },
+        {
+          "address": "0x220fe2",
+          "instruction": "call 0x555280",
+          "references": [
+            "_ZNK6Router17RouteAfterConnectER10Connection"
+          ]
+        },
+        {
+          "address": "0x22102b",
+          "instruction": "call 0xf02e0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x221044",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x22105f",
+          "instruction": "call 0x21e750",
+          "references": [
+            "_ZN8SyncTask15CloseConnectionEv"
+          ]
+        },
+        {
+          "address": "0x2210ad",
+          "instruction": "jmp 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2210b8",
+          "instruction": "call 0xf02e0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x2210d1",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2210f2",
+          "instruction": "call 0x53b930",
+          "references": [
+            "_ZN10Connection9SetStatusENS_6StatusE"
+          ]
+        },
+        {
+          "address": "0x221133",
+          "instruction": "call 0xf02e0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x22114c",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x221168",
+          "instruction": "call 0x53b380",
+          "references": [
+            "_ZNK10Connection5GetIdEv"
+          ]
+        },
+        {
+          "address": "0x221173",
+          "instruction": "call 0xec090",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x22117b",
+          "instruction": "call 0xf0e50",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x2211a6",
+          "instruction": "lea r9, [rip + 0x4c0e5a]",
+          "references": [
+            "sync-task.cpp.o"
+          ]
+        },
+        {
+          "address": "0x2211f4",
+          "instruction": "call 0xf04a0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x22120c",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x221226",
+          "instruction": "call 0x5552d0",
+          "references": [
+            "_ZNK6Router15RouteBeforeReadER10Connection"
+          ]
+        },
+        {
+          "address": "0x221235",
+          "instruction": "call 0x21e9d0",
+          "references": [
+            "_ZN8SyncTask10ReadHeaderEv"
+          ]
+        },
+        {
+          "address": "0x221257",
+          "instruction": "call 0x551e40",
+          "references": [
+            "_ZNK7Request9GetActionB5cxx11Ev"
+          ]
+        },
+        {
+          "address": "0x221262",
+          "instruction": "call 0x555bc0",
+          "references": [
+            "_ZN6Router9SetActionERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x22127b",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2212a2",
+          "instruction": "call 0x555400",
+          "references": [
+            "_ZNK6Router22RouteOnHeaderReadErrorER7Request"
+          ]
+        },
+        {
+          "address": "0x2212aa",
+          "instruction": "call 0x21e750",
+          "references": [
+            "_ZN8SyncTask15CloseConnectionEv"
+          ]
+        },
+        {
+          "address": "0x2212be",
+          "instruction": "call 0xeef70",
+          "references": [
+            "PLT:gettimeofday"
+          ]
+        },
+        {
+          "address": "0x221313",
+          "instruction": "call 0x53b920",
+          "references": [
+            "_ZNK10Connection9GetStatusEv"
+          ]
+        },
+        {
+          "address": "0x221338",
+          "instruction": "call 0x551e40",
+          "references": [
+            "_ZNK7Request9GetActionB5cxx11Ev"
+          ]
+        },
+        {
+          "address": "0x221343",
+          "instruction": "call 0x555bc0",
+          "references": [
+            "_ZN6Router9SetActionERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x22135c",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2213b2",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2213d0",
+          "instruction": "call 0x555260",
+          "references": [
+            "_ZN6Router14IsLongTermTaskEv"
+          ]
+        },
+        {
+          "address": "0x2213f5",
+          "instruction": "call 0xedf60",
+          "references": [
+            "PLT:_Znwm"
+          ]
+        },
+        {
+          "address": "0x221400",
+          "instruction": "call 0xea820",
+          "references": [
+            "PLT:_ZN3cat8RunnableC2Ev"
+          ]
+        },
+        {
+          "address": "0x221405",
+          "instruction": "lea rax, [rip + 0x57da8c]",
+          "references": [
+            "@%\""
+          ]
+        },
+        {
+          "address": "0x221484",
+          "instruction": "call 0xf02e0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x22149d",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2214c1",
+          "instruction": "call 0x551e40",
+          "references": [
+            "_ZNK7Request9GetActionB5cxx11Ev"
+          ]
+        },
+        {
+          "address": "0x2214d1",
+          "instruction": "call 0xec090",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x2214d9",
+          "instruction": "call 0xf0e50",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x221510",
+          "instruction": "lea r9, [rip + 0x4c0af0]",
+          "references": [
+            "sync-task.cpp.o"
+          ]
+        },
+        {
+          "address": "0x221556",
+          "instruction": "call 0xf04a0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x22156e",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x22158c",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2215ae",
+          "instruction": "call 0x53b380",
+          "references": [
+            "_ZNK10Connection5GetIdEv"
+          ]
+        },
+        {
+          "address": "0x2215b9",
+          "instruction": "call 0xec090",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x2215c1",
+          "instruction": "call 0xf0e50",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x2215f7",
+          "instruction": "lea r9, [rip + 0x4c0a09]",
+          "references": [
+            "sync-task.cpp.o"
+          ]
+        },
+        {
+          "address": "0x22163a",
+          "instruction": "call 0xf04a0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x221657",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x22166b",
+          "instruction": "call 0x53b380",
+          "references": [
+            "_ZNK10Connection5GetIdEv"
+          ]
+        },
+        {
+          "address": "0x221676",
+          "instruction": "call 0xec090",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x22167e",
+          "instruction": "call 0xf0e50",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x2216b4",
+          "instruction": "lea r9, [rip + 0x4c094c]",
+          "references": [
+            "sync-task.cpp.o"
+          ]
+        },
+        {
+          "address": "0x2216f7",
+          "instruction": "call 0xf04a0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x221715",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x22175c",
+          "instruction": "call 0xf02e0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x221775",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x221791",
+          "instruction": "call 0x53b380",
+          "references": [
+            "_ZNK10Connection5GetIdEv"
+          ]
+        },
+        {
+          "address": "0x22179c",
+          "instruction": "call 0xec090",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x2217a4",
+          "instruction": "call 0xf0e50",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x2217da",
+          "instruction": "lea r9, [rip + 0x4c0826]",
+          "references": [
+            "sync-task.cpp.o"
+          ]
+        },
+        {
+          "address": "0x22181d",
+          "instruction": "call 0xf04a0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x221837",
+          "instruction": "call 0x220610",
+          "references": [
+            "_ZN8SyncTask11RunFlowBodyEv"
+          ]
+        },
+        {
+          "address": "0x22184d",
+          "instruction": "call 0xeef70",
+          "references": [
+            "PLT:gettimeofday"
+          ]
+        },
+        {
+          "address": "0x221895",
+          "instruction": "call 0xead00",
+          "references": [
+            "PLT:__stack_chk_fail"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "_ZN8SyncTask11RunFlowBodyEv",
+      "address": "0x220610",
+      "size": 2275,
+      "disassembly": "function-220610.asm",
+      "references": [
+        {
+          "address": "0x220682",
+          "instruction": "call 0xeef70",
+          "references": [
+            "PLT:gettimeofday"
+          ]
+        },
+        {
+          "address": "0x2206d7",
+          "instruction": "call 0x555320",
+          "references": [
+            "_ZNK6Router20RouteAfterHeaderReadER7RequestR8Response"
+          ]
+        },
+        {
+          "address": "0x2206e7",
+          "instruction": "call 0x21fed0",
+          "references": [
+            "_ZN8SyncTask8ReadBodyEv"
+          ]
+        },
+        {
+          "address": "0x22070d",
+          "instruction": "call 0x555390",
+          "references": [
+            "_ZNK6Router18RouteAfterBodyReadER7RequestR8Response"
+          ]
+        },
+        {
+          "address": "0x220732",
+          "instruction": "call 0x551e40",
+          "references": [
+            "_ZNK7Request9GetActionB5cxx11Ev"
+          ]
+        },
+        {
+          "address": "0x22073a",
+          "instruction": "lea rsi, [rip + 0x48ed08]",
+          "references": [
+            "test_connection"
+          ]
+        },
+        {
+          "address": "0x220745",
+          "instruction": "call 0xf0620",
+          "references": [
+            "PLT:_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE7compareEPKc"
+          ]
+        },
+        {
+          "address": "0x220761",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x22077f",
+          "instruction": "call 0x5542c0",
+          "references": [
+            "_ZN8Response16SetAutoWriteBackEb"
+          ]
+        },
+        {
+          "address": "0x220792",
+          "instruction": "call 0x53b550",
+          "references": [
+            "_ZN10Connection10GetChannelEv"
+          ]
+        },
+        {
+          "address": "0x22079d",
+          "instruction": "call 0x555bb0",
+          "references": [
+            "_ZNK6Router5RouteER7Channel"
+          ]
+        },
+        {
+          "address": "0x2207ab",
+          "instruction": "call 0x21ed50",
+          "references": [
+            "_ZN8SyncTask11DiscardBodyEv"
+          ]
+        },
+        {
+          "address": "0x2207c3",
+          "instruction": "call 0x5542d0",
+          "references": [
+            "_ZNK8Response15IsAutoWriteBackEv"
+          ]
+        },
+        {
+          "address": "0x2207e5",
+          "instruction": "call 0x5559a0",
+          "references": [
+            "_ZNK6Router15RouteBeforeSendER7RequestR8Response"
+          ]
+        },
+        {
+          "address": "0x2207ed",
+          "instruction": "call 0x21f2b0",
+          "references": [
+            "_ZN8SyncTask11WriteHeaderEv"
+          ]
+        },
+        {
+          "address": "0x2207fd",
+          "instruction": "call 0x21f5e0",
+          "references": [
+            "_ZN8SyncTask9WriteBodyEv"
+          ]
+        },
+        {
+          "address": "0x220823",
+          "instruction": "call 0x555a10",
+          "references": [
+            "_ZNK6Router14RouteAfterSentER7RequestR8Response"
+          ]
+        },
+        {
+          "address": "0x220833",
+          "instruction": "call 0x5542f0",
+          "references": [
+            "_ZNK8Response18IsDetachConnectionEv"
+          ]
+        },
+        {
+          "address": "0x22084b",
+          "instruction": "call 0x553b00",
+          "references": [
+            "_ZN8Response9GetHeaderEv"
+          ]
+        },
+        {
+          "address": "0x22088e",
+          "instruction": "call 0xeadf0",
+          "references": [
+            "PLT:_ZNK7PObject9hasMemberERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x2208b2",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x220907",
+          "instruction": "call 0xf02e0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x220923",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x220938",
+          "instruction": "call 0x53b380",
+          "references": [
+            "_ZNK10Connection5GetIdEv"
+          ]
+        },
+        {
+          "address": "0x220940",
+          "instruction": "call 0xec090",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x220948",
+          "instruction": "call 0xf0e50",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x220972",
+          "instruction": "lea r9, [rip + 0x4c168e]",
+          "references": [
+            "sync-task.cpp.o"
+          ]
+        },
+        {
+          "address": "0x2209c9",
+          "instruction": "call 0xf04a0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x2209e4",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2209ee",
+          "instruction": "call 0xf0c50",
+          "references": [
+            "PLT:sleep"
+          ]
+        },
+        {
+          "address": "0x2209fb",
+          "instruction": "call 0x21e750",
+          "references": [
+            "_ZN8SyncTask15CloseConnectionEv"
+          ]
+        },
+        {
+          "address": "0x220a45",
+          "instruction": "call 0xeef70",
+          "references": [
+            "PLT:gettimeofday"
+          ]
+        },
+        {
+          "address": "0x220a90",
+          "instruction": "call 0x555470",
+          "references": [
+            "_ZNK6Router20RouteOnBodyReadErrorER7Request"
+          ]
+        },
+        {
+          "address": "0x220aa0",
+          "instruction": "call 0x555b40",
+          "references": [
+            "_ZNK6Router21RouteOnBodyWriteErrorER7RequestR8Response"
+          ]
+        },
+        {
+          "address": "0x220ac9",
+          "instruction": "call 0x555ad0",
+          "references": [
+            "_ZNK6Router23RouteOnHeaderWriteErrorER7RequestR8Response"
+          ]
+        },
+        {
+          "address": "0x220ae6",
+          "instruction": "call 0x5554e0",
+          "references": [
+            "_ZNK6Router5RouteER7RequestR8Response"
+          ]
+        },
+        {
+          "address": "0x220afb",
+          "instruction": "call 0x553b00",
+          "references": [
+            "_ZN8Response9GetHeaderEv"
+          ]
+        },
+        {
+          "address": "0x220b39",
+          "instruction": "call 0xf1030",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x220b41",
+          "instruction": "call 0xed890",
+          "references": [
+            "PLT:_ZNK7PObject8asUInt32Ev"
+          ]
+        },
+        {
+          "address": "0x220b60",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x220b7c",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x220b9b",
+          "instruction": "call 0x53b930",
+          "references": [
+            "_ZN10Connection9SetStatusENS_6StatusE"
+          ]
+        },
+        {
+          "address": "0x220ba7",
+          "instruction": "call 0x53b5a0",
+          "references": [
+            "_ZN10Connection13ReturnToEpollEv"
+          ]
+        },
+        {
+          "address": "0x220bf2",
+          "instruction": "call 0xf02e0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x220c11",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x220c30",
+          "instruction": "call 0x553b00",
+          "references": [
+            "_ZN8Response9GetHeaderEv"
+          ]
+        },
+        {
+          "address": "0x220c65",
+          "instruction": "call 0xf1030",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x220c6d",
+          "instruction": "call 0xed890",
+          "references": [
+            "PLT:_ZNK7PObject8asUInt32Ev"
+          ]
+        },
+        {
+          "address": "0x220c75",
+          "instruction": "call 0xf0e50",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x220c8c",
+          "instruction": "call 0x53b380",
+          "references": [
+            "_ZNK10Connection5GetIdEv"
+          ]
+        },
+        {
+          "address": "0x220c9d",
+          "instruction": "call 0xec090",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x220ca9",
+          "instruction": "call 0xf0e50",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x220cd0",
+          "instruction": "lea r9, [rip + 0x4c1330]",
+          "references": [
+            "sync-task.cpp.o"
+          ]
+        },
+        {
+          "address": "0x220d33",
+          "instruction": "call 0xf04a0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x220d50",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x220d70",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x220d85",
+          "instruction": "call 0xf02e0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x220da1",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x220db6",
+          "instruction": "call 0x53b380",
+          "references": [
+            "_ZNK10Connection5GetIdEv"
+          ]
+        },
+        {
+          "address": "0x220dbe",
+          "instruction": "call 0xec090",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x220dc6",
+          "instruction": "call 0xf0e50",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x220df0",
+          "instruction": "lea r9, [rip + 0x4c1210]",
+          "references": [
+            "sync-task.cpp.o"
+          ]
+        },
+        {
+          "address": "0x220e47",
+          "instruction": "call 0xf04a0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x220e66",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x220e70",
+          "instruction": "call 0xead00",
+          "references": [
+            "PLT:__stack_chk_fail"
+          ]
+        }
+      ]
+    }
+  ],
+  "binary_executed": false,
+  "method": "PT_DYNAMIC and GNU/SysV hash; bounded dynamic symbols; RIP references and direct/PLT calls; no execution"
+}

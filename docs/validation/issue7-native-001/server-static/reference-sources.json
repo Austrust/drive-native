@@ -1,0 +1,20 @@
+[
+  {
+    "repository": "synacktiv/synodecrypt",
+    "commit": null,
+    "source_url": "https://raw.githubusercontent.com/synacktiv/synodecrypt/main/synodecrypt.py",
+    "file": "synacktiv-synodecrypt.py.txt",
+    "bytes": 8261,
+    "sha256": "b773c71fb8aeefae4bbd01dfcbf6d75eaa534a3abb0a2c519f6e3db2290dcff5",
+    "executed": false
+  },
+  {
+    "repository": "prt1999/SynoXtract",
+    "commit": null,
+    "source_url": "https://raw.githubusercontent.com/prt1999/SynoXtract/main/main.cpp",
+    "file": "prt1999-main.cpp.txt",
+    "bytes": 29793,
+    "sha256": "02201e5a4ffa01b91a61b986095e7bcc53261dcd5d1de74731de80016fc31dc6",
+    "executed": false
+  }
+]

@@ -1,0 +1,1624 @@
+{
+  "sha256": "cfcad81883c49285b34a986eec78dc4702bf8312d4b1d847a07b095fbb93ab3b",
+  "bytes": 8374811,
+  "machine": "x86-64",
+  "has_section_table": false,
+  "dynamic_symbol_count": 10479,
+  "pattern": "NodeCapability.*LoadAclByPath|DriveAcl13GetCapability|DriveAcl.*GetPermission|DriveAcl.*CanDelete",
+  "functions": [
+    {
+      "name": "_ZN8DriveAcl13GetCapabilityERKNS_8UserInfoEjPNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEES9_",
+      "address": "0x25b7a0",
+      "size": 2896,
+      "disassembly": "function-25b7a0.asm",
+      "references": [
+        {
+          "address": "0x25b7e3",
+          "instruction": "call 0x1b4c80",
+          "references": [
+            "PLT:_ZN8DriveAcl10CapabilityC1Ev"
+          ]
+        },
+        {
+          "address": "0x25b835",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x25b84d",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x25b8f2",
+          "instruction": "call 0x1b3510",
+          "references": [
+            "PLT:_ZN8DriveAcl12IsAccessibleERKNS_8UserInfoEjRjRSt6vectorINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESaISA_EE"
+          ]
+        },
+        {
+          "address": "0x25b9b4",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x25ba73",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x25bacc",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x25baed",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x25bbd2",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x25bc96",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x25bcc7",
+          "instruction": "call 0x1b0f40",
+          "references": [
+            "PLT:_ZN8DriveAcl19CalculatePermissionERKNS_8UserInfoEjj"
+          ]
+        },
+        {
+          "address": "0x25bce4",
+          "instruction": "call 0x1b4430",
+          "references": [
+            "PLT:_ZN8DriveAcl15CheckPermissionERKNS_8UserInfoEjjj"
+          ]
+        },
+        {
+          "address": "0x25bd30",
+          "instruction": "call 0x1b4430",
+          "references": [
+            "PLT:_ZN8DriveAcl15CheckPermissionERKNS_8UserInfoEjjj"
+          ]
+        },
+        {
+          "address": "0x25bdc8",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x25bdd0",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x25bdf3",
+          "instruction": "lea r9, [rip + 0x45404c]",
+          "references": [
+            "drive-acl.cpp.o"
+          ]
+        },
+        {
+          "address": "0x25be42",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x25be5e",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x25be93",
+          "instruction": "call 0x1b4430",
+          "references": [
+            "PLT:_ZN8DriveAcl15CheckPermissionERKNS_8UserInfoEjjj"
+          ]
+        },
+        {
+          "address": "0x25bec5",
+          "instruction": "call 0x1b4430",
+          "references": [
+            "PLT:_ZN8DriveAcl15CheckPermissionERKNS_8UserInfoEjjj"
+          ]
+        },
+        {
+          "address": "0x25beec",
+          "instruction": "call 0x1b4430",
+          "references": [
+            "PLT:_ZN8DriveAcl15CheckPermissionERKNS_8UserInfoEjjj"
+          ]
+        },
+        {
+          "address": "0x25bf1e",
+          "instruction": "call 0x1b4430",
+          "references": [
+            "PLT:_ZN8DriveAcl15CheckPermissionERKNS_8UserInfoEjjj"
+          ]
+        },
+        {
+          "address": "0x25bfec",
+          "instruction": "call 0x1a8890",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x25c015",
+          "instruction": "call 0x1a8890",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x25c033",
+          "instruction": "call 0x1a8890",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x25c082",
+          "instruction": "call 0x1b4430",
+          "references": [
+            "PLT:_ZN8DriveAcl15CheckPermissionERKNS_8UserInfoEjjj"
+          ]
+        },
+        {
+          "address": "0x25c0a6",
+          "instruction": "call 0x1a8890",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x25c0e1",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x25c106",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x25c128",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x25c14d",
+          "instruction": "call 0x1aede0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x25c1df",
+          "instruction": "call 0x1aac10",
+          "references": [
+            "PLT:__stack_chk_fail"
+          ]
+        },
+        {
+          "address": "0x25c1fa",
+          "instruction": "call 0x1a8890",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x25c233",
+          "instruction": "call 0x1a8890",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x25c26c",
+          "instruction": "call 0x1a8890",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x25c2a7",
+          "instruction": "call 0x1a8890",
+          "references": [
+            "PLT:memcpy"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "_ZN9synodrive4core14NodeCapability18NodeCapabilityImpl13LoadAclByPathERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEERKN2db4NodeERKN3SDK20SimpleSharePrivilegeERKN8DriveAcl8UserInfoERSJ_RiRS8_",
+      "address": "0x2f5330",
+      "size": 14238,
+      "disassembly": "function-2f5330.asm",
+      "references": [
+        {
+          "address": "0x2f53b1",
+          "instruction": "call 0x1ab430",
+          "references": [
+            "PLT:__cxa_guard_acquire"
+          ]
+        },
+        {
+          "address": "0x2f53d2",
+          "instruction": "call 0x1b54f0",
+          "references": [
+            "PLT:_ZN2db4NodeC1ERKS0_"
+          ]
+        },
+        {
+          "address": "0x2f53da",
+          "instruction": "call 0x1adb00",
+          "references": [
+            "PLT:_ZNK2db4Node7getPathB5cxx11Ev"
+          ]
+        },
+        {
+          "address": "0x2f53f3",
+          "instruction": "call 0x1b3480",
+          "references": [
+            "PLT:_Z13NormalizePathRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x2f5405",
+          "instruction": "call 0x1b5080",
+          "references": [
+            "PLT:_ZN2db11ViewManager9getViewIdEv"
+          ]
+        },
+        {
+          "address": "0x2f54b0",
+          "instruction": "call 0x1add00",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE12_M_constructEmc"
+          ]
+        },
+        {
+          "address": "0x2f5570",
+          "instruction": "call 0x1b4560",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_assignERKS4_"
+          ]
+        },
+        {
+          "address": "0x2f561a",
+          "instruction": "call 0x1afaf0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_appendEPKcm"
+          ]
+        },
+        {
+          "address": "0x2f5626",
+          "instruction": "call 0x1b2b30",
+          "references": [
+            "PLT:_ZNK2db4Node9getSyncIdEv"
+          ]
+        },
+        {
+          "address": "0x2f56ec",
+          "instruction": "call 0x1a9cc0",
+          "references": [
+            "PLT:_ZNK2db4Node6getAclB5cxx11Ev"
+          ]
+        },
+        {
+          "address": "0x2f56f7",
+          "instruction": "call 0x1b4560",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_assignERKS4_"
+          ]
+        },
+        {
+          "address": "0x2f56ff",
+          "instruction": "call 0x1b2960",
+          "references": [
+            "PLT:_ZNK2db4Node11getUnixModeEv"
+          ]
+        },
+        {
+          "address": "0x2f570d",
+          "instruction": "call 0x1a9e10",
+          "references": [
+            "PLT:_ZNK2db4Node5isDirEv"
+          ]
+        },
+        {
+          "address": "0x2f571b",
+          "instruction": "call 0x1b51e0",
+          "references": [
+            "PLT:_ZNK2db4Node9getUserIdEv"
+          ]
+        },
+        {
+          "address": "0x2f5729",
+          "instruction": "call 0x1aae20",
+          "references": [
+            "PLT:_ZNK2db4Node10getGroupIdEv"
+          ]
+        },
+        {
+          "address": "0x2f5755",
+          "instruction": "call 0x1b4560",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_assignERKS4_"
+          ]
+        },
+        {
+          "address": "0x2f5764",
+          "instruction": "call 0x1a9fd0",
+          "references": [
+            "PLT:_ZN8DriveAcl12AddPrivilegeERKNS_9PrivilegeE"
+          ]
+        },
+        {
+          "address": "0x2f578b",
+          "instruction": "call 0x1b4560",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_assignERKS4_"
+          ]
+        },
+        {
+          "address": "0x2f57a6",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f57c9",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f57e5",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f57ff",
+          "instruction": "lea rsi, [rip + 0x3d862c]",
+          "references": [
+            "/"
+          ]
+        },
+        {
+          "address": "0x2f5809",
+          "instruction": "call 0x1b1bb0",
+          "references": [
+            "PLT:_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE7compareEPKc"
+          ]
+        },
+        {
+          "address": "0x2f5826",
+          "instruction": "call 0x1b4170",
+          "references": [
+            "PLT:_Z10ParentPathRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x2f58b2",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f58be",
+          "instruction": "call 0x1a8ce0",
+          "references": [
+            "PLT:_ZNK2db4Node11getParentIdEv"
+          ]
+        },
+        {
+          "address": "0x2f58d2",
+          "instruction": "call 0x1adbd0",
+          "references": [
+            "PLT:_ZN2db4NodeC1Ev"
+          ]
+        },
+        {
+          "address": "0x2f61de",
+          "instruction": "call 0x1a8180",
+          "references": [
+            "PLT:_ZN2db4NodeD1Ev"
+          ]
+        },
+        {
+          "address": "0x2f61ed",
+          "instruction": "call 0x1aa590",
+          "references": [
+            "PLT:_ZN2db4Node9setNodeIdEm"
+          ]
+        },
+        {
+          "address": "0x2f6214",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f622b",
+          "instruction": "call 0x1b30d0",
+          "references": [
+            "PLT:_ZN2db11ViewManager13getRootNodeIdEv"
+          ]
+        },
+        {
+          "address": "0x2f6249",
+          "instruction": "lea rcx, [rip + 0x3d7be2]",
+          "references": [
+            "/"
+          ]
+        },
+        {
+          "address": "0x2f6250",
+          "instruction": "call 0x1acb10",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE10_M_replaceEmmPKcm"
+          ]
+        },
+        {
+          "address": "0x2f6275",
+          "instruction": "call 0x1adbd0",
+          "references": [
+            "PLT:_ZN2db4NodeC1Ev"
+          ]
+        },
+        {
+          "address": "0x2f6281",
+          "instruction": "call 0x1aa850",
+          "references": [
+            "PLT:pthread_mutex_lock"
+          ]
+        },
+        {
+          "address": "0x2f629c",
+          "instruction": "call 0x1ac250",
+          "references": [
+            "PLT:_ZNSt8_Rb_treeINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESt4pairIKS5_N9synodrive4core5cache13LRUCacheEntryIS5_S6_IiN2db4NodeEEEEESt10_Select1stISG_ESt4lessIS5_ESaISG_EE4findERS7_"
+          ]
+        },
+        {
+          "address": "0x2f62b6",
+          "instruction": "call 0x1afa40",
+          "references": [
+            "PLT:time"
+          ]
+        },
+        {
+          "address": "0x2f62ef",
+          "instruction": "call 0x1b26a0",
+          "references": [
+            "PLT:_ZNSt8__detail15_List_node_base9_M_unhookEv"
+          ]
+        },
+        {
+          "address": "0x2f6310",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f631d",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f632e",
+          "instruction": "call 0x1a9420",
+          "references": [
+            "PLT:_Znwm"
+          ]
+        },
+        {
+          "address": "0x2f635e",
+          "instruction": "call 0x1a9db0",
+          "references": [
+            "PLT:_ZNSt8__detail15_List_node_base7_M_hookEPS0_"
+          ]
+        },
+        {
+          "address": "0x2f6399",
+          "instruction": "call 0x1aa260",
+          "references": [
+            "PLT:pthread_mutex_unlock"
+          ]
+        },
+        {
+          "address": "0x2f6635",
+          "instruction": "call 0x1a8180",
+          "references": [
+            "PLT:_ZN2db4NodeD1Ev"
+          ]
+        },
+        {
+          "address": "0x2f6671",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x2f6697",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f66a8",
+          "instruction": "call 0x1b1630",
+          "references": [
+            "PLT:_ZN2db9GetErrMsgEi"
+          ]
+        },
+        {
+          "address": "0x2f66b7",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x2f66bf",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x2f66cf",
+          "instruction": "lea r9, [rip + 0x3c43c6]",
+          "references": [
+            "node-capability.cpp.o"
+          ]
+        },
+        {
+          "address": "0x2f671b",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x2f673f",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f6768",
+          "instruction": "call 0x1adf70",
+          "references": [
+            "PLT:_ZN3SDK3ACLC1Ev"
+          ]
+        },
+        {
+          "address": "0x2f6774",
+          "instruction": "lea rsi, [rip + 0x3d76b7]",
+          "references": [
+            "/"
+          ]
+        },
+        {
+          "address": "0x2f677b",
+          "instruction": "call 0x1b1bb0",
+          "references": [
+            "PLT:_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE7compareEPKc"
+          ]
+        },
+        {
+          "address": "0x2f6801",
+          "instruction": "call 0x1afaf0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_appendEPKcm"
+          ]
+        },
+        {
+          "address": "0x2f681d",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f683a",
+          "instruction": "call 0x1b44d0",
+          "references": [
+            "PLT:_ZN3SDK3ACL4readERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEP4stat"
+          ]
+        },
+        {
+          "address": "0x2f685e",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x2f6884",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f68af",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f68bb",
+          "instruction": "call 0x1ab480",
+          "references": [
+            "PLT:_ZN3SDK3ACLD1Ev"
+          ]
+        },
+        {
+          "address": "0x2f68c7",
+          "instruction": "call 0x1b4850",
+          "references": [
+            "PLT:_ZN8DriveAcl9PrivilegeD1Ev"
+          ]
+        },
+        {
+          "address": "0x2f68ea",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f690f",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f6932",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f693e",
+          "instruction": "call 0x1a8180",
+          "references": [
+            "PLT:_ZN2db4NodeD1Ev"
+          ]
+        },
+        {
+          "address": "0x2f697d",
+          "instruction": "call 0x1a8890",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x2f69bd",
+          "instruction": "call 0x1a8890",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x2f6a00",
+          "instruction": "call 0x1a8890",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x2f6a40",
+          "instruction": "call 0x1a8890",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x2f6a80",
+          "instruction": "call 0x1a8890",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x2f6ac0",
+          "instruction": "call 0x1a8890",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x2f6b00",
+          "instruction": "call 0x1a8890",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x2f6b40",
+          "instruction": "call 0x1a8890",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x2f6b80",
+          "instruction": "call 0x1a8890",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x2f6bc0",
+          "instruction": "call 0x1a8890",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x2f6c00",
+          "instruction": "call 0x1a8890",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x2f6c40",
+          "instruction": "call 0x1a8890",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x2f6c80",
+          "instruction": "call 0x1a8890",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x2f6cc0",
+          "instruction": "call 0x1a8890",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x2f6d00",
+          "instruction": "call 0x1a8890",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x2f6d40",
+          "instruction": "call 0x1a8890",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x2f6d80",
+          "instruction": "call 0x1a8890",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x2f6dc0",
+          "instruction": "call 0x1a8890",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x2f6e00",
+          "instruction": "call 0x1a8890",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x2f6e4e",
+          "instruction": "call 0x1b10f0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x2f6e74",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f71a3",
+          "instruction": "call 0x1aa260",
+          "references": [
+            "PLT:pthread_mutex_unlock"
+          ]
+        },
+        {
+          "address": "0x2f71c0",
+          "instruction": "call 0x1a93b0",
+          "references": [
+            "PLT:_ZN3cat9LockGuardC1ERNS_5MutexE"
+          ]
+        },
+        {
+          "address": "0x2f71d9",
+          "instruction": "call 0x1a8710",
+          "references": [
+            "PLT:_ZNSt3mapINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEN3cat16ThreadMultiMutexIS5_E10MutexEntryESt4lessIS5_ESaISt4pairIKS5_S9_EEEixERSD_"
+          ]
+        },
+        {
+          "address": "0x2f71e7",
+          "instruction": "call 0x1a8710",
+          "references": [
+            "PLT:_ZNSt3mapINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEN3cat16ThreadMultiMutexIS5_E10MutexEntryESt4lessIS5_ESaISt4pairIKS5_S9_EEEixERSD_"
+          ]
+        },
+        {
+          "address": "0x2f71f6",
+          "instruction": "call 0x1b38b0",
+          "references": [
+            "PLT:_ZN3cat9LockGuardD1Ev"
+          ]
+        },
+        {
+          "address": "0x2f71ff",
+          "instruction": "call 0x1aebd0",
+          "references": [
+            "PLT:_ZN3cat11ThreadMutex4LockEv"
+          ]
+        },
+        {
+          "address": "0x2f720b",
+          "instruction": "call 0x1aa850",
+          "references": [
+            "PLT:pthread_mutex_lock"
+          ]
+        },
+        {
+          "address": "0x2f7226",
+          "instruction": "call 0x1ac250",
+          "references": [
+            "PLT:_ZNSt8_Rb_treeINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESt4pairIKS5_N9synodrive4core5cache13LRUCacheEntryIS5_S6_IiN2db4NodeEEEEESt10_Select1stISG_ESt4lessIS5_ESaISG_EE4findERS7_"
+          ]
+        },
+        {
+          "address": "0x2f7240",
+          "instruction": "call 0x1afa40",
+          "references": [
+            "PLT:time"
+          ]
+        },
+        {
+          "address": "0x2f728f",
+          "instruction": "call 0x1aa260",
+          "references": [
+            "PLT:pthread_mutex_unlock"
+          ]
+        },
+        {
+          "address": "0x2f72a2",
+          "instruction": "call 0x1a8f60",
+          "references": [
+            "PLT:_ZN3cat16ThreadMultiMutexINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEE6UnlockERKS6_"
+          ]
+        },
+        {
+          "address": "0x2f72bd",
+          "instruction": "call 0x1a86e0",
+          "references": [
+            "PLT:_ZNK3SDK3ACL3getB5cxx11Ev"
+          ]
+        },
+        {
+          "address": "0x2f72eb",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f72f6",
+          "instruction": "call 0x1aef80",
+          "references": [
+            "PLT:_ZN8DriveAcl20UnixModeToPermissionEj"
+          ]
+        },
+        {
+          "address": "0x2f7338",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f7344",
+          "instruction": "call 0x1ab480",
+          "references": [
+            "PLT:_ZN3SDK3ACLD1Ev"
+          ]
+        },
+        {
+          "address": "0x2f7385",
+          "instruction": "call 0x1aa260",
+          "references": [
+            "PLT:pthread_mutex_unlock"
+          ]
+        },
+        {
+          "address": "0x2f73a5",
+          "instruction": "call 0x1adbd0",
+          "references": [
+            "PLT:_ZN2db4NodeC1Ev"
+          ]
+        },
+        {
+          "address": "0x2f73b1",
+          "instruction": "call 0x1b21f0",
+          "references": [
+            "PLT:_ZNK2db4Node9getNodeIdEv"
+          ]
+        },
+        {
+          "address": "0x2f73e2",
+          "instruction": "call 0x1ab250",
+          "references": [
+            "PLT:_ZN2db11ViewManager9QueryNodeERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEERNS_4NodeEi"
+          ]
+        },
+        {
+          "address": "0x2f73f4",
+          "instruction": "call 0x1b2b30",
+          "references": [
+            "PLT:_ZNK2db4Node9getSyncIdEv"
+          ]
+        },
+        {
+          "address": "0x2f7435",
+          "instruction": "call 0x1b54f0",
+          "references": [
+            "PLT:_ZN2db4NodeC1ERKS0_"
+          ]
+        },
+        {
+          "address": "0x2f7443",
+          "instruction": "call 0x1a8180",
+          "references": [
+            "PLT:_ZN2db4NodeD1Ev"
+          ]
+        },
+        {
+          "address": "0x2f7474",
+          "instruction": "call 0x1b54f0",
+          "references": [
+            "PLT:_ZN2db4NodeC1ERKS0_"
+          ]
+        },
+        {
+          "address": "0x2f7480",
+          "instruction": "call 0x1aa850",
+          "references": [
+            "PLT:pthread_mutex_lock"
+          ]
+        },
+        {
+          "address": "0x2f749d",
+          "instruction": "call 0x1ac250",
+          "references": [
+            "PLT:_ZNSt8_Rb_treeINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESt4pairIKS5_N9synodrive4core5cache13LRUCacheEntryIS5_S6_IiN2db4NodeEEEEESt10_Select1stISG_ESt4lessIS5_ESaISG_EE4findERS7_"
+          ]
+        },
+        {
+          "address": "0x2f74d7",
+          "instruction": "call 0x1b1480",
+          "references": [
+            "PLT:_ZSt28_Rb_tree_rebalance_for_erasePSt18_Rb_tree_node_baseRS_"
+          ]
+        },
+        {
+          "address": "0x2f74e3",
+          "instruction": "call 0x1a8180",
+          "references": [
+            "PLT:_ZN2db4NodeD1Ev"
+          ]
+        },
+        {
+          "address": "0x2f74fd",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f750a",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f7526",
+          "instruction": "call 0x1afa40",
+          "references": [
+            "PLT:time"
+          ]
+        },
+        {
+          "address": "0x2f76ea",
+          "instruction": "call 0x1b3f00",
+          "references": [
+            "PLT:memcmp"
+          ]
+        },
+        {
+          "address": "0x2f7766",
+          "instruction": "call 0x1b3f00",
+          "references": [
+            "PLT:memcmp"
+          ]
+        },
+        {
+          "address": "0x2f77cd",
+          "instruction": "call 0x1b1480",
+          "references": [
+            "PLT:_ZSt28_Rb_tree_rebalance_for_erasePSt18_Rb_tree_node_baseRS_"
+          ]
+        },
+        {
+          "address": "0x2f77d9",
+          "instruction": "call 0x1a8180",
+          "references": [
+            "PLT:_ZN2db4NodeD1Ev"
+          ]
+        },
+        {
+          "address": "0x2f77f3",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f7800",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f7814",
+          "instruction": "call 0x1b1cd0",
+          "references": [
+            "PLT:_ZSt18_Rb_tree_incrementPKSt18_Rb_tree_node_base"
+          ]
+        },
+        {
+          "address": "0x2f7866",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f7873",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f78c5",
+          "instruction": "call 0x1b0b70",
+          "references": [
+            "PLT:_ZNSt8_Rb_treeINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESt4pairIKS5_N9synodrive4core5cache13LRUCacheEntryIS5_S6_IiN2db4NodeEEEEESt10_Select1stISG_ESt4lessIS5_ESaISG_EE22_M_emplace_hint_uniqueIJRS7_SF_EEESt17_Rb_tree_iteratorISG_ESt23_Rb_tree_const_iteratorISG_EDpOT_"
+          ]
+        },
+        {
+          "address": "0x2f78d1",
+          "instruction": "call 0x1a8180",
+          "references": [
+            "PLT:_ZN2db4NodeD1Ev"
+          ]
+        },
+        {
+          "address": "0x2f78dd",
+          "instruction": "call 0x1aa260",
+          "references": [
+            "PLT:pthread_mutex_unlock"
+          ]
+        },
+        {
+          "address": "0x2f78e9",
+          "instruction": "call 0x1a8180",
+          "references": [
+            "PLT:_ZN2db4NodeD1Ev"
+          ]
+        },
+        {
+          "address": "0x2f7914",
+          "instruction": "call 0x1a8180",
+          "references": [
+            "PLT:_ZN2db4NodeD1Ev"
+          ]
+        },
+        {
+          "address": "0x2f7927",
+          "instruction": "call 0x1a8f60",
+          "references": [
+            "PLT:_ZN3cat16ThreadMultiMutexINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEE6UnlockERKS6_"
+          ]
+        },
+        {
+          "address": "0x2f7940",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f7955",
+          "instruction": "call 0x1b2a60",
+          "references": [
+            "PLT:_ZSt18_Rb_tree_incrementPSt18_Rb_tree_node_base"
+          ]
+        },
+        {
+          "address": "0x2f79a6",
+          "instruction": "call 0x1b1cd0",
+          "references": [
+            "PLT:_ZSt18_Rb_tree_incrementPKSt18_Rb_tree_node_base"
+          ]
+        },
+        {
+          "address": "0x2f79b4",
+          "instruction": "call 0x1b1480",
+          "references": [
+            "PLT:_ZSt28_Rb_tree_rebalance_for_erasePSt18_Rb_tree_node_baseRS_"
+          ]
+        },
+        {
+          "address": "0x2f79ee",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f79fb",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f7a1f",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f7a46",
+          "instruction": "call 0x1adbd0",
+          "references": [
+            "PLT:_ZN2db4NodeC1Ev"
+          ]
+        },
+        {
+          "address": "0x2f7d7b",
+          "instruction": "call 0x1a9420",
+          "references": [
+            "PLT:_Znwm"
+          ]
+        },
+        {
+          "address": "0x2f7dab",
+          "instruction": "call 0x1a9db0",
+          "references": [
+            "PLT:_ZNSt8__detail15_List_node_base7_M_hookEPS0_"
+          ]
+        },
+        {
+          "address": "0x2f7e4f",
+          "instruction": "call 0x1ae2a0",
+          "references": [
+            "PLT:_ZNSt8_Rb_treeIjSt4pairIKjSt3setINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESt4lessIS8_ESaIS8_EEESt10_Select1stISD_ES9_IjESaISD_EE22_M_emplace_hint_uniqueIJRKSt21piecewise_construct_tSt5tupleIJRS1_EESN_IJEEEEESt17_Rb_tree_iteratorISD_ESt23_Rb_tree_const_iteratorISD_EDpOT_"
+          ]
+        },
+        {
+          "address": "0x2f7e62",
+          "instruction": "call 0x1b4300",
+          "references": [
+            "PLT:_ZNSt8_Rb_treeINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEES5_St9_IdentityIS5_ESt4lessIS5_ESaIS5_EE16_M_insert_uniqueIRKS5_EESt4pairISt17_Rb_tree_iteratorIS5_EbEOT_"
+          ]
+        },
+        {
+          "address": "0x2f7ec5",
+          "instruction": "call 0x1b3f00",
+          "references": [
+            "PLT:memcmp"
+          ]
+        },
+        {
+          "address": "0x2f7ef5",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x2f7f04",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x2f7f14",
+          "instruction": "lea r9, [rip + 0x3c2b81]",
+          "references": [
+            "node-capability.cpp.o"
+          ]
+        },
+        {
+          "address": "0x2f7f5a",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x2f7f7c",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f7f8d",
+          "instruction": "call 0x1b21f0",
+          "references": [
+            "PLT:_ZNK2db4Node9getNodeIdEv"
+          ]
+        },
+        {
+          "address": "0x2f7fa4",
+          "instruction": "call 0x1ae6a0",
+          "references": [
+            "PLT:_ZN2db11ViewManager9QueryNodeEmRNS_4NodeEi"
+          ]
+        },
+        {
+          "address": "0x2f8038",
+          "instruction": "call 0x1ac250",
+          "references": [
+            "PLT:_ZNSt8_Rb_treeINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESt4pairIKS5_N9synodrive4core5cache13LRUCacheEntryIS5_S6_IiN2db4NodeEEEEESt10_Select1stISG_ESt4lessIS5_ESaISG_EE4findERS7_"
+          ]
+        },
+        {
+          "address": "0x2f8070",
+          "instruction": "call 0x1b26a0",
+          "references": [
+            "PLT:_ZNSt8__detail15_List_node_base9_M_unhookEv"
+          ]
+        },
+        {
+          "address": "0x2f8094",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f80a1",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f80b0",
+          "instruction": "call 0x1b1480",
+          "references": [
+            "PLT:_ZSt28_Rb_tree_rebalance_for_erasePSt18_Rb_tree_node_baseRS_"
+          ]
+        },
+        {
+          "address": "0x2f80bc",
+          "instruction": "call 0x1a8180",
+          "references": [
+            "PLT:_ZN2db4NodeD1Ev"
+          ]
+        },
+        {
+          "address": "0x2f80d6",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f80e3",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f8245",
+          "instruction": "call 0x1af1a0",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x2f824d",
+          "instruction": "call 0x1b4870",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x2f825d",
+          "instruction": "lea r9, [rip + 0x3c2838]",
+          "references": [
+            "node-capability.cpp.o"
+          ]
+        },
+        {
+          "address": "0x2f82a3",
+          "instruction": "call 0x1b03d0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x2f82c1",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f839c",
+          "instruction": "call 0x1b26a0",
+          "references": [
+            "PLT:_ZNSt8__detail15_List_node_base9_M_unhookEv"
+          ]
+        },
+        {
+          "address": "0x2f83b6",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f83c3",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f83d4",
+          "instruction": "call 0x1a9420",
+          "references": [
+            "PLT:_Znwm"
+          ]
+        },
+        {
+          "address": "0x2f8404",
+          "instruction": "call 0x1a9db0",
+          "references": [
+            "PLT:_ZNSt8__detail15_List_node_base7_M_hookEPS0_"
+          ]
+        },
+        {
+          "address": "0x2f8436",
+          "instruction": "call 0x1b26a0",
+          "references": [
+            "PLT:_ZNSt8__detail15_List_node_base9_M_unhookEv"
+          ]
+        },
+        {
+          "address": "0x2f8457",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f8464",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f848c",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2f84b6",
+          "instruction": "call 0x1afa20",
+          "references": [
+            "PLT:_ZN9synodrive4core14NodeCapability18NodeCapabilityImpl20AppendSharePrivielgeERKN3SDK20SimpleSharePrivilegeEiRKN8DriveAcl8UserInfoERS7_"
+          ]
+        },
+        {
+          "address": "0x2f84e0",
+          "instruction": "call 0x1afa40",
+          "references": [
+            "PLT:time"
+          ]
+        },
+        {
+          "address": "0x2f8546",
+          "instruction": "call 0x1a8890",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x2f85fe",
+          "instruction": "call 0x1ae2a0",
+          "references": [
+            "PLT:_ZNSt8_Rb_treeIjSt4pairIKjSt3setINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESt4lessIS8_ESaIS8_EEESt10_Select1stISD_ES9_IjESaISD_EE22_M_emplace_hint_uniqueIJRKSt21piecewise_construct_tSt5tupleIJRS1_EESN_IJEEEEESt17_Rb_tree_iteratorISD_ESt23_Rb_tree_const_iteratorISD_EDpOT_"
+          ]
+        },
+        {
+          "address": "0x2f8714",
+          "instruction": "call 0x1a92f0",
+          "references": [
+            "PLT:_ZN3cat11ThreadMutexC1Ev"
+          ]
+        },
+        {
+          "address": "0x2f8778",
+          "instruction": "call 0x1b14c0",
+          "references": [
+            "PLT:__cxa_atexit"
+          ]
+        },
+        {
+          "address": "0x2f8784",
+          "instruction": "call 0x1ad6e0",
+          "references": [
+            "PLT:__cxa_guard_release"
+          ]
+        },
+        {
+          "address": "0x2f889e",
+          "instruction": "call 0x1ae2a0",
+          "references": [
+            "PLT:_ZNSt8_Rb_treeIjSt4pairIKjSt3setINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEESt4lessIS8_ESaIS8_EEESt10_Select1stISD_ES9_IjESaISD_EE22_M_emplace_hint_uniqueIJRKSt21piecewise_construct_tSt5tupleIJRS1_EESN_IJEEEEESt17_Rb_tree_iteratorISD_ESt23_Rb_tree_const_iteratorISD_EDpOT_"
+          ]
+        },
+        {
+          "address": "0x2f88e3",
+          "instruction": "call 0x1abdb0",
+          "references": [
+            "PLT:_ZSt20__throw_system_errori"
+          ]
+        },
+        {
+          "address": "0x2f88e8",
+          "instruction": "call 0x1abdb0",
+          "references": [
+            "PLT:_ZSt20__throw_system_errori"
+          ]
+        },
+        {
+          "address": "0x2f891a",
+          "instruction": "call 0x1abdb0",
+          "references": [
+            "PLT:_ZSt20__throw_system_errori"
+          ]
+        },
+        {
+          "address": "0x2f891f",
+          "instruction": "lea rdi, [rip + 0x3b687d]",
+          "references": [
+            "basic_string::append"
+          ]
+        },
+        {
+          "address": "0x2f8926",
+          "instruction": "call 0x1adf90",
+          "references": [
+            "PLT:_ZSt20__throw_length_errorPKc"
+          ]
+        },
+        {
+          "address": "0x2f892b",
+          "instruction": "lea rdi, [rip + 0x3b6871]",
+          "references": [
+            "basic_string::append"
+          ]
+        },
+        {
+          "address": "0x2f8932",
+          "instruction": "call 0x1adf90",
+          "references": [
+            "PLT:_ZSt20__throw_length_errorPKc"
+          ]
+        },
+        {
+          "address": "0x2f8937",
+          "instruction": "call 0x1aac10",
+          "references": [
+            "PLT:__stack_chk_fail"
+          ]
+        }
+      ]
+    }
+  ],
+  "binary_executed": false,
+  "method": "PT_DYNAMIC and GNU/SysV hash; bounded dynamic symbols; RIP references and direct/PLT calls; no execution"
+}

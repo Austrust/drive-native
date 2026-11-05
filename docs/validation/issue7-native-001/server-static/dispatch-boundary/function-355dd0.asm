@@ -1,0 +1,227 @@
+_ZN24GetFileCapabilityHandler15CheckParametersER7RequestR8Response
+355dd0: endbr64  ; 
+355dd4: push rbp ; 
+355dd5: mov rdi, rsi ; 
+355dd8: mov rbp, rsp ; 
+355ddb: push r15 ; 
+355ddd: push r14 ; 
+355ddf: mov r14, rdx ; 
+355de2: lea r15, [rbp - 0x90] ; 
+355de9: push r13 ; 
+355deb: push r12 ; 
+355ded: lea r12, [rbp - 0x60] ; 
+355df1: push rbx ; 
+355df2: lea rbx, [rbp - 0x50] ; 
+355df6: sub rsp, 0x88 ; 
+355dfd: mov rax, qword ptr fs:[0x28] ; 
+355e06: mov qword ptr [rbp - 0x38], rax ; 
+355e0a: xor eax, eax ; 
+355e0c: call 0x550d30 ; _ZN7Request9GetHeaderEv
+355e11: mov qword ptr [rbp - 0x60], rbx ; 
+355e15: mov rsi, r12 ; 
+355e18: mov dword ptr [rbp - 0x50], 0x68746170 ; 
+355e1f: mov rdi, rax ; 
+355e22: mov qword ptr [rbp - 0x58], 4 ; 
+355e2a: mov byte ptr [rbp - 0x4c], 0 ; 
+355e2e: mov qword ptr [rbp - 0xa8], rax ; 
+355e35: mov qword ptr [rbp - 0xa0], r15 ; 
+355e3c: mov qword ptr [rbp - 0x98], 0 ; 
+355e47: mov byte ptr [rbp - 0x90], 0 ; 
+355e4e: call 0xeadf0 ; PLT:_ZNK7PObject9hasMemberERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE
+355e53: mov rdi, qword ptr [rbp - 0x60] ; 
+355e57: mov r13d, eax ; 
+355e5a: cmp rdi, rbx ; 
+355e5d: je 0x355e6c ; 
+355e5f: mov rax, qword ptr [rbp - 0x50] ; 
+355e63: lea rsi, [rax + 1] ; 
+355e67: call 0xea4a0 ; PLT:_ZdlPvm
+355e6c: test r13b, r13b ; 
+355e6f: jne 0x356038 ; 
+355e75: cmp qword ptr [rbp - 0x98], 0 ; 
+355e7d: je 0x355ed8 ; 
+355e7f: lea rdi, [rbp - 0xa0] ; 
+355e86: call 0x374e50 ; _ZN7Handler7Utility10IsSafePathERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE
+355e8b: mov r13d, eax ; 
+355e8e: test al, al ; 
+355e90: je 0x355ed8 ; 
+355e92: mov rdi, qword ptr [rbp - 0xa0] ; 
+355e99: cmp rdi, r15 ; 
+355e9c: je 0x355eae ; 
+355e9e: mov rax, qword ptr [rbp - 0x90] ; 
+355ea5: lea rsi, [rax + 1] ; 
+355ea9: call 0xea4a0 ; PLT:_ZdlPvm
+355eae: mov rax, qword ptr [rbp - 0x38] ; 
+355eb2: sub rax, qword ptr fs:[0x28] ; 
+355ebb: jne 0x356163 ; 
+355ec1: lea rsp, [rbp - 0x28] ; 
+355ec5: mov eax, r13d ; 
+355ec8: pop rbx ; 
+355ec9: pop r12 ; 
+355ecb: pop r13 ; 
+355ecd: pop r14 ; 
+355ecf: pop r15 ; 
+355ed1: pop rbp ; 
+355ed2: ret  ; 
+355ed3: nop dword ptr [rax + rax] ; 
+355ed8: mov qword ptr [rbp - 0x60], rbx ; 
+355edc: mov rsi, r12 ; 
+355edf: mov edi, 3 ; 
+355ee4: movabs rax, 0x7361745f636e7973 ; 
+355eee: mov qword ptr [rbp - 0x50], rax ; 
+355ef2: movabs rax, 0x67756265645f6b73 ; 
+355efc: mov qword ptr [rbp - 0x49], rax ; 
+355f00: mov qword ptr [rbp - 0x58], 0xf ; 
+355f08: mov byte ptr [rbp - 0x41], 0 ; 
+355f0c: call 0xf02e0 ; PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE
+355f11: mov rdi, qword ptr [rbp - 0x60] ; 
+355f15: mov r13d, eax ; 
+355f18: cmp rdi, rbx ; 
+355f1b: je 0x355f2a ; 
+355f1d: mov rax, qword ptr [rbp - 0x50] ; 
+355f21: lea rsi, [rax + 1] ; 
+355f25: call 0xea4a0 ; PLT:_ZdlPvm
+355f2a: test r13b, r13b ; 
+355f2d: je 0x355fde ; 
+355f33: call 0xec090 ; PLT:pthread_self
+355f38: mov r13, qword ptr [rbp - 0xa0] ; 
+355f3f: mov qword ptr [rbp - 0xa8], rax ; 
+355f46: call 0xf0e50 ; PLT:getpid
+355f4b: mov rdi, qword ptr [rbp - 0xa8] ; 
+355f52: mov qword ptr [rbp - 0x60], rbx ; 
+355f56: mov rsi, r12 ; 
+355f59: movabs rdx, 0x7361745f636e7973 ; 
+355f63: mov ecx, eax ; 
+355f65: mov byte ptr [rbp - 0x41], 0 ; 
+355f69: movabs rax, 0xa7c5ac471b47843 ; 
+355f73: mov qword ptr [rbp - 0x50], rdx ; 
+355f77: mov r8d, edi ; 
+355f7a: movabs rdx, 0x67756265645f6b73 ; 
+355f84: lea r9, [rip + 0x3700f5] ; get-file-capability.cpp.o
+355f8b: mov qword ptr [rbp - 0x49], rdx ; 
+355f8f: mov rdx, rdi ; 
+355f92: mov edi, 3 ; 
+355f97: shr rdx, 5 ; 
+355f9b: mov qword ptr [rbp - 0x58], 0xf ; 
+355fa3: mul rdx ; 
+355fa6: push r13 ; 
+355fa8: xor eax, eax ; 
+355faa: push 0x4f ; 
+355fac: shr rdx, 7 ; 
+355fb0: imul rdx, rdx, 0x186a0 ; 
+355fb7: sub r8d, edx ; 
+355fba: lea rdx, [rip + 0x359a77] ; 
+355fc1: call 0xf04a0 ; PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz
+355fc6: mov rdi, qword ptr [rbp - 0x60] ; 
+355fca: pop rax ; 
+355fcb: pop rdx ; 
+355fcc: cmp rdi, rbx ; 
+355fcf: je 0x355fde ; 
+355fd1: mov rax, qword ptr [rbp - 0x50] ; 
+355fd5: lea rsi, [rax + 1] ; 
+355fd9: call 0xea4a0 ; PLT:_ZdlPvm
+355fde: mov qword ptr [rbp - 0x60], rbx ; 
+355fe2: mov rcx, r12 ; 
+355fe5: xor edx, edx ; 
+355fe7: mov esi, 0x7000 ; 
+355fec: movabs rax, 0x2064696c61766e49 ; 
+355ff6: mov dword ptr [rbp - 0x48], 0x68746170 ; 
+355ffd: mov rdi, r14 ; 
+356000: mov qword ptr [rbp - 0x50], rax ; 
+356004: mov qword ptr [rbp - 0x58], 0xc ; 
+35600c: mov byte ptr [rbp - 0x44], 0 ; 
+356010: call 0x553b20 ; _ZN8Response8SetErrorEmmRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE
+356015: mov rdi, qword ptr [rbp - 0x60] ; 
+356019: cmp rdi, rbx ; 
+35601c: je 0x35602b ; 
+35601e: mov rax, qword ptr [rbp - 0x50] ; 
+356022: lea rsi, [rax + 1] ; 
+356026: call 0xea4a0 ; PLT:_ZdlPvm
+35602b: xor r13d, r13d ; 
+35602e: jmp 0x355e92 ; 
+356033: nop dword ptr [rax + rax] ; 
+356038: mov rdi, qword ptr [rbp - 0xa8] ; 
+35603f: lea r13, [rbp - 0x70] ; 
+356043: lea rsi, [rbp - 0x80] ; 
+356047: mov dword ptr [rbp - 0x70], 0x68746170 ; 
+35604e: mov qword ptr [rbp - 0x80], r13 ; 
+356052: mov qword ptr [rbp - 0x78], 4 ; 
+35605a: mov byte ptr [rbp - 0x6c], 0 ; 
+35605e: call 0xf1030 ; PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE
+356063: mov rsi, rax ; 
+356066: mov rdi, r12 ; 
+356069: call 0xeeef0 ; PLT:_ZNKR7PObject8asStringB5cxx11Ev
+35606e: mov rax, qword ptr [rbp - 0x60] ; 
+356072: mov rdi, qword ptr [rbp - 0xa0] ; 
+356079: cmp rax, rbx ; 
+35607c: je 0x356110 ; 
+356082: cmp rdi, r15 ; 
+356085: je 0x3560f0 ; 
+356087: movdqu xmm0, xmmword ptr [rbp - 0x58] ; 
+35608c: mov rdx, qword ptr [rbp - 0x90] ; 
+356093: mov qword ptr [rbp - 0xa0], rax ; 
+35609a: movups xmmword ptr [rbp - 0x98], xmm0 ; 
+3560a1: test rdi, rdi ; 
+3560a4: je 0x356103 ; 
+3560a6: mov qword ptr [rbp - 0x60], rdi ; 
+3560aa: mov qword ptr [rbp - 0x50], rdx ; 
+3560ae: mov qword ptr [rbp - 0x58], 0 ; 
+3560b6: mov byte ptr [rdi], 0 ; 
+3560b9: mov rdi, qword ptr [rbp - 0x60] ; 
+3560bd: cmp rdi, rbx ; 
+3560c0: je 0x3560cf ; 
+3560c2: mov rax, qword ptr [rbp - 0x50] ; 
+3560c6: lea rsi, [rax + 1] ; 
+3560ca: call 0xea4a0 ; PLT:_ZdlPvm
+3560cf: mov rdi, qword ptr [rbp - 0x80] ; 
+3560d3: cmp rdi, r13 ; 
+3560d6: je 0x355e75 ; 
+3560dc: mov rax, qword ptr [rbp - 0x70] ; 
+3560e0: lea rsi, [rax + 1] ; 
+3560e4: call 0xea4a0 ; PLT:_ZdlPvm
+3560e9: jmp 0x355e75 ; 
+3560ee: nop  ; 
+3560f0: movdqu xmm1, xmmword ptr [rbp - 0x58] ; 
+3560f5: mov qword ptr [rbp - 0xa0], rax ; 
+3560fc: movups xmmword ptr [rbp - 0x98], xmm1 ; 
+356103: mov qword ptr [rbp - 0x60], rbx ; 
+356107: lea rbx, [rbp - 0x50] ; 
+35610b: mov rdi, rbx ; 
+35610e: jmp 0x3560ae ; 
+356110: mov rdx, qword ptr [rbp - 0x58] ; 
+356114: test rdx, rdx ; 
+356117: je 0x356132 ; 
+356119: cmp rdx, 1 ; 
+35611d: je 0x356150 ; 
+35611f: mov rsi, rbx ; 
+356122: call 0xeddd0 ; PLT:memcpy
+356127: mov rdx, qword ptr [rbp - 0x58] ; 
+35612b: mov rdi, qword ptr [rbp - 0xa0] ; 
+356132: mov qword ptr [rbp - 0x98], rdx ; 
+356139: mov byte ptr [rdi + rdx], 0 ; 
+35613d: mov rdi, qword ptr [rbp - 0x60] ; 
+356141: jmp 0x3560ae ; 
+356146: nop word ptr cs:[rax + rax] ; 
+356150: movzx eax, byte ptr [rbp - 0x50] ; 
+356154: mov byte ptr [rdi], al ; 
+356156: mov rdx, qword ptr [rbp - 0x58] ; 
+35615a: mov rdi, qword ptr [rbp - 0xa0] ; 
+356161: jmp 0x356132 ; 
+356163: call 0xead00 ; PLT:__stack_chk_fail
+356168: endbr64  ; 
+35616c: mov r14, rax ; 
+35616f: jmp 0x124ae4 ; 
+356174: endbr64  ; 
+356178: mov r14, rax ; 
+35617b: jmp 0x124ae4 ; 
+356180: endbr64  ; 
+356184: mov r14, rax ; 
+356187: jmp 0x124ae4 ; 
+35618c: endbr64  ; 
+356190: mov rbx, rax ; 
+356193: jmp 0x124afd ; 
+356198: endbr64  ; 
+35619c: mov rbx, rax ; 
+35619f: jmp 0x124b21 ; 
+3561a4: endbr64  ; 
+3561a8: mov r14, rax ; 
+3561ab: jmp 0x124ae4 ; 

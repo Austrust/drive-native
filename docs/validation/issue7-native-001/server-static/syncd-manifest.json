@@ -1,0 +1,7 @@
+{
+  "member": "sbin/syncd",
+  "bytes": 8052033,
+  "sha256": "e2288b191e8db97673c3468595e3a2d441579d2da365927c1108c000549fdf9c",
+  "matches_historical_software_sha256": true,
+  "executed": false
+}

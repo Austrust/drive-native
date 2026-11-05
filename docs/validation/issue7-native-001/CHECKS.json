@@ -1,0 +1,70 @@
+{
+  "command": "cargo check --workspace --all-targets --all-features --locked --offline -j2",
+  "author_tests_run": false,
+  "logs": [
+    {
+      "file": "check-001.log",
+      "sha256": "8ab436f6d0d3be62d76d67909a418191ad9f554bad5b5f2dfb7c2ba72fbd60df",
+      "bytes": 4876,
+      "nul_bytes": 0,
+      "host_exit_code": 0,
+      "reported_seconds": 28.87
+    },
+    {
+      "file": "check-002.log",
+      "sha256": "ba30c272a91dc9a54c1cd03014c2ad47d68cd006481903e61cd4566f5df9b108",
+      "bytes": 5017,
+      "nul_bytes": 0,
+      "host_exit_code": 0,
+      "reported_seconds": 30.93
+    },
+    {
+      "file": "check-003.log",
+      "sha256": "11f7788f3d6dcda05c3d232b72b22ed44be5b3f63ea726f34dcdd5660c81deff",
+      "bytes": 4128,
+      "nul_bytes": 81,
+      "host_exit_code": 1,
+      "reported_seconds": null
+    },
+    {
+      "file": "check-004.log",
+      "sha256": "78c939f0c84bb187b4f318304375b4ca5a7ad2046a141097b640ff9fd2425a3c",
+      "bytes": 5017,
+      "nul_bytes": 0,
+      "host_exit_code": 0,
+      "reported_seconds": 24.93
+    },
+    {
+      "file": "check-005.log",
+      "sha256": "526eda6d71d26afa01d9b540db293b1604e9de0d38023a3bbad29864c8b41da3",
+      "bytes": 4876,
+      "nul_bytes": 0,
+      "host_exit_code": 0,
+      "reported_seconds": 27.53
+    },
+    {
+      "file": "check-006.log",
+      "sha256": "0b306bc912d7a058a0d7ebb3bfa8a4b3d928a8ccd9f138f4a76a855b05e401e4",
+      "bytes": 4731,
+      "nul_bytes": 0,
+      "host_exit_code": 0,
+      "reported_seconds": 18.78
+    },
+    {
+      "file": "check-007.log",
+      "sha256": "791830e255cb7fa13a5104874c5355e20338d4982b29de9eb41a139605e00cb5",
+      "bytes": 4876,
+      "nul_bytes": 0,
+      "host_exit_code": 0,
+      "reported_seconds": 33.77
+    },
+    {
+      "file": "check-008.log",
+      "sha256": "bbf426ab87e39d987f549810e985ab8769dcf25e2c9e2dab75eeac7462867c52",
+      "bytes": 4876,
+      "nul_bytes": 2151,
+      "host_exit_code": 0,
+      "reported_seconds": 30.39
+    }
+  ]
+}
