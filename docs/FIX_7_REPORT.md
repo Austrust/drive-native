@@ -91,7 +91,7 @@ GUI 显示用户只读、服务禁止、当前目录权限不足、权限待验�
 - selector 登录与列表正常：team root list 约 0.03s、folders=18；personal root folders=3。
 - fsd `initial_index` **两次均失败**：`native_transport` / `native_response_timeout`，TLS `UnexpectedEof: peer closed connection without TLS close_notify`；`nodes=0`，无残留挂载。
 - 隔离只读探针（Lead）：`list_dir` 小请求 200/200；`pull_event` cursor=0 常成功（约 516 events，next=2000），紧接 cursor=2000 常被断连；子目录 watermark S0 可进入 enumerate（10s 约 948 目录/8351 节点），约 1000 次 list 请求内被断连；根 `/` 走 legacy `collect_snapshot_seed`。
-- 该轮**未找到根因**，仅证明长初始化序列断连 + 产品无每请求重试/断点续拉；不是 T1 窄子集修复引入的已证回归（既有记录：[initialization-owner-20261101](../../../outputs/drive-native/initialization-owner-20261101/REPORT.md)、[development-20261101-3](../../../outputs/drive-native/delivery/development-20261101-3/RELEASE_NOTES.md)、[development-20261101-4](../../../outputs/drive-native/delivery/development-20261101-4/RELEASE_NOTES.md)、[personal-003](../../../work/initialization-pipeline-8/docs/validation/personal-003/REPORT.md)）。
+- 该轮**未找到根因**，仅证明长初始化序列断连 + 产品无每请求重试/断点续拉；不是 T1 窄子集修复引入的已证回归（既有记录：`outputs/drive-native/initialization-owner-20261101/REPORT.md`、`outputs/drive-native/delivery/development-20261101-3/RELEASE_NOTES.md`、`outputs/drive-native/delivery/development-20261101-4/RELEASE_NOTES.md`、`work/initialization-pipeline-8/docs/validation/personal-003/REPORT.md`，均为项目工作区路径，未入本包）。
 
 **B. T7 受限真实 NAS 验收（T3，部分通过）**
 
