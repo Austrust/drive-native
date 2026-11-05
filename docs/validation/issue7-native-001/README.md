@@ -4,8 +4,10 @@
 - [作者编译记录](CHECKS.json)：每次 cargo check 的退出码、原始日志和字节摘要。
 - [早期独立验证原件](g4-through-010/REPORT.md)：G4-006–010 的逐组计数、失败、时钟诊断及环境阻塞。
 - [G4-012 独立验证](g4-final-012/REPORT.md)：`9c9aaba` 的最终矩阵、真实worker链、组件数据保留和此前反例原件（历史，期望冻结）。
-- [G4-013 独立验证（当前）](g4-final-013/REPORT.md)：T4 对 `fefb8ee` 的独立矩阵/补测、T1/T2 审阅与 012/013 loopback delta；包内 `MANIFEST.json` 与 `SHA256SUMS` 可逐文件复核。
+- [G4-013 独立验证（历史）](g4-final-013/REPORT.md)：T4 对 `fefb8ee` 的独立矩阵/补测、T1/T2 审阅与 012/013 loopback delta；包内 `MANIFEST.json` 与 `SHA256SUMS` 可逐文件复核。
 - [G4-013 复制核验](g4-final-013-COPY-VERIFY.md)：本仓库入库时的逐字节复制/哈希/文件数核验（作者侧）。
+- [G4-014 独立验证（当前）](g4-final-014/REPORT.md)：T4 对候选 `b303ac6`（T9 初始化只读重试）的主矩阵 59/59、补测 28/28、T9 审阅与对抗、ACL/loopback 增量核对；`STATUS.json` 保留 2 项 allowed-failed。
+- [G4-014 复制核验](g4-final-014-COPY-VERIFY.md)：本仓库入库时的逐字节复制/哈希/文件数核验（作者侧）。
 - [官方客户端静态证据](static/REPORT.md)：直接响应的错误码与分类边界。
 - [官方服务端静态证据](server-static/REPORT.md)：提交前 ACL 检查、路径过滤和父目录语义。
 - [能力与身份补充证据](server-capability/REPORT.md)：原生能力查询为何尚不能绑定精确节点。
@@ -15,4 +17,5 @@
 - [真实 NAS 挂载健康检查（阻塞）](../real-nas-initial-index-20261105/REPORT.md)：`0.1.0~dev20261105.2` 在 build 17892 的 `initial_index` 断连阻塞、探针证据、归因边界与后续建议。
 - [根系初始化韧性 R2](../real-nas-initial-index-20261105/REPORT-R2-RESILIENCE-20261105.md)：真实 NAS 只读测量（团队根 76 页/102k 事件/215s/25 次断连恢复）、有界每请求重试+断点续拉实现、测试计数与 release 产物；HOME 超大根为残余。
 - [真实 NAS 受限验收（部分通过）](../real-nas-t7-20261105/T7-RESULT.md)：T3 在 build 17892 的子目录 scope 完整挂载/写矩阵 6/6 committed、根 scope 仍阻塞、场景与缺口状态；复制核验见同目录 COPY-VERIFY。
+- [真实 NAS T10 受限验收（部分通过）](../real-nas-t10-20261105/T10-RESULT.md)：T3 在候选 `.3` 上的 ROOT_MF 根 scope 4/4 完整挂载、S01 根拒绝 `0x9004` fail-closed、S02/S12 6/6 committed、blocked 场景与产品观察；复制核验见同目录 COPY-VERIFY。
 - [当前功能报告](../../FIX_7_REPORT.md)：用户可观察行为、验收矩阵及未实测项。

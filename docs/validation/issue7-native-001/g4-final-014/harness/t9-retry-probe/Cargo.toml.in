@@ -1,0 +1,11 @@
+[package]
+name = "t9-retry-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+sproto = { path = @SPROTO_PATH@, features = ["protocol-research"] }
+tokio = { version = "1", features = ["full"] }

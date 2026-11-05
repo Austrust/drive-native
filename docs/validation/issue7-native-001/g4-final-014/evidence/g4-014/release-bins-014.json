@@ -1,0 +1,21 @@
+{
+  "candidate_commit": "b303ac6bf01f6ff66f48d1e74cb94740561a841c",
+  "binaries": {
+    "drive-native-fsd": {
+      "built_sha256": "a3ed4ce5b5a83754c14b3257130f6da2a528408e9151edf329f3e647073d3d75",
+      "author_sha256": "a3ed4ce5b5a83754c14b3257130f6da2a528408e9151edf329f3e647073d3d75",
+      "match": true
+    },
+    "drive-native-worker": {
+      "built_sha256": "54e96e175ee4af6d84fdf47528c812f47cdefed1c5d9aaa2fb8f7c2329587f59",
+      "author_sha256": "54e96e175ee4af6d84fdf47528c812f47cdefed1c5d9aaa2fb8f7c2329587f59",
+      "match": true
+    },
+    "drive-native-setup": {
+      "built_sha256": "dafc0249aefc254594a82e5e799c20cde7e5f1373fdd7d9c68c4df52200abe09",
+      "author_sha256": "dafc0249aefc254594a82e5e799c20cde7e5f1373fdd7d9c68c4df52200abe09",
+      "match": true
+    }
+  },
+  "scope": "local release build from the verified snapshot"
+}

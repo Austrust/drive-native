@@ -1,0 +1,28 @@
+{
+  "attempt": 4,
+  "label": "root-invalid-partial",
+  "run_dir_original": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun",
+  "run_dir_preserved_at": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-root-invalid-partial",
+  "launched_as": "root (wsl.exe -d Ubuntu-24.04 -u root)",
+  "recorded_as_product_failure": false,
+  "reason": "Runner was launched as root. crates/drive-fs/tests/permissions_kernel.rs:28 asserts libc::getuid() != 0, so kernel-parent-actions-preflight (FUSE kernel permission group) deterministically fails under root. The FUSE/kernel and core-history groups require the non-root user drive-native-test (same user as the accepted G4-013 run). This attempt is invalid for product conclusions and is preserved only as environment evidence.",
+  "commands_recorded": 25,
+  "failed_commands": ["kernel-parent-actions-preflight", "core-history-probe"],
+  "failure_details": {
+    "kernel-parent-actions-preflight": {
+      "log_sha256": "0b8345c7ffa93d0ca23ba6ec31dcfc42a7c195bda8feef7c9a414eb2c6618dfc",
+      "cause": "assertion left != right failed: left: 0 right: 0 at permissions_kernel.rs:28 (assert_ne!(libc::getuid(), 0))",
+      "product_failure": false
+    },
+    "core-history-probe": {
+      "log_sha256": "71f31608f0bb099f89db5fdfd8cbba91e5482109e5291ccb114553c650eefda1",
+      "cause": "command was still executing when the root-invalid run was stopped after the deterministic kernel failure; log ends inside 'running 5 tests'. Not a product failure.",
+      "product_failure": false
+    }
+  },
+  "summary_sha256": "d66dd95e929bd80dee8ae920de7339bf500363750578f69210b3f91f6db51800",
+  "source_json_sha256": "6ff61bfddaaec92760720dfa94a86351cf7a1370553def039e5da09cb0cc64e1",
+  "launcher_log_sha256": "59e00004036169d6af49199006d64b7e06f3f69eadfd8db750f1814364f040f3",
+  "target_disposition": "target directory of this run was not reused; a separate registry-only seed (g4-014-rerun-target-seed) built from attempt 3 is used by the formal rerun",
+  "note": "Not used for any pass/fail count in REPORT.md. Formal rerun (attempt 5) is executed as drive-native-test."
+}

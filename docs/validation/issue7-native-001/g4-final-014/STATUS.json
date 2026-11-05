@@ -1,0 +1,264 @@
+{
+  "candidate_commit": "b303ac6bf01f6ff66f48d1e74cb94740561a841c",
+  "prior_baseline": {
+    "bundle": "G4-evidence-bundle-013-final",
+    "candidate_commit": "fefb8ee0b02f68ec0e76d9cd89b6f37172d645b4"
+  },
+  "final_run": "g4-014-rerun",
+  "run": {
+    "run_dir_wsl": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun",
+    "summary_sha256": "b8c14b01ffc51fff74e15306c2e944e55872b1193708717c8aece03c4cc30131",
+    "complete": true,
+    "all_commands_passed": true,
+    "command_counts": {
+      "passed": 59,
+      "failed": 0,
+      "not_run": 0
+    },
+    "supplemental_dir_wsl": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/supplemental-001",
+    "supplemental_summary_sha256": "f37947e4c1b53e19fef1ad6fe7f47d521852ec190cadb3b43c7b7132032ddf64",
+    "supplemental_complete": true,
+    "supplemental_all_passed": true,
+    "supplemental_records_main_summary_sha256": "b8c14b01ffc51fff74e15306c2e944e55872b1193708717c8aece03c4cc30131"
+  },
+  "created_utc": "2026-11-05T12:07:19.667401+00:00",
+  "verifier": "T4 independent verifier (no product source edits)",
+  "acceptance_status": "passed",
+  "main": {
+    "command_count": 59,
+    "passed_commands": 59,
+    "failed_commands": [],
+    "not_run_commands": [],
+    "complete": true,
+    "all_commands_passed": true,
+    "workspace_all_features": {
+      "reported": true,
+      "passed": 992,
+      "failed": 0,
+      "ignored": 42,
+      "measured": 0,
+      "filtered": 0
+    },
+    "workspace_default": {
+      "reported": true,
+      "passed": 982,
+      "failed": 0,
+      "ignored": 37,
+      "measured": 0,
+      "filtered": 0
+    }
+  },
+  "supplemental": {
+    "command_count": 28,
+    "complete": true,
+    "all_passed": true,
+    "failed_commands": [],
+    "self_reported_failed_checks": [
+      {
+        "name": "package-metadata-equivalence",
+        "command_exit_ok": true,
+        "self_reported_passed": false,
+        "reason": "packaging delta vs 9c28992 is non-empty: debian/changelog adds the 0.1.0~dev20261105.2 entry (commit d7d8b6a); frozen deb-001 manifest/SHA256SUMS/package SHA still match their records; no deb build was run",
+        "result_sha256": "04d7b8c662bee9888c6def3a5a4dce7f131709f48ccb4ec5bf3768e6beda0e06",
+        "product_behavior_impact": "none observed; the delta is release metadata only and no product test asserted the frozen baseline",
+        "follow_up": "T5 packaging must confirm the version bump is intended and rebuild/verify the deb; this entry is not counted as a product failure"
+      },
+      {
+        "name": "t9-measure-log-audit (JSON artefact self-report)",
+        "command_exit_ok": true,
+        "self_reported_passed": false,
+        "reason": "all four report claims are reproduced, but the home_attempts5 row is internally inconsistent: retry phase reports 19 retries/298 requests in the histogram against 24 disconnects and pages=311; the other three rows reconcile. T9 report figures match the raw fields, so this is a measurement-accounting caveat, not a product behaviour failure",
+        "result_sha256": "544952f5b3ab7f3257565fc917ee69086ffda790dc2f01d1d2a47bdc52c9df6a",
+        "product_behavior_impact": "none directly measured; T9 real-NAS claims remain as documented but the retry accounting in one row is not reconciled",
+        "follow_up": "T9 author should clarify disconnect/page/request accounting on the HOME attempts5 row or annotate the report; no new NAS run was performed here"
+      }
+    ]
+  },
+  "native_loopback": {
+    "g4_014_counts": {
+      "failed": 0,
+      "ignored": 0,
+      "passed": 70,
+      "total": 70
+    },
+    "baseline_013_sha256": "da9d1eacfe3cbbfa8b8eb5e0151f956b59e3b5647a365e534f81833ffc3f251a",
+    "comparison": {
+      "cases": 70,
+      "counts": {
+        "failed": 0,
+        "ignored": 0,
+        "passed": 70,
+        "total": 70
+      },
+      "changed_observed_cases": [],
+      "baseline": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/issue7-validation/G4-evidence-bundle-013-final/evidence/g4-013/native-loopback-updated-001/results.json",
+      "verdict": "observed classification identical to G4-013 corrected baseline"
+    },
+    "note": "G4-014 uses the corrected 70-case harness; case-by-case observed classification is compared with the G4-013 corrected baseline"
+  },
+  "t1_write_learning_targeted_tests": [
+    {
+      "name": "sproto-error-tests",
+      "passed": true,
+      "counts": {
+        "reported": true,
+        "passed": 8,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 160
+      }
+    },
+    {
+      "name": "worker-mutation-permission-tests",
+      "passed": true,
+      "counts": {
+        "reported": true,
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 156
+      }
+    },
+    {
+      "name": "bridge-learned-upload-denial",
+      "passed": true,
+      "counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 157
+      }
+    },
+    {
+      "name": "bridge-ambiguous-upload-hint",
+      "passed": true,
+      "counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 157
+      }
+    },
+    {
+      "name": "bridge-transport-loss-no-learn",
+      "passed": true,
+      "counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 157
+      }
+    },
+    {
+      "name": "core-learned-upload-denial-revision",
+      "passed": true,
+      "counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 415
+      }
+    },
+    {
+      "name": "core-definite-refusal-target-guard",
+      "passed": true,
+      "counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 415
+      }
+    },
+    {
+      "name": "core-rename-remove-hints-no-rows",
+      "passed": true,
+      "counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 415
+      }
+    }
+  ],
+  "snapshot": {
+    "repo": "None",
+    "git_dir": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/public-summary-20261031/.git",
+    "commit": "b303ac6bf01f6ff66f48d1e74cb94740561a841c",
+    "root_tree": "17d091768d45167ed81c19160075040da9aad2c5",
+    "source": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-snapshot/source",
+    "entries": 2803,
+    "verified_blobs": 2803,
+    "extra_files": [],
+    "allowed_extra_files": [],
+    "missing_files": [],
+    "problems": [],
+    "problem_count": 0,
+    "tree_listing_sha256": "0ef3176a8a2d479efda0ac465f9dfa03cc524be546cf26034e894083a6841be0",
+    "passed": true,
+    "method": "git ls-tree -r blob object ids + path set + executable bit; no product source writes"
+  },
+  "aborted_partial_run": {
+    "path_in_wsl": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-aborted-partial",
+    "reason": "interrupted by the user during workspace-default",
+    "commands_recorded": 28,
+    "failed_commands": [
+      "native-loopback"
+    ],
+    "target_reuse": "its target was used only as a Cargo.lock registry-dependency seed for the formal rerun"
+  },
+  "invalid_root_user_run": {
+    "evidence_dir": "environment/attempt4-root-invalid",
+    "reason": "launched as root; permissions_kernel asserts getuid != 0, so the FUSE/kernel group cannot pass under root",
+    "commands_recorded": 25,
+    "failed_commands": [
+      "kernel-parent-actions-preflight",
+      "core-history-probe"
+    ],
+    "recorded_as_product_failure": false,
+    "target_reuse": "target not reused; formal run is executed as drive-native-test"
+  },
+  "not_run_commands": [],
+  "exclusions": {
+    "manifest_self": "MANIFEST.json is not listed in its own files map",
+    "sha256sums_self": "SHA256SUMS lists all files except MANIFEST.json and SHA256SUMS",
+    "absent_by_design": [
+      "product source archive candidate.tar and run/source (retained at work/issue7-validation/prepared-g4-014/candidate.tar; SHA in source.json)",
+      "build targets and all ELF binaries",
+      "Store databases, scratch fixtures and temporary files"
+    ]
+  },
+  "allowed_failed_checks": [
+    {
+      "name": "package-metadata-equivalence",
+      "command_exit_ok": true,
+      "self_reported_passed": false,
+      "reason": "packaging delta vs 9c28992 is non-empty: debian/changelog adds the 0.1.0~dev20261105.2 entry (commit d7d8b6a); frozen deb-001 manifest/SHA256SUMS/package SHA still match their records; no deb build was run",
+      "result_sha256": "04d7b8c662bee9888c6def3a5a4dce7f131709f48ccb4ec5bf3768e6beda0e06",
+      "product_behavior_impact": "none observed; the delta is release metadata only and no product test asserted the frozen baseline",
+      "follow_up": "T5 packaging must confirm the version bump is intended and rebuild/verify the deb; this entry is not counted as a product failure"
+    },
+    {
+      "name": "t9-measure-log-audit (JSON artefact self-report)",
+      "command_exit_ok": true,
+      "self_reported_passed": false,
+      "reason": "all four report claims are reproduced, but the home_attempts5 row is internally inconsistent: retry phase reports 19 retries/298 requests in the histogram against 24 disconnects and pages=311; the other three rows reconcile. T9 report figures match the raw fields, so this is a measurement-accounting caveat, not a product behaviour failure",
+      "result_sha256": "544952f5b3ab7f3257565fc917ee69086ffda790dc2f01d1d2a47bdc52c9df6a",
+      "product_behavior_impact": "none directly measured; T9 real-NAS claims remain as documented but the retry accounting in one row is not reconciled",
+      "follow_up": "T9 author should clarify disconnect/page/request accounting on the HOME attempts5 row or annotate the report; no new NAS run was performed here"
+    }
+  ]
+}

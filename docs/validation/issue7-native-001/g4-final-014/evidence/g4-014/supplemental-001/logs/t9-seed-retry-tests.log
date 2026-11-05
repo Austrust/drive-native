@@ -1,0 +1,17 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.04s
+     Running unittests src/lib.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/deps/drive_core-d0df5f485b1c9979)
+
+running 10 tests
+test native::native_snapshot::seed_tests::root_deletion_replacement_and_type_change_abort_cached_seed ... ok
+test native::native_snapshot::seed_tests::retry_starts_at_completed_seed_and_reduces_root_updates_before_new_boundary ... ok
+test native::native_snapshot::seed_tests::seed_does_not_retry_a_server_refusal ... ok
+test native::native_snapshot::seed_tests::seed_binding_cannot_cross_scope_or_server_identity ... ok
+test native::native_snapshot::seed_tests::interrupted_or_invalid_reseed_cannot_publish_partial_root_and_cursor ... ok
+test native::native_snapshot::seed_tests::unchanged_cached_seed_and_normalized_return_keep_the_selected_identity ... ok
+test native::native_snapshot::seed_tests::fresh_seed_still_requires_selected_root_and_stationary_empty_boundary ... ok
+test native::native_snapshot::seed_tests::cancelled_reseed_keeps_only_the_previous_completed_boundary ... ok
+test native::native_snapshot::seed_tests::seed_retries_transport_failures_from_the_same_cursor_then_completes ... ok
+test native::native_snapshot::seed_tests::seed_stops_after_bounded_retries_without_skipping_a_page ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 406 filtered out; finished in 3.01s
+

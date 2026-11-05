@@ -1,0 +1,29 @@
+{"name": "t9-retry-unit-tests", "passed": true, "counts": {"reported": true, "passed": 4, "failed": 0, "ignored": 0, "measured": 0, "filtered": 412}}
+{"name": "t9-seed-retry-tests", "passed": true, "counts": {"reported": true, "passed": 10, "failed": 0, "ignored": 0, "measured": 0, "filtered": 406}}
+{"name": "t9-drive-core-lib", "passed": true, "counts": {"reported": true, "passed": 415, "failed": 0, "ignored": 1, "measured": 0, "filtered": 0}}
+{"name": "t9-drive-runtime-lib", "passed": true, "counts": {"reported": true, "passed": 157, "failed": 0, "ignored": 1, "measured": 0, "filtered": 0}}
+{"name": "t9-retry-probe-prepare", "passed": true, "counts": {"reported": false}}
+{"name": "t9-retry-probe-tests", "passed": true, "counts": {"reported": true, "passed": 13, "failed": 0, "ignored": 0, "measured": 0, "filtered": 0}}
+{"name": "t9-measure-log-audit", "passed": true, "counts": {"reported": true, "passed": 4, "failed": 0, "ignored": 0}}
+{"name": "t1-sproto-error-tests", "passed": true, "counts": {"reported": true, "passed": 8, "failed": 0, "ignored": 0, "measured": 0, "filtered": 160}}
+{"name": "t1-worker-mutation-permission-tests", "passed": true, "counts": {"reported": true, "passed": 2, "failed": 0, "ignored": 0, "measured": 0, "filtered": 156}}
+{"name": "t1-bridge-learned-upload-denial", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 157}}
+{"name": "t1-bridge-ambiguous-upload-hint", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 157}}
+{"name": "t1-bridge-transport-loss-no-learn", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 157}}
+{"name": "t1-core-learned-upload-denial-revision", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 415}}
+{"name": "t1-core-definite-refusal-target-guard", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 415}}
+{"name": "t1-core-rename-remove-hints-no-rows", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 415}}
+{"name": "standard-check-all-targets", "passed": true, "counts": {"reported": false}}
+{"name": "capacity-ignored-list", "passed": true, "counts": {"reported": false}}
+{"name": "capacity-210k", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 415}}
+{"name": "t9-release-bins-build", "passed": true, "counts": {"reported": false}}
+{"name": "tls-harness-build", "passed": true, "counts": {"reported": false}}
+{"name": "tls-actual-worker-all-ten", "passed": true, "counts": {"reported": false}}
+{"name": "old-target-seed", "passed": true, "counts": {"reported": false}}
+{"name": "old-component-build", "passed": true, "counts": {"reported": false}}
+{"name": "new-component-build", "passed": true, "counts": {"reported": false}}
+{"name": "private-component-policy-handover", "passed": true, "counts": {"reported": false}}
+{"name": "package-version", "passed": true, "counts": {"reported": false}}
+{"name": "package-documentation-staging", "passed": true, "counts": {"reported": false}}
+{"name": "package-metadata-equivalence", "passed": true, "counts": {"reported": true, "passed": 0, "failed": 1, "ignored": 0}}
+{"summary": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/supplemental-001/summary.json", "all_passed": true}

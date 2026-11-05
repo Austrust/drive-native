@@ -1,0 +1,184 @@
+{
+  "passed": true,
+  "scope": "real IPC21 component pair, private files/D-Bus/FUSE; not a Debian package lifecycle",
+  "old_commit": "41365a650eb7d7df696046e21b7671697231f851",
+  "new_commit": "b303ac6bf01f6ff66f48d1e74cb94740561a841c",
+  "cases": [
+    {
+      "name": "legacy_false_explicit_follow_remote_and_actual_remount",
+      "passed": true,
+      "policy": "follow_remote",
+      "source": "user",
+      "revision": 1,
+      "body_sha256": "ccf9fbb49090e8f28a1fffed65d5b0f8c7c8b1562089e9516f39acfb04263dc4"
+    },
+    {
+      "name": "running_old_fsd_keeps_policy_and_pending_data_after_pair_replace",
+      "passed": true,
+      "policy": "follow_remote",
+      "source": "user",
+      "revision": 1,
+      "body_sha256": "ccf9fbb49090e8f28a1fffed65d5b0f8c7c8b1562089e9516f39acfb04263dc4"
+    },
+    {
+      "name": "old_fsd_pins_old_worker_inode_across_replacement",
+      "passed": true,
+      "peer_is_loopback": true,
+      "native_initial_bytes": 37,
+      "pid": 45296,
+      "executable_identity": {
+        "device": 2096,
+        "inode": 1708934
+      },
+      "revision_before_resume": 1,
+      "revision_after_resume": 2,
+      "scope": "fsd-owned actual worker initiated native traffic after strict IPC handshake; TLS/auth deliberately not completed"
+    },
+    {
+      "name": "old_pair_after_local_worker_probe",
+      "passed": true,
+      "policy": "follow_remote",
+      "source": "user",
+      "revision": 2,
+      "body_sha256": "ccf9fbb49090e8f28a1fffed65d5b0f8c7c8b1562089e9516f39acfb04263dc4"
+    },
+    {
+      "name": "new_pair_remount_keeps_policy_pending_body_history_cursor",
+      "passed": true,
+      "policy": "follow_remote",
+      "source": "user",
+      "revision": 2,
+      "body_sha256": "ccf9fbb49090e8f28a1fffed65d5b0f8c7c8b1562089e9516f39acfb04263dc4"
+    },
+    {
+      "name": "new_fsd_uses_new_worker_inode",
+      "passed": true,
+      "peer_is_loopback": true,
+      "native_initial_bytes": 37,
+      "pid": 45355,
+      "executable_identity": {
+        "device": 2096,
+        "inode": 1708947
+      },
+      "revision_before_resume": 2,
+      "revision_after_resume": 3,
+      "scope": "fsd-owned actual worker initiated native traffic after strict IPC handshake; TLS/auth deliberately not completed"
+    },
+    {
+      "name": "new_pair_after_local_worker_probe",
+      "passed": true,
+      "policy": "follow_remote",
+      "source": "user",
+      "revision": 3,
+      "body_sha256": "ccf9fbb49090e8f28a1fffed65d5b0f8c7c8b1562089e9516f39acfb04263dc4"
+    },
+    {
+      "name": "payload_remove_restore_and_remount_preserves_user_state",
+      "passed": true,
+      "policy": "follow_remote",
+      "source": "user",
+      "revision": 3,
+      "body_sha256": "ccf9fbb49090e8f28a1fffed65d5b0f8c7c8b1562089e9516f39acfb04263dc4"
+    }
+  ],
+  "commands": [
+    {
+      "argv": [
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/examples/multi_mount_fixture",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/component-policy-handover-001/fixture"
+      ],
+      "stdout": "logs/command-000.stdout.log",
+      "stderr": "logs/command-000.stderr.log",
+      "exit_code": 0,
+      "elapsed_seconds": 0.24984836300018287,
+      "stdout_sha256": "e1518362e9a0713ec6c0f9e9f93ef8e6c9e022c346476ceda9e1eed2418d6219",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    [
+      "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/component-policy-handover-001/installed/drive-native-fsd",
+      "--config",
+      "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/component-policy-handover-001/fixture/config/drive-native/profile.json"
+    ],
+    [
+      "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/component-policy-handover-001/installed/drive-native-fsd",
+      "--config",
+      "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/component-policy-handover-001/fixture/config/drive-native/profile.json"
+    ],
+    [
+      "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/component-policy-handover-001/installed/drive-native-fsd",
+      "--config",
+      "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/component-policy-handover-001/fixture/config/drive-native/profile.json"
+    ],
+    [
+      "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/component-policy-handover-001/installed/drive-native-fsd",
+      "--config",
+      "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/component-policy-handover-001/fixture/config/drive-native/profile.json"
+    ]
+  ],
+  "nas_accessed": false,
+  "expected_ipc_version": 21,
+  "native_login_success_claimed": false,
+  "binary_identity": {
+    "old-pair": {
+      "drive-native-fsd": {
+        "source": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-old-target/debug/drive-native-fsd",
+        "sha256": "ed842c80bda73137d464febb0d63e44de38e25a57bd68ac11c17adf3090fc5a8",
+        "installed_identity": {
+          "device": 2096,
+          "inode": 1708932
+        }
+      },
+      "drive-native-worker": {
+        "source": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-old-target/debug/drive-native-worker",
+        "sha256": "25f197138aa2fef659bc3f1bb88ea50ec4a756488f1d2d9e551f508e4498dfb2",
+        "installed_identity": {
+          "device": 2096,
+          "inode": 1708934
+        }
+      }
+    },
+    "new-pair": {
+      "drive-native-fsd": {
+        "source": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/drive-native-fsd",
+        "sha256": "d1592e7af75f47973b9863491f11a0fe82eda5213e97f54f61a4404937d9a5eb",
+        "installed_identity": {
+          "device": 2096,
+          "inode": 1708946
+        }
+      },
+      "drive-native-worker": {
+        "source": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/drive-native-worker",
+        "sha256": "f102698f0f22c6a0ddc7a050cf2a7fe9df916d25812ca2cc43cd8a7fca9da194",
+        "installed_identity": {
+          "device": 2096,
+          "inode": 1708947
+        }
+      }
+    },
+    "restored-pair": {
+      "drive-native-fsd": {
+        "source": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/drive-native-fsd",
+        "sha256": "d1592e7af75f47973b9863491f11a0fe82eda5213e97f54f61a4404937d9a5eb",
+        "installed_identity": {
+          "device": 2096,
+          "inode": 1708948
+        }
+      },
+      "drive-native-worker": {
+        "source": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/drive-native-worker",
+        "sha256": "f102698f0f22c6a0ddc7a050cf2a7fe9df916d25812ca2cc43cd8a7fca9da194",
+        "installed_identity": {
+          "device": 2096,
+          "inode": 1708949
+        }
+      }
+    }
+  },
+  "cleanup": [],
+  "residual_mount": false,
+  "counts": {
+    "passed": 8,
+    "failed": 0,
+    "ignored": 0
+  }
+}

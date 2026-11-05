@@ -1,0 +1,141 @@
+{
+  "boundary": "native TLS -> real worker ELF -> IPC/Rpc -> public Bridge -> Store",
+  "checks": {
+    "after": {
+      "cursor": "native-v1:78",
+      "download_failure": null,
+      "has_cached_body": false,
+      "policy": {
+        "local_policy": "explicit_read_only",
+        "server_capability": "unknown",
+        "writable_source": "user",
+        "write_policy_revision": 5
+      },
+      "root_list": "unknown",
+      "sibling_read": "unknown",
+      "target_read": "unknown",
+      "target_write_content": "deny"
+    },
+    "after_notification": {
+      "cursor": "native-v1:78",
+      "download_failure": null,
+      "has_cached_body": false,
+      "policy": {
+        "local_policy": "explicit_read_only",
+        "server_capability": "unknown",
+        "writable_source": "user",
+        "write_policy_revision": 5
+      },
+      "root_list": "unknown",
+      "sibling_read": "unknown",
+      "target_read": "unknown",
+      "target_write_content": "deny"
+    },
+    "before": {
+      "cursor": "native-v1:78",
+      "download_failure": null,
+      "has_cached_body": false,
+      "policy": {
+        "local_policy": "explicit_read_only",
+        "server_capability": "unknown",
+        "writable_source": "user",
+        "write_policy_revision": 4
+      },
+      "root_list": "deny",
+      "sibling_read": "allow",
+      "target_read": "deny",
+      "target_write_content": "deny"
+    },
+    "node_from_actual_worker_pull": true
+  },
+  "cleanup": {
+    "download_thread_joined": true,
+    "event_thread_joined": true,
+    "passed": true,
+    "server_threads_joined_and_sockets_closed": true,
+    "worker_pid_absent_after_stop": true
+  },
+  "elapsed_seconds": 0.167070939,
+  "error": null,
+  "failure_snapshot_after_cleanup": null,
+  "ignored": false,
+  "ipc_version": 21,
+  "name": "bridge_profile_true_empty",
+  "native_server": {
+    "actions": [
+      {
+        "connection": 1,
+        "event": "handshake",
+        "fields_checked": true,
+        "scmd": 25
+      },
+      {
+        "connection": 1,
+        "event": "handshake",
+        "fields_checked": true,
+        "scmd": 18
+      },
+      {
+        "connection": 1,
+        "event": "handshake",
+        "fields_checked": true,
+        "scmd": 25
+      },
+      {
+        "connection": 1,
+        "event": "handshake",
+        "fields_checked": true,
+        "scmd": 14
+      },
+      {
+        "action": "pull_event",
+        "connection": 1,
+        "cursor": 77,
+        "events": 1
+      },
+      {
+        "action": "pull_event",
+        "connection": 1,
+        "cursor": 78,
+        "events": 0
+      },
+      {
+        "action": "long_poll",
+        "connection": 1,
+        "cursor": 78,
+        "digest_checked": true,
+        "ordinal": 1
+      },
+      {
+        "action": "profile_reply",
+        "changed_views": [],
+        "connection": 1,
+        "profile_changed": true
+      },
+      {
+        "action": "pull_event",
+        "connection": 1,
+        "cursor": 78,
+        "events": 0
+      },
+      {
+        "action": "long_poll",
+        "connection": 1,
+        "cursor": 78,
+        "digest_checked": true,
+        "ordinal": 2
+      }
+    ],
+    "connections": 1,
+    "download_content_bytes_sent": 0,
+    "download_requests": 0,
+    "errors": [],
+    "listener": "127.0.0.1:6690",
+    "long_poll_requests": 2,
+    "pull_event_requests": 3
+  },
+  "passed": true,
+  "scope": "synthetic local TLS/service/Store; no NAS, FUSE, GUI or real ACL source",
+  "status": "passed",
+  "worker_pid": 44707
+}

@@ -1,0 +1,9 @@
+{
+  "source": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-old-candidate-snapshot/source",
+  "seed": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target",
+  "target": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-old-target",
+  "selection": "Cargo.lock registry+ packages only; debug deps/fingerprint/build; no workspace/path products, test ELF or incremental cache",
+  "copied_files": 3843,
+  "copied_bytes": 2219894846,
+  "complete": true
+}

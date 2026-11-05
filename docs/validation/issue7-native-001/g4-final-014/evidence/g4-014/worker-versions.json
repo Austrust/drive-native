@@ -1,0 +1,45 @@
+{
+  "worker": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/drive-native-worker",
+  "worker_sha256": "f102698f0f22c6a0ddc7a050cf2a7fe9df916d25812ca2cc43cd8a7fca9da194",
+  "scope": "real worker ELF; local UNIX socket; invalid CA rejected before native connect",
+  "cases": [
+    {
+      "name": "worker_elf_handshake_v20",
+      "version": 20,
+      "response": "EOF without response",
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "Error: Custom { kind: Other, error: \"invalid worker handshake\" }\n",
+      "passed": true
+    },
+    {
+      "name": "worker_elf_handshake_v21",
+      "version": 21,
+      "response": {
+        "version": 21,
+        "id": 1,
+        "body": {
+          "Failed": {
+            "category": "tls_or_configuration"
+          }
+        }
+      },
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": "",
+      "passed": true
+    },
+    {
+      "name": "worker_elf_handshake_v22",
+      "version": 22,
+      "response": "EOF without response",
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "Error: Custom { kind: Other, error: \"invalid worker handshake\" }\n",
+      "passed": true
+    }
+  ],
+  "passed": 3,
+  "failed": 0,
+  "ignored": 0
+}

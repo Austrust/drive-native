@@ -1,0 +1,23 @@
+{
+  "run_dir_preserved_in_wsl": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-aborted-partial",
+  "candidate_commit": "b303ac6bf01f6ff66f48d1e74cb94740561a841c",
+  "complete": false,
+  "all_commands_passed": null,
+  "start": "2026-11-05T11:03:04.761013+00:00",
+  "interrupted_during": "workspace-default",
+  "commands_recorded": 28,
+  "passed": 26,
+  "failed": 1,
+  "not_run": 0,
+  "failed_commands": [
+    "native-loopback"
+  ],
+  "registry_seed_record": {
+    "source": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-target-seed",
+    "copied_files": 2812,
+    "copied_bytes": 1714266149,
+    "selection": "Cargo.lock registry+ packages only; debug/release deps/fingerprint/build; copied bytes, no workspace/path packages, no test ELFs or incremental"
+  },
+  "target_location_after_preservation": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun-target-seed",
+  "note": "Run interrupted by the user during workspace-default; target kept only as registry-dependency seed for the formal rerun. No product claim uses this partial run."
+}

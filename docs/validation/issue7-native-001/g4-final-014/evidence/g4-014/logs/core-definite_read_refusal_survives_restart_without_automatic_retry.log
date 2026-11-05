@@ -1,0 +1,13 @@
+   Compiling rustls-webpki v0.103.10
+   Compiling rustls v0.23.37
+   Compiling tokio-rustls v0.26.4
+   Compiling sproto v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/source/crates/sproto)
+   Compiling drive-core v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/source/crates/drive-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 40.82s
+     Running tests/download_jobs.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/deps/download_jobs-347b147522b22afe)
+
+running 1 test
+test definite_read_refusal_survives_restart_without_automatic_retry ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.22s
+

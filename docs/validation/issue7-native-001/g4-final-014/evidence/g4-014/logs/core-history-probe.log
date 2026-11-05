@@ -1,0 +1,84 @@
+   Compiling drive-core v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/source/crates/drive-core)
+warning: unused import: `installation_restore`
+   --> /home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/source/crates/drive-core/src/initialization_store.rs:851:70
+    |
+851 |     InitializationCommit, check_install_gate, finish_in_transaction, installation_restore,
+    |                                                                      ^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `installation_restore` is never used
+   --> /home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/source/crates/drive-core/src/initialization_store_ops.rs:997:15
+    |
+997 | pub(crate) fn installation_restore(
+    |               ^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `emit` is never used
+  --> /home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/source/crates/drive-core/src/snapshot_progress.rs:50:15
+   |
+50 | pub(crate) fn emit(progress: Progress) {
+   |               ^^^^
+
+warning: function `retry` is never used
+  --> /home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/source/crates/drive-core/src/snapshot_progress.rs:53:15
+   |
+53 | pub(crate) fn retry(attempt: u8, reason: RetryReason) {
+   |               ^^^^^
+
+   Compiling issue7-core-history-probe v0.0.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/core-history-probe)
+warning: unused import: `write_permissions as permissions`
+ --> src/lib.rs:1:110
+  |
+1 | ...sync_history::{HistoryQuery, SyncHistoryRecord}, write_permissions as permissions};
+  |                                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `node` is never used
+ --> src/lib.rs:3:4
+  |
+3 | fn node(id: &str, name: &str, version: &str) -> Node {
+  |    ^^^^
+  |
+  = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `fixture` is never used
+ --> src/lib.rs:7:4
+  |
+7 | fn fixture() -> (tempfile::TempDir, Store) {
+  |    ^^^^^^^
+
+warning: function `history` is never used
+  --> src/lib.rs:17:4
+   |
+17 | fn history(store:&Store, node_id:&str, action:&str) -> SyncHistoryRecord {
+   |    ^^^^^^^
+
+warning: function `detail` is never used
+  --> src/lib.rs:20:4
+   |
+20 | fn detail(row:&SyncHistoryRecord,action:&str,code:u32) {
+   |    ^^^^^^
+
+warning: `issue7-core-history-probe` (lib) generated 5 warnings (run `cargo fix --lib -p issue7-core-history-probe` to apply 1 suggestion)
+warning: `drive-core` (lib) generated 4 warnings (run `cargo fix --lib -p drive-core` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 13.13s
+     Running unittests src/lib.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/deps/issue7_core_history_probe-8d036af822ef7690)
+
+running 5 tests
+test first_invalidation_creates_and_advances_authoritative_revision ... ok
+test mkdir_confirmed_history_clears_hint_but_retains_original_response_detail ... ok
+test mkdir_conflict_history_replaces_hint_and_retains_original_response_detail ... ok
+test replace_cleanup_uncertainty_never_replays_and_final_history_keeps_reply_detail ... ok
+test upload_confirmed_history_clears_hint_but_retains_original_response_detail ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.66s
+
+   Doc-tests issue7_core_history_probe
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

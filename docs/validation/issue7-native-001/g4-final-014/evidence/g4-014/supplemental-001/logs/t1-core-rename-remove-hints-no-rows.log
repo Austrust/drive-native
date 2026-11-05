@@ -1,0 +1,8 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.90s
+     Running unittests src/lib.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/deps/drive_core-d0df5f485b1c9979)
+
+running 1 test
+test write_permissions::tests::rename_and_remove_permission_hints_never_write_acl_rows ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 415 filtered out; finished in 0.18s
+

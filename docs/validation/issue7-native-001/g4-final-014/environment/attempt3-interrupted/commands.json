@@ -1,0 +1,340 @@
+[
+  {
+    "name": "offline-documentation-staging",
+    "passed": true,
+    "not_run": null,
+    "counts": {
+      "reported": true,
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0
+    }
+  },
+  {
+    "name": "clean-private-product-packages",
+    "passed": true,
+    "not_run": null,
+    "counts": {
+      "reported": false
+    }
+  },
+  {
+    "name": "core-definite_read_refusal_survives_restart_without_automatic_retry",
+    "passed": true,
+    "not_run": null,
+    "counts": {
+      "reported": true,
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered": 6
+    }
+  },
+  {
+    "name": "core-revoked_traversal_suppresses_existing_transport_retry_wakes",
+    "passed": true,
+    "not_run": null,
+    "counts": {
+      "reported": true,
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered": 6
+    }
+  },
+  {
+    "name": "runtime-bridge_respects_read_denial_before_cached_body_or_new_flight",
+    "passed": true,
+    "not_run": null,
+    "counts": {
+      "reported": true,
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered": 157
+    }
+  },
+  {
+    "name": "runtime-cancelled_flight_clears_retry_even_when_read_or_traverse_is_denied",
+    "passed": true,
+    "not_run": null,
+    "counts": {
+      "reported": true,
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered": 157
+    }
+  },
+  {
+    "name": "runtime-concurrent_read_revocation_and_last_reader_cancel_leave_no_retry_intent",
+    "passed": true,
+    "not_run": null,
+    "counts": {
+      "reported": true,
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered": 157
+    }
+  },
+  {
+    "name": "retry-clock-preflight",
+    "passed": true,
+    "not_run": null,
+    "counts": {
+      "reported": true,
+      "passed": 4,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered": 154
+    }
+  },
+  {
+    "name": "obsolete-ticket-preflight",
+    "passed": true,
+    "not_run": null,
+    "counts": {
+      "reported": true,
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered": 157
+    }
+  },
+  {
+    "name": "original-retry-pair-preflight",
+    "passed": true,
+    "not_run": null,
+    "counts": {
+      "reported": true,
+      "passed": 2,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered": 156
+    }
+  },
+  {
+    "name": "runtime-lib-original-parallelism",
+    "passed": true,
+    "not_run": null,
+    "counts": {
+      "reported": true,
+      "passed": 157,
+      "failed": 0,
+      "ignored": 1,
+      "measured": 0,
+      "filtered": 0
+    }
+  },
+  {
+    "name": "native-read-stale-preflight",
+    "passed": true,
+    "not_run": null,
+    "counts": {
+      "reported": true,
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered": 157
+    }
+  },
+  {
+    "name": "runtime-permission-preflight",
+    "passed": true,
+    "not_run": null,
+    "counts": {
+      "reported": true,
+      "passed": 7,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered": 151
+    }
+  },
+  {
+    "name": "runtime-profile-preflight",
+    "passed": true,
+    "not_run": null,
+    "counts": {
+      "reported": true,
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered": 157
+    }
+  },
+  {
+    "name": "runtime-version-preflight",
+    "passed": true,
+    "not_run": null,
+    "counts": {
+      "reported": true,
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered": 157
+    }
+  },
+  {
+    "name": "core-permission-preflight",
+    "passed": true,
+    "not_run": null,
+    "counts": {
+      "reported": true,
+      "passed": 26,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered": 390
+    }
+  },
+  {
+    "name": "core-v6-migration-preflight",
+    "passed": true,
+    "not_run": null,
+    "counts": {
+      "reported": true,
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered": 8
+    }
+  },
+  {
+    "name": "kernel-parent-actions-preflight",
+    "passed": true,
+    "not_run": null,
+    "counts": {
+      "reported": true,
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered": 4
+    }
+  },
+  {
+    "name": "sproto-permission-preflight",
+    "passed": true,
+    "not_run": null,
+    "counts": {
+      "reported": true,
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered": 165
+    }
+  },
+  {
+    "name": "sproto-profile-preflight",
+    "passed": true,
+    "not_run": null,
+    "counts": {
+      "reported": true,
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered": 167
+    }
+  },
+  {
+    "name": "native-loopback",
+    "passed": false,
+    "not_run": null,
+    "counts": {
+      "reported": false
+    }
+  },
+  {
+    "name": "worker-trust-preflight",
+    "passed": true,
+    "not_run": null,
+    "counts": {
+      "reported": true,
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered": 0
+    }
+  },
+  {
+    "name": "worker-elf-versions",
+    "passed": true,
+    "not_run": null,
+    "counts": {
+      "reported": true,
+      "passed": 3,
+      "failed": 0,
+      "ignored": 0
+    }
+  },
+  {
+    "name": "core-history-probe-prepare",
+    "passed": true,
+    "not_run": null,
+    "counts": {
+      "reported": false
+    }
+  },
+  {
+    "name": "core-history-probe",
+    "passed": true,
+    "not_run": null,
+    "counts": {
+      "reported": true,
+      "passed": 5,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered": 0
+    }
+  },
+  {
+    "name": "kernel-setattr-preflight",
+    "passed": true,
+    "not_run": null,
+    "counts": {
+      "reported": true,
+      "passed": 1,
+      "failed": 0,
+      "ignored": 0,
+      "measured": 0,
+      "filtered": 4
+    }
+  },
+  {
+    "name": "workspace-all-features",
+    "passed": true,
+    "not_run": null,
+    "counts": {
+      "reported": true,
+      "passed": 992,
+      "failed": 0,
+      "ignored": 42,
+      "measured": 0,
+      "filtered": 0
+    }
+  },
+  {
+    "name": "workspace-default",
+    "passed": null,
+    "not_run": null,
+    "counts": null
+  }
+]

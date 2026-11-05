@@ -1,0 +1,2196 @@
+{
+  "all_passed": true,
+  "cases": [
+    {
+      "bind_address": "127.0.0.1:45647",
+      "elapsed_seconds": 0.005114959,
+      "expected": {
+        "code": 12290,
+        "kind": "download_permission_denied"
+      },
+      "name": "download_reply_3002",
+      "observed": {
+        "code": 12290,
+        "kind": "download_permission_denied"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "download",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:34139",
+      "elapsed_seconds": 0.003736571,
+      "expected": {
+        "code": 12296,
+        "kind": "download_permission_denied"
+      },
+      "name": "download_reply_3008",
+      "observed": {
+        "code": 12296,
+        "kind": "download_permission_denied"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "download",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:33847",
+      "elapsed_seconds": 0.004632163,
+      "expected": {
+        "code": 12292,
+        "kind": "server"
+      },
+      "name": "download_reply_3004",
+      "observed": {
+        "code": 12292,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "download",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:44325",
+      "elapsed_seconds": 0.003844469,
+      "expected": {
+        "code": 32772,
+        "kind": "server"
+      },
+      "name": "download_reply_8004",
+      "observed": {
+        "code": 32772,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "download",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:37055",
+      "elapsed_seconds": 0.004291266,
+      "expected": {
+        "code": 36869,
+        "kind": "server"
+      },
+      "name": "download_reply_9005",
+      "observed": {
+        "code": 36869,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "download",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:40797",
+      "elapsed_seconds": 0.00366977,
+      "expected": {
+        "code": 40965,
+        "kind": "server"
+      },
+      "name": "download_reply_a005",
+      "observed": {
+        "code": 40965,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "download",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:38443",
+      "elapsed_seconds": 0.004230966,
+      "expected": {
+        "code": null,
+        "kind": "decode"
+      },
+      "name": "download_reply_100003002",
+      "observed": {
+        "kind": "decode",
+        "message": "server error code exceeds u32"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "download",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:40455",
+      "elapsed_seconds": 0.003978668,
+      "expected": {
+        "code": 36867,
+        "kind": "server"
+      },
+      "name": "download_reply_9003",
+      "observed": {
+        "code": 36867,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "download",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:33849",
+      "elapsed_seconds": 0.004387965,
+      "expected": {
+        "code": 40964,
+        "kind": "server"
+      },
+      "name": "download_reply_a004",
+      "observed": {
+        "code": 40964,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "download",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:35869",
+      "elapsed_seconds": 0.003214375,
+      "expected": {
+        "code": 36867,
+        "kind": "server"
+      },
+      "name": "t1_setup_Auth_9003_is_generic",
+      "observed": {
+        "code": 36867,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action_requests": 0,
+          "commands": [
+            25,
+            18
+          ],
+          "reply_stage": "auth"
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:38279",
+      "elapsed_seconds": 0.004087568,
+      "expected": {
+        "code": 36867,
+        "kind": "server"
+      },
+      "name": "t1_setup_Connect_9003_is_generic",
+      "observed": {
+        "code": 36867,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action_requests": 0,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "connect"
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:44807",
+      "elapsed_seconds": 0.003588972,
+      "expected": {
+        "code": 12290,
+        "kind": "server"
+      },
+      "name": "download_setup_Auth_3002_is_generic",
+      "observed": {
+        "code": 12290,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action_requests": 0,
+          "commands": [
+            25,
+            18
+          ],
+          "reply_stage": "auth"
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:34201",
+      "elapsed_seconds": 0.003697971,
+      "expected": {
+        "code": 12290,
+        "kind": "server"
+      },
+      "name": "download_setup_Connect_3002_is_generic",
+      "observed": {
+        "code": 12290,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action_requests": 0,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "connect"
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:43139",
+      "elapsed_seconds": 0.005368957,
+      "expected": {
+        "code": 12290,
+        "kind": "mutation_permission_uncertain"
+      },
+      "name": "upload_reply_3002",
+      "observed": {
+        "code": 12290,
+        "kind": "mutation_permission_uncertain"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "upload",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 21
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:34987",
+      "elapsed_seconds": 0.005623655,
+      "expected": {
+        "code": 12292,
+        "kind": "mutation_permission_uncertain"
+      },
+      "name": "upload_reply_3004",
+      "observed": {
+        "code": 12292,
+        "kind": "mutation_permission_uncertain"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "upload",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 21
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:39741",
+      "elapsed_seconds": 0.004841262,
+      "expected": {
+        "code": 12296,
+        "kind": "server"
+      },
+      "name": "upload_reply_3008",
+      "observed": {
+        "code": 12296,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "upload",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 21
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:43517",
+      "elapsed_seconds": 0.005205859,
+      "expected": {
+        "code": 32772,
+        "kind": "server"
+      },
+      "name": "upload_reply_8004",
+      "observed": {
+        "code": 32772,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "upload",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 21
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:35865",
+      "elapsed_seconds": 0.005347557,
+      "expected": {
+        "code": 36867,
+        "kind": "mutation_permission_denied"
+      },
+      "name": "upload_reply_9003",
+      "observed": {
+        "code": 36867,
+        "kind": "mutation_permission_denied"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "upload",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 21
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:34635",
+      "elapsed_seconds": 0.004699462,
+      "expected": {
+        "code": 36868,
+        "kind": "mutation_permission_uncertain"
+      },
+      "name": "upload_reply_9004",
+      "observed": {
+        "code": 36868,
+        "kind": "mutation_permission_uncertain"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "upload",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 21
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:46689",
+      "elapsed_seconds": 0.00499286,
+      "expected": {
+        "code": 36869,
+        "kind": "server"
+      },
+      "name": "upload_reply_9005",
+      "observed": {
+        "code": 36869,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "upload",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 21
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:46117",
+      "elapsed_seconds": 0.004678062,
+      "expected": {
+        "code": 40963,
+        "kind": "server"
+      },
+      "name": "upload_reply_a003",
+      "observed": {
+        "code": 40963,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "upload",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 21
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:39373",
+      "elapsed_seconds": 0.00502996,
+      "expected": {
+        "code": 40964,
+        "kind": "server"
+      },
+      "name": "upload_reply_a004",
+      "observed": {
+        "code": 40964,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "upload",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 21
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:45827",
+      "elapsed_seconds": 0.005180459,
+      "expected": {
+        "code": 40965,
+        "kind": "server"
+      },
+      "name": "upload_reply_a005",
+      "observed": {
+        "code": 40965,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "upload",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 21
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:41883",
+      "elapsed_seconds": 0.00500466,
+      "expected": {
+        "code": null,
+        "kind": "decode"
+      },
+      "name": "upload_reply_100003002",
+      "observed": {
+        "kind": "decode",
+        "message": "server error code exceeds u32"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "upload",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 21
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:35103",
+      "elapsed_seconds": 0.004568163,
+      "expected": {
+        "code": 12290,
+        "kind": "mutation_permission_uncertain"
+      },
+      "name": "rename_reply_3002",
+      "observed": {
+        "code": 12290,
+        "kind": "mutation_permission_uncertain"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "rename",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:41333",
+      "elapsed_seconds": 0.003638671,
+      "expected": {
+        "code": 12292,
+        "kind": "mutation_permission_uncertain"
+      },
+      "name": "rename_reply_3004",
+      "observed": {
+        "code": 12292,
+        "kind": "mutation_permission_uncertain"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "rename",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:40587",
+      "elapsed_seconds": 0.003982669,
+      "expected": {
+        "code": 12296,
+        "kind": "server"
+      },
+      "name": "rename_reply_3008",
+      "observed": {
+        "code": 12296,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "rename",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:45005",
+      "elapsed_seconds": 0.003696571,
+      "expected": {
+        "code": 32772,
+        "kind": "server"
+      },
+      "name": "rename_reply_8004",
+      "observed": {
+        "code": 32772,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "rename",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:44047",
+      "elapsed_seconds": 0.004350165,
+      "expected": {
+        "code": 36867,
+        "kind": "server"
+      },
+      "name": "rename_reply_9003",
+      "observed": {
+        "code": 36867,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "rename",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:37471",
+      "elapsed_seconds": 0.003700971,
+      "expected": {
+        "code": 36868,
+        "kind": "server"
+      },
+      "name": "rename_reply_9004",
+      "observed": {
+        "code": 36868,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "rename",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:33409",
+      "elapsed_seconds": 0.004160267,
+      "expected": {
+        "code": 36869,
+        "kind": "server"
+      },
+      "name": "rename_reply_9005",
+      "observed": {
+        "code": 36869,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "rename",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:46153",
+      "elapsed_seconds": 0.003714371,
+      "expected": {
+        "code": 40963,
+        "kind": "server"
+      },
+      "name": "rename_reply_a003",
+      "observed": {
+        "code": 40963,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "rename",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:41169",
+      "elapsed_seconds": 0.004162567,
+      "expected": {
+        "code": 40964,
+        "kind": "server"
+      },
+      "name": "rename_reply_a004",
+      "observed": {
+        "code": 40964,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "rename",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:35189",
+      "elapsed_seconds": 0.00374187,
+      "expected": {
+        "code": 40965,
+        "kind": "server"
+      },
+      "name": "rename_reply_a005",
+      "observed": {
+        "code": 40965,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "rename",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:36357",
+      "elapsed_seconds": 0.004274966,
+      "expected": {
+        "code": null,
+        "kind": "decode"
+      },
+      "name": "rename_reply_100003002",
+      "observed": {
+        "kind": "decode",
+        "message": "server error code exceeds u32"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "rename",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:39641",
+      "elapsed_seconds": 0.003827669,
+      "expected": {
+        "code": 12290,
+        "kind": "mutation_permission_uncertain"
+      },
+      "name": "remove_reply_3002",
+      "observed": {
+        "code": 12290,
+        "kind": "mutation_permission_uncertain"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "remove",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:42585",
+      "elapsed_seconds": 0.004124367,
+      "expected": {
+        "code": 12292,
+        "kind": "mutation_permission_uncertain"
+      },
+      "name": "remove_reply_3004",
+      "observed": {
+        "code": 12292,
+        "kind": "mutation_permission_uncertain"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "remove",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:46337",
+      "elapsed_seconds": 0.00376467,
+      "expected": {
+        "code": 12296,
+        "kind": "server"
+      },
+      "name": "remove_reply_3008",
+      "observed": {
+        "code": 12296,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "remove",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:34005",
+      "elapsed_seconds": 0.003999768,
+      "expected": {
+        "code": 32772,
+        "kind": "server"
+      },
+      "name": "remove_reply_8004",
+      "observed": {
+        "code": 32772,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "remove",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:39557",
+      "elapsed_seconds": 0.004133967,
+      "expected": {
+        "code": 36867,
+        "kind": "server"
+      },
+      "name": "remove_reply_9003",
+      "observed": {
+        "code": 36867,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "remove",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:43739",
+      "elapsed_seconds": 0.004012268,
+      "expected": {
+        "code": 36868,
+        "kind": "server"
+      },
+      "name": "remove_reply_9004",
+      "observed": {
+        "code": 36868,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "remove",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:42563",
+      "elapsed_seconds": 0.004163867,
+      "expected": {
+        "code": 36869,
+        "kind": "server"
+      },
+      "name": "remove_reply_9005",
+      "observed": {
+        "code": 36869,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "remove",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:33473",
+      "elapsed_seconds": 0.004230866,
+      "expected": {
+        "code": 40963,
+        "kind": "mutation_permission_uncertain"
+      },
+      "name": "remove_reply_a003",
+      "observed": {
+        "code": 40963,
+        "kind": "mutation_permission_uncertain"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "remove",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:35101",
+      "elapsed_seconds": 0.003891669,
+      "expected": {
+        "code": 40964,
+        "kind": "mutation_permission_uncertain"
+      },
+      "name": "remove_reply_a004",
+      "observed": {
+        "code": 40964,
+        "kind": "mutation_permission_uncertain"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "remove",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:40617",
+      "elapsed_seconds": 0.004255766,
+      "expected": {
+        "code": 40965,
+        "kind": "server"
+      },
+      "name": "remove_reply_a005",
+      "observed": {
+        "code": 40965,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "remove",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:35645",
+      "elapsed_seconds": 0.004270166,
+      "expected": {
+        "code": null,
+        "kind": "decode"
+      },
+      "name": "remove_reply_100003002",
+      "observed": {
+        "kind": "decode",
+        "message": "server error code exceeds u32"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "remove",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:34617",
+      "elapsed_seconds": 0.004438665,
+      "expected": {
+        "code": 12290,
+        "kind": "mutation_permission_uncertain"
+      },
+      "name": "mkdir_reply_3002",
+      "observed": {
+        "code": 12290,
+        "kind": "mutation_permission_uncertain"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "upload",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:34775",
+      "elapsed_seconds": 0.003887369,
+      "expected": {
+        "code": 12292,
+        "kind": "mutation_permission_uncertain"
+      },
+      "name": "mkdir_reply_3004",
+      "observed": {
+        "code": 12292,
+        "kind": "mutation_permission_uncertain"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "upload",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:39601",
+      "elapsed_seconds": 0.004375465,
+      "expected": {
+        "code": 12296,
+        "kind": "server"
+      },
+      "name": "mkdir_reply_3008",
+      "observed": {
+        "code": 12296,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "upload",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:40179",
+      "elapsed_seconds": 0.004437764,
+      "expected": {
+        "code": 32772,
+        "kind": "server"
+      },
+      "name": "mkdir_reply_8004",
+      "observed": {
+        "code": 32772,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "upload",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:38729",
+      "elapsed_seconds": 0.004527964,
+      "expected": {
+        "code": 36867,
+        "kind": "mutation_permission_denied"
+      },
+      "name": "mkdir_reply_9003",
+      "observed": {
+        "code": 36867,
+        "kind": "mutation_permission_denied"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "upload",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:38419",
+      "elapsed_seconds": 0.003802569,
+      "expected": {
+        "code": 36868,
+        "kind": "mutation_permission_uncertain"
+      },
+      "name": "mkdir_reply_9004",
+      "observed": {
+        "code": 36868,
+        "kind": "mutation_permission_uncertain"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "upload",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:40775",
+      "elapsed_seconds": 0.004316866,
+      "expected": {
+        "code": 36869,
+        "kind": "server"
+      },
+      "name": "mkdir_reply_9005",
+      "observed": {
+        "code": 36869,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "upload",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:37637",
+      "elapsed_seconds": 0.003912669,
+      "expected": {
+        "code": 40963,
+        "kind": "server"
+      },
+      "name": "mkdir_reply_a003",
+      "observed": {
+        "code": 40963,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "upload",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:33479",
+      "elapsed_seconds": 0.004655262,
+      "expected": {
+        "code": 40964,
+        "kind": "server"
+      },
+      "name": "mkdir_reply_a004",
+      "observed": {
+        "code": 40964,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "upload",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:43675",
+      "elapsed_seconds": 0.004045068,
+      "expected": {
+        "code": 40965,
+        "kind": "server"
+      },
+      "name": "mkdir_reply_a005",
+      "observed": {
+        "code": 40965,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "upload",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:35549",
+      "elapsed_seconds": 0.002309882,
+      "expected": {
+        "code": null,
+        "kind": "decode"
+      },
+      "name": "mkdir_reply_100003002",
+      "observed": {
+        "kind": "decode",
+        "message": "server error code exceeds u32"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "upload",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:45963",
+      "elapsed_seconds": 0.004363265,
+      "expected": {
+        "changed_views": [],
+        "kind": "notification",
+        "profile_changed": true,
+        "profile_digest": "next-digest"
+      },
+      "name": "profile_only_true_empty_views",
+      "observed": {
+        "changed_views": [],
+        "kind": "notification",
+        "profile_changed": true,
+        "profile_digest": "next-digest"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "long_poll",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:43533",
+      "elapsed_seconds": 0.004324466,
+      "expected": {
+        "changed_views": [
+          8
+        ],
+        "kind": "notification",
+        "profile_changed": true,
+        "profile_digest": "next-digest"
+      },
+      "name": "profile_only_true_other_view",
+      "observed": {
+        "changed_views": [
+          8
+        ],
+        "kind": "notification",
+        "profile_changed": true,
+        "profile_digest": "next-digest"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "long_poll",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:39583",
+      "elapsed_seconds": 0.00384127,
+      "expected": {
+        "changed_views": [],
+        "kind": "notification",
+        "profile_changed": false,
+        "profile_digest": "same-digest"
+      },
+      "name": "profile_false_explicit_digest",
+      "observed": {
+        "changed_views": [],
+        "kind": "notification",
+        "profile_changed": false,
+        "profile_digest": "same-digest"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "long_poll",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:43575",
+      "elapsed_seconds": 0.004025368,
+      "expected": {
+        "changed_views": [],
+        "kind": "notification",
+        "profile_changed": false,
+        "profile_digest": "prior-digest"
+      },
+      "name": "profile_false_omitted_digest",
+      "observed": {
+        "changed_views": [],
+        "kind": "notification",
+        "profile_changed": false,
+        "profile_digest": "prior-digest"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "long_poll",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:43047",
+      "elapsed_seconds": 0.004760362,
+      "expected": {
+        "changed_views": [
+          7
+        ],
+        "kind": "notification",
+        "profile_changed": false,
+        "profile_digest": "prior-digest"
+      },
+      "name": "profile_omitted_flag_and_digest",
+      "observed": {
+        "changed_views": [
+          7
+        ],
+        "kind": "notification",
+        "profile_changed": false,
+        "profile_digest": "prior-digest"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "long_poll",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:35317",
+      "elapsed_seconds": 0.004334866,
+      "expected": {
+        "code": null,
+        "kind": "decode"
+      },
+      "name": "profile_flag_two_rejected",
+      "observed": {
+        "kind": "decode",
+        "message": "invalid profile_changed"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "long_poll",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:33997",
+      "elapsed_seconds": 0.00375787,
+      "expected": {
+        "code": null,
+        "kind": "decode"
+      },
+      "name": "profile_flag_string_rejected",
+      "observed": {
+        "kind": "decode",
+        "message": "invalid profile_changed"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "long_poll",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:46799",
+      "elapsed_seconds": 0.004115167,
+      "expected": {
+        "code": null,
+        "kind": "decode"
+      },
+      "name": "profile_flag_null_rejected",
+      "observed": {
+        "kind": "decode",
+        "message": "invalid profile_changed"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "long_poll",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:44385",
+      "elapsed_seconds": 0.004112167,
+      "expected": {
+        "code": null,
+        "kind": "decode"
+      },
+      "name": "profile_changed_without_digest_rejected",
+      "observed": {
+        "kind": "decode",
+        "message": "missing changed profile digest"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "long_poll",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:41975",
+      "elapsed_seconds": 0.001757086,
+      "expected": {
+        "code": null,
+        "kind": "decode"
+      },
+      "name": "profile_numeric_digest_rejected",
+      "observed": {
+        "kind": "decode",
+        "message": "missing changed profile digest"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "long_poll",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:42375",
+      "elapsed_seconds": 0.004008368,
+      "expected": {
+        "code": null,
+        "kind": "decode"
+      },
+      "name": "profile_changes_missing_rejected",
+      "observed": {
+        "kind": "decode",
+        "message": "missing notification changes"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "long_poll",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:41751",
+      "elapsed_seconds": 0.003929368,
+      "expected": {
+        "code": null,
+        "kind": "decode"
+      },
+      "name": "profile_changes_scalar_rejected",
+      "observed": {
+        "kind": "decode",
+        "message": "missing notification changes"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "long_poll",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:36505",
+      "elapsed_seconds": 0.004232366,
+      "expected": {
+        "code": null,
+        "kind": "decode"
+      },
+      "name": "profile_changes_noninteger_rejected",
+      "observed": {
+        "kind": "decode",
+        "message": "invalid changed view"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "long_poll",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    }
+  ],
+  "complete": true,
+  "counts": {
+    "failed": 0,
+    "ignored": 0,
+    "passed": 70,
+    "total": 70
+  },
+  "elapsed_seconds": 0.297100833,
+  "scope": "synthetic IPv4 loopback / public sproto Client APIs; no NAS, real credentials, product worker ELF or live ACL confirmation"
+}

@@ -1,0 +1,34 @@
+   Compiling drive-core v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/source/crates/drive-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 21.95s
+     Running unittests src/lib.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/deps/drive_core-d0df5f485b1c9979)
+
+running 26 tests
+test write_permissions::tests::a_new_draft_rechecks_its_parents_create_permission ... ok
+test write_permissions::tests::action_classes_are_independent ... ok
+test write_permissions::tests::cached_reply_lease_does_not_wait_for_ordinary_metadata_store ... ok
+test write_permissions::tests::decisions_survive_restart_and_recheck_preserves_data ... ok
+test write_permissions::tests::definite_refusal_must_match_an_authorized_target ... ok
+test write_permissions::tests::definite_refusal_preserves_bytes_and_uncertain_is_never_reset ... ok
+test write_permissions::tests::denied_namespace_intent_does_not_block_independent_sibling ... ok
+test write_permissions::tests::directory_permission_hint_keeps_journal_and_reconciliation_barrier ... ok
+test write_permissions::tests::explicit_and_space_limits_override_child_allow ... ok
+test write_permissions::tests::first_denial_publication_waits_for_existing_bounded_reply ... ok
+test write_permissions::tests::independent_subroot_stops_at_its_own_ancestry_boundary ... ok
+test write_permissions::tests::learned_upload_denial_uses_current_revision_persists_and_expires ... ok
+test write_permissions::tests::malformed_pending_intent_keeps_the_existing_fail_closed_barrier ... ok
+test write_permissions::tests::mutation_permission_hint_preserves_uncertainty_bytes_and_unknown_acl ... ok
+test write_permissions::tests::parent_self_denials_do_not_stall_child_remove_or_rename_journals ... ok
+test write_permissions::tests::precise_source_wins_over_a_late_observed_success ... ok
+test write_permissions::tests::profile_change_expires_all_node_sources_but_preserves_scope_policy_and_intents ... ok
+test write_permissions::tests::recheck_releases_only_the_typed_read_refusal_retry_gate ... ok
+test write_permissions::tests::recheck_resets_observed_but_never_explicit_read_only ... ok
+test write_permissions::tests::remote_overlay_ancestry_is_not_bypassed_by_local_move ... ok
+test write_permissions::tests::rename_and_remove_permission_hints_never_write_acl_rows ... ok
+test write_permissions::tests::revision_conflict_does_not_replace_a_user_policy ... ok
+test write_permissions::tests::root_denial_does_not_become_a_child_write_policy ... ok
+test write_permissions::tests::schema24_migration_preserves_history_dirty_bytes_and_backup ... ok
+test write_permissions::tests::traverse_is_distinct_from_list ... ok
+test write_permissions::tests::unknown_attempt_does_not_persist_allow ... ok
+
+test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 390 filtered out; finished in 3.00s
+

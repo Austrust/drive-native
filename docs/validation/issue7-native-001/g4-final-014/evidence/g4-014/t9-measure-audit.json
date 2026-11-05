@@ -1,0 +1,185 @@
+{
+  "scope": "independent re-derivation of T9 real-NAS measurement claims from committed JSONL; not a new NAS measurement and not product behaviour evidence",
+  "sources": {
+    "measure-root-scopes-20261105.jsonl": {
+      "file": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/source/docs/validation/real-nas-initial-index-20261105/measure-root-scopes-20261105.jsonl",
+      "lines": 6
+    },
+    "measure-home-attempts5-20261105.jsonl": {
+      "file": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/source/docs/validation/real-nas-initial-index-20261105/measure-home-attempts5-20261105.jsonl",
+      "lines": 4
+    },
+    "measure-home-attempts8-20261105.jsonl": {
+      "file": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/source/docs/validation/real-nas-initial-index-20261105/measure-home-attempts8-20261105.jsonl",
+      "lines": 4
+    },
+    "measure-drive-enum-20261105.jsonl": {
+      "file": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/source/docs/validation/real-nas-initial-index-20261105/measure-drive-enum-20261105.jsonl",
+      "lines": 4
+    }
+  },
+  "root_mf": {
+    "pages": 76,
+    "events": 102014,
+    "elapsed_s": 214.961,
+    "completed": true,
+    "disconnects": 25,
+    "retries_field": 25,
+    "retries_derived": 25,
+    "requests_field": 63,
+    "requests_derived": 63,
+    "server_errors": 0,
+    "attempt_histogram": [
+      {
+        "attempts": 1,
+        "requests": 48
+      },
+      {
+        "attempts": 2,
+        "requests": 10
+      },
+      {
+        "attempts": 3,
+        "requests": 2
+      },
+      {
+        "attempts": 4,
+        "requests": 1
+      },
+      {
+        "attempts": 5,
+        "requests": 2
+      }
+    ],
+    "consistency": true
+  },
+  "home_attempts5": {
+    "pages": 311,
+    "events": 148281,
+    "elapsed_s": 308.99,
+    "completed": false,
+    "disconnects": 24,
+    "retries_field": 19,
+    "retries_derived": 19,
+    "requests_field": 298,
+    "requests_derived": 298,
+    "server_errors": 0,
+    "attempt_histogram": [
+      {
+        "attempts": 1,
+        "requests": 284
+      },
+      {
+        "attempts": 2,
+        "requests": 10
+      },
+      {
+        "attempts": 3,
+        "requests": 3
+      },
+      {
+        "attempts": 4,
+        "requests": 1
+      }
+    ],
+    "consistency": false
+  },
+  "home_attempts8": {
+    "pages": 289,
+    "events": 126129,
+    "elapsed_s": 422.684,
+    "completed": false,
+    "disconnects": 7,
+    "retries_field": 7,
+    "retries_derived": 7,
+    "requests_field": 261,
+    "requests_derived": 261,
+    "server_errors": 0,
+    "attempt_histogram": [
+      {
+        "attempts": 1,
+        "requests": 255
+      },
+      {
+        "attempts": 2,
+        "requests": 5
+      },
+      {
+        "attempts": 3,
+        "requests": 1
+      }
+    ],
+    "consistency": true
+  },
+  "drive_enumeration": {
+    "dirs": 5000,
+    "nodes": 20476,
+    "requests": 5001,
+    "elapsed_s": 159.145,
+    "disconnects": 0
+  },
+  "report_claims": {
+    "root_mf": {
+      "pages": 76,
+      "events": 102014,
+      "elapsed_s": 215.0,
+      "disconnects": 25,
+      "retries": 25,
+      "server_errors": 0,
+      "completed": true
+    },
+    "home_attempts5": {
+      "pages": 311,
+      "events": 148281,
+      "elapsed_s": 309.0,
+      "disconnects": 24,
+      "stop_reason": "retry_exhausted"
+    },
+    "home_attempts8": {
+      "pages": 289,
+      "events": 126129,
+      "elapsed_s": 422.7,
+      "disconnects": 7,
+      "stop_reason": "deadline_or_page_cap"
+    },
+    "drive_enum": {
+      "dirs": 5000,
+      "nodes": 20476,
+      "requests": 5001,
+      "elapsed_s": 159.1,
+      "disconnects": 0
+    }
+  },
+  "claims_reproduced": {
+    "root_mf": true,
+    "home_attempts5": true,
+    "home_attempts8": true,
+    "drive_enum": true
+  },
+  "early_enumeration_row": {
+    "dirs": 200,
+    "nodes": 1551
+  },
+  "home_early_no_retry": {
+    "completed": false,
+    "elapsed_s": 7.816187371,
+    "error": {
+      "category": "io",
+      "kind": "UnexpectedEof"
+    },
+    "events": 4509,
+    "failed_cursor": 56000,
+    "pages": 28,
+    "resume_final_attempts": 5,
+    "resume_final_error": {
+      "category": "io",
+      "kind": "UnexpectedEof"
+    }
+  },
+  "passed": false,
+  "counts": {
+    "passed": 4,
+    "failed": 0,
+    "ignored": 0
+  }
+}

@@ -1,0 +1,1857 @@
+{
+  "candidate_commit": "b303ac6bf01f6ff66f48d1e74cb94740561a841c",
+  "started_utc": "2026-11-05T12:00:55.338114+00:00",
+  "complete": true,
+  "runner_driver_files": {
+    "run.py": "82b31af21c3f155c11debcaf7f379a448e7dbb0fc7098a34cdccb9090b1ad06c",
+    "space.py": "46602840bebb940e633236c50ae0b00f4572a72c841524b9c388c00dab103669"
+  },
+  "worker": {
+    "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/drive-native-worker",
+    "sha256": "f102698f0f22c6a0ddc7a050cf2a7fe9df916d25812ca2cc43cd8a7fca9da194"
+  },
+  "harness": {
+    "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/native-worker-chain-probe",
+    "sha256": "d23c484591cfed2cc855650d1392a327ccea5f5c95de990109c43e354d783fa0",
+    "crate": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/native-worker-chain-build-001/native-worker-chain-crate",
+    "source_files": {
+      "src/main.rs": "ea07d79a04b3469e7ec48261693598d37916d0d92ca442866cabff66e8ce9728",
+      "src/codec.rs": "5eaca3e517653408f4331bd0096e8cf9c0d9a464837315fd9fb0452763cb0b25",
+      "Cargo.toml": "5e4adfabd652272a5f5b1cca900b568980f8c6b96430e2e0a0f2c3b41f4abd45",
+      "Cargo.lock": "881fd3816461ccfdd2843d626169ba8279ee95837986fc78281fb552d5dcb300",
+      "provenance.json": "94bb073b7a9b207fd0dcda9eae6184f7b88687629745d68db586e48295189c48",
+      "lock-verification.json": "9c5887c7698355b9328d991e8a51abd3eedd72c8803fc498497afc9cf2c2f1f6"
+    }
+  },
+  "certificate_fixture_hashes": {
+    "ca.pem": "79f1b87bc25db408602e1c76ce2eceeaa6015f3ccbf3a667926315ca4ecc5834",
+    "server-key.pem": "ba8961bf391a243c98caae9eca75c4181bc20b7ec333b91c87189e7bf6426875",
+    "server.pem": "49b56349c288932aebd1befef17f5e11822beb08a7b74ac54f8cdcb6fccfa344"
+  },
+  "cases": [
+    {
+      "name": "bridge_download_denied_3002",
+      "command": [
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/native-worker-chain-probe",
+        "bridge_download_denied_3002",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/drive-native-worker",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/native-worker-chain-build-001/native-worker-chain-crate/fixtures",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/native-worker-chain-001/bridge_download_denied_3002"
+      ],
+      "started_utc": "2026-11-05T12:00:56.639175+00:00",
+      "passed": true,
+      "status": "passed",
+      "log": "bridge_download_denied_3002/output.log",
+      "host_space_before": {
+        "helper_path": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/issue7-validation/G4-evidence-bundle-014-final/harness/run-g4-014.py",
+        "helper_sha256": "88fa9b573ac109d85b1c7af2fcf4b2c02e81a0be58527f8031c411b1a9c5271d",
+        "minimum_free_bytes": 10737418240,
+        "minimum_free_gib": 10,
+        "observation": {
+          "utc": "2026-11-05T12:00:55.978083+00:00",
+          "command": [
+            "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+          ],
+          "host_drive": "C:",
+          "free_bytes": 312372203520,
+          "exit_code": 0,
+          "stdout": "312372203520",
+          "stderr": ""
+        },
+        "passed": true
+      },
+      "process_group": 44630,
+      "exit_code": 0,
+      "observed": {
+        "boundary": "native TLS -> real worker ELF -> IPC/Rpc -> public Bridge -> Store",
+        "checks": {
+          "after": {
+            "cursor": "native-v1:78",
+            "download_failure": {
+              "attempts": 1,
+              "kind": "server_rejected",
+              "retry_at": null,
+              "schema": 1,
+              "server_code": null
+            },
+            "has_cached_body": false,
+            "policy": {
+              "local_policy": "follow_remote",
+              "server_capability": "unknown",
+              "writable_source": "legacy",
+              "write_policy_revision": 2
+            },
+            "root_list": "unknown",
+            "sibling_read": "allow",
+            "target_read": "deny",
+            "target_write_content": "unknown"
+          },
+          "after_refresh_cached": {
+            "cursor": "native-v1:78",
+            "download_failure": {
+              "attempts": 1,
+              "kind": "server_rejected",
+              "retry_at": null,
+              "schema": 1,
+              "server_code": null
+            },
+            "has_cached_body": false,
+            "policy": {
+              "local_policy": "follow_remote",
+              "server_capability": "unknown",
+              "writable_source": "legacy",
+              "write_policy_revision": 2
+            },
+            "root_list": "unknown",
+            "sibling_read": "allow",
+            "target_read": "deny",
+            "target_write_content": "unknown"
+          },
+          "background_probe_wait_ms": 3008,
+          "before": {
+            "cursor": "native-v1:78",
+            "download_failure": null,
+            "has_cached_body": false,
+            "policy": {
+              "local_policy": "follow_remote",
+              "server_capability": "unknown",
+              "writable_source": "legacy",
+              "write_policy_revision": 1
+            },
+            "root_list": "unknown",
+            "sibling_read": "allow",
+            "target_read": "unknown",
+            "target_write_content": "unknown"
+          },
+          "download_count_after_refresh_cached": 1,
+          "download_count_after_repeat": 1,
+          "ensure_errno": 13,
+          "native_refusal_code": 12290,
+          "node_from_actual_worker_pull": true,
+          "repeat_ensure_errno": 13,
+          "retry_at_recorded_not_assumed_terminal": null
+        },
+        "cleanup": {
+          "download_thread_joined": true,
+          "event_thread_joined": true,
+          "passed": true,
+          "server_threads_joined_and_sockets_closed": true,
+          "worker_pid_absent_after_stop": true
+        },
+        "elapsed_seconds": 3.190795574,
+        "error": null,
+        "failure_snapshot_after_cleanup": null,
+        "ignored": false,
+        "ipc_version": 21,
+        "name": "bridge_download_denied_3002",
+        "native_server": {
+          "actions": [
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 25
+            },
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 18
+            },
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 25
+            },
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 14
+            },
+            {
+              "action": "pull_event",
+              "connection": 1,
+              "cursor": 77,
+              "events": 1
+            },
+            {
+              "action": "download",
+              "connection": 1,
+              "identity_checked": true,
+              "version_checked": true
+            },
+            {
+              "action": "download_reply",
+              "code": 12290,
+              "connection": 1
+            },
+            {
+              "after_connect": true,
+              "connection": 1,
+              "event": "connection_end",
+              "io_detail": "io:UnexpectedEof:peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof"
+            }
+          ],
+          "connections": 1,
+          "download_content_bytes_sent": 0,
+          "download_requests": 1,
+          "errors": [],
+          "listener": "127.0.0.1:6690",
+          "long_poll_requests": 0,
+          "pull_event_requests": 1
+        },
+        "passed": true,
+        "scope": "synthetic local TLS/service/Store; no NAS, FUSE, GUI or real ACL source",
+        "status": "passed",
+        "worker_pid": 44632
+      },
+      "process_group_cleanup": {
+        "leftover_before_cleanup": false,
+        "absent_after_cleanup": true
+      },
+      "elapsed_seconds": 3.2232311190000473,
+      "finished_utc": "2026-11-05T12:00:59.862723+00:00",
+      "log_sha256": "26d26c6d37ebd40d98350bb52b196eb200cd8c5c3ff5d1cdd4fa2edf80b539b8",
+      "case_json_sha256": "37934a272fbc9fb5c6ae5976fa93a4723553671f739ddadc47d7eda836dc5c67",
+      "cleanup_errors": []
+    },
+    {
+      "name": "bridge_download_denied_3008",
+      "command": [
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/native-worker-chain-probe",
+        "bridge_download_denied_3008",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/drive-native-worker",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/native-worker-chain-build-001/native-worker-chain-crate/fixtures",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/native-worker-chain-001/bridge_download_denied_3008"
+      ],
+      "started_utc": "2026-11-05T12:01:00.521142+00:00",
+      "passed": true,
+      "status": "passed",
+      "log": "bridge_download_denied_3008/output.log",
+      "host_space_before": {
+        "helper_path": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/issue7-validation/G4-evidence-bundle-014-final/harness/run-g4-014.py",
+        "helper_sha256": "88fa9b573ac109d85b1c7af2fcf4b2c02e81a0be58527f8031c411b1a9c5271d",
+        "minimum_free_bytes": 10737418240,
+        "minimum_free_gib": 10,
+        "observation": {
+          "utc": "2026-11-05T12:00:59.863290+00:00",
+          "command": [
+            "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+          ],
+          "host_drive": "C:",
+          "free_bytes": 312371789824,
+          "exit_code": 0,
+          "stdout": "312371789824",
+          "stderr": ""
+        },
+        "passed": true
+      },
+      "process_group": 44657,
+      "exit_code": 0,
+      "observed": {
+        "boundary": "native TLS -> real worker ELF -> IPC/Rpc -> public Bridge -> Store",
+        "checks": {
+          "after": {
+            "cursor": "native-v1:78",
+            "download_failure": {
+              "attempts": 1,
+              "kind": "server_rejected",
+              "retry_at": null,
+              "schema": 1,
+              "server_code": null
+            },
+            "has_cached_body": false,
+            "policy": {
+              "local_policy": "follow_remote",
+              "server_capability": "unknown",
+              "writable_source": "legacy",
+              "write_policy_revision": 2
+            },
+            "root_list": "unknown",
+            "sibling_read": "allow",
+            "target_read": "deny",
+            "target_write_content": "unknown"
+          },
+          "after_refresh_cached": {
+            "cursor": "native-v1:78",
+            "download_failure": {
+              "attempts": 1,
+              "kind": "server_rejected",
+              "retry_at": null,
+              "schema": 1,
+              "server_code": null
+            },
+            "has_cached_body": false,
+            "policy": {
+              "local_policy": "follow_remote",
+              "server_capability": "unknown",
+              "writable_source": "legacy",
+              "write_policy_revision": 2
+            },
+            "root_list": "unknown",
+            "sibling_read": "allow",
+            "target_read": "deny",
+            "target_write_content": "unknown"
+          },
+          "background_probe_wait_ms": 3004,
+          "before": {
+            "cursor": "native-v1:78",
+            "download_failure": null,
+            "has_cached_body": false,
+            "policy": {
+              "local_policy": "follow_remote",
+              "server_capability": "unknown",
+              "writable_source": "legacy",
+              "write_policy_revision": 1
+            },
+            "root_list": "unknown",
+            "sibling_read": "allow",
+            "target_read": "unknown",
+            "target_write_content": "unknown"
+          },
+          "download_count_after_refresh_cached": 1,
+          "download_count_after_repeat": 1,
+          "ensure_errno": 13,
+          "native_refusal_code": 12296,
+          "node_from_actual_worker_pull": true,
+          "repeat_ensure_errno": 13,
+          "retry_at_recorded_not_assumed_terminal": null
+        },
+        "cleanup": {
+          "download_thread_joined": true,
+          "event_thread_joined": true,
+          "passed": true,
+          "server_threads_joined_and_sockets_closed": true,
+          "worker_pid_absent_after_stop": true
+        },
+        "elapsed_seconds": 3.195983504,
+        "error": null,
+        "failure_snapshot_after_cleanup": null,
+        "ignored": false,
+        "ipc_version": 21,
+        "name": "bridge_download_denied_3008",
+        "native_server": {
+          "actions": [
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 25
+            },
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 18
+            },
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 25
+            },
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 14
+            },
+            {
+              "action": "pull_event",
+              "connection": 1,
+              "cursor": 77,
+              "events": 1
+            },
+            {
+              "action": "download",
+              "connection": 1,
+              "identity_checked": true,
+              "version_checked": true
+            },
+            {
+              "action": "download_reply",
+              "code": 12296,
+              "connection": 1
+            },
+            {
+              "after_connect": true,
+              "connection": 1,
+              "event": "connection_end",
+              "io_detail": "io:UnexpectedEof:peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof"
+            }
+          ],
+          "connections": 1,
+          "download_content_bytes_sent": 0,
+          "download_requests": 1,
+          "errors": [],
+          "listener": "127.0.0.1:6690",
+          "long_poll_requests": 0,
+          "pull_event_requests": 1
+        },
+        "passed": true,
+        "scope": "synthetic local TLS/service/Store; no NAS, FUSE, GUI or real ACL source",
+        "status": "passed",
+        "worker_pid": 44659
+      },
+      "process_group_cleanup": {
+        "leftover_before_cleanup": false,
+        "absent_after_cleanup": true
+      },
+      "elapsed_seconds": 3.223045977000311,
+      "finished_utc": "2026-11-05T12:01:03.744878+00:00",
+      "log_sha256": "5750896d8ce1122f8b76de1c841b9bed42ea1fff82e483d6ada74578f8a040a0",
+      "case_json_sha256": "b7c6281c9774ef4efca40550dab28673b4060b50a9dc58e7d36bf44836a4ebb7",
+      "cleanup_errors": []
+    },
+    {
+      "name": "bridge_profile_false_empty",
+      "command": [
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/native-worker-chain-probe",
+        "bridge_profile_false_empty",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/drive-native-worker",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/native-worker-chain-build-001/native-worker-chain-crate/fixtures",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/native-worker-chain-001/bridge_profile_false_empty"
+      ],
+      "started_utc": "2026-11-05T12:01:04.296556+00:00",
+      "passed": true,
+      "status": "passed",
+      "log": "bridge_profile_false_empty/output.log",
+      "host_space_before": {
+        "helper_path": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/issue7-validation/G4-evidence-bundle-014-final/harness/run-g4-014.py",
+        "helper_sha256": "88fa9b573ac109d85b1c7af2fcf4b2c02e81a0be58527f8031c411b1a9c5271d",
+        "minimum_free_bytes": 10737418240,
+        "minimum_free_gib": 10,
+        "observation": {
+          "utc": "2026-11-05T12:01:03.745609+00:00",
+          "command": [
+            "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+          ],
+          "host_drive": "C:",
+          "free_bytes": 312371798016,
+          "exit_code": 0,
+          "stdout": "312371798016",
+          "stderr": ""
+        },
+        "passed": true
+      },
+      "process_group": 44681,
+      "exit_code": 0,
+      "observed": {
+        "boundary": "native TLS -> real worker ELF -> IPC/Rpc -> public Bridge -> Store",
+        "checks": {
+          "after": {
+            "cursor": "native-v1:78",
+            "download_failure": null,
+            "has_cached_body": false,
+            "policy": {
+              "local_policy": "explicit_read_only",
+              "server_capability": "unknown",
+              "writable_source": "user",
+              "write_policy_revision": 4
+            },
+            "root_list": "deny",
+            "sibling_read": "allow",
+            "target_read": "deny",
+            "target_write_content": "deny"
+          },
+          "after_notification": {
+            "cursor": "native-v1:78",
+            "download_failure": null,
+            "has_cached_body": false,
+            "policy": {
+              "local_policy": "explicit_read_only",
+              "server_capability": "unknown",
+              "writable_source": "user",
+              "write_policy_revision": 4
+            },
+            "root_list": "deny",
+            "sibling_read": "allow",
+            "target_read": "deny",
+            "target_write_content": "deny"
+          },
+          "before": {
+            "cursor": "native-v1:78",
+            "download_failure": null,
+            "has_cached_body": false,
+            "policy": {
+              "local_policy": "explicit_read_only",
+              "server_capability": "unknown",
+              "writable_source": "user",
+              "write_policy_revision": 4
+            },
+            "root_list": "deny",
+            "sibling_read": "allow",
+            "target_read": "deny",
+            "target_write_content": "deny"
+          },
+          "node_from_actual_worker_pull": true
+        },
+        "cleanup": {
+          "download_thread_joined": true,
+          "event_thread_joined": true,
+          "passed": true,
+          "server_threads_joined_and_sockets_closed": true,
+          "worker_pid_absent_after_stop": true
+        },
+        "elapsed_seconds": 0.161000053,
+        "error": null,
+        "failure_snapshot_after_cleanup": null,
+        "ignored": false,
+        "ipc_version": 21,
+        "name": "bridge_profile_false_empty",
+        "native_server": {
+          "actions": [
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 25
+            },
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 18
+            },
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 25
+            },
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 14
+            },
+            {
+              "action": "pull_event",
+              "connection": 1,
+              "cursor": 77,
+              "events": 1
+            },
+            {
+              "action": "pull_event",
+              "connection": 1,
+              "cursor": 78,
+              "events": 0
+            },
+            {
+              "action": "long_poll",
+              "connection": 1,
+              "cursor": 78,
+              "digest_checked": true,
+              "ordinal": 1
+            },
+            {
+              "action": "profile_reply",
+              "changed_views": [],
+              "connection": 1,
+              "profile_changed": false
+            },
+            {
+              "action": "pull_event",
+              "connection": 1,
+              "cursor": 78,
+              "events": 0
+            },
+            {
+              "action": "long_poll",
+              "connection": 1,
+              "cursor": 78,
+              "digest_checked": true,
+              "ordinal": 2
+            }
+          ],
+          "connections": 1,
+          "download_content_bytes_sent": 0,
+          "download_requests": 0,
+          "errors": [],
+          "listener": "127.0.0.1:6690",
+          "long_poll_requests": 2,
+          "pull_event_requests": 3
+        },
+        "passed": true,
+        "scope": "synthetic local TLS/service/Store; no NAS, FUSE, GUI or real ACL source",
+        "status": "passed",
+        "worker_pid": 44683
+      },
+      "process_group_cleanup": {
+        "leftover_before_cleanup": false,
+        "absent_after_cleanup": true
+      },
+      "elapsed_seconds": 0.16552756500004762,
+      "finished_utc": "2026-11-05T12:01:04.462669+00:00",
+      "log_sha256": "aaf7b08ec245c1d57ead30ae711a30a8217888cf0a6ca1e97daa25ac1c17615b",
+      "case_json_sha256": "1e5af368ace75fa221532e58e700802072154747826ea9f11770c9106f9049da",
+      "cleanup_errors": []
+    },
+    {
+      "name": "bridge_profile_true_empty",
+      "command": [
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/native-worker-chain-probe",
+        "bridge_profile_true_empty",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/drive-native-worker",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/native-worker-chain-build-001/native-worker-chain-crate/fixtures",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/native-worker-chain-001/bridge_profile_true_empty"
+      ],
+      "started_utc": "2026-11-05T12:01:05.031105+00:00",
+      "passed": true,
+      "status": "passed",
+      "log": "bridge_profile_true_empty/output.log",
+      "host_space_before": {
+        "helper_path": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/issue7-validation/G4-evidence-bundle-014-final/harness/run-g4-014.py",
+        "helper_sha256": "88fa9b573ac109d85b1c7af2fcf4b2c02e81a0be58527f8031c411b1a9c5271d",
+        "minimum_free_bytes": 10737418240,
+        "minimum_free_gib": 10,
+        "observation": {
+          "utc": "2026-11-05T12:01:04.463530+00:00",
+          "command": [
+            "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+          ],
+          "host_drive": "C:",
+          "free_bytes": 312371798016,
+          "exit_code": 0,
+          "stdout": "312371798016",
+          "stderr": ""
+        },
+        "passed": true
+      },
+      "process_group": 44705,
+      "exit_code": 0,
+      "observed": {
+        "boundary": "native TLS -> real worker ELF -> IPC/Rpc -> public Bridge -> Store",
+        "checks": {
+          "after": {
+            "cursor": "native-v1:78",
+            "download_failure": null,
+            "has_cached_body": false,
+            "policy": {
+              "local_policy": "explicit_read_only",
+              "server_capability": "unknown",
+              "writable_source": "user",
+              "write_policy_revision": 5
+            },
+            "root_list": "unknown",
+            "sibling_read": "unknown",
+            "target_read": "unknown",
+            "target_write_content": "deny"
+          },
+          "after_notification": {
+            "cursor": "native-v1:78",
+            "download_failure": null,
+            "has_cached_body": false,
+            "policy": {
+              "local_policy": "explicit_read_only",
+              "server_capability": "unknown",
+              "writable_source": "user",
+              "write_policy_revision": 5
+            },
+            "root_list": "unknown",
+            "sibling_read": "unknown",
+            "target_read": "unknown",
+            "target_write_content": "deny"
+          },
+          "before": {
+            "cursor": "native-v1:78",
+            "download_failure": null,
+            "has_cached_body": false,
+            "policy": {
+              "local_policy": "explicit_read_only",
+              "server_capability": "unknown",
+              "writable_source": "user",
+              "write_policy_revision": 4
+            },
+            "root_list": "deny",
+            "sibling_read": "allow",
+            "target_read": "deny",
+            "target_write_content": "deny"
+          },
+          "node_from_actual_worker_pull": true
+        },
+        "cleanup": {
+          "download_thread_joined": true,
+          "event_thread_joined": true,
+          "passed": true,
+          "server_threads_joined_and_sockets_closed": true,
+          "worker_pid_absent_after_stop": true
+        },
+        "elapsed_seconds": 0.167070939,
+        "error": null,
+        "failure_snapshot_after_cleanup": null,
+        "ignored": false,
+        "ipc_version": 21,
+        "name": "bridge_profile_true_empty",
+        "native_server": {
+          "actions": [
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 25
+            },
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 18
+            },
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 25
+            },
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 14
+            },
+            {
+              "action": "pull_event",
+              "connection": 1,
+              "cursor": 77,
+              "events": 1
+            },
+            {
+              "action": "pull_event",
+              "connection": 1,
+              "cursor": 78,
+              "events": 0
+            },
+            {
+              "action": "long_poll",
+              "connection": 1,
+              "cursor": 78,
+              "digest_checked": true,
+              "ordinal": 1
+            },
+            {
+              "action": "profile_reply",
+              "changed_views": [],
+              "connection": 1,
+              "profile_changed": true
+            },
+            {
+              "action": "pull_event",
+              "connection": 1,
+              "cursor": 78,
+              "events": 0
+            },
+            {
+              "action": "long_poll",
+              "connection": 1,
+              "cursor": 78,
+              "digest_checked": true,
+              "ordinal": 2
+            }
+          ],
+          "connections": 1,
+          "download_content_bytes_sent": 0,
+          "download_requests": 0,
+          "errors": [],
+          "listener": "127.0.0.1:6690",
+          "long_poll_requests": 2,
+          "pull_event_requests": 3
+        },
+        "passed": true,
+        "scope": "synthetic local TLS/service/Store; no NAS, FUSE, GUI or real ACL source",
+        "status": "passed",
+        "worker_pid": 44707
+      },
+      "process_group_cleanup": {
+        "leftover_before_cleanup": false,
+        "absent_after_cleanup": true
+      },
+      "elapsed_seconds": 0.2151565950002805,
+      "finished_utc": "2026-11-05T12:01:05.247065+00:00",
+      "log_sha256": "1dc4c0fabcdb261efa59d7bce5936a0b6953b1e53f35cd428696aa8a4c03e4cf",
+      "case_json_sha256": "8185e58f4f6e518bfadde4f070919a977e7514eeb6d2d5ac56d9c0fad54baba8",
+      "cleanup_errors": []
+    },
+    {
+      "name": "bridge_profile_true_other_view",
+      "command": [
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/native-worker-chain-probe",
+        "bridge_profile_true_other_view",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/drive-native-worker",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/native-worker-chain-build-001/native-worker-chain-crate/fixtures",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/native-worker-chain-001/bridge_profile_true_other_view"
+      ],
+      "started_utc": "2026-11-05T12:01:05.816737+00:00",
+      "passed": true,
+      "status": "passed",
+      "log": "bridge_profile_true_other_view/output.log",
+      "host_space_before": {
+        "helper_path": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/issue7-validation/G4-evidence-bundle-014-final/harness/run-g4-014.py",
+        "helper_sha256": "88fa9b573ac109d85b1c7af2fcf4b2c02e81a0be58527f8031c411b1a9c5271d",
+        "minimum_free_bytes": 10737418240,
+        "minimum_free_gib": 10,
+        "observation": {
+          "utc": "2026-11-05T12:01:05.248356+00:00",
+          "command": [
+            "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+          ],
+          "host_drive": "C:",
+          "free_bytes": 312371798016,
+          "exit_code": 0,
+          "stdout": "312371798016",
+          "stderr": ""
+        },
+        "passed": true
+      },
+      "process_group": 44729,
+      "exit_code": 0,
+      "observed": {
+        "boundary": "native TLS -> real worker ELF -> IPC/Rpc -> public Bridge -> Store",
+        "checks": {
+          "after": {
+            "cursor": "native-v1:78",
+            "download_failure": null,
+            "has_cached_body": false,
+            "policy": {
+              "local_policy": "explicit_read_only",
+              "server_capability": "unknown",
+              "writable_source": "user",
+              "write_policy_revision": 5
+            },
+            "root_list": "unknown",
+            "sibling_read": "unknown",
+            "target_read": "unknown",
+            "target_write_content": "deny"
+          },
+          "after_notification": {
+            "cursor": "native-v1:78",
+            "download_failure": null,
+            "has_cached_body": false,
+            "policy": {
+              "local_policy": "explicit_read_only",
+              "server_capability": "unknown",
+              "writable_source": "user",
+              "write_policy_revision": 5
+            },
+            "root_list": "unknown",
+            "sibling_read": "unknown",
+            "target_read": "unknown",
+            "target_write_content": "deny"
+          },
+          "before": {
+            "cursor": "native-v1:78",
+            "download_failure": null,
+            "has_cached_body": false,
+            "policy": {
+              "local_policy": "explicit_read_only",
+              "server_capability": "unknown",
+              "writable_source": "user",
+              "write_policy_revision": 4
+            },
+            "root_list": "deny",
+            "sibling_read": "allow",
+            "target_read": "deny",
+            "target_write_content": "deny"
+          },
+          "node_from_actual_worker_pull": true
+        },
+        "cleanup": {
+          "download_thread_joined": true,
+          "event_thread_joined": true,
+          "passed": true,
+          "server_threads_joined_and_sockets_closed": true,
+          "worker_pid_absent_after_stop": true
+        },
+        "elapsed_seconds": 0.169828608,
+        "error": null,
+        "failure_snapshot_after_cleanup": null,
+        "ignored": false,
+        "ipc_version": 21,
+        "name": "bridge_profile_true_other_view",
+        "native_server": {
+          "actions": [
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 25
+            },
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 18
+            },
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 25
+            },
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 14
+            },
+            {
+              "action": "pull_event",
+              "connection": 1,
+              "cursor": 77,
+              "events": 1
+            },
+            {
+              "action": "pull_event",
+              "connection": 1,
+              "cursor": 78,
+              "events": 0
+            },
+            {
+              "action": "long_poll",
+              "connection": 1,
+              "cursor": 78,
+              "digest_checked": true,
+              "ordinal": 1
+            },
+            {
+              "action": "profile_reply",
+              "changed_views": [
+                8
+              ],
+              "connection": 1,
+              "profile_changed": true
+            },
+            {
+              "action": "pull_event",
+              "connection": 1,
+              "cursor": 78,
+              "events": 0
+            },
+            {
+              "action": "long_poll",
+              "connection": 1,
+              "cursor": 78,
+              "digest_checked": true,
+              "ordinal": 2
+            }
+          ],
+          "connections": 1,
+          "download_content_bytes_sent": 0,
+          "download_requests": 0,
+          "errors": [],
+          "listener": "127.0.0.1:6690",
+          "long_poll_requests": 2,
+          "pull_event_requests": 3
+        },
+        "passed": true,
+        "scope": "synthetic local TLS/service/Store; no NAS, FUSE, GUI or real ACL source",
+        "status": "passed",
+        "worker_pid": 44731
+      },
+      "process_group_cleanup": {
+        "leftover_before_cleanup": false,
+        "absent_after_cleanup": true
+      },
+      "elapsed_seconds": 0.17284666799969273,
+      "finished_utc": "2026-11-05T12:01:05.990904+00:00",
+      "log_sha256": "408327609a05e3dc62171a0bb870d49145ebf3f77d5d8cc62356794a584d9a63",
+      "case_json_sha256": "5bf202187d4a7236fad52fdbd6bae828f13b6dffc9b26baa71acae32ca06fddf",
+      "cleanup_errors": []
+    },
+    {
+      "name": "bridge_late_read_after_profile",
+      "command": [
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/native-worker-chain-probe",
+        "bridge_late_read_after_profile",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/drive-native-worker",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/native-worker-chain-build-001/native-worker-chain-crate/fixtures",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/native-worker-chain-001/bridge_late_read_after_profile"
+      ],
+      "started_utc": "2026-11-05T12:01:06.535926+00:00",
+      "passed": true,
+      "status": "passed",
+      "log": "bridge_late_read_after_profile/output.log",
+      "host_space_before": {
+        "helper_path": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/issue7-validation/G4-evidence-bundle-014-final/harness/run-g4-014.py",
+        "helper_sha256": "88fa9b573ac109d85b1c7af2fcf4b2c02e81a0be58527f8031c411b1a9c5271d",
+        "minimum_free_bytes": 10737418240,
+        "minimum_free_gib": 10,
+        "observation": {
+          "utc": "2026-11-05T12:01:05.991866+00:00",
+          "command": [
+            "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+          ],
+          "host_drive": "C:",
+          "free_bytes": 312371666944,
+          "exit_code": 0,
+          "stdout": "312371666944",
+          "stderr": ""
+        },
+        "passed": true
+      },
+      "process_group": 44753,
+      "exit_code": 0,
+      "observed": {
+        "boundary": "native TLS -> real worker ELF -> IPC/Rpc -> public Bridge -> Store",
+        "checks": {
+          "after": {
+            "cursor": "native-v1:78",
+            "download_failure": null,
+            "has_cached_body": false,
+            "policy": {
+              "local_policy": "explicit_read_only",
+              "server_capability": "unknown",
+              "writable_source": "user",
+              "write_policy_revision": 4
+            },
+            "root_list": "unknown",
+            "sibling_read": "unknown",
+            "target_read": "unknown",
+            "target_write_content": "deny"
+          },
+          "after_notification_before_refusal": {
+            "cursor": "native-v1:78",
+            "download_failure": null,
+            "has_cached_body": false,
+            "policy": {
+              "local_policy": "explicit_read_only",
+              "server_capability": "unknown",
+              "writable_source": "user",
+              "write_policy_revision": 4
+            },
+            "root_list": "unknown",
+            "sibling_read": "unknown",
+            "target_read": "unknown",
+            "target_write_content": "deny"
+          },
+          "before": {
+            "cursor": "native-v1:78",
+            "download_failure": null,
+            "has_cached_body": false,
+            "policy": {
+              "local_policy": "explicit_read_only",
+              "server_capability": "unknown",
+              "writable_source": "user",
+              "write_policy_revision": 3
+            },
+            "root_list": "deny",
+            "sibling_read": "allow",
+            "target_read": "unknown",
+            "target_write_content": "deny"
+          },
+          "late_ensure_errno": 13,
+          "node_from_actual_worker_pull": true
+        },
+        "cleanup": {
+          "download_thread_joined": true,
+          "event_thread_joined": true,
+          "passed": true,
+          "server_threads_joined_and_sockets_closed": true,
+          "worker_pid_absent_after_stop": true
+        },
+        "elapsed_seconds": 0.18337333,
+        "error": null,
+        "failure_snapshot_after_cleanup": null,
+        "ignored": false,
+        "ipc_version": 21,
+        "name": "bridge_late_read_after_profile",
+        "native_server": {
+          "actions": [
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 25
+            },
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 18
+            },
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 25
+            },
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 14
+            },
+            {
+              "action": "pull_event",
+              "connection": 1,
+              "cursor": 77,
+              "events": 1
+            },
+            {
+              "action": "download",
+              "connection": 1,
+              "identity_checked": true,
+              "version_checked": true
+            },
+            {
+              "connection": 2,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 14
+            },
+            {
+              "action": "pull_event",
+              "connection": 2,
+              "cursor": 78,
+              "events": 0
+            },
+            {
+              "action": "long_poll",
+              "connection": 2,
+              "cursor": 78,
+              "digest_checked": true,
+              "ordinal": 1
+            },
+            {
+              "action": "profile_reply",
+              "changed_views": [],
+              "connection": 2,
+              "profile_changed": true
+            },
+            {
+              "action": "pull_event",
+              "connection": 2,
+              "cursor": 78,
+              "events": 0
+            },
+            {
+              "action": "long_poll",
+              "connection": 2,
+              "cursor": 78,
+              "digest_checked": true,
+              "ordinal": 2
+            },
+            {
+              "action": "download_reply",
+              "code": 12290,
+              "connection": 1
+            },
+            {
+              "after_connect": true,
+              "connection": 1,
+              "event": "connection_end",
+              "io_detail": "io:UnexpectedEof:peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof"
+            }
+          ],
+          "connections": 2,
+          "download_content_bytes_sent": 0,
+          "download_requests": 1,
+          "errors": [],
+          "listener": "127.0.0.1:6690",
+          "long_poll_requests": 2,
+          "pull_event_requests": 3
+        },
+        "passed": true,
+        "scope": "synthetic local TLS/service/Store; no NAS, FUSE, GUI or real ACL source",
+        "status": "passed",
+        "worker_pid": 44755
+      },
+      "process_group_cleanup": {
+        "leftover_before_cleanup": false,
+        "absent_after_cleanup": true
+      },
+      "elapsed_seconds": 0.21557044200017117,
+      "finished_utc": "2026-11-05T12:01:06.752735+00:00",
+      "log_sha256": "ecf272c756ea0fc46ef9fd84e7ccf0f46e5fa8646eae6f47343b9163b6a7526b",
+      "case_json_sha256": "3b6affd21638b16a141815c58d1d8bd1c450d3d664f99af3f51fef2b7583357f",
+      "cleanup_errors": []
+    },
+    {
+      "name": "worker_rpc_generic_3004",
+      "command": [
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/native-worker-chain-probe",
+        "worker_rpc_generic_3004",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/drive-native-worker",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/native-worker-chain-build-001/native-worker-chain-crate/fixtures",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/native-worker-chain-001/worker_rpc_generic_3004"
+      ],
+      "started_utc": "2026-11-05T12:01:07.331180+00:00",
+      "passed": true,
+      "status": "passed",
+      "log": "worker_rpc_generic_3004/output.log",
+      "host_space_before": {
+        "helper_path": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/issue7-validation/G4-evidence-bundle-014-final/harness/run-g4-014.py",
+        "helper_sha256": "88fa9b573ac109d85b1c7af2fcf4b2c02e81a0be58527f8031c411b1a9c5271d",
+        "minimum_free_bytes": 10737418240,
+        "minimum_free_gib": 10,
+        "observation": {
+          "utc": "2026-11-05T12:01:06.754600+00:00",
+          "command": [
+            "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+          ],
+          "host_drive": "C:",
+          "free_bytes": 312304685056,
+          "exit_code": 0,
+          "stdout": "312304685056",
+          "stderr": ""
+        },
+        "passed": true
+      },
+      "process_group": 44779,
+      "exit_code": 0,
+      "observed": {
+        "boundary": "native TLS -> real worker ELF -> IPC/Rpc (direct Download; no Bridge download application)",
+        "checks": {
+          "after": {
+            "cursor": "native-v1:78",
+            "download_failure": null,
+            "has_cached_body": false,
+            "policy": {
+              "local_policy": "follow_remote",
+              "server_capability": "unknown",
+              "writable_source": "legacy",
+              "write_policy_revision": 1
+            },
+            "root_list": "unknown",
+            "sibling_read": "allow",
+            "target_read": "unknown",
+            "target_write_content": "unknown"
+          },
+          "before": {
+            "cursor": "native-v1:78",
+            "download_failure": null,
+            "has_cached_body": false,
+            "policy": {
+              "local_policy": "follow_remote",
+              "server_capability": "unknown",
+              "writable_source": "legacy",
+              "write_policy_revision": 1
+            },
+            "root_list": "unknown",
+            "sibling_read": "allow",
+            "target_read": "unknown",
+            "target_write_content": "unknown"
+          },
+          "bridge_download_application_exercised": false,
+          "node_from_actual_worker_pull": true,
+          "rpc_category": "native_server_code:12292"
+        },
+        "cleanup": {
+          "download_thread_joined": true,
+          "event_thread_joined": true,
+          "passed": true,
+          "server_threads_joined_and_sockets_closed": true,
+          "worker_pid_absent_after_stop": true
+        },
+        "elapsed_seconds": 0.157458394,
+        "error": null,
+        "failure_snapshot_after_cleanup": null,
+        "ignored": false,
+        "ipc_version": 21,
+        "name": "worker_rpc_generic_3004",
+        "native_server": {
+          "actions": [
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 25
+            },
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 18
+            },
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 25
+            },
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 14
+            },
+            {
+              "action": "pull_event",
+              "connection": 1,
+              "cursor": 77,
+              "events": 1
+            },
+            {
+              "action": "download",
+              "connection": 1,
+              "identity_checked": true,
+              "version_checked": true
+            },
+            {
+              "action": "download_reply",
+              "code": 12292,
+              "connection": 1
+            },
+            {
+              "after_connect": true,
+              "connection": 1,
+              "event": "connection_end",
+              "io_detail": "io:UnexpectedEof:peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof"
+            }
+          ],
+          "connections": 1,
+          "download_content_bytes_sent": 0,
+          "download_requests": 1,
+          "errors": [],
+          "listener": "127.0.0.1:6690",
+          "long_poll_requests": 0,
+          "pull_event_requests": 1
+        },
+        "passed": true,
+        "scope": "synthetic local TLS/service/Store; no NAS, FUSE, GUI or real ACL source",
+        "status": "passed",
+        "worker_pid": 44781
+      },
+      "process_group_cleanup": {
+        "leftover_before_cleanup": false,
+        "absent_after_cleanup": true
+      },
+      "elapsed_seconds": 0.1667102020001039,
+      "finished_utc": "2026-11-05T12:01:07.499209+00:00",
+      "log_sha256": "14fdaf2ec112b1ceca08ddf7f0b3d1aa22a0a2b0f76e87e0ae67969af298c67f",
+      "case_json_sha256": "2f625b61e8b228d112ac45d71b0cee2c064261b6b87d06567990e8c0201e69b7",
+      "cleanup_errors": []
+    },
+    {
+      "name": "worker_rpc_generic_8004",
+      "command": [
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/native-worker-chain-probe",
+        "worker_rpc_generic_8004",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/drive-native-worker",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/native-worker-chain-build-001/native-worker-chain-crate/fixtures",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/native-worker-chain-001/worker_rpc_generic_8004"
+      ],
+      "started_utc": "2026-11-05T12:01:08.068334+00:00",
+      "passed": true,
+      "status": "passed",
+      "log": "worker_rpc_generic_8004/output.log",
+      "host_space_before": {
+        "helper_path": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/issue7-validation/G4-evidence-bundle-014-final/harness/run-g4-014.py",
+        "helper_sha256": "88fa9b573ac109d85b1c7af2fcf4b2c02e81a0be58527f8031c411b1a9c5271d",
+        "minimum_free_bytes": 10737418240,
+        "minimum_free_gib": 10,
+        "observation": {
+          "utc": "2026-11-05T12:01:07.500423+00:00",
+          "command": [
+            "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+          ],
+          "host_drive": "C:",
+          "free_bytes": 312304656384,
+          "exit_code": 0,
+          "stdout": "312304656384",
+          "stderr": ""
+        },
+        "passed": true
+      },
+      "process_group": 44803,
+      "exit_code": 0,
+      "observed": {
+        "boundary": "native TLS -> real worker ELF -> IPC/Rpc (direct Download; no Bridge download application)",
+        "checks": {
+          "after": {
+            "cursor": "native-v1:78",
+            "download_failure": null,
+            "has_cached_body": false,
+            "policy": {
+              "local_policy": "follow_remote",
+              "server_capability": "unknown",
+              "writable_source": "legacy",
+              "write_policy_revision": 1
+            },
+            "root_list": "unknown",
+            "sibling_read": "allow",
+            "target_read": "unknown",
+            "target_write_content": "unknown"
+          },
+          "before": {
+            "cursor": "native-v1:78",
+            "download_failure": null,
+            "has_cached_body": false,
+            "policy": {
+              "local_policy": "follow_remote",
+              "server_capability": "unknown",
+              "writable_source": "legacy",
+              "write_policy_revision": 1
+            },
+            "root_list": "unknown",
+            "sibling_read": "allow",
+            "target_read": "unknown",
+            "target_write_content": "unknown"
+          },
+          "bridge_download_application_exercised": false,
+          "node_from_actual_worker_pull": true,
+          "rpc_category": "native_server_code:32772"
+        },
+        "cleanup": {
+          "download_thread_joined": true,
+          "event_thread_joined": true,
+          "passed": true,
+          "server_threads_joined_and_sockets_closed": true,
+          "worker_pid_absent_after_stop": true
+        },
+        "elapsed_seconds": 0.17434364,
+        "error": null,
+        "failure_snapshot_after_cleanup": null,
+        "ignored": false,
+        "ipc_version": 21,
+        "name": "worker_rpc_generic_8004",
+        "native_server": {
+          "actions": [
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 25
+            },
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 18
+            },
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 25
+            },
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 14
+            },
+            {
+              "action": "pull_event",
+              "connection": 1,
+              "cursor": 77,
+              "events": 1
+            },
+            {
+              "action": "download",
+              "connection": 1,
+              "identity_checked": true,
+              "version_checked": true
+            },
+            {
+              "action": "download_reply",
+              "code": 32772,
+              "connection": 1
+            },
+            {
+              "after_connect": true,
+              "connection": 1,
+              "event": "connection_end",
+              "io_detail": "io:UnexpectedEof:peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof"
+            }
+          ],
+          "connections": 1,
+          "download_content_bytes_sent": 0,
+          "download_requests": 1,
+          "errors": [],
+          "listener": "127.0.0.1:6690",
+          "long_poll_requests": 0,
+          "pull_event_requests": 1
+        },
+        "passed": true,
+        "scope": "synthetic local TLS/service/Store; no NAS, FUSE, GUI or real ACL source",
+        "status": "passed",
+        "worker_pid": 44805
+      },
+      "process_group_cleanup": {
+        "leftover_before_cleanup": false,
+        "absent_after_cleanup": true
+      },
+      "elapsed_seconds": 0.2169064879999496,
+      "finished_utc": "2026-11-05T12:01:08.286955+00:00",
+      "log_sha256": "9ab353a68f2528a0b1715f2a63131066ffa154515378910d3d93f805c14708ef",
+      "case_json_sha256": "99cb5cdc5196b67776f13f3a310288faee5357fddf9cb220ffe3e491c28c1647",
+      "cleanup_errors": []
+    },
+    {
+      "name": "worker_rpc_generic_9005",
+      "command": [
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/native-worker-chain-probe",
+        "worker_rpc_generic_9005",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/drive-native-worker",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/native-worker-chain-build-001/native-worker-chain-crate/fixtures",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/native-worker-chain-001/worker_rpc_generic_9005"
+      ],
+      "started_utc": "2026-11-05T12:01:08.926290+00:00",
+      "passed": true,
+      "status": "passed",
+      "log": "worker_rpc_generic_9005/output.log",
+      "host_space_before": {
+        "helper_path": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/issue7-validation/G4-evidence-bundle-014-final/harness/run-g4-014.py",
+        "helper_sha256": "88fa9b573ac109d85b1c7af2fcf4b2c02e81a0be58527f8031c411b1a9c5271d",
+        "minimum_free_bytes": 10737418240,
+        "minimum_free_gib": 10,
+        "observation": {
+          "utc": "2026-11-05T12:01:08.288552+00:00",
+          "command": [
+            "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+          ],
+          "host_drive": "C:",
+          "free_bytes": 312304336896,
+          "exit_code": 0,
+          "stdout": "312304336896",
+          "stderr": ""
+        },
+        "passed": true
+      },
+      "process_group": 44826,
+      "exit_code": 0,
+      "observed": {
+        "boundary": "native TLS -> real worker ELF -> IPC/Rpc (direct Download; no Bridge download application)",
+        "checks": {
+          "after": {
+            "cursor": "native-v1:78",
+            "download_failure": null,
+            "has_cached_body": false,
+            "policy": {
+              "local_policy": "follow_remote",
+              "server_capability": "unknown",
+              "writable_source": "legacy",
+              "write_policy_revision": 1
+            },
+            "root_list": "unknown",
+            "sibling_read": "allow",
+            "target_read": "unknown",
+            "target_write_content": "unknown"
+          },
+          "before": {
+            "cursor": "native-v1:78",
+            "download_failure": null,
+            "has_cached_body": false,
+            "policy": {
+              "local_policy": "follow_remote",
+              "server_capability": "unknown",
+              "writable_source": "legacy",
+              "write_policy_revision": 1
+            },
+            "root_list": "unknown",
+            "sibling_read": "allow",
+            "target_read": "unknown",
+            "target_write_content": "unknown"
+          },
+          "bridge_download_application_exercised": false,
+          "node_from_actual_worker_pull": true,
+          "rpc_category": "native_server_code:36869"
+        },
+        "cleanup": {
+          "download_thread_joined": true,
+          "event_thread_joined": true,
+          "passed": true,
+          "server_threads_joined_and_sockets_closed": true,
+          "worker_pid_absent_after_stop": true
+        },
+        "elapsed_seconds": 0.155728455,
+        "error": null,
+        "failure_snapshot_after_cleanup": null,
+        "ignored": false,
+        "ipc_version": 21,
+        "name": "worker_rpc_generic_9005",
+        "native_server": {
+          "actions": [
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 25
+            },
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 18
+            },
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 25
+            },
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 14
+            },
+            {
+              "action": "pull_event",
+              "connection": 1,
+              "cursor": 77,
+              "events": 1
+            },
+            {
+              "action": "download",
+              "connection": 1,
+              "identity_checked": true,
+              "version_checked": true
+            },
+            {
+              "action": "download_reply",
+              "code": 36869,
+              "connection": 1
+            },
+            {
+              "after_connect": true,
+              "connection": 1,
+              "event": "connection_end",
+              "io_detail": "io:UnexpectedEof:peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof"
+            }
+          ],
+          "connections": 1,
+          "download_content_bytes_sent": 0,
+          "download_requests": 1,
+          "errors": [],
+          "listener": "127.0.0.1:6690",
+          "long_poll_requests": 0,
+          "pull_event_requests": 1
+        },
+        "passed": true,
+        "scope": "synthetic local TLS/service/Store; no NAS, FUSE, GUI or real ACL source",
+        "status": "passed",
+        "worker_pid": 44828
+      },
+      "process_group_cleanup": {
+        "leftover_before_cleanup": false,
+        "absent_after_cleanup": true
+      },
+      "elapsed_seconds": 0.1687930769999184,
+      "finished_utc": "2026-11-05T12:01:09.097145+00:00",
+      "log_sha256": "b5152be784cdfeef1a1bbc38f1ca2244fee2f73b64b9ea209dc1157dceea3eb7",
+      "case_json_sha256": "0e05f45fe9a02f9b9fa881205aa5b88382b946b233b643e970dca3188c69d679",
+      "cleanup_errors": []
+    },
+    {
+      "name": "worker_rpc_generic_a005",
+      "command": [
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/native-worker-chain-probe",
+        "worker_rpc_generic_a005",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/drive-native-worker",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/native-worker-chain-build-001/native-worker-chain-crate/fixtures",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/native-worker-chain-001/worker_rpc_generic_a005"
+      ],
+      "started_utc": "2026-11-05T12:01:09.637050+00:00",
+      "passed": true,
+      "status": "passed",
+      "log": "worker_rpc_generic_a005/output.log",
+      "host_space_before": {
+        "helper_path": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/issue7-validation/G4-evidence-bundle-014-final/harness/run-g4-014.py",
+        "helper_sha256": "88fa9b573ac109d85b1c7af2fcf4b2c02e81a0be58527f8031c411b1a9c5271d",
+        "minimum_free_bytes": 10737418240,
+        "minimum_free_gib": 10,
+        "observation": {
+          "utc": "2026-11-05T12:01:09.099674+00:00",
+          "command": [
+            "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+          ],
+          "host_drive": "C:",
+          "free_bytes": 312304336896,
+          "exit_code": 0,
+          "stdout": "312304336896",
+          "stderr": ""
+        },
+        "passed": true
+      },
+      "process_group": 44849,
+      "exit_code": 0,
+      "observed": {
+        "boundary": "native TLS -> real worker ELF -> IPC/Rpc (direct Download; no Bridge download application)",
+        "checks": {
+          "after": {
+            "cursor": "native-v1:78",
+            "download_failure": null,
+            "has_cached_body": false,
+            "policy": {
+              "local_policy": "follow_remote",
+              "server_capability": "unknown",
+              "writable_source": "legacy",
+              "write_policy_revision": 1
+            },
+            "root_list": "unknown",
+            "sibling_read": "allow",
+            "target_read": "unknown",
+            "target_write_content": "unknown"
+          },
+          "before": {
+            "cursor": "native-v1:78",
+            "download_failure": null,
+            "has_cached_body": false,
+            "policy": {
+              "local_policy": "follow_remote",
+              "server_capability": "unknown",
+              "writable_source": "legacy",
+              "write_policy_revision": 1
+            },
+            "root_list": "unknown",
+            "sibling_read": "allow",
+            "target_read": "unknown",
+            "target_write_content": "unknown"
+          },
+          "bridge_download_application_exercised": false,
+          "node_from_actual_worker_pull": true,
+          "rpc_category": "native_server_code:40965"
+        },
+        "cleanup": {
+          "download_thread_joined": true,
+          "event_thread_joined": true,
+          "passed": true,
+          "server_threads_joined_and_sockets_closed": true,
+          "worker_pid_absent_after_stop": true
+        },
+        "elapsed_seconds": 0.144196861,
+        "error": null,
+        "failure_snapshot_after_cleanup": null,
+        "ignored": false,
+        "ipc_version": 21,
+        "name": "worker_rpc_generic_a005",
+        "native_server": {
+          "actions": [
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 25
+            },
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 18
+            },
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 25
+            },
+            {
+              "connection": 1,
+              "event": "handshake",
+              "fields_checked": true,
+              "scmd": 14
+            },
+            {
+              "action": "pull_event",
+              "connection": 1,
+              "cursor": 77,
+              "events": 1
+            },
+            {
+              "action": "download",
+              "connection": 1,
+              "identity_checked": true,
+              "version_checked": true
+            },
+            {
+              "action": "download_reply",
+              "code": 40965,
+              "connection": 1
+            },
+            {
+              "after_connect": true,
+              "connection": 1,
+              "event": "connection_end",
+              "io_detail": "io:UnexpectedEof:peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof"
+            }
+          ],
+          "connections": 1,
+          "download_content_bytes_sent": 0,
+          "download_requests": 1,
+          "errors": [],
+          "listener": "127.0.0.1:6690",
+          "long_poll_requests": 0,
+          "pull_event_requests": 1
+        },
+        "passed": true,
+        "scope": "synthetic local TLS/service/Store; no NAS, FUSE, GUI or real ACL source",
+        "status": "passed",
+        "worker_pid": 44851
+      },
+      "process_group_cleanup": {
+        "leftover_before_cleanup": false,
+        "absent_after_cleanup": true
+      },
+      "elapsed_seconds": 0.1665212889997747,
+      "finished_utc": "2026-11-05T12:01:09.805689+00:00",
+      "log_sha256": "c94574a64923d29d43e5e4ef9b1726a1e623d6bbd32a32bd9570199cfe510dea",
+      "case_json_sha256": "493ace02976c8296d597f38938730957d6a189a416bb80cc22872d99d83fafa8",
+      "cleanup_errors": []
+    }
+  ],
+  "scope": "isolated synthetic native TLS service; no relay, NAS, real credentials, FUSE or GUI",
+  "case_timeout_seconds": 45,
+  "cleanup_timeout_seconds": 12,
+  "finished_utc": "2026-11-05T12:01:09.807614+00:00",
+  "unchanged_executables": true,
+  "counts": {
+    "passed": 10,
+    "failed": 0,
+    "ignored": 0,
+    "total": 10
+  },
+  "all_passed": true
+}

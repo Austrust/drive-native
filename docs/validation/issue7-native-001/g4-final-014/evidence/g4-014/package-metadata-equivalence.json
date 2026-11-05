@@ -1,0 +1,44 @@
+{
+  "scope": "packaging inputs unchanged vs 9c28992; frozen local deb delivery untouched; no deb build run",
+  "from_commit": "9c28992eb67a5620bf83b4939dc262dfe239027f",
+  "to_commit": "b303ac6bf01f6ff66f48d1e74cb94740561a841c",
+  "freeze_record": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/issue7-validation/package-delivery-freeze.json",
+  "delivery": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/issue7-deb-001-artifacts",
+  "checks": {
+    "packaging_delta_command": [
+      "git",
+      "-c",
+      "safe.directory=*",
+      "--git-dir=/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/public-summary-20261031/.git",
+      "diff",
+      "--name-status",
+      "9c28992eb67a5620bf83b4939dc262dfe239027f",
+      "b303ac6bf01f6ff66f48d1e74cb94740561a841c",
+      "--",
+      "debian",
+      "scripts",
+      "Cargo.toml",
+      "Cargo.lock",
+      "vendor"
+    ],
+    "packaging_delta_exit_code": 0,
+    "packaging_delta_stderr": "",
+    "packaging_delta_lines": [
+      "M\tdebian/changelog"
+    ],
+    "packaging_delta_empty": false,
+    "frozen_manifest_sha256": "5fa305d4fae4f5720e9610544709bced8c1603b28da3cff2ebbe7fae6475411c",
+    "frozen_manifest_matches_record": true,
+    "frozen_sha256sums_matches_record": true,
+    "frozen_package_count": 1,
+    "frozen_package_path": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/issue7-deb-001-artifacts/drive-native_0.1.0~dev20261105.1_amd64.deb",
+    "frozen_package_sha256": "a369b617610052373817121de7cef84fe2e2afd51c153dd8402baa97714001d3",
+    "frozen_package_matches_record": true
+  },
+  "passed": false,
+  "counts": {
+    "passed": 0,
+    "failed": 1,
+    "ignored": 0
+  }
+}

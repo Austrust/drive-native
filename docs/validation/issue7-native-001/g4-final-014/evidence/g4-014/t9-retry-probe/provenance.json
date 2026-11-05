@@ -1,0 +1,15 @@
+{
+  "candidate_commit": "b303ac6bf01f6ff66f48d1e74cb94740561a841c",
+  "frozen_source": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/source",
+  "product_file": "crates/drive-core/src/native_retry.rs",
+  "product_file_sha256": "156bf982dde47fff85b7c08fe27a2305570d3d5cc691379d1094e38dc1e701eb",
+  "included_file_sha256": "faf1e00fc76d1ccf113161d694aa8ab7e22ca97cc6e99a26c2c740f4a658cf4a",
+  "stripped_leading_line_count": 4,
+  "scope": "external adversarial tests of the actual retry source file; real sproto::Error type; no product source modification; no private crate API imported",
+  "source_cargo_lock_sha256": "fcaf7417018889efefaffd45ac2e4931a1b01dd5fc83e6a9fc9f0806093268dd",
+  "probe_cargo_lock_sha256": "c18c929c3ccacb242930905f624cfd218f95de501df04d17e0e1fb4d5cd7a9fe",
+  "registry_dependencies_checked": 125,
+  "unexpected_registry_dependencies": [],
+  "registry_dependencies_match_frozen_candidate": true,
+  "harness_main_sha256": "11be64bd1c071d56fc65c2a50ae01722c8588952e090cdc7b3aee5ef77284f42"
+}

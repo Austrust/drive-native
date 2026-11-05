@@ -1,0 +1,7 @@
+{"event":"connection_transition","persisted":true,"record":{"attempt_elapsed_ms":36,"before_cleanup":{"state":"running"},"cause":{"kind":"native_transport"},"recovery":"reconnect","stage":"authenticate","unix_ms":1793880125375,"worker_pid":45296}}
+drive-native-fsd: shutdown phase=requested elapsed_ms=0
+drive-native-fsd: shutdown phase=stopping_workers elapsed_ms=244
+drive-native-fsd: shutdown phase=detaching_mount elapsed_ms=244
+drive-native-fsd: shutdown phase=draining_filesystem elapsed_ms=262
+drive-native-fsd: shutdown phase=checkpointing_local elapsed_ms=262
+drive-native-fsd: shutdown phase=complete elapsed_ms=263

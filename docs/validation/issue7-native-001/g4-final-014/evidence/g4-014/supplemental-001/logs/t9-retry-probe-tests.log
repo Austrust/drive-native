@@ -1,0 +1,36 @@
+   Compiling t9-retry-probe v0.0.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/t9-retry-probe)
+warning: function `pull_events` is never used
+  --> src/native_retry_included.rs:62:21
+   |
+62 | pub(super) async fn pull_events(
+   |                     ^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `list_dir` is never used
+  --> src/native_retry_included.rs:70:21
+   |
+70 | pub(super) async fn list_dir(
+   |                     ^^^^^^^^
+
+warning: `t9-retry-probe` (bin "t9-retry-probe" test) generated 2 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.70s
+     Running unittests src/main.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/deps/t9_retry_probe-4a7b7b76b26524a9)
+
+running 13 tests
+test immediate_success_has_no_backoff ... ok
+test max_attempts_constant_is_five ... ok
+test native::retry::tests::server_protocol_and_mutation_errors_are_never_retried ... ok
+test non_retryable_errors_are_attempted_once ... ok
+test cancelled_future_during_backoff_does_not_start_another_attempt ... ok
+test native::retry::tests::timeout_and_connection_closed_are_retryable ... ok
+test native::retry::tests::transport_disconnects_are_retried_with_same_read ... ok
+test operation_constructs_a_fresh_future_for_each_attempt ... ok
+test retryable_transport_errors_are_retried ... ok
+test native::retry::tests::persistent_transport_failure_stops_at_the_attempt_cap ... ok
+test persistent_transport_failure_stops_at_the_attempt_cap ... ok
+test exhausted_backoff_is_bounded_and_nonzero ... ok
+test transport_disconnects_then_success_retries_same_operation ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.81s
+

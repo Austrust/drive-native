@@ -1,0 +1,10 @@
+test_hidden_cache_settings_ignore_signals_and_queued_timeout (__main__.HiddenDialogTests.test_hidden_cache_settings_ignore_signals_and_queued_timeout) ... This plugin does not support propagateSizeHints()
+ok
+test_hidden_issues_stop_automatic_next_page (__main__.HiddenDialogTests.test_hidden_issues_stop_automatic_next_page) ... ok
+test_hidden_transfers_do_not_query_on_service_reconnect (__main__.HiddenDialogTests.test_hidden_transfers_do_not_query_on_service_reconnect) ... This plugin does not support propagateSizeHints()
+ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.036s
+
+OK

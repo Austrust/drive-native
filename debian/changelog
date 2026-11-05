@@ -1,3 +1,31 @@
+drive-native (0.1.0~dev20261105.3) unstable; urgency=medium
+
+  * Retry read-only native initialization requests (pull_event pages, list_dir,
+    watermark/current-root reads) up to five attempts with bounded backoff,
+    resuming at the same cursor/path; server refusals, decode/config/session/
+    TLS errors and all mutation replies are never retried.
+  * Keep schema 25, IPC 21, seed budgets, error classification and every write
+    path unchanged.
+  * Record the real-NAS T10 partial acceptance of this candidate: ROOT_MF root
+    scope 4/4 complete mounts, root mkdir/create refused with 0x9004 and
+    fail-closed, S02/S12 6/6 committed; the T7 root initial-index block was not
+    reproduced. Evidence under docs/validation/real-nas-t10-20261105/ (report
+    and copy verification) and
+    docs/validation/real-nas-initial-index-20261105/REPORT-R2-RESILIENCE-20261105.md.
+  * Independent G4-014 verification of source candidate b303ac6 passed the
+    main matrix (59/59 commands) and supplemental run (28/28); all-features
+    992/0/42 and default 982/0/37 (+7 retry tests). Its frozen STATUS keeps two
+    allowed-failed checks: package-metadata-equivalence and
+    t9-measure-log-audit (a HOME attempts5 measurement-accounting caveat, not a
+    product-behaviour failure). Evidence under
+    docs/validation/issue7-native-001/g4-final-014/.
+  * S01 remains partial, S03-S11 blocked, gap 2 partially observed and gap 3
+    blocked/not observed; full real NAS ACL acceptance is not claimed.
+  * Development build; HOME root, root watermark and full /Drive enumeration
+    remain unproven.
+
+ -- Drive Native contributors <noreply@localhost>  Thu, 05 Nov 2026 18:44:58 +0800
+
 drive-native (0.1.0~dev20261105.2) unstable; urgency=medium
 
   * Learn the single proven pre-commit ACL denial: upload 0x9003 addressed to an

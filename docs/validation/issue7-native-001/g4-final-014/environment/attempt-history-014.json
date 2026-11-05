@@ -1,0 +1,53 @@
+{
+  "candidate_commit": "b303ac6bf01f6ff66f48d1e74cb94740561a841c",
+  "attempts": [
+    {
+      "attempt": 1,
+      "status": "aborted_before_product_commands",
+      "cause": "private Nautilus dependency prefix removed by external cleanup; run-g4.py startup assertion failed before any product command",
+      "evidence": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/issue7-validation/G4-evidence-bundle-014-final/environment/attempt1-missing-nautilus-prefix",
+      "launcher_log_sha256": "31cc6c4916a9f912bf7f1767b564079e10dc633e2b1a5ef333aa5f65deb29514",
+      "recorded_as_product_failure": false
+    },
+    {
+      "attempt": 2,
+      "status": "aborted_mid_matrix",
+      "cause": "run-g4.py calls the fixed script name run-native-loopback.sh; the launcher referenced a differently named script, so native-loopback failed before the remaining commands",
+      "complete": false,
+      "commands_recorded": 27,
+      "failed_commands": [
+        "native-loopback"
+      ],
+      "evidence": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/issue7-validation/G4-evidence-bundle-014-final/environment/attempt2-native-loopback-runner-name",
+      "recorded_as_product_failure": false
+    },
+    {
+      "attempt": 3,
+      "status": "aborted_mid_matrix",
+      "cause": "interrupted by the user during workspace-default; partial run preserved",
+      "complete": false,
+      "commands_recorded": 28,
+      "failed_commands": [
+        "native-loopback"
+      ],
+      "run_dir": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-aborted-partial",
+      "evidence": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/issue7-validation/G4-evidence-bundle-014-final/environment/attempt3-interrupted",
+      "recorded_as_product_failure": false
+    },
+    {
+      "attempt": 4,
+      "status": "invalid_root_user_run",
+      "cause": "launched as root; permissions_kernel asserts getuid != 0, so the FUSE/kernel group cannot pass under root; preserved as environment evidence only",
+      "commands_recorded": 25,
+      "failed_commands": [
+        "kernel-parent-actions-preflight",
+        "core-history-probe"
+      ],
+      "evidence": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/issue7-validation/G4-evidence-bundle-014-final/environment/attempt4-root-invalid",
+      "recorded_as_product_failure": false
+    }
+  ],
+  "formal_run": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun",
+  "formal_run_user": "drive-native-test (non-root)",
+  "target_reuse": "formal-run target seeded only from the attempt-3 target via the run-g4.py Cargo.lock registry filter (registry+ packages only); no workspace/path artifact, test ELF or incremental cache copied; CARGO_INCREMENTAL=0. Attempt-4 target was not reused."
+}

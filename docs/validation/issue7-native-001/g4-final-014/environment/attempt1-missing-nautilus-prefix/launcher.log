@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/issue7-validation/G4-evidence-bundle-014-final/harness/run-g4-014.py", line 356, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/issue7-validation/G4-evidence-bundle-014-final/harness/run-g4-014.py", line 192, in main
+    assert (dependency/'usr/lib/x86_64-linux-gnu/girepository-1.0/Nautilus-4.0.typelib').is_file()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError

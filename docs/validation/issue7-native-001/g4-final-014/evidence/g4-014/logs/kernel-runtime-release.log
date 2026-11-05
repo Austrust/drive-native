@@ -1,0 +1,86 @@
+   Compiling syn v3.0.9
+   Compiling rustix v1.1.6
+   Compiling linux-raw-sys v0.12.1
+   Compiling autocfg v1.5.1
+   Compiling memoffset v0.9.1
+   Compiling tokio-macros v2.7.2
+   Compiling tokio v1.54.1
+   Compiling serde_core v1.0.228
+   Compiling proc-macro2 v1.0.106
+   Compiling unicode-ident v1.0.24
+   Compiling nix v0.29.0
+   Compiling uuid v1.22.0
+   Compiling serde v1.0.228
+   Compiling quote v1.0.45
+   Compiling tempfile v3.27.0
+   Compiling tokio-rustls v0.26.4
+   Compiling winnow v1.0.4
+   Compiling futures-core v0.3.34
+   Compiling sproto v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/source/crates/sproto)
+   Compiling zbus_utils v6.0.0
+   Compiling futures-io v0.3.34
+   Compiling zruntime v0.2.1
+   Compiling fuser v0.16.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/source/vendor/fuser)
+warning: struct `cuse_init_in` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:814:12
+    |
+814 | pub struct cuse_init_in {
+    |            ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: struct `cuse_init_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:823:12
+    |
+823 | pub struct cuse_init_out {
+    |            ^^^^^^^^^^^^^
+
+warning: struct `fuse_ioctl_iovec` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:868:12
+    |
+868 | pub struct fuse_ioctl_iovec {
+    |            ^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:996:12
+    |
+996 | pub struct fuse_notify_retrieve_out {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_in` is never constructed
+    --> vendor/fuser/src/ll/fuse_abi.rs:1006:12
+     |
+1006 | pub struct fuse_notify_retrieve_in {
+     |            ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `fuser` (lib) generated 5 warnings
+   Compiling drive-core v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/source/crates/drive-core)
+   Compiling zbus_macros v6.1.0
+   Compiling ordered-stream v0.2.0
+   Compiling async-trait v0.1.92
+   Compiling serde_repr v0.1.21
+   Compiling zcheapstr v1.1.0
+   Compiling rtoolbox v0.0.6
+   Compiling hex v0.4.3
+   Compiling endi v1.1.1
+   Compiling zbus v6.1.0
+   Compiling rpassword v7.5.4
+   Compiling drive-fs v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/source/crates/drive-fs)
+   Compiling drive-runtime v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/source/crates/drive-runtime)
+warning: unused variable: `op`
+  --> crates/drive-runtime/src/namespace_schedule_tests.rs:57:10
+   |
+57 |     let (op, child_file) = {
+   |          ^^ help: if this is intentional, prefix it with an underscore: `_op`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `drive-runtime` (lib test) generated 1 warning (run `cargo fix --lib -p drive-runtime --tests` to apply 1 suggestion)
+    Finished `release` profile [optimized] target(s) in 2m 52s
+     Running unittests src/lib.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/release/deps/drive_runtime-0ed435aaa1facb72)
+
+running 1 test
+test bridge::cancel_bridge_tests::backoff::kernel_cancel_in_backoff_clears_retry_and_later_read_gets_complete_body ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 157 filtered out; finished in 0.65s
+

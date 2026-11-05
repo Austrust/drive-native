@@ -1,0 +1,129 @@
+     Locking 66 packages to highest Rust 1.85 compatible versions
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.27
+   Compiling quote v1.0.47
+   Compiling libc v0.2.191
+   Compiling memchr v2.8.3
+   Compiling syn v3.0.9
+   Compiling aho-corasick v1.1.5
+   Compiling regex-syntax v0.8.11
+   Compiling serde_core v1.0.229
+   Compiling regex-automata v0.4.18
+   Compiling cfg-if v1.0.5
+   Compiling serde v1.0.229
+   Compiling getrandom v0.4.3
+   Compiling nix v0.29.0
+   Compiling regex v1.13.1
+   Compiling serde_derive v1.0.229
+   Compiling syn v2.0.119
+   Compiling clap_lex v1.1.1
+   Compiling log v0.4.35
+   Compiling jiff-core v0.1.2
+   Compiling zerocopy-derive v0.8.63
+   Compiling jiff v0.2.39
+   Compiling env_filter v2.0.0
+   Compiling clap_derive v4.6.7
+   Compiling clap_builder v4.6.7
+   Compiling fuser v0.16.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/source/vendor/fuser)
+   Compiling tempfile v3.27.0
+   Compiling clap v4.6.7
+   Compiling bincode v1.3.3
+   Compiling env_logger v0.11.11
+   Compiling zerocopy v0.8.63
+   Compiling page_size v0.6.0
+   Compiling smallvec v1.16.4
+warning: struct `cuse_init_in` is never constructed
+   --> src/ll/fuse_abi.rs:814:12
+    |
+814 | pub struct cuse_init_in {
+    |            ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: struct `cuse_init_out` is never constructed
+   --> src/ll/fuse_abi.rs:823:12
+    |
+823 | pub struct cuse_init_out {
+    |            ^^^^^^^^^^^^^
+
+warning: struct `fuse_ioctl_iovec` is never constructed
+   --> src/ll/fuse_abi.rs:868:12
+    |
+868 | pub struct fuse_ioctl_iovec {
+    |            ^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_out` is never constructed
+   --> src/ll/fuse_abi.rs:996:12
+    |
+996 | pub struct fuse_notify_retrieve_out {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_in` is never constructed
+    --> src/ll/fuse_abi.rs:1006:12
+     |
+1006 | pub struct fuse_notify_retrieve_in {
+     |            ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `fuser` (lib test) generated 5 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 59.65s
+     Running unittests src/lib.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-014-rerun/target/debug/deps/fuser-c6f3ec785f7ee920)
+
+running 55 tests
+test ll::argument::tests::all_data ... ok
+test ll::argument::tests::generic_argument ... ok
+test ll::argument::tests::mixed_arguments ... ok
+test ll::argument::tests::out_of_data ... ok
+test ll::argument::tests::string_argument ... ok
+test ll::notify::test::delete ... ok
+test ll::notify::test::inval_entry ... ok
+test ll::notify::test::inval_inode ... ok
+test ll::notify::test::poll ... ok
+test ll::notify::test::store ... ok
+test ll::reply::test::directory_plus_without_lookup_emits_zero_nodeid_dirent ... ok
+test ll::reply::test::reply_attr ... ok
+test ll::reply::test::reply_bmap ... ok
+test ll::reply::test::reply_create ... ok
+test ll::reply::test::reply_data ... ok
+test ll::reply::test::reply_directory ... ok
+test ll::reply::test::reply_empty ... ok
+test ll::reply::test::reply_entry ... ok
+test ll::reply::test::reply_error ... ok
+test ll::reply::test::reply_lock ... ok
+test ll::reply::test::reply_open ... ok
+test ll::reply::test::reply_statfs ... ok
+test ll::reply::test::reply_write ... ok
+test ll::reply::test::reply_xattr_data ... ok
+test ll::reply::test::reply_xattr_size ... ok
+test ll::request::tests::init ... ok
+test ll::request::tests::mknod ... ok
+test ll::request::tests::short_read ... ok
+test ll::request::tests::short_read_header ... ok
+test mnt::mount_options::test::option_checking ... ok
+test mnt::mount_options::test::option_round_trip ... ok
+test mnt::mount_options::test::test_parse_options ... ok
+test mnt::test::fuse_args ... ok
+test reply::test::reply_attr ... ok
+test reply::test::reply_bmap ... ok
+test reply::test::async_reply ... ok
+test reply::test::reply_create ... ok
+test reply::test::reply_data ... ok
+test reply::test::reply_directory ... ok
+test reply::test::reply_directory_plus_unequal_ttls_reach_the_correct_wire_fields ... ok
+test reply::test::reply_empty ... ok
+test reply::test::reply_entry ... ok
+test reply::test::reply_entry_unequal_ttls_reach_the_correct_wire_fields ... ok
+test reply::test::reply_error ... ok
+test reply::test::reply_lock ... ok
+test reply::test::reply_open ... ok
+test reply::test::reply_raw ... ok
+test reply::test::reply_statfs ... ok
+test reply::test::reply_write ... ok
+test reply::test::reply_xattr_data ... ok
+test reply::test::reply_xattr_size ... ok
+test reply::test::serialize_empty ... ok
+test reply::test::serialize_slice ... ok
+test reply::test::serialize_struct ... ok
+test mnt::test::mount_unmount ... ok
+
+test result: ok. 55 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+

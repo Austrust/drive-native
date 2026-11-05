@@ -1,0 +1,115 @@
+{
+  "collected_utc": "2026-11-05T12:04:24.100989+00:00",
+  "platform": "Linux-6.18.54.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+  "os_release": [
+    "PRETTY_NAME=\"Ubuntu 24.04.5 LTS\"",
+    "NAME=\"Ubuntu\"",
+    "VERSION_ID=\"24.04\"",
+    "VERSION=\"24.04.5 LTS (Noble Numbat)\"",
+    "VERSION_CODENAME=noble",
+    "ID=ubuntu",
+    "ID_LIKE=debian",
+    "HOME_URL=\"https://www.ubuntu.com/\"",
+    "SUPPORT_URL=\"https://help.ubuntu.com/\"",
+    "BUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"",
+    "PRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"",
+    "UBUNTU_CODENAME=noble",
+    "LOGO=ubuntu-logo"
+  ],
+  "kernel": "6.18.54.1-microsoft-standard-WSL2",
+  "nproc": 12,
+  "guest_df_home": {
+    "argv": [
+      "df",
+      "-h",
+      "/home"
+    ],
+    "exit_code": 0,
+    "stdout": "Filesystem      Size  Used Avail Use% Mounted on\n/dev/sdd       1007G  216G  740G  23% /",
+    "stderr": ""
+  },
+  "host_c_space": {
+    "utc": "2026-11-05T12:04:24.119040+00:00",
+    "command": [
+      "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+    ],
+    "host_drive": "C:",
+    "free_bytes": 308620050432,
+    "exit_code": 0,
+    "stdout": "308620050432",
+    "stderr": ""
+  },
+  "rustc": {
+    "argv": [
+      "rustc",
+      "--version"
+    ],
+    "exit_code": 0,
+    "stdout": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "stderr": ""
+  },
+  "cargo": {
+    "argv": [
+      "cargo",
+      "--version"
+    ],
+    "exit_code": 0,
+    "stdout": "cargo 1.99.1 (5f94df478 2026-08-27)",
+    "stderr": ""
+  },
+  "python3": {
+    "argv": [
+      "python3",
+      "--version"
+    ],
+    "exit_code": 0,
+    "stdout": "Python 3.12.3",
+    "stderr": ""
+  },
+  "gui_python": {
+    "argv": [
+      "/opt/drive-native-build/gui-venv/bin/python",
+      "--version"
+    ],
+    "exit_code": 0,
+    "stdout": "Python 3.12.3",
+    "stderr": ""
+  },
+  "gui_packages": {
+    "argv": [
+      "/opt/drive-native-build/gui-venv/bin/python",
+      "-c",
+      "import importlib.metadata as m; print(m.version(\"PySide6_Essentials\")); print(m.version(\"pyinstaller\"))"
+    ],
+    "exit_code": 0,
+    "stdout": "6.12.0\n6.22.3",
+    "stderr": ""
+  },
+  "dbus_run_session": {
+    "argv": [
+      "dbus-run-session",
+      "--",
+      "true"
+    ],
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "fusermount3": {
+    "argv": [
+      "fusermount3",
+      "--version"
+    ],
+    "exit_code": 0,
+    "stdout": "fusermount3 version: 3.14.0",
+    "stderr": ""
+  },
+  "cargo_home": "/mnt/c/Users/a_tas/Documents/Codex/2026-10-28/dui-yu/work/toolchains/cargo",
+  "rustup_home": "/mnt/c/Users/a_tas/Documents/Codex/2026-10-28/dui-yu/work/toolchains/rustup",
+  "candidate_commit": "b303ac6bf01f6ff66f48d1e74cb94740561a841c"
+}
