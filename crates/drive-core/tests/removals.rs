@@ -218,9 +218,9 @@ fn v6_migration_preserves_queued_move_and_inflight_becomes_uncertain() {
     s.mark_rename_started(&q.job.operation).unwrap();
     drop(s);
     let db = rusqlite::Connection::open(d.path().join("state.sqlite")).unwrap();
-    // Schema 6 predates history. Remove its newer kind-dependent trigger
+    // Schema 6 predates history. Remove its newer kind-dependent triggers
     // before constructing the old namespace table; keep the migration assertions.
-    db.execute_batch("DROP TRIGGER history_namespace; DROP TABLE local_unlinks; ALTER TABLE namespace_ops DROP COLUMN kind; PRAGMA user_version=6;").unwrap();
+    db.execute_batch("DROP TRIGGER history_namespace; DROP TRIGGER history_permission_namespace_extra; DROP TABLE local_unlinks; ALTER TABLE namespace_ops DROP COLUMN kind; PRAGMA user_version=6;").unwrap();
     drop(db);
     let s = Store::open(d.path()).unwrap();
     assert_eq!(s.next_rename().unwrap().unwrap().state, "uncertain");

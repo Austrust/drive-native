@@ -65,6 +65,14 @@
       "nul_bytes": 2151,
       "host_exit_code": 0,
       "reported_seconds": 30.39
+    },
+    {
+      "file": "check-009.log",
+      "sha256": "f7bdf5900b1592e6bfe287446662c67327f0c71dbc5365c98dad045555a61ab2",
+      "bytes": 4876,
+      "nul_bytes": 81,
+      "host_exit_code": 0,
+      "reported_seconds": 32.91
     }
   ]
 }

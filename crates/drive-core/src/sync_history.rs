@@ -535,6 +535,7 @@ mod tests {
         // Emulate the real v23 shape, not a new schema with only its version
         // number changed. These durable history objects did not exist in v23.
         store.db.execute_batch("DROP TRIGGER history_upload; DROP TRIGGER history_namespace;
+          DROP TRIGGER history_permission_namespace_extra;
           DROP TRIGGER history_download; DROP TRIGGER history_download_removed;
           DROP TABLE sync_history;
           DELETE FROM metadata WHERE key LIKE 'sync_history_%';").unwrap();
@@ -568,6 +569,7 @@ mod tests {
         let (dir,mut store)=fixture();
         store.save_local("file",b"pending survives").unwrap();
         store.db.execute_batch("DROP TRIGGER history_upload; DROP TRIGGER history_namespace;
+          DROP TRIGGER history_permission_namespace_extra;
           DROP TRIGGER history_download; DROP TRIGGER history_download_removed;
           DROP TABLE sync_history;
           DELETE FROM metadata WHERE key LIKE 'sync_history_%';
