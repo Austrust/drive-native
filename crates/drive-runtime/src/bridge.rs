@@ -755,6 +755,17 @@ impl Bridge {
             Ok(())
         }
     }
+    fn reject_download_flight(&self, node: &Node, flight: &Flight, ticket: &DownloadTicket, error: i32) -> Result<(), i32> {
+        // Cancellation can race with the Store permission check. Re-evaluate
+        // demand after that guard is released, including pins/cache/other users,
+        // before leaving a refusal with this flight's durable retry intent.
+        if self.download_abandoned(node, flight) {
+            self.store.lock().unwrap().finish_download(ticket).map_err(|_| libc::EIO)?;
+            Ok(())
+        } else {
+            Err(error)
+        }
+    }
     fn retry_ticket_current(store: &drive_core::Store, ticket: &DownloadTicket) -> drive_core::Result<bool> {
         match store.node(&ticket.id) {
             Ok(node) => Ok(node.version == ticket.version),
@@ -820,7 +831,6 @@ impl Bridge {
         };
         let retry_deadline = std::time::Instant::now() + Duration::from_secs(35);
         loop {
-            Self::check_download_permission(&self.store.lock().unwrap(), &node.id)?;
             if self.download_abandoned(node, flight) {
                 self.store
                     .lock()
@@ -828,6 +838,10 @@ impl Bridge {
                     .finish_download(&ticket)
                     .map_err(|_| libc::EIO)?;
                 return Ok(());
+            }
+            let permission = Self::check_download_permission(&self.store.lock().unwrap(), &node.id);
+            if let Err(error) = permission {
+                return self.reject_download_flight(node, flight, &ticket, error);
             }
             let result = if self
                 .store
@@ -901,7 +915,6 @@ impl Bridge {
                 return Err(error);
             };
             while !self.retry_clock_ready(&self.store.lock().unwrap(), &ticket, unix_seconds()).map_err(|_|libc::EIO)? {
-                Self::check_download_permission(&self.store.lock().unwrap(), &node.id)?;
                 if !Self::retry_ticket_current(&self.store.lock().unwrap(), &ticket).map_err(|_|libc::EIO)? {
                     return Err(libc::EAGAIN);
                 }
@@ -912,6 +925,10 @@ impl Bridge {
                         .finish_download(&ticket)
                         .map_err(|_| libc::EIO)?;
                     return Ok(());
+                }
+                let permission = Self::check_download_permission(&self.store.lock().unwrap(), &node.id);
+                if let Err(error) = permission {
+                    return self.reject_download_flight(node, flight, &ticket, error);
                 }
                 if std::time::Instant::now() >= retry_deadline {
                     return Err(libc::EAGAIN);

@@ -97,6 +97,14 @@
       "nul_bytes": 183,
       "host_exit_code": 0,
       "reported_seconds": 31.73
+    },
+    {
+      "file": "check-013.log",
+      "sha256": "0b70b14cec1e0a731c4f968cbc8369c1094120c2ec130ef50b324e350f41d697",
+      "bytes": 4582,
+      "nul_bytes": 0,
+      "host_exit_code": 0,
+      "reported_seconds": 15.73
     }
   ]
 }

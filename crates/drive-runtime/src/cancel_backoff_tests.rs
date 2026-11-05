@@ -53,6 +53,63 @@ fn start(
 }
 
 #[test]
+fn cancelled_flight_clears_retry_even_when_read_or_traverse_is_denied() {
+    use drive_core::write_permissions::{self as permissions, Action};
+    for action in [Action::Read, Action::Traverse] {
+        let (_dir, bridge, file, _peer) = fixture(false);
+        let ticket = DownloadTicket { id:file.id.clone(), version:file.version.clone() };
+        let token = drive_fs::ReadCancellation::default();
+        {
+            let mut store = bridge.store.lock().unwrap();
+            store.fail_download(&ticket, DownloadFailureKind::Transport, None, unix_seconds()).unwrap();
+            permissions::record_observed(&store, "root", if action==Action::Read {"file"} else {"root"}, action, false).unwrap();
+            token.cancel();
+        }
+        // This is the current flight's retry, not an independent queued pin.
+        let flight = Flight { demand:Mutex::new(Demand { foreground:true, readers:vec![token], ..Demand::default() }),
+            done:Mutex::new(None), changed:Condvar::new() };
+        assert_eq!(bridge.run_download_flight(&file, &flight), Ok(()));
+        let store = bridge.store.lock().unwrap();
+        assert!(store.downloads_needed().unwrap().is_empty());
+        assert_eq!(store.download_failure_count().unwrap(), 0);
+        permissions::reset_observed(&store, "root").unwrap();
+        assert_eq!(store.next_download_retry().unwrap(), None);
+    }
+}
+
+#[test]
+fn concurrent_read_revocation_and_last_reader_cancel_leave_no_retry_intent() {
+    use drive_core::write_permissions::{self as permissions, Action};
+    for action in [Action::Read, Action::Traverse] {
+        let (dir, bridge, file, mut peer) = fixture(false);
+        let token = drive_fs::ReadCancellation::default();
+        let owner = start(&bridge, &file, &token);
+        let first = request(&mut peer);
+        fail(&mut peer, first.id, "transport");
+        backoff(&bridge);
+        {
+            let store = bridge.store.lock().unwrap();
+            permissions::record_observed(&store, "root", if action==Action::Read {"file"} else {"root"}, action, false).unwrap();
+            token.cancel();
+        }
+        assert_eq!(owner.join().unwrap(), Err(libc::EINTR));
+        assert!(bridge.active_downloads().is_empty());
+        {
+            let store = bridge.store.lock().unwrap();
+            assert_eq!(store.download_failure_count().unwrap(), 0);
+            assert!(store.downloads_needed().unwrap().is_empty());
+            permissions::reset_observed(&store, "root").unwrap();
+        }
+        bridge.refresh_cached();
+        assert_eq!(bridge.downloads.load(Ordering::Relaxed), 1);
+        bridge.disconnect(); drop(bridge); drop(peer);
+        let store = Store::open(dir.path()).unwrap();
+        assert!(store.downloads_needed().unwrap().is_empty());
+        assert_eq!(store.next_download_retry().unwrap(), None);
+    }
+}
+
+#[test]
 fn cancelling_in_backoff_removes_only_read_intent_and_survives_restart() {
     for category in ["native_server_code:32772", "transport"] {
         let (dir, bridge, file, mut peer) = fixture(false);

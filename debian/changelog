@@ -1,3 +1,16 @@
+drive-native (0.1.0~dev20261105.1) unstable; urgency=medium
+
+  * Separate explicit read-only policy from per-node, per-action remote permissions.
+  * Preserve legacy read-only choices and allow explicit follow-remote remounts.
+  * Invalidate permission evidence on native profile changes and guard late replies.
+  * Stop automatic downloads after definite read refusals without losing cancellation.
+  * Include persistent sync history (schema 24) and permission policy (schema 25).
+  * Pair the native worker and filesystem service using IPC version 21.
+  * Include namespace indexing and unified desktop history from the integration.
+  * Development build; real NAS ACL and near-local performance remain acceptance gates.
+
+ -- Drive Native contributors <noreply@localhost>  Thu, 05 Nov 2026 12:00:00 +0800
+
 drive-native (0.1.0~dev20261103.9) unstable; urgency=medium
 
   * Reduce repeated directory SQL preparation and inode completeness queries.
