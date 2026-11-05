@@ -1,5 +1,6 @@
 pub mod bridge;
 mod connection_diagnostics;
+mod download_retry_clock;
 pub mod desktop;
 mod index_progress;
 pub mod initialization;

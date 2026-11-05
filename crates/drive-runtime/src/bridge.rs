@@ -92,6 +92,7 @@ pub struct Bridge {
     initialization_session: Mutex<Option<initialization_owner::Session>>,
     session_pending: AtomicBool,
     flights: Mutex<HashMap<(String, String), Arc<Flight>>>,
+    download_retry_clock: Mutex<crate::download_retry_clock::RetryClock>,
     notify_hub: Arc<Mutex<Option<drive_fs::NotifyHub>>>,
     notifications: std::sync::mpsc::SyncSender<Invalidation>,
     pub downloads: AtomicUsize,
@@ -274,6 +275,7 @@ impl Bridge {
             session_pending: AtomicBool::new(false),
             connection: Mutex::new(rpc),
             flights: Mutex::new(HashMap::new()),
+            download_retry_clock: Mutex::new(crate::download_retry_clock::RetryClock::default()),
             notify_hub,
             notifications,
             downloads: AtomicUsize::new(0),
@@ -512,7 +514,7 @@ impl Bridge {
             let now = unix_seconds();
             let node = {
                 let store = self.store.lock().unwrap();
-                if !store.download_ready(&ticket, now).unwrap_or(false) {
+                if !self.download_ready(&store, &ticket, now).unwrap_or(false) {
                     continue;
                 }
                 store.node(&ticket.id)
@@ -590,6 +592,7 @@ impl Bridge {
                     drive_core::write_permissions::observe_targets(&store,&[(node.id.clone(),drive_core::write_permissions::Action::Read)],true).map_err(|_|libc::EIO)?;
                 }
                 store.finish_download(&ticket).map_err(|_|libc::EIO)?;
+                self.download_retry_clock.lock().unwrap().clear(&ticket);
                 Ok(())
             }
             Err((errno, _, _)) if errno == libc::EINTR => {
@@ -607,18 +610,21 @@ impl Bridge {
                 *self.last_download_failure.lock().unwrap() = Some((kind.clone(), code));
                 let persisted = {
                     let mut store = self.store.lock().unwrap();
+                    let failed_at = unix_seconds();
+                    let failed_instant = std::time::Instant::now();
                     // Publish the learned refusal and its retry gate under one
                     // Store guard. A profile notification cannot clear the ACL
                     // between them and leave a stale terminal download behind.
-                    if errno == libc::EACCES && kind == DownloadFailureKind::ServerRejected && code.is_none() {
+                    let result = if errno == libc::EACCES && kind == DownloadFailureKind::ServerRejected && code.is_none() {
                         if drive_core::write_permissions::session_revision(&store).map_err(|_|libc::EIO)? != permission_revision {
                             drive_core::write_permissions::defer_stale_read_refusal(&store, &ticket)
                         } else {
                             drive_core::write_permissions::observe_targets(&store,
                                 &[(node.id.clone(), drive_core::write_permissions::Action::Read)], false)
-                                .and_then(|_| store.fail_download(&ticket, kind, code, unix_seconds()))
+                                .and_then(|_| store.fail_download(&ticket, kind, code, failed_at))
                         }
-                    } else { store.fail_download(&ticket, kind, code, unix_seconds()) }
+                    } else { store.fail_download(&ticket, kind, code, failed_at) };
+                    result.and_then(|_| self.publish_download_retry(&store, &ticket, failed_at, failed_instant))
                 };
                 if persisted.is_err() {
                     *self.last_error.lock().unwrap() = Some(
@@ -741,6 +747,37 @@ impl Bridge {
     pub fn ensure(&self, node: &Node) -> Result<(), i32> {
         self.ensure_cancellable(node, None)
     }
+    fn retry_ticket_current(store: &drive_core::Store, ticket: &DownloadTicket) -> drive_core::Result<bool> {
+        match store.node(&ticket.id) {
+            Ok(node) => Ok(node.version == ticket.version),
+            Err(error) if error.is_not_found() => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+    fn publish_download_retry(&self, store: &drive_core::Store, ticket: &DownloadTicket, wall: u64, now: std::time::Instant) -> drive_core::Result<()> {
+        // fail_download deliberately no-ops for an obsolete ticket. Never
+        // mislabel the current version's failure as that old request's result.
+        if !Self::retry_ticket_current(store, ticket)? {
+            return Ok(());
+        }
+        let failure = store.download_failure(&ticket.id)?;
+        self.download_retry_clock.lock().unwrap().publish(ticket, failure.as_ref(), wall, now);
+        Ok(())
+    }
+    fn retry_clock_ready(&self, store: &drive_core::Store, ticket: &DownloadTicket, now: u64) -> drive_core::Result<bool> {
+        if !Self::retry_ticket_current(store, ticket)? {
+            return Ok(false);
+        }
+        let failure = store.download_failure(&ticket.id)?;
+        Ok(self.download_retry_clock.lock().unwrap().ready(
+            ticket, failure.as_ref(), now, std::time::Instant::now()))
+    }
+    fn download_ready(&self, store: &drive_core::Store, ticket: &DownloadTicket, now: u64) -> drive_core::Result<bool> {
+        // Seed even before the wall deadline is due, so a subsequent clock
+        // correction cannot bypass the same gate on another flight or worker.
+        let retry_ready = self.retry_clock_ready(store, ticket, now)?;
+        Ok(store.download_ready(ticket, now)? && retry_ready)
+    }
     fn ensure_cancellable(
         &self,
         node: &Node,
@@ -794,11 +831,7 @@ impl Bridge {
             } else if !self.connection().is_connected() {
                 Err(libc::ENETDOWN)
             } else {
-                let ready = self
-                    .store
-                    .lock()
-                    .unwrap()
-                    .download_ready(&ticket, unix_seconds());
+                let ready = self.download_ready(&self.store.lock().unwrap(), &ticket, unix_seconds());
                 match ready {
                     Ok(true) => self.transfer(node, flight),
                     Ok(false) => Err(libc::EAGAIN),
@@ -855,10 +888,13 @@ impl Bridge {
                         }
                     })
             };
-            let Some(retry_at) = retry_at else {
+            let Some(_retry_at) = retry_at else {
                 return Err(error);
             };
-            while unix_seconds() < retry_at {
+            while !self.retry_clock_ready(&self.store.lock().unwrap(), &ticket, unix_seconds()).map_err(|_|libc::EIO)? {
+                if !Self::retry_ticket_current(&self.store.lock().unwrap(), &ticket).map_err(|_|libc::EIO)? {
+                    return Err(libc::EAGAIN);
+                }
                 if self.download_abandoned(node, flight) {
                     self.store
                         .lock()
@@ -1571,6 +1607,34 @@ mod download_scheduler_tests {
         time::Instant,
     };
     #[test]
+    fn obsolete_ticket_cannot_displace_current_version_retry_gate() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut store = Store::open(directory.path()).unwrap();
+        let root = Node { id: "root".into(), parent: None, name: "root".into(), version: "v1".into(), directory: true, metadata: None };
+        let file = Node { id: "file".into(), parent: Some("root".into()), name: "file".into(), version: "v2".into(), directory: false, metadata: None };
+        store.install_remote_snapshot(&[root, file], "1", "server").unwrap();
+        store.ensure_fs_root("root").unwrap();
+        let current = DownloadTicket { id: "file".into(), version: "v2".into() };
+        let old = DownloadTicket { id: "file".into(), version: "v1".into() };
+        store.begin_download(&current).unwrap();
+        store.fail_download(&current, DownloadFailureKind::Transport, None, 100).unwrap();
+        let failure = store.download_failure("file").unwrap().unwrap();
+        let bridge = Bridge::offline(Arc::new(drive_core::SharedStore::new(store))).unwrap();
+        let start = Instant::now();
+        let mut store = bridge.store.lock().unwrap();
+        bridge.publish_download_retry(&store, &current, 100, start).unwrap();
+        assert!(!bridge.retry_clock_ready(&store, &old, 500).unwrap());
+        // This no-op is the real late-result path: it must not publish v2's
+        // failure under v1 and thereby evict v2's original monotonic deadline.
+        store.fail_download(&old, DownloadFailureKind::Transport, None, 500).unwrap();
+        bridge.publish_download_retry(&store, &old, 500, start).unwrap();
+        assert_eq!(store.download_failure("file").unwrap(), Some(failure.clone()));
+        assert!(!bridge.download_retry_clock.lock().unwrap().ready(
+            &current, Some(&failure), 500, start + Duration::from_secs(1)));
+        assert!(bridge.download_retry_clock.lock().unwrap().ready(
+            &current, Some(&failure), 500, start + Duration::from_secs(2)));
+    }
+    #[test]
     fn durable_retry_wakes_without_remote_event_and_clears_failure() {
         retry_roundtrip(false, "native_server_code:32772");
     }
@@ -1732,7 +1796,14 @@ mod download_scheduler_tests {
                 assert_ne!(poll.revents & libc::POLLIN, 0);
             }
             let (request, _) = transport::receive::<Envelope<Command>>(&mut b).unwrap();
-            assert!(first.elapsed() >= Duration::from_millis(900));
+            // Capture both clocks before taking the Store lock, so diagnostic
+            // work cannot make an early request satisfy the original bound.
+            let elapsed = first.elapsed();
+            let received_at = unix_seconds();
+            let failure_at_receive = peer_store.lock().unwrap().download_failure("file").unwrap();
+            assert!(elapsed >= Duration::from_millis(900),
+                "early retry: elapsed={elapsed:?}, failed_at={failed_at}, received_at={received_at}, download={}, failure={failure_at_receive:?}",
+                matches!(&request.body, Command::Download { .. }));
             assert!(matches!(request.body, Command::Download { .. }));
             {
                 let store = peer_store.lock().unwrap();

@@ -73,6 +73,22 @@
       "nul_bytes": 81,
       "host_exit_code": 0,
       "reported_seconds": 32.91
+    },
+    {
+      "file": "check-010.log",
+      "sha256": "fce7f85777d17a74d59e8414581ea54e387862d0add2bd5d5cdbae03d9474374",
+      "bytes": 4686,
+      "nul_bytes": 0,
+      "host_exit_code": 0,
+      "reported_seconds": 17.54
+    },
+    {
+      "file": "check-011.log",
+      "sha256": "3cf618c922822baa48c1d1fd9ce8b3ae311fdf76feae8cb7abbaae01da1c1684",
+      "bytes": 4582,
+      "nul_bytes": 127,
+      "host_exit_code": 0,
+      "reported_seconds": 14.47
     }
   ]
 }
