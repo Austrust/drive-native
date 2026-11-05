@@ -163,7 +163,10 @@ pub async fn serve(socket: UnixStream) -> io::Result<()> {
                                 Ok(drive_core::native::NativeDirectoryOutcome::Conflict) => {
                                     Response::Conflict
                                 }
-                                Err(drive_core::Error::Native(sproto::Error::MutationPermissionUncertain { code })) => Response::MutationPermissionUncertain { code },
+                                Err(drive_core::Error::Native(sproto::Error::MutationPermissionUncertain { code })) => mutation_permission_response("mkdir", Some(&job.node), code),
+                                // Directory creation is addressed to a child that
+                                // does not exist yet; never a definite denial.
+                                Err(drive_core::Error::Native(sproto::Error::MutationPermissionDenied { code })) => mutation_permission_response("mkdir", Some(&job.node), code),
                                 _ => Response::Uncertain,
                             };
                             Ok((response, None))
@@ -197,7 +200,10 @@ pub async fn serve(socket: UnixStream) -> io::Result<()> {
                                 Ok(drive_core::native::NativeWriteOutcome::Conflict) => {
                                     Response::Conflict
                                 }
-                                Err(drive_core::Error::Native(sproto::Error::MutationPermissionUncertain { code })) => Response::MutationPermissionUncertain { code },
+                                Err(drive_core::Error::Native(sproto::Error::MutationPermissionUncertain { code })) => mutation_permission_response("replace", Some(&job.target), code),
+                                // A compound replace mixes upload and cleanup phases; the
+                                // client target set has no single target write_content pair.
+                                Err(drive_core::Error::Native(sproto::Error::MutationPermissionDenied { code })) => mutation_permission_response("replace", Some(&job.target), code),
                                 _ => Response::Uncertain,
                             };
                             Ok((response, None))
@@ -210,7 +216,11 @@ pub async fn serve(socket: UnixStream) -> io::Result<()> {
                                     Response::Removed { identity }
                                 }
                                 Ok(NativeRemoveOutcome::Conflict) => Response::Conflict,
-                                Err(drive_core::Error::Native(sproto::Error::MutationPermissionUncertain { code })) => Response::MutationPermissionUncertain { code },
+                                Err(drive_core::Error::Native(sproto::Error::MutationPermissionUncertain { code })) => mutation_permission_response("remove", Some(&job.node), code),
+                                // Delete target codes keep the existing hint: 0xa004 is
+                                // also profile read-only filtering and 0xa003 has no
+                                // proven producer.
+                                Err(drive_core::Error::Native(sproto::Error::MutationPermissionDenied { code })) => mutation_permission_response("remove", Some(&job.node), code),
                                 _ => Response::Uncertain,
                             };
                             Ok((response, None))
@@ -226,7 +236,10 @@ pub async fn serve(socket: UnixStream) -> io::Result<()> {
                                     Response::DirectoryRenameRefresh { node }
                                 }
                                 Ok(NativeRenameOutcome::Conflict) => Response::Conflict,
-                                Err(drive_core::Error::Native(sproto::Error::MutationPermissionUncertain { code })) => Response::MutationPermissionUncertain { code },
+                                Err(drive_core::Error::Native(sproto::Error::MutationPermissionUncertain { code })) => mutation_permission_response("rename", Some(&job.node), code),
+                                // Rename source and destination tests share one reply with
+                                // no participant field; never learn which side was denied.
+                                Err(drive_core::Error::Native(sproto::Error::MutationPermissionDenied { code })) => mutation_permission_response("rename", Some(&job.node), code),
                                 _ => Response::Uncertain,
                             };
                             Ok((response, None))
@@ -307,7 +320,18 @@ pub async fn serve(socket: UnixStream) -> io::Result<()> {
                                 Ok(drive_core::native::NativeWriteOutcome::Conflict) => {
                                     Response::Conflict
                                 }
-                                Err(drive_core::Error::Native(sproto::Error::MutationPermissionUncertain { code })) => Response::MutationPermissionUncertain { code },
+                                Err(drive_core::Error::Native(
+                                    sproto::Error::MutationPermissionUncertain { code },
+                                )) => Response::MutationPermissionUncertain { code },
+                                // A typed pre-commit ACL refusal is published as
+                                // a definite denial only for the identity-addressed
+                                // upload of an existing node. A creation is
+                                // addressed to a child that does not exist yet, so
+                                // its capability check is not a CreateFile
+                                // primitive and keeps the uncertain/hint path.
+                                Err(drive_core::Error::Native(
+                                    sproto::Error::MutationPermissionDenied { code },
+                                )) => mutation_permission_response("upload", Some(&node), code),
                                 _ => Response::Uncertain,
                             };
                             Ok((response, None))
@@ -537,6 +561,79 @@ pub(crate) fn download_error_response(
 
 fn valid_command_descriptor(command: &Command, has_descriptor: bool) -> bool {
     has_descriptor == matches!(command, Command::Upload { .. } | Command::Replace { .. })
+}
+
+/// Bind a typed pre-commit ACL refusal to this request. A definite denial is
+/// published only for an identity-addressed upload of an existing node: that
+/// request names exactly one `(node, write_content)` pair, and the server's
+/// Create ACL test runs after the header is read and before `ReadBody`, the
+/// handler and any commit (server-static/REPORT.md, function anchors 0x223710 /
+/// 0x223140 / 0x220610). A creation is addressed to a child that does not exist
+/// yet, so its capability check is not a CreateFile/CreateDir primitive. Other
+/// mutation kinds never qualify and keep the existing pending hint, so the
+/// diagnostic is not lost.
+fn mutation_permission_response(
+    kind: &str,
+    node: Option<&drive_core::Node>,
+    code: u32,
+) -> Response {
+    if kind == "upload" {
+        if let Some(node) = node {
+            if node.version != drive_core::creations::CREATE_VERSION {
+                return Response::PermissionDenied {
+                    node: node.id.clone(),
+                    action: drive_core::write_permissions::Action::WriteContent,
+                };
+            }
+        }
+    }
+    Response::MutationPermissionUncertain { code }
+}
+
+#[cfg(test)]
+mod mutation_permission_tests {
+    use super::*;
+    fn node(version: &str) -> drive_core::Node {
+        drive_core::Node {
+            id: "42".into(),
+            parent: Some("1".into()),
+            name: "A.doc".into(),
+            version: version.into(),
+            directory: false,
+            metadata: None,
+        }
+    }
+    #[test]
+    fn only_an_existing_node_upload_binds_the_definite_refusal() {
+        match mutation_permission_response("upload", Some(&node("v7")), 0x9003) {
+            Response::PermissionDenied { node, action } => {
+                assert_eq!(node, "42");
+                assert_eq!(action, drive_core::write_permissions::Action::WriteContent);
+            }
+            _ => panic!("expected a definite upload denial"),
+        }
+    }
+    #[test]
+    fn creation_and_every_other_mutation_keep_the_uncertain_hint() {
+        // A creation has no target node yet: the ACL Create test there is not a
+        // CreateFile primitive, so the code must stay a pending hint.
+        for (kind, version) in [
+            ("upload", drive_core::creations::CREATE_VERSION),
+            ("mkdir", drive_core::creations::CREATE_VERSION),
+            ("replace", "v7"),
+            ("remove", "v7"),
+            ("rename", "v7"),
+        ] {
+            match mutation_permission_response(kind, Some(&node(version)), 0x9003) {
+                Response::MutationPermissionUncertain { code } => assert_eq!(code, 0x9003),
+                _ => panic!("{kind} must stay uncertain/hint"),
+            }
+        }
+        match mutation_permission_response("upload", None, 0x9003) {
+            Response::MutationPermissionUncertain { code } => assert_eq!(code, 0x9003),
+            _ => panic!("missing request identity must stay uncertain"),
+        }
+    }
 }
 
 #[cfg(test)]

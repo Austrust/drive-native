@@ -1005,6 +1005,239 @@ fn blocked_upload_surfaces_the_dependency_reason() {
     server.join().unwrap();
 }
 
+// A definite pre-commit ACL refusal (typed from upload code 0x9003 for an
+// existing node) is learned as an observed target denial by the existing
+// refuse_operation path: journal stays pending, retry is gated on the learned
+// denial, and only an explicit recheck releases the same retained intent.
+#[test]
+fn learned_upload_denial_gates_the_queue_and_recheck_releases_the_same_intent() {
+    let (a, mut b) = UnixStream::pair().unwrap();
+    b.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    let server = std::thread::spawn(move || {
+        handshake(&mut b);
+        let (req, fd) = crate::transport::receive::<Envelope<Command>>(&mut b).unwrap();
+        assert!(fd.is_some());
+        let Command::Upload {
+            node,
+            reconcile,
+            ..
+        } = req.body
+        else {
+            panic!("only upload expected")
+        };
+        assert!(!reconcile);
+        assert_ne!(node.version, drive_core::creations::CREATE_VERSION);
+        crate::transport::send(
+            &mut b,
+            &Envelope {
+                version: VERSION,
+                id: req.id,
+                body: Response::PermissionDenied {
+                    node: node.id,
+                    action: drive_core::write_permissions::Action::WriteContent,
+                },
+            },
+            None,
+        )
+        .unwrap();
+        // The learned denial must gate the op: no mutation may reach the wire
+        // until an explicit recheck clears observed evidence.
+        let (req, fd) = crate::transport::receive::<Envelope<Command>>(&mut b).unwrap();
+        assert!(fd.is_some());
+        let Command::Upload {
+            mut node,
+            mtime,
+            ..
+        } = req.body
+        else {
+            panic!("only upload expected")
+        };
+        node.version = "v2".into();
+        node.metadata.as_mut().unwrap().mtime = u64::from(mtime.unwrap());
+        crate::transport::send(
+            &mut b,
+            &Envelope {
+                version: VERSION,
+                id: req.id,
+                body: Response::Committed { node },
+            },
+            None,
+        )
+        .unwrap();
+    });
+    let (_dir, store, bridge) = fixture(a);
+    // Permission learning keys on the mounted filesystem root; the bare fixture
+    // deliberately omits it, so install it before the refusal publishes.
+    store.lock().unwrap().ensure_fs_root("1").unwrap();
+    assert_eq!(bridge.upload_pending(false).unwrap(), 0);
+    let operation = {
+        let s = store.lock().unwrap();
+        assert_eq!(s.pending_operations().unwrap(), 1);
+        let operation = s.upload_operations("pending").unwrap().pop().unwrap();
+        assert_eq!(s.upload_job(&operation).unwrap().state, "pending");
+        assert_eq!(
+            drive_core::write_permissions::decide(
+                &s,
+                "1",
+                "2",
+                drive_core::write_permissions::Action::WriteContent
+            )
+            .unwrap(),
+            drive_core::write_permissions::Decision::Deny
+        );
+        let revision = drive_core::write_permissions::policy(&s, "1")
+            .unwrap()
+            .write_policy_revision;
+        let snapshot = drive_core::write_permissions::snapshot(&s, "1", "2").unwrap();
+        let row = &snapshot["actions"]["write_content"];
+        assert_eq!(row["state"], "denied");
+        assert_eq!(row["source"], "observed");
+        assert_eq!(row["revision"].as_u64(), Some(revision));
+        assert!(row["verified_at"].as_i64().is_some_and(|t| t > 0));
+        let history = s
+            .sync_history(&drive_core::sync_history::HistoryQuery::default())
+            .unwrap();
+        assert!(history
+            .records
+            .iter()
+            .any(|r| r.error_kind.as_deref() == Some("permission_denied")));
+        operation
+    };
+    // Still gated: the retained operation is not replayed by a later pass.
+    assert_eq!(bridge.upload_pending(false).unwrap(), 0);
+    // Recheck invalidates observed evidence; the same durable intent is resent.
+    {
+        let s = store.lock().unwrap();
+        drive_core::write_permissions::reset_session(&s).unwrap();
+        assert_eq!(
+            drive_core::write_permissions::decide(
+                &s,
+                "1",
+                "2",
+                drive_core::write_permissions::Action::WriteContent
+            )
+            .unwrap(),
+            drive_core::write_permissions::Decision::Unknown
+        );
+    }
+    assert_eq!(bridge.upload_pending(false).unwrap(), 1);
+    {
+        let s = store.lock().unwrap();
+        assert_eq!(s.pending_operations().unwrap(), 0);
+        assert_eq!(s.upload_job(&operation).unwrap().state, "committed");
+        assert_eq!(
+            drive_core::write_permissions::decide(
+                &s,
+                "1",
+                "2",
+                drive_core::write_permissions::Action::WriteContent
+            )
+            .unwrap(),
+            drive_core::write_permissions::Decision::Allow
+        );
+    }
+    bridge.disconnect();
+    server.join().unwrap();
+}
+
+// 0x9004 is also produced by profile read-only filtering, so the bridge must
+// keep the pending hint and learn nothing even when the code reaches it.
+#[test]
+fn ambiguous_upload_permission_hint_never_learns_a_denial() {
+    let (a, mut b) = UnixStream::pair().unwrap();
+    b.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    let server = std::thread::spawn(move || {
+        handshake(&mut b);
+        let (req, fd) = crate::transport::receive::<Envelope<Command>>(&mut b).unwrap();
+        assert!(fd.is_some());
+        assert!(matches!(
+            req.body,
+            Command::Upload {
+                reconcile: false,
+                ..
+            }
+        ));
+        crate::transport::send(
+            &mut b,
+            &Envelope {
+                version: VERSION,
+                id: req.id,
+                body: Response::MutationPermissionUncertain { code: 0x9004 },
+            },
+            None,
+        )
+        .unwrap();
+        assert!(crate::transport::receive::<Envelope<Command>>(&mut b).is_err());
+    });
+    let (_dir, store, bridge) = fixture(a);
+    assert_eq!(bridge.upload_pending(false).unwrap(), 0);
+    {
+        let s = store.lock().unwrap();
+        let operation = s.upload_operations("uncertain").unwrap().pop().unwrap();
+        assert_eq!(s.upload_job(&operation).unwrap().state, "uncertain");
+        assert_eq!(
+            drive_core::write_permissions::decide(
+                &s,
+                "1",
+                "2",
+                drive_core::write_permissions::Action::WriteContent
+            )
+            .unwrap(),
+            drive_core::write_permissions::Decision::Unknown
+        );
+        let snapshot = drive_core::write_permissions::snapshot(&s, "1", "2").unwrap();
+        assert_eq!(snapshot["actions"]["write_content"]["state"], "unknown");
+        assert_eq!(snapshot["actions"]["write_content"]["source"], "unknown");
+        let history = s
+            .sync_history(&drive_core::sync_history::HistoryQuery::default())
+            .unwrap();
+        assert!(history
+            .records
+            .iter()
+            .any(|r| r.error_kind.as_deref() == Some("permission_commit_uncertain")));
+    }
+    assert_eq!(bridge.upload_pending(false).unwrap(), 0);
+    bridge.disconnect();
+    server.join().unwrap();
+}
+
+// Cancellation/transport loss at the mutation boundary is never permission
+// evidence: no ACL row, no retry gate, content and intent retained.
+#[test]
+fn transport_loss_during_upload_never_learns_an_acl_denial() {
+    let (a, mut b) = UnixStream::pair().unwrap();
+    let server = std::thread::spawn(move || {
+        handshake(&mut b);
+        let (_req, fd) = crate::transport::receive::<Envelope<Command>>(&mut b).unwrap();
+        assert!(fd.is_some());
+        drop(b);
+    });
+    let (_dir, store, bridge) = fixture(a);
+    assert!(bridge.upload_pending(false).is_err());
+    {
+        let s = store.lock().unwrap();
+        let operation = s.upload_operations("uncertain").unwrap().pop().unwrap();
+        assert_eq!(s.upload_job(&operation).unwrap().state, "uncertain");
+        assert_eq!(
+            drive_core::write_permissions::decide(
+                &s,
+                "1",
+                "2",
+                drive_core::write_permissions::Action::WriteContent
+            )
+            .unwrap(),
+            drive_core::write_permissions::Decision::Unknown
+        );
+        let snapshot = drive_core::write_permissions::snapshot(&s, "1", "2").unwrap();
+        assert_eq!(snapshot["actions"]["write_content"]["state"], "unknown");
+        assert_eq!(snapshot["actions"]["write_content"]["source"], "unknown");
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(&mut s.upload_job(&operation).unwrap().file, &mut bytes).unwrap();
+        assert_eq!(bytes, b"new");
+    }
+    server.join().unwrap();
+}
+
 // These existing protocol fixtures deliberately advance reconciliation without
 // wall-clock waits. The scheduler-specific tests below exercise real backoff.
 fn namespace_without_backoff(

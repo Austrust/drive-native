@@ -485,6 +485,10 @@ pub fn upload_targets(node: &crate::Node) -> Vec<(String, Action)> {
 /// Preserve a direct permission-related reply without inventing a definite
 /// non-commit or guessing which participant in a compound mutation was denied.
 /// This operation and its bytes remain in reconciliation; no ACL row changes.
+/// `0x9003` still arrives here for creations/mkdir/replace: only the
+/// identity-addressed upload of an *existing* node has a proven
+/// `(node, write_content)` attribution and is refused earlier through
+/// `refuse_operation` (see `sproto::Error::MutationPermissionDenied`).
 pub fn mutation_permission_uncertain(store: &Store, operation: &str, namespace: bool, code: u32) -> Result<()> {
     let (table, prefix) = if namespace { ("namespace_ops", "namespace") } else { ("operations", "upload") };
     let tx = store.db.unchecked_transaction()?;
@@ -946,6 +950,117 @@ mod tests {
         assert!(s.scheduled_rename().unwrap().is_none());
         inject(&s, "root", "f", Action::RenameSource, Decision::Allow).unwrap();
         assert!(s.scheduled_rename().unwrap().is_some());
+    }
+
+    /// The auto-learned denial path used only for an existing-node upload
+    /// refused by the server's Create ACL test (wire code 0x9003). It must use
+    /// the current policy revision, persist, and expire through the existing
+    /// profile/recheck invalidation rather than a new mechanism.
+    #[test]
+    fn learned_upload_denial_uses_current_revision_persists_and_expires() {
+        let (d, mut s) = fixture();
+        let op = s.save_local("f", b"edited").unwrap();
+        s.mark_upload_started(&op).unwrap();
+        let targets = upload_targets(&s.node("f").unwrap());
+        assert_eq!(targets, vec![("f".to_owned(), Action::WriteContent)]);
+        let before = policy(&s, "root").unwrap().write_policy_revision;
+        refuse_operation(&s, &op, false, &targets, "f", Action::WriteContent).unwrap();
+        let after = policy(&s, "root").unwrap().write_policy_revision;
+        assert_eq!(after, before + 1);
+        assert_eq!(
+            decide(&s, "root", "f", Action::WriteContent).unwrap(),
+            Decision::Deny
+        );
+        let (source, revision, verified): (String, i64, Option<i64>) = s
+            .db
+            .query_row(
+                "SELECT source,revision,verified_at FROM directory_permissions
+                 WHERE root='root' AND node='f' AND action='write_content'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(source, "observed");
+        assert_eq!(revision, after as i64);
+        assert!(verified.is_some());
+        let rows = s
+            .sync_history(&crate::sync_history::HistoryQuery::default())
+            .unwrap()
+            .records;
+        assert!(rows
+            .iter()
+            .any(|r| r.result == "failed"
+                && r.error_kind.as_deref() == Some("permission_denied")));
+        // Durable across restart: an observed target denial is not in-memory.
+        drop(s);
+        let s = Store::open(d.path()).unwrap();
+        assert_eq!(
+            decide(&s, "root", "f", Action::WriteContent).unwrap(),
+            Decision::Deny
+        );
+        // A native profile change invalidates observed evidence and bumps the
+        // revision again; the user's policy and the target are untouched.
+        let revision = policy(&s, "root").unwrap().write_policy_revision;
+        invalidate_remote_permissions(&s, "root").unwrap();
+        assert_eq!(exact(&s, "root", "f", Action::WriteContent).unwrap(), Decision::Unknown);
+        assert_eq!(
+            decide(&s, "root", "f", Action::WriteContent).unwrap(),
+            Decision::Unknown
+        );
+        assert_eq!(
+            policy(&s, "root").unwrap().write_policy_revision,
+            revision + 1
+        );
+    }
+
+    /// Fail closed: a definite-refusal caller cannot name a node/action pair
+    /// that the operation did not authorize. This is the guard for a misbound
+    /// worker reply; nothing may be learned or retried from it.
+    #[test]
+    fn definite_refusal_must_match_an_authorized_target() {
+        let (_d, mut s) = fixture();
+        let op = s.save_local("f", b"x").unwrap();
+        s.mark_upload_started(&op).unwrap();
+        let wrong = vec![("root".to_owned(), Action::CreateFile)];
+        assert!(refuse_operation(&s, &op, false, &wrong, "f", Action::WriteContent).is_err());
+        assert_eq!(
+            exact(&s, "root", "f", Action::WriteContent).unwrap(),
+            Decision::Unknown
+        );
+        assert_eq!(s.upload_job(&op).unwrap().state, "inflight");
+    }
+
+    /// Rename and remove responses keep the action-scoped hint. Their codes are
+    /// ambiguous (profile read-only filtering rewrites 0x9004 to 0xa004) or
+    /// unattributable (rename source/target, compound replace phases), so no
+    /// directory_permissions row may be written.
+    #[test]
+    fn rename_and_remove_permission_hints_never_write_acl_rows() {
+        let (_d, mut s) = fixture();
+        s.rename_local("A", "f", "B", "moved", false).unwrap();
+        let op = s.scheduled_rename().unwrap().unwrap().job.operation;
+        s.mark_rename_started(&op).unwrap();
+        mutation_permission_uncertain(&s, &op, true, 0x3002).unwrap();
+        assert_eq!(s.scheduled_rename().unwrap().unwrap().state, "uncertain");
+        assert_eq!(
+            s.db.query_row("SELECT count(*) FROM directory_permissions", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+
+        let (_d, mut s) = fixture();
+        s.unlink_local("A", "f", "f", false).unwrap();
+        let op = s.scheduled_remove().unwrap().unwrap().job.operation;
+        s.mark_remove_started(&op).unwrap();
+        mutation_permission_uncertain(&s, &op, true, 0xa004).unwrap();
+        assert_eq!(s.scheduled_remove().unwrap().unwrap().state, "uncertain");
+        assert_eq!(
+            s.db.query_row("SELECT count(*) FROM directory_permissions", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
     }
 
 }

@@ -1,0 +1,122 @@
+# command: cargo test -p drive-runtime --lib upload_tests --locked --offline -j2
+# started: 2026-11-05T14:28:50+08:00
+warning: unused import: `validate_path`
+ --> crates/sproto/src/actions/transfer.rs:4:36
+  |
+4 | use super::native::{NativeVersion, validate_path};
+  |                                    ^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `AsyncReadExt` and `AsyncSeekExt`
+  --> crates/sproto/src/actions/transfer.rs:14:17
+   |
+14 | use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWrite};
+   |                 ^^^^^^^^^^^^  ^^^^^^^^^^^^
+
+warning: function `binary_parts` is never used
+  --> crates/sproto/src/pstream/encode.rs:68:15
+   |
+68 | pub(crate) fn binary_parts(obj: &PObject) -> Result<(Vec<u8>, Vec<u8>, u64)> {
+   |               ^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `send_binary` is never used
+  --> crates/sproto/src/channel.rs:80:25
+   |
+77 | impl Channel {
+   | ------------ method in this implementation
+...
+80 |     pub(crate) async fn send_binary<R: AsyncRead + Unpin>(
+   |                         ^^^^^^^^^^^
+
+warning: function `mutation_reply_error` is never used
+  --> crates/sproto/src/error.rs:85:15
+   |
+85 | pub(crate) fn mutation_reply_error(action: &str, error: Error) -> Error {
+   |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: `sproto` (lib) generated 5 warnings (run `cargo fix --lib -p sproto` to apply 2 suggestions)
+warning: struct `cuse_init_in` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:814:12
+    |
+814 | pub struct cuse_init_in {
+    |            ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: struct `cuse_init_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:823:12
+    |
+823 | pub struct cuse_init_out {
+    |            ^^^^^^^^^^^^^
+
+warning: struct `fuse_ioctl_iovec` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:868:12
+    |
+868 | pub struct fuse_ioctl_iovec {
+    |            ^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:996:12
+    |
+996 | pub struct fuse_notify_retrieve_out {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_in` is never constructed
+    --> vendor/fuser/src/ll/fuse_abi.rs:1006:12
+     |
+1006 | pub struct fuse_notify_retrieve_in {
+     |            ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `fuser` (lib) generated 5 warnings
+warning: method `verify_root` is never used
+  --> crates/drive-core/src/native_root_guard.rs:86:25
+   |
+26 | impl NativeReadSession {
+   | ---------------------- method in this implementation
+...
+86 |     pub(super) async fn verify_root(&self) -> Result<()> {
+   |                         ^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `drive-core` (lib) generated 1 warning
+warning: unused variable: `op`
+  --> crates/drive-runtime/src/namespace_schedule_tests.rs:57:10
+   |
+57 |     let (op, child_file) = {
+   |          ^^ help: if this is intentional, prefix it with an underscore: `_op`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `drive-runtime` (lib test) generated 1 warning (run `cargo fix --lib -p drive-runtime --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.81s
+     Running unittests src/lib.rs (/home/drive-native-test/.cache/p032-writelearn-target/debug/deps/drive_runtime-4e1c84d0ae2dacc3)
+
+running 19 tests
+test bridge::upload_tests::stopped_worker_leaves_saved_operation_pending_without_marking_it_submitted ... ok
+test bridge::upload_tests::ambiguous_upload_permission_hint_never_learns_a_denial ... ok
+test bridge::upload_tests::blocked_upload_surfaces_the_dependency_reason ... ok
+test bridge::upload_tests::learned_upload_denial_gates_the_queue_and_recheck_releases_the_same_intent ... ok
+test bridge::upload_tests::directory_move_refresh_is_persisted_before_a_second_conditional_request ... ok
+test bridge::upload_tests::definite_permission_refusal_retains_body_allows_sibling_and_rechecks ... ok
+test bridge::upload_tests::timestamp_upload_tests::wrong_time_commit_is_uncertain_and_reconciles_without_reupload ... ok
+test bridge::upload_tests::transport_loss_during_upload_never_learns_an_acl_denial ... ok
+test bridge::upload_tests::new_file_provenance_is_durable_before_upload_and_preserved_for_reconciliation ... ok
+test bridge::upload_tests::directory_preparation_is_persisted_before_send_and_survives_uncertain_reply ... ok
+test bridge::upload_tests::lost_read_only_replacement_preparation_leaves_operation_pending ... ok
+test bridge::upload_tests::namespace_schedule_tests::lost_mkdir_ack_does_not_head_of_line_block_independent_rename_or_replay_create ... ok
+test bridge::upload_tests::replacement_upload_and_cleanup_have_independent_uncertainty_barriers ... ok
+test bridge::upload_tests::replacement_prepares_durable_target_creation_before_upload_and_reuses_it_after_uncertainty ... ok
+test bridge::upload_tests::uncertain_remove_reconciles_identity_without_resending_and_unblocks_recreation ... ok
+test bridge::upload_tests::uncertain_rename_is_reconciled_without_resending_and_rebases_waiting_upload ... ok
+test bridge::upload_tests::uncertain_commit_uses_read_only_reconciliation_and_never_replays_upload ... ok
+test bridge::upload_tests::unknown_directory_receipt_never_replays_creation_or_releases_child_uploads ... ok
+test bridge::upload_tests::unrelated_pending_remove_does_not_stall_upload_queue ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 139 filtered out; finished in 9.78s
+
+# exit=0
+# finished: 2026-11-05T14:29:04+08:00

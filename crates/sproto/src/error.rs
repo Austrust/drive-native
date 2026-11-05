@@ -35,8 +35,24 @@ pub enum Error {
 
     /// An ACL/read-only response to a mutation, without proof that no partial
     /// commit occurred. Callers must reconcile, never turn this into a retry.
+    /// The one proven pre-commit subset (upload `0x9003` on an existing node) is
+    /// reported as [`Error::MutationPermissionDenied`] instead; everything else
+    /// (filter-ambiguous, unreachable, rename/compound, creation) stays here.
     #[error("native mutation permission response ({code:#06x}); commit unconfirmed")]
     MutationPermissionUncertain { code: u32 },
+
+    /// A direct `upload` reply refused by the server ACL middleware after the
+    /// header was read and before `ReadBody`, the business handler and commit
+    /// (docs/validation/issue7-native-001/server-static/REPORT.md). Only
+    /// `0x9003` has one proven producer: the Create ACL test rejecting the
+    /// request path because `can_read` is absent (`CreateACLTest::PermissionCheck`
+    /// 0x223710 `-3`; `CreateACLTest::HandleError` 0x223140 emits `0x9003`). The
+    /// code alone does not name a node: the caller must bind the current request
+    /// identity, which is only sound for an identity-addressed upload of an
+    /// existing node. Creations are addressed to a child that does not exist
+    /// yet, so their capability check is not a CreateFile/CreateDir primitive.
+    #[error("native mutation permission denial ({code:#06x}); refused before commit")]
+    MutationPermissionDenied { code: u32 },
 
     /// `PStream` decode error
     #[error("PStream decode error: {0}")]
@@ -68,10 +84,25 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 pub(crate) fn mutation_reply_error(action: &str, error: Error) -> Error {
     match error {
-        Error::Server { code, .. } if matches!((action, code),
-            ("upload" | "remove" | "rename", 0x3002 | 0x3004)
-            | ("upload", 0x9003 | 0x9004)
-            | ("remove", 0xa003 | 0xa004)) => Error::MutationPermissionUncertain { code },
+        // The only mutation reply this evidence proves both non-committed and
+        // attributable is the upload Create ACL test failing its read
+        // prerequisite. Everything else stays an action-scoped hint: 0x9004 /
+        // 0xa004 are also produced by profile read-only filtering, 0xa003 has
+        // no proven producer in the remove path, and rename/compound requests
+        // do not identify the denied participant.
+        Error::Server { code: 0x9003, .. } if action == "upload" => {
+            Error::MutationPermissionDenied { code: 0x9003 }
+        }
+        Error::Server { code, .. }
+            if matches!(
+                (action, code),
+                ("upload" | "remove" | "rename", 0x3002 | 0x3004)
+                    | ("upload", 0x9004)
+                    | ("remove", 0xa003 | 0xa004)
+            ) =>
+        {
+            Error::MutationPermissionUncertain { code }
+        }
         error => error,
     }
 }
@@ -176,9 +207,54 @@ mod tests {
         assert!(matches!(check_server_error(&obj), Err(Error::Decode(_))));
     }
     #[test]
+    fn only_the_upload_create_acl_code_is_a_definite_mutation_refusal() {
+        // 0x9003 on `upload` is the one code proven to be produced only by the
+        // pre-commit ACL middleware (Create test, can_read absent). It still
+        // needs request-identity binding; the wire layer only types it.
+        match mutation_reply_error(
+            "upload",
+            Error::Server {
+                code: 0x9003,
+                reason: "synthetic".into(),
+            },
+        ) {
+            Error::MutationPermissionDenied { code } => assert_eq!(code, 0x9003),
+            other => panic!("expected definite refusal, got {other:?}"),
+        }
+        // Every ambiguous or unattributable code must stay an action-scoped
+        // hint or a plain server error; none may become a definite refusal.
+        for (action, code) in [
+            ("upload", 0x9004u32),
+            ("upload", 0x9005),
+            ("upload", 0x3002),
+            ("upload", 0x3004),
+            ("remove", 0xa003),
+            ("remove", 0xa004),
+            ("remove", 0xa005),
+            ("remove", 0x9003),
+            ("rename", 0x9003),
+            ("rename", 0x9004),
+            ("rename", 0x3002),
+            ("mkdir", 0x9003),
+            ("list", 0x9003),
+        ] {
+            let error = mutation_reply_error(
+                action,
+                Error::Server {
+                    code,
+                    reason: "permission denied".into(),
+                },
+            );
+            assert!(
+                !matches!(error, Error::MutationPermissionDenied { .. }),
+                "{action} {code:#06x} must not be a definite refusal"
+            );
+        }
+    }
+    #[test]
     fn mutation_permission_hints_are_action_scoped_and_never_definite_refusals() {
         for (action, code, permission) in [
-            ("upload", 0x9003, true), ("upload", 0x9004, true),
+            ("upload", 0x9004, true),
             ("upload", 0x9005, false), ("remove", 0xa003, true),
             ("remove", 0xa004, true), ("remove", 0xa005, false),
             ("rename", 0x3002, true), ("rename", 0x9004, false),
@@ -187,6 +263,7 @@ mod tests {
         ] {
             let error = mutation_reply_error(action, Error::Server { code, reason: "permission denied".into() });
             assert_eq!(matches!(error, Error::MutationPermissionUncertain { .. }), permission);
+            assert!(!matches!(error, Error::MutationPermissionDenied { .. }));
         }
     }
 }

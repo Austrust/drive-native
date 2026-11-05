@@ -8,4 +8,5 @@
 - [官方服务端静态证据](server-static/REPORT.md)：提交前 ACL 检查、路径过滤和父目录语义。
 - [能力与身份补充证据](server-capability/REPORT.md)：原生能力查询为何尚不能绑定精确节点。
 - [空间只读来源复核](l2-static/REPORT.md)：共享配置与根节点能力的组合边界。
+- [精确写拒绝自动学习增量](write-learning/REPORT.md)：可证窄子集（upload/0x9003/已存在节点）、实现锚点、测试矩阵与未实测项。
 - [当前功能报告](../../FIX_7_REPORT.md)：用户可观察行为、验收矩阵及未实测项。

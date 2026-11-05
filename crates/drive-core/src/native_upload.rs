@@ -110,7 +110,13 @@ impl NativeReadSession {
             Err(sproto::Error::Server { code: 24579, .. }) => {
                 return Ok(NativeWriteOutcome::Conflict);
             }
-            Err(error @ sproto::Error::MutationPermissionUncertain { .. }) => return Err(error.into()),
+            // Both typed outcomes must reach the worker intact: it owns the
+            // request identity that decides whether a definite denial may be
+            // published, or only an action-scoped uncertain hint.
+            Err(
+                error @ (sproto::Error::MutationPermissionUncertain { .. }
+                | sproto::Error::MutationPermissionDenied { .. }),
+            ) => return Err(error.into()),
             _ => return Ok(NativeWriteOutcome::Uncertain),
         };
         // A parent can be moved/deleted after preflight. Identity paths avoid

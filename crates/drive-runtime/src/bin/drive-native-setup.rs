@@ -51,7 +51,8 @@ fn category(error: &sproto::Error) -> &'static str {
         | sproto::Error::CursorReset { .. } => "protocol",
         sproto::Error::Server { .. }
         | sproto::Error::DownloadPermissionDenied { .. }
-        | sproto::Error::MutationPermissionUncertain { .. } => "server_rejected",
+        | sproto::Error::MutationPermissionUncertain { .. }
+        | sproto::Error::MutationPermissionDenied { .. } => "server_rejected",
     }
 }
 // The reviewed Ubuntu branch observed 4100 on rejected credentials. Scope this
