@@ -1,0 +1,94 @@
+{
+  "candidate_commit": "fefb8ee0b02f68ec0e76d9cd89b6f37172d645b4",
+  "complete": false,
+  "all_passed": false,
+  "commands": [
+    {
+      "name": "native-loopback-updated",
+      "argv": [
+        "bash",
+        "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/issue7-validation/G4-evidence-bundle-013-final/harness/run-native-loopback-013.sh",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013",
+        "fefb8ee0b02f68ec0e76d9cd89b6f37172d645b4"
+      ],
+      "cwd": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/source",
+      "kind": "json",
+      "log": "logs/native-loopback-updated.log",
+      "host_space_before": {
+        "utc": "2026-11-05T07:22:31.414821+00:00",
+        "command": [
+          "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+        ],
+        "host_drive": "C:",
+        "free_bytes": 29711314944,
+        "exit_code": 0,
+        "stdout": "29711314944",
+        "stderr": ""
+      },
+      "started_utc": "2026-11-05T07:22:31.833973+00:00",
+      "process_group": 410,
+      "exit_code": 1,
+      "finished_utc": "2026-11-05T07:22:36.963894+00:00",
+      "elapsed_seconds": 5.129669554999964,
+      "log_sha256": "5b56a9590673511f7097dfac17e35ce6677af0417338ed42075476ee91b6b50e",
+      "counts": {
+        "reported": true,
+        "passed": 64,
+        "failed": 2,
+        "ignored": 0
+      },
+      "result_path": "native-loopback-updated-001/results.json",
+      "result_sha256": "5007e2d9c4527d5b6a2dab04e2d76e39e992bc7cc2784c8ebd661ad77d7e7c11",
+      "passed": false
+    }
+  ],
+  "scope": "corrected native-loopback, 210k functional capacity, real worker TLS chain, private component lifecycle, package-side preflight; no NAS/deb/performance claims",
+  "main_summary_sha256": "b8bb9925efdd8d62304dd053cfc6f45405bbbd666afc2cc3f9a749cb41d78b9e",
+  "harness_sha256": "91587ea4ecee440341c2bbda50f1852d978193e0994cb1b36b7d88718ae1485b",
+  "matrix_acceptance": {
+    "main_failed_commands": [
+      "native-loopback",
+      "core-history-probe-prepare"
+    ],
+    "frozen_native_loopback_failed_cases": [
+      "upload_reply_9003",
+      "mkdir_reply_9003"
+    ],
+    "frozen_counts": {
+      "failed": 2,
+      "ignored": 0,
+      "passed": 64,
+      "total": 66
+    },
+    "reason": "frozen 012 harness asserts pre-T1 classification for upload/mkdir wire 9003; fefb8ee intentionally returns the typed pre-commit refusal there",
+    "core_history_probe_prepare_failure": "verifier bundle initially lacked core-history-probe.rs; the group is re-run as a supplement",
+    "corrected_harness": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/issue7-validation/G4-evidence-bundle-013-final/harness/native-loopback-013/main.rs",
+    "corrected_patch_record": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/issue7-validation/G4-evidence-bundle-013-final/harness/native-loopback-013-patch.json"
+  },
+  "target": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target",
+  "target_provenance": "fresh empty private target created by run-g4.py for this candidate; no author target or product artifact copied",
+  "exception_type": "AssertionError",
+  "error": "{'failed': 2, 'ignored': 0, 'passed': 64, 'total': 66}",
+  "audit_errors": [],
+  "changed_executed_elf": [],
+  "changed_source_files": [],
+  "residual_owned_mounts": [],
+  "archive_integrity": {
+    "sha256": "816d9cc06c6486e54dc87a21a4db11eab7519537b1b30b3e27cc2270fde01765",
+    "expected": "816d9cc06c6486e54dc87a21a4db11eab7519537b1b30b3e27cc2270fde01765",
+    "unchanged": true
+  },
+  "snapshot_verification_after": {
+    "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/snapshot-verification-after.json",
+    "passed": true,
+    "entries": 2483,
+    "problem_count": 0,
+    "tree_listing_sha256": "8524b9164280d9c077e2d632222489970bda854a3ca06fea779cbe3586452c10",
+    "same_as_before": true
+  }
+}

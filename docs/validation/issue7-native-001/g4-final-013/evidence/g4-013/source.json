@@ -1,0 +1,29 @@
+{
+  "candidate_commit": "fefb8ee0b02f68ec0e76d9cd89b6f37172d645b4",
+  "candidate_archive_sha256": "816d9cc06c6486e54dc87a21a4db11eab7519537b1b30b3e27cc2270fde01765",
+  "archive_command": [
+    "git",
+    "-c",
+    "safe.directory=*",
+    "--git-dir=/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/public-summary-20261031/.git",
+    "archive",
+    "--format=tar",
+    "--output=/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/issue7-validation/prepared-g4-013/candidate.tar",
+    "fefb8ee0b02f68ec0e76d9cd89b6f37172d645b4"
+  ],
+  "authorization": "T4 independent verifier: Lead-authorized G4 re-run on fixed commit fefb8ee; local synthetic fixtures only; no NAS, credentials, push or release.",
+  "harness_sha256": "88fa9b573ac109d85b1c7af2fcf4b2c02e81a0be58527f8031c411b1a9c5271d",
+  "cache_policy": "fresh empty private target; no author target and no product build artifact copied; registry sources read from the shared offline CARGO_HOME only",
+  "compile_cache_control": "CARGO_INCREMENTAL=0; -j2; --locked --offline; profiles and assertions unchanged",
+  "host_space_gate": "Host C >= 40 GiB before new run/target; >= 10 GiB before each command; unknown stops",
+  "snapshot_verification": {
+    "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013-snapshot/snapshot-verification-before.json",
+    "passed": true,
+    "entries": 2483,
+    "problem_count": 0,
+    "tree_listing_sha256": "8524b9164280d9c077e2d632222489970bda854a3ca06fea779cbe3586452c10",
+    "root_tree": "72ab91c1eb290f0f642aa416e9e1c84c7c8dba2e"
+  },
+  "prepared_by": "T4 independent verifier (verifier)",
+  "git_version": "git version 2.43.0"
+}

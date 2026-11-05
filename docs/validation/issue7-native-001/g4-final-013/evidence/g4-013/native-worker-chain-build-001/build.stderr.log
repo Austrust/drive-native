@@ -1,0 +1,7 @@
+   Compiling fuser v0.16.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/source/vendor/fuser)
+   Compiling sproto v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/source/crates/sproto)
+   Compiling drive-core v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/source/crates/drive-core)
+   Compiling drive-fs v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/source/crates/drive-fs)
+   Compiling drive-runtime v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/source/crates/drive-runtime)
+   Compiling native-worker-chain-probe v0.0.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/native-worker-chain-build-001/native-worker-chain-crate)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 19.62s

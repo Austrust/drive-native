@@ -1,0 +1,48 @@
+{
+  "candidate_commit": "fefb8ee0b02f68ec0e76d9cd89b6f37172d645b4",
+  "source": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/source",
+  "target": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target",
+  "completed_same_candidate_target_reuse": null,
+  "crate": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/native-worker-chain-build-001/native-worker-chain-crate",
+  "started_utc": "2026-11-05T07:26:39.544763+00:00",
+  "complete": true,
+  "passed": false,
+  "source_lock_before": "fcaf7417018889efefaffd45ac2e4931a1b01dd5fc83e6a9fc9f0806093268dd",
+  "commands": [],
+  "driver_files": {
+    "build.py": "ff2e1ab73355a38793b0544361c556da4c98798009c2dea4c4580452705c926f",
+    "prepare.py": "4af913d2c19dafb9f3e59838ceb79cab6bc3753d5942795fbefcecbb845c87c2",
+    "verify-lock.py": "c496ecd23e2b80cea2a70b9d87f132e9cba9422e85b030a8554fd2262b8d3bc0",
+    "space.py": "46602840bebb940e633236c50ae0b00f4572a72c841524b9c388c00dab103669",
+    "Cargo.toml.in": "cbedbed99a18eb656cdfe9a442f5cd65cef92bf7325a53b3ca0d55d9d601119f",
+    "main.rs": "ea07d79a04b3469e7ec48261693598d37916d0d92ca442866cabff66e8ce9728",
+    "codec.rs": "5eaca3e517653408f4331bd0096e8cf9c0d9a464837315fd9fb0452763cb0b25"
+  },
+  "host_space_before_new_target": {
+    "helper_path": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/issue7-validation/G4-evidence-bundle-013-final/harness/prepared-g4-013/run-g4.py",
+    "helper_sha256": "88fa9b573ac109d85b1c7af2fcf4b2c02e81a0be58527f8031c411b1a9c5271d",
+    "minimum_free_bytes": 42949672960,
+    "minimum_free_gib": 40,
+    "observation": {
+      "utc": "2026-11-05T07:26:39.557715+00:00",
+      "command": [
+        "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+      ],
+      "host_drive": "C:",
+      "free_bytes": 29167435776,
+      "exit_code": 0,
+      "stdout": "29167435776",
+      "stderr": ""
+    },
+    "passed": false
+  },
+  "error": "host C below applicable 10 GiB existing-target / 40 GiB new-target gate or unknown; no preparation/build started",
+  "finished_utc": "2026-11-05T07:26:39.999758+00:00",
+  "source_lock_after": "fcaf7417018889efefaffd45ac2e4931a1b01dd5fc83e6a9fc9f0806093268dd",
+  "source_lock_unchanged": true
+}

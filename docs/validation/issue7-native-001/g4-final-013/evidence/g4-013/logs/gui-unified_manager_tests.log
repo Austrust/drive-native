@@ -1,0 +1,69 @@
+test_actual_archive_and_cancelled_wizard_keeps_embedded_page (__main__.UnifiedTests.test_actual_archive_and_cancelled_wizard_keeps_embedded_page) ... qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+This plugin does not support propagateSizeHints()
+ok
+test_catalog_replacement_restarts_visible_history_and_ignores_old_reply (__main__.UnifiedTests.test_catalog_replacement_restarts_visible_history_and_ignores_old_reply) ... qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+This plugin does not support raise()
+ok
+test_close_with_tray_hides_without_stopping_and_without_tray_stays_reachable (__main__.UnifiedTests.test_close_with_tray_hides_without_stopping_and_without_tray_stays_reachable) ... qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+ok
+test_current_activity_only_queries_while_visible_and_checks_identity (__main__.UnifiedTests.test_current_activity_only_queries_while_visible_and_checks_identity) ... qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+This plugin does not support propagateSizeHints()
+This plugin does not support raise()
+ok
+test_current_activity_stalled_task_does_not_delay_other_refresh (__main__.UnifiedTests.test_current_activity_stalled_task_does_not_delay_other_refresh) ... qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+This plugin does not support propagateSizeHints()
+This plugin does not support raise()
+ok
+test_development_launcher_sets_child_instance_without_mutating_environment (__main__.UnifiedTests.test_development_launcher_sets_child_instance_without_mutating_environment) ... qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+ok
+test_explicit_wizard_and_config_do_not_follow_other_task_environment (__main__.UnifiedTests.test_explicit_wizard_and_config_do_not_follow_other_task_environment) ... qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+ok
+test_external_replacement_during_own_gap_and_external_deletion_are_not_retained (__main__.UnifiedTests.test_external_replacement_during_own_gap_and_external_deletion_are_not_retained) ... qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+ok
+test_late_bulk_pause_reply_cannot_reclaim_manual_pause_from_any_page (__main__.UnifiedTests.test_late_bulk_pause_reply_cannot_reclaim_manual_pause_from_any_page) ... qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+ok
+test_manager_palette_change_updates_embedded_page_stylesheet (__main__.UnifiedTests.test_manager_palette_change_updates_embedded_page_stylesheet) ... qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+ok
+test_online_uncertain_queue_is_visible_in_manager_and_tray (__main__.UnifiedTests.test_online_uncertain_queue_is_visible_in_manager_and_tray) ... qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+ok
+test_own_directory_switch_survives_absent_catalog_and_preserves_new_login (__main__.UnifiedTests.test_own_directory_switch_survives_absent_catalog_and_preserves_new_login) ... qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+ok
+test_own_replacement_without_catalog_gap_keeps_page_but_external_change_does_not (__main__.UnifiedTests.test_own_replacement_without_catalog_gap_keeps_page_but_external_change_does_not) ... qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+ok
+test_pause_all_only_resumes_tasks_it_paused_and_preserves_manual_pause (__main__.UnifiedTests.test_pause_all_only_resumes_tasks_it_paused_and_preserves_manual_pause) ... qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+ok
+test_pause_routes_to_selected_task_and_does_not_restore_other_paused_task (__main__.UnifiedTests.test_pause_routes_to_selected_task_and_does_not_restore_other_paused_task) ... qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+ok
+test_real_detached_child_receives_own_config_and_instance (__main__.UnifiedTests.test_real_detached_child_receives_own_config_and_instance) ... qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+ok
+test_replaced_task_ignores_old_response (__main__.UnifiedTests.test_replaced_task_ignores_old_response) ... qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+ok
+test_shutdown_query_progresses_while_overview_is_stalled_and_rejects_wrong_task (__main__.UnifiedTests.test_shutdown_query_progresses_while_overview_is_stalled_and_rejects_wrong_task) ... qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+ok
+test_shutdown_uses_real_stage_and_does_not_claim_timeout_is_complete (__main__.UnifiedTests.test_shutdown_uses_real_stage_and_does_not_claim_timeout_is_complete) ... qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+ok
+test_stalled_one_task_does_not_block_other_task_or_duplicate_requests (__main__.UnifiedTests.test_stalled_one_task_does_not_block_other_task_or_duplicate_requests) ... qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+ok
+test_stop_all_owner_loss_is_not_process_or_unmount_confirmation (__main__.UnifiedTests.test_stop_all_owner_loss_is_not_process_or_unmount_confirmation) ... qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+This plugin does not support raise()
+ok
+test_stop_all_request_is_not_completion_and_failed_stop_keeps_ui (__main__.UnifiedTests.test_stop_all_request_is_not_completion_and_failed_stop_keeps_ui) ... qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+This plugin does not support raise()
+ok
+test_stop_all_waits_for_every_mount_and_ui_exit_does_not_stop (__main__.UnifiedTests.test_stop_all_waits_for_every_mount_and_ui_exit_does_not_stop) ... qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+ok
+test_switching_is_embedded_reuses_pages_and_never_changes_environment (__main__.UnifiedTests.test_switching_is_embedded_reuses_pages_and_never_changes_environment) ... qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+ok
+test_tray_disappearance_restores_window (__main__.UnifiedTests.test_tray_disappearance_restores_window) ... qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+ok
+test_tray_menu_has_history_settings_and_two_exit_choices (__main__.UnifiedTests.test_tray_menu_has_history_settings_and_two_exit_choices) ... qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+ok
+test_tree_and_five_tabs_keep_history_in_same_window (__main__.UnifiedTests.test_tree_and_five_tabs_keep_history_in_same_window) ... qt.core.qobject.connect: QObject::connect: No such signal QPlatformNativeInterface::systemTrayWindowChanged(QScreen*)
+This plugin does not support raise()
+This plugin does not support raise()
+ok
+
+----------------------------------------------------------------------
+Ran 27 tests in 2.515s
+
+OK

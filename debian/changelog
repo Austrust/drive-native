@@ -1,3 +1,16 @@
+drive-native (0.1.0~dev20261105.2) unstable; urgency=medium
+
+  * Learn the single proven pre-commit ACL denial: upload 0x9003 addressed to an
+    existing node becomes an observed write_content deny with the current policy
+    revision; creations, rename, compound replace, profile-filter-ambiguous and
+    unreachable codes keep the conservative uncertain/hint path.
+  * Include the T1 write-learning report, T2 L2-source review and the independent
+    G4-013 evidence bundle; document the frozen 012 expectation delta.
+  * Keep schema 25, IPC 21, L2 unknown and all unrelated write behavior unchanged.
+  * Development build; real NAS acceptance (T7) and the remaining write-denial
+    codes are still open and are not claimed by this package.
+
+ -- Drive Native contributors <noreply@localhost>  Thu, 05 Nov 2026 16:30:00 +0800
 drive-native (0.1.0~dev20261105.1) unstable; urgency=medium
 
   * Separate explicit read-only policy from per-node, per-action remote permissions.

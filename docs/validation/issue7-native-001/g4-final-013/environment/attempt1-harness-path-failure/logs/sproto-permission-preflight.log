@@ -1,0 +1,45 @@
+   Compiling log v0.4.29
+   Compiling utf8parse v0.2.2
+   Compiling anstyle-parse v1.0.0
+   Compiling tracing-core v0.1.36
+   Compiling colorchoice v1.0.5
+   Compiling anstyle v1.0.14
+   Compiling anstyle-query v1.1.5
+   Compiling portable-atomic v1.13.1
+   Compiling regex-syntax v0.8.10
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling anstream v1.0.0
+   Compiling heck v0.5.0
+   Compiling anyhow v1.0.102
+   Compiling regex-automata v0.4.14
+   Compiling lazy_static v1.5.0
+   Compiling clap_lex v1.1.0
+   Compiling strsim v0.11.1
+   Compiling unicode-width v0.2.2
+   Compiling console v0.16.3
+   Compiling matchers v0.2.0
+   Compiling rustls v0.23.37
+   Compiling clap_builder v4.6.0
+   Compiling tokio v1.54.1
+   Compiling sharded-slab v0.1.7
+   Compiling clap_derive v4.6.0
+   Compiling tracing v0.1.44
+   Compiling tracing-log v0.2.0
+   Compiling thread_local v1.1.9
+   Compiling unit-prefix v0.5.2
+   Compiling nu-ansi-term v0.50.3
+   Compiling tracing-subscriber v0.3.23
+   Compiling tokio-rustls v0.26.4
+   Compiling indicatif v0.18.4
+   Compiling clap v4.6.0
+   Compiling sproto v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/source/crates/sproto)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 36.72s
+     Running unittests src/lib.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/sproto-b03e745c7e349904)
+
+running 3 tests
+test actions::transfer::tests::only_verified_download_reply_codes_are_permission_evidence ... ok
+test error::tests::mutation_permission_hints_are_action_scoped_and_never_definite_refusals ... ok
+test error::tests::oversized_error_code_cannot_alias_a_permission_refusal ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 165 filtered out; finished in 0.00s
+

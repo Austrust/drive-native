@@ -1,0 +1,107 @@
+# command: cargo test -p drive-runtime --lib mutation_permission_tests --locked --offline -j2
+# started: 2026-11-05T16:35:00+08:00
+# purpose: re-run after T4-requested assert-only defence (final pre-freeze)
+warning: unused import: `validate_path`
+ --> crates/sproto/src/actions/transfer.rs:4:36
+  |
+4 | use super::native::{NativeVersion, validate_path};
+  |                                    ^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `AsyncReadExt` and `AsyncSeekExt`
+  --> crates/sproto/src/actions/transfer.rs:14:17
+   |
+14 | use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWrite};
+   |                 ^^^^^^^^^^^^  ^^^^^^^^^^^^
+
+warning: function `binary_parts` is never used
+  --> crates/sproto/src/pstream/encode.rs:68:15
+   |
+68 | pub(crate) fn binary_parts(obj: &PObject) -> Result<(Vec<u8>, Vec<u8>, u64)> {
+   |               ^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `send_binary` is never used
+  --> crates/sproto/src/channel.rs:80:25
+   |
+77 | impl Channel {
+   | ------------ method in this implementation
+...
+80 |     pub(crate) async fn send_binary<R: AsyncRead + Unpin>(
+   |                         ^^^^^^^^^^^
+
+warning: function `mutation_reply_error` is never used
+  --> crates/sproto/src/error.rs:85:15
+   |
+85 | pub(crate) fn mutation_reply_error(action: &str, error: Error) -> Error {
+   |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: `sproto` (lib) generated 5 warnings (run `cargo fix --lib -p sproto` to apply 2 suggestions)
+warning: struct `cuse_init_in` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:814:12
+    |
+814 | pub struct cuse_init_in {
+    |            ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: struct `cuse_init_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:823:12
+    |
+823 | pub struct cuse_init_out {
+    |            ^^^^^^^^^^^^^
+
+warning: struct `fuse_ioctl_iovec` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:868:12
+    |
+868 | pub struct fuse_ioctl_iovec {
+    |            ^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:996:12
+    |
+996 | pub struct fuse_notify_retrieve_out {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_in` is never constructed
+    --> vendor/fuser/src/ll/fuse_abi.rs:1006:12
+     |
+1006 | pub struct fuse_notify_retrieve_in {
+     |            ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `fuser` (lib) generated 5 warnings
+warning: method `verify_root` is never used
+  --> crates/drive-core/src/native_root_guard.rs:86:25
+   |
+26 | impl NativeReadSession {
+   | ---------------------- method in this implementation
+...
+86 |     pub(super) async fn verify_root(&self) -> Result<()> {
+   |                         ^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `drive-core` (lib) generated 1 warning
+   Compiling drive-runtime v0.1.0 (/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/fix-7/crates/drive-runtime)
+warning: unused variable: `op`
+  --> crates/drive-runtime/src/namespace_schedule_tests.rs:57:10
+   |
+57 |     let (op, child_file) = {
+   |          ^^ help: if this is intentional, prefix it with an underscore: `_op`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `drive-runtime` (lib test) generated 1 warning (run `cargo fix --lib -p drive-runtime --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 19.40s
+     Running unittests src/lib.rs (/home/drive-native-test/.cache/p032-writelearn-target/debug/deps/drive_runtime-4e1c84d0ae2dacc3)
+
+running 2 tests
+test worker::mutation_permission_tests::only_an_existing_node_upload_binds_the_definite_refusal ... ok
+test worker::mutation_permission_tests::creation_and_every_other_mutation_keep_the_uncertain_hint ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 156 filtered out; finished in 0.00s
+
+# exit=0
+# finished: 2026-11-05T16:35:23+08:00

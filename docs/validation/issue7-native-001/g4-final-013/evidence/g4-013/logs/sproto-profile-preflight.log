@@ -1,0 +1,8 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.11s
+     Running unittests src/lib.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/sproto-b03e745c7e349904)
+
+running 1 test
+test actions::native::profile_notifications::profile_only_changes_require_a_digest_and_preserve_the_notification_bit ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 167 filtered out; finished in 0.00s
+

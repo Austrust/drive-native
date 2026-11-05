@@ -1,0 +1,6 @@
+drive-native-fsd: shutdown phase=requested elapsed_ms=0
+drive-native-fsd: shutdown phase=stopping_workers elapsed_ms=192
+drive-native-fsd: shutdown phase=detaching_mount elapsed_ms=192
+drive-native-fsd: shutdown phase=draining_filesystem elapsed_ms=208
+drive-native-fsd: shutdown phase=checkpointing_local elapsed_ms=208
+drive-native-fsd: shutdown phase=complete elapsed_ms=209

@@ -1,0 +1,1275 @@
+{
+  "candidate_commit": "fefb8ee0b02f68ec0e76d9cd89b6f37172d645b4",
+  "main": {
+    "complete": true,
+    "all_commands_passed": false,
+    "command_counts": {
+      "passed": 56,
+      "failed": 2,
+      "not_run": 0
+    },
+    "commands": [
+      {
+        "name": "offline-documentation-staging",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 0.2163843779999297,
+        "log": "logs/offline-documentation-staging.log",
+        "log_sha256": "bdc31cd99445ca5c03cd425365859e3d77d5ad6995d75b23233bd94097ff9a2a"
+      },
+      {
+        "name": "clean-private-product-packages",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": false
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 1.968990893999944,
+        "log": "logs/clean-private-product-packages.log",
+        "log_sha256": "0bdaeb2aa6a92a0fdfec2d2cc4d0ab71946de5d0654e08c526e4629130ae0f28"
+      },
+      {
+        "name": "core-definite_read_refusal_survives_restart_without_automatic_retry",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 6
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 52.39059671500013,
+        "log": "logs/core-definite_read_refusal_survives_restart_without_automatic_retry.log",
+        "log_sha256": "3fc895d8519d881abbe2245757b9b4aeb0aabbadf75c892f7885de0cd2336ef1"
+      },
+      {
+        "name": "core-revoked_traversal_suppresses_existing_transport_retry_wakes",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 6
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 5.829189486999894,
+        "log": "logs/core-revoked_traversal_suppresses_existing_transport_retry_wakes.log",
+        "log_sha256": "a53ac0ebcc048fa14abd3fab7c866605f36e5659ce5d84b6f15871940c8b2b9f"
+      },
+      {
+        "name": "runtime-bridge_respects_read_denial_before_cached_body_or_new_flight",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 157
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 37.20599755399985,
+        "log": "logs/runtime-bridge_respects_read_denial_before_cached_body_or_new_flight.log",
+        "log_sha256": "36700c5aed52968fbb11cfc2a9c3515315c525bec5e54af6c726d2549da9cb59"
+      },
+      {
+        "name": "runtime-cancelled_flight_clears_retry_even_when_read_or_traverse_is_denied",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 157
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 4.126301683999827,
+        "log": "logs/runtime-cancelled_flight_clears_retry_even_when_read_or_traverse_is_denied.log",
+        "log_sha256": "840da5e40f7a30de79071e9c40f6a130b4ad67c15c16f8c74b288596f7c5a889"
+      },
+      {
+        "name": "runtime-concurrent_read_revocation_and_last_reader_cancel_leave_no_retry_intent",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 157
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 4.477871653999955,
+        "log": "logs/runtime-concurrent_read_revocation_and_last_reader_cancel_leave_no_retry_intent.log",
+        "log_sha256": "10ad17310c935e1e1820d325c26e5847546ac956e4d58f33f6cefcf55f27a836"
+      },
+      {
+        "name": "retry-clock-preflight",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 154
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 4.129580325999996,
+        "log": "logs/retry-clock-preflight.log",
+        "log_sha256": "9bbc9454e7f02f7416a6d641873e0fdba0d16833542c02ba4cf350ab5baacf5d"
+      },
+      {
+        "name": "obsolete-ticket-preflight",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 157
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 3.9303001209998456,
+        "log": "logs/obsolete-ticket-preflight.log",
+        "log_sha256": "2d2d8248cafcdded9c6bfae2c0aca8a75b468175068e8fad053ebd594d64f210"
+      },
+      {
+        "name": "original-retry-pair-preflight",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 156
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 5.383356305999996,
+        "log": "logs/original-retry-pair-preflight.log",
+        "log_sha256": "113d6563c75ca22e0ed8d67dc6a94894a307229febf92b850e698b9ce5127b9f"
+      },
+      {
+        "name": "runtime-lib-original-parallelism",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 157,
+          "failed": 0,
+          "ignored": 1,
+          "measured": 0,
+          "filtered": 0
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 17.583625037000047,
+        "log": "logs/runtime-lib-original-parallelism.log",
+        "log_sha256": "83e5c260fb93a8bf195efc8dd3778f7291e5f4c409e92ece68ed1c6f4f109905"
+      },
+      {
+        "name": "native-read-stale-preflight",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 157
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 3.9263006129999667,
+        "log": "logs/native-read-stale-preflight.log",
+        "log_sha256": "7a69db34bb29d3e8b637a346ecc30faae118a06fb7d9f82c1dfa593563a5c975"
+      },
+      {
+        "name": "runtime-permission-preflight",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 151
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 5.032596302999991,
+        "log": "logs/runtime-permission-preflight.log",
+        "log_sha256": "8b852295dce1a3399368d58394f502b90eb0069a528ed4765f21d053ea2f2d10"
+      },
+      {
+        "name": "runtime-profile-preflight",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 157
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 3.6257769649998863,
+        "log": "logs/runtime-profile-preflight.log",
+        "log_sha256": "7222fab01352fbcfb70f57e807ce80885c7871a3bb1e424198d867ab1d527972"
+      },
+      {
+        "name": "runtime-version-preflight",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 157
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 3.1240893630001665,
+        "log": "logs/runtime-version-preflight.log",
+        "log_sha256": "0b1105b5d6da1faee09544558f358f036d2cee4138425d0365cf85c230e6d59d"
+      },
+      {
+        "name": "core-permission-preflight",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 26,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 383
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 23.570552313000007,
+        "log": "logs/core-permission-preflight.log",
+        "log_sha256": "421b9aae356dc13f4dd6ea7a7117887c3c41c64256c7568f31526f909e9ed0e2"
+      },
+      {
+        "name": "core-v6-migration-preflight",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 8
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 5.6793822369998,
+        "log": "logs/core-v6-migration-preflight.log",
+        "log_sha256": "f865414b828a5c09d06f6af32789278ece04761f5be67554e5ab912adb97ecac"
+      },
+      {
+        "name": "kernel-parent-actions-preflight",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 4
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 17.554192796000052,
+        "log": "logs/kernel-parent-actions-preflight.log",
+        "log_sha256": "be44b0a265c608f5bd5ac4df7a871ba94cd56e41244551c9a12695e9f2953c07"
+      },
+      {
+        "name": "sproto-permission-preflight",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 165
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 19.456970386000194,
+        "log": "logs/sproto-permission-preflight.log",
+        "log_sha256": "ee5db3411b4c4495b152aee3563211a743ffc282f40a817a2642e24a93d7a192"
+      },
+      {
+        "name": "sproto-profile-preflight",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 167
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 3.2241257400000904,
+        "log": "logs/sproto-profile-preflight.log",
+        "log_sha256": "bc92d5fd2232f40f9ce4aee40524d95858f0d5f0985fe492da773f159a0ac9a4"
+      },
+      {
+        "name": "native-loopback",
+        "passed": false,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 64,
+          "failed": 2,
+          "ignored": 0
+        },
+        "exit_code": 1,
+        "elapsed_seconds": 12.548384608999868,
+        "log": "logs/native-loopback.log",
+        "log_sha256": "89d04d3204bd98ecac8451c08fa63ffb8795b90396b46ff0cf0612259482f56e"
+      },
+      {
+        "name": "worker-trust-preflight",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 0
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 14.148765066999886,
+        "log": "logs/worker-trust-preflight.log",
+        "log_sha256": "84f28c18e399f81d6883c4170d347b79af4823dbaa29ca2b503c8aa8e51f43be"
+      },
+      {
+        "name": "worker-elf-versions",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 0.371621776999973,
+        "log": "logs/worker-elf-versions.log",
+        "log_sha256": "2c29e9961920cd551be93a1bdcd04606d243f4fbb50092bb727c5eb8ea9c4472"
+      },
+      {
+        "name": "core-history-probe-prepare",
+        "passed": false,
+        "not_run": false,
+        "counts": {
+          "reported": false
+        },
+        "exit_code": 1,
+        "elapsed_seconds": 0.1705399560000842,
+        "log": "logs/core-history-probe-prepare.log",
+        "log_sha256": "5860480307141abd163fe4818fca4b1838526c947488e2e057d495b6439eab47"
+      },
+      {
+        "name": "kernel-setattr-preflight",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 4
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 3.124030696999853,
+        "log": "logs/kernel-setattr-preflight.log",
+        "log_sha256": "8a02a23323ff6ea40ad0269298ffb2d393397fa77088de1ef589e4cf0a95e5f5"
+      },
+      {
+        "name": "workspace-all-features",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 985,
+          "failed": 0,
+          "ignored": 42,
+          "measured": 0,
+          "filtered": 0
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 250.09548362300006,
+        "log": "logs/workspace-all-features.log",
+        "log_sha256": "aa916d12a00d98733fca020a8476970dc597782e484612bbffeb4b4d88c5bfc3"
+      },
+      {
+        "name": "workspace-default",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 975,
+          "failed": 0,
+          "ignored": 37,
+          "measured": 0,
+          "filtered": 0
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 203.4584322400001,
+        "log": "logs/workspace-default.log",
+        "log_sha256": "d13f3c1aa913c50a86097105a672114bbef7aed31c8af74922c4949a43970473"
+      },
+      {
+        "name": "vendored-fuser-wire",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 55,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 0
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 41.89922499399995,
+        "log": "logs/vendored-fuser-wire.log",
+        "log_sha256": "8540f0f7c29d2d00db2ea30aa22ebf1a465e158d7fbcf40857b74a92c1234af1"
+      },
+      {
+        "name": "kernel-fs-debug-index1",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 38,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 41
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 30.89514743099994,
+        "log": "logs/kernel-fs-debug-index1.log",
+        "log_sha256": "93fa1a54557e1fd15e1f3bdf95fe18a0d2350af42e16a7219e4f9ec3061bd763"
+      },
+      {
+        "name": "kernel-fs-debug-index0",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 36,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 43
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 21.66077065699983,
+        "log": "logs/kernel-fs-debug-index0.log",
+        "log_sha256": "2888538ea7616c24b37784f5922509f618c7d2d3c3ccb9e92b889366eb955d77"
+      },
+      {
+        "name": "kernel-runtime-debug",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 157
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 18.40924556899995,
+        "log": "logs/kernel-runtime-debug.log",
+        "log_sha256": "6b5a67424f3fb9ab581714ce45617cfd514791ba72d0de14455b69ba27fdf9fe"
+      },
+      {
+        "name": "kernel-fs-release-index1",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 38,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 41
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 306.5265480190001,
+        "log": "logs/kernel-fs-release-index1.log",
+        "log_sha256": "e21184db82459c32516aa8dc1096008fda49e6d0f14d7fafedca801b3a40967c"
+      },
+      {
+        "name": "kernel-fs-release-index0",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 36,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 43
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 12.892045486999905,
+        "log": "logs/kernel-fs-release-index0.log",
+        "log_sha256": "240b658c2385837179c90728a44f40dbdb1c0b628c510522e6070657a3de7e70"
+      },
+      {
+        "name": "kernel-runtime-release",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 157
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 104.28238856100006,
+        "log": "logs/kernel-runtime-release.log",
+        "log_sha256": "07304f0b602c1f81fd88ebf67da4bc10bf33c222a3070247e74204a62c26d96a"
+      },
+      {
+        "name": "kernel-fs-release-attr0",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 38,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 41
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 11.49054382400027,
+        "log": "logs/kernel-fs-release-attr0.log",
+        "log_sha256": "5684de4093cbf838fb94857e41d8753e3ba29650d3226db78917735840e7c579"
+      },
+      {
+        "name": "runtime-private-dbus",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 24
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 15.058562085000176,
+        "log": "logs/runtime-private-dbus.log",
+        "log_sha256": "aa89bbf53a47b8fba89c89707664f033872416d1a23506bea0c502c2ed4e142c"
+      },
+      {
+        "name": "gui-gui_unit_tests",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 0.3713887599997179,
+        "log": "logs/gui-gui_unit_tests.log",
+        "log_sha256": "fc632f613cc0fcbb9112267425c7e18dcddbce00b6fe61769d52d7bb5b52ad87"
+      },
+      {
+        "name": "gui-cache_gui_tests",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 0.171012588999929,
+        "log": "logs/gui-cache_gui_tests.log",
+        "log_sha256": "2495a6c2c85c1759da02b82031153a2743af10516addb20bb42fdc53e880856c"
+      },
+      {
+        "name": "gui-conflict_gui_tests",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 24,
+          "failed": 0,
+          "ignored": 0
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 0.47089200399977926,
+        "log": "logs/gui-conflict_gui_tests.log",
+        "log_sha256": "a254d820edd6e5188e120c9a01140584e66398fced4db1a01002ac494d8a014d"
+      },
+      {
+        "name": "gui-hidden_dialog_tests",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 0.22158856999976706,
+        "log": "logs/gui-hidden_dialog_tests.log",
+        "log_sha256": "6c92dfe51536d7c152de3cb89bde8773648cabd49781f827e89bd53e61d6235a"
+      },
+      {
+        "name": "gui-lazy_gui_tests",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 0.3714728190002461,
+        "log": "logs/gui-lazy_gui_tests.log",
+        "log_sha256": "f2563b7f69b5756a61d08bbcefd518804641670b051212a80878eb5b8daacfab"
+      },
+      {
+        "name": "gui-multi_mount_tests",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 0.3211965880000207,
+        "log": "logs/gui-multi_mount_tests.log",
+        "log_sha256": "021887e8e83607c21136899e0ce5f22dd0c49bd6b9a090c8768b5390e66c83e2"
+      },
+      {
+        "name": "gui-trust_gui_tests",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 0.32131529599973874,
+        "log": "logs/gui-trust_gui_tests.log",
+        "log_sha256": "e1308c9dee8a7454c6df2e936bdc5492fbed9753449caf0d0bd299b942b652ab"
+      },
+      {
+        "name": "gui-transfer_gui_tests",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 6,
+          "failed": 0,
+          "ignored": 0
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 0.22151459399992746,
+        "log": "logs/gui-transfer_gui_tests.log",
+        "log_sha256": "daaf23e2250bf6779917466671d981fe87be9e9e6e30596c72e5fb1320e84290"
+      },
+      {
+        "name": "gui-theme_tests",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 0.17164765600000464,
+        "log": "logs/gui-theme_tests.log",
+        "log_sha256": "73267ee34bbcc9e2e05fac0f08e73aef4fc813973f0330b6aee48121512fce1a"
+      },
+      {
+        "name": "gui-selector_gui_tests",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 7,
+          "failed": 0,
+          "ignored": 0
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 0.3218732709997312,
+        "log": "logs/gui-selector_gui_tests.log",
+        "log_sha256": "409a12f3fb0b87f031fb5ff195ac56ef0f4b0f7b75d39aa9120587504c0a343b"
+      },
+      {
+        "name": "gui-backend_upgrade_test",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 11,
+          "failed": 0,
+          "ignored": 0
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 0.17067186500025855,
+        "log": "logs/gui-backend_upgrade_test.log",
+        "log_sha256": "8e0ee9a787a2f446860e2aa1a9e2d847beab2098a88ce4e1e251ad8bbf6178e5"
+      },
+      {
+        "name": "gui-pause_handover_test",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 0.12068502600004649,
+        "log": "logs/gui-pause_handover_test.log",
+        "log_sha256": "56e7049e29044cc7dd43c2a5bcdf3205208831a404e9d0dadfbad68c2e32e3c0"
+      },
+      {
+        "name": "gui-initialization_gui_tests",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 10,
+          "failed": 0,
+          "ignored": 0
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 0.47141377099978854,
+        "log": "logs/gui-initialization_gui_tests.log",
+        "log_sha256": "d6d079300a8b9121e53fa73089e983b7a123704a283a4525e67a513bd479edc2"
+      },
+      {
+        "name": "gui-unified_manager_tests",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 27,
+          "failed": 0,
+          "ignored": 0
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 2.827358697999898,
+        "log": "logs/gui-unified_manager_tests.log",
+        "log_sha256": "62772f582d8f2465c0dd0807264cc9ab197288c7aa3b8c6116c98d5302538be3"
+      },
+      {
+        "name": "gui-gui_instance_test",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 0.371522960999755,
+        "log": "logs/gui-gui_instance_test.log",
+        "log_sha256": "92c21d7beae95c778cfeca2897ef0006cb43740467caed3d03226ec07dcc5269"
+      },
+      {
+        "name": "gui-queue_gui_tests",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 4,
+          "failed": 0,
+          "ignored": 0
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 0.32145123899999817,
+        "log": "logs/gui-queue_gui_tests.log",
+        "log_sha256": "e540383f82ffd031b326557d66630146b2e26773f418f0e5d11133455cedd6c1"
+      },
+      {
+        "name": "gui-history_gui_tests",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 17,
+          "failed": 0,
+          "ignored": 0
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 0.4209628240000711,
+        "log": "logs/gui-history_gui_tests.log",
+        "log_sha256": "2fa7cf7466b1c22f3e331aa95e72f1de87910bcb547600856f289bb72fea9e6d"
+      },
+      {
+        "name": "gui-permission_gui_tests",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 0.2710583160001079,
+        "log": "logs/gui-permission_gui_tests.log",
+        "log_sha256": "725726711717a835072800ef29d65d2638e9f320a8088bb3501bb69bdcbdc02e"
+      },
+      {
+        "name": "gui-permission-history-labels",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 3,
+          "failed": 0,
+          "ignored": 0
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 0.2203147700001864,
+        "log": "logs/gui-permission-history-labels.log",
+        "log_sha256": "d0f28ff53e81495226dc1a01bd2db0adb6ece99f9de71b47b6867905216085dc"
+      },
+      {
+        "name": "provider-nemo",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 10,
+          "failed": 0,
+          "ignored": 0
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 0.2208308530002796,
+        "log": "logs/provider-nemo.log",
+        "log_sha256": "db263cb3fc5d541eda831d53f29f70e4e623fb13d647b75a91817ff59eb398c4"
+      },
+      {
+        "name": "provider-nautilus",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 10,
+          "failed": 0,
+          "ignored": 0
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 0.17080808099990463,
+        "log": "logs/provider-nautilus.log",
+        "log_sha256": "4689b16ed20960b431fb7b00845a55dafec721200e34d69d5717ded5a7fdcc53"
+      },
+      {
+        "name": "unified-ui-render",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": false
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 0.8719406119998894,
+        "log": "logs/unified-ui-render.log",
+        "log_sha256": "172d4f7cb177c7ce404b195f8201e01967107acb6c9956592ab33fea8d018f61"
+      }
+    ]
+  },
+  "supplemental": {
+    "complete": true,
+    "all_passed": true,
+    "commands": [
+      {
+        "name": "native-loopback-updated",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 70,
+          "failed": 0,
+          "ignored": 0
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 13.346961001000182,
+        "log": "logs/native-loopback-updated.log",
+        "log_sha256": "c1930a45c6a6eba11d242a39a228f0f4b2c6c6133add52fbca3d99df2bd3d5b8"
+      },
+      {
+        "name": "t1-sproto-error-tests",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 8,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 160
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 3.1742829110003186,
+        "log": "logs/t1-sproto-error-tests.log",
+        "log_sha256": "3edcd047cd7e88f40a6d311c92e37096a1155e3da3d80fdb794a03848e9e8bd2"
+      },
+      {
+        "name": "t1-worker-mutation-permission-tests",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 2,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 156
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 2.973674914000185,
+        "log": "logs/t1-worker-mutation-permission-tests.log",
+        "log_sha256": "1b8d124afce930580be14297379f53bc63f925d29b602df3e8e9235c71b91cf7"
+      },
+      {
+        "name": "t1-bridge-learned-upload-denial",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 157
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 3.1239550720001716,
+        "log": "logs/t1-bridge-learned-upload-denial.log",
+        "log_sha256": "dfbdb1d8753eb4bea1d28a061eee455c901afe55c765d22bd0861afae12fd756"
+      },
+      {
+        "name": "t1-bridge-ambiguous-upload-hint",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 157
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 3.9250698969999576,
+        "log": "logs/t1-bridge-ambiguous-upload-hint.log",
+        "log_sha256": "e4322a3780e7868890651400cb601b5a0c54cc186a489ea226297328a7432bb6"
+      },
+      {
+        "name": "t1-bridge-transport-loss-no-learn",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 157
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 3.1880227350002315,
+        "log": "logs/t1-bridge-transport-loss-no-learn.log",
+        "log_sha256": "924492868be0cb2e768057537393b456abb4d6e60ea3b95b756207ec6e066cf4"
+      },
+      {
+        "name": "t1-core-learned-upload-denial-revision",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 408
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 2.873256287000004,
+        "log": "logs/t1-core-learned-upload-denial-revision.log",
+        "log_sha256": "17a3c7845a1163e9f36dbaf09833fe79074e0a3f3aab5700261765282e262e77"
+      },
+      {
+        "name": "t1-core-definite-refusal-target-guard",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 408
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 3.0238713029998507,
+        "log": "logs/t1-core-definite-refusal-target-guard.log",
+        "log_sha256": "21e116121ef91b2e8f7d83808a81d798be4b505e858f332eb4c3f8b3c2a7fcb7"
+      },
+      {
+        "name": "t1-core-rename-remove-hints-no-rows",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 408
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 3.3250423920003414,
+        "log": "logs/t1-core-rename-remove-hints-no-rows.log",
+        "log_sha256": "ad017bf97cb440aa84c1f5d39305e297f4285a4ae78aa406b7d66196734b1b00"
+      },
+      {
+        "name": "core-history-probe-prepare",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": false
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 1.773837339000238,
+        "log": "logs/core-history-probe-prepare.log",
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "core-history-probe",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 5,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 0
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 2.9740050980003616,
+        "log": "logs/core-history-probe.log",
+        "log_sha256": "3f3217186279de9634341f43f003aed97754884e6a2c8d83a23b8ee8197b8195"
+      },
+      {
+        "name": "standard-check-all-targets",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": false
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 3.3245106340000348,
+        "log": "logs/standard-check-all-targets.log",
+        "log_sha256": "8c45b52a11fdad4781179a5813b831e0a00ea1964efe4d9101b2051da5b907bf"
+      },
+      {
+        "name": "capacity-ignored-list",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": false
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 2.4729396379998434,
+        "log": "logs/capacity-ignored-list.log",
+        "log_sha256": "17a56f783446d92b0e92ae39498163aaa4341c418c1b032126774ee9326fc5ad"
+      },
+      {
+        "name": "capacity-210k",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0,
+          "measured": 0,
+          "filtered": 408
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 13.948023512999953,
+        "log": "logs/capacity-210k.log",
+        "log_sha256": "c663ffc19a26d893f9283912a9e0c6bf86c8f5c44b8bc248e9908d5f07e18233"
+      },
+      {
+        "name": "tls-harness-build",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": false
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 25.824588939000023,
+        "log": "logs/tls-harness-build.log",
+        "log_sha256": "a1bbb508e74fb40435d55f2d776e46c244fb798c022448eb2b5b793b63806eb8"
+      },
+      {
+        "name": "tls-actual-worker-all-ten",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": false
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 13.297717395999825,
+        "log": "logs/tls-actual-worker-all-ten.log",
+        "log_sha256": "523f75972a7905552e23543ec6ce1f465c5e4c2204c8c9a637c331ff37815499"
+      },
+      {
+        "name": "old-component-build",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": false
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 3.225030949000029,
+        "log": "logs/old-component-build.log",
+        "log_sha256": "496b24e95521ab34d7ef579d6220e30a244139ff32a4a01e4e2646f353376580"
+      },
+      {
+        "name": "new-component-build",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": false
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 2.7740625100000216,
+        "log": "logs/new-component-build.log",
+        "log_sha256": "463c977e51d80b3b62437b9cce8f34542eaab692cdc7e2312ff56ffa5035957e"
+      },
+      {
+        "name": "private-component-policy-handover",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": false
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 5.833477653000045,
+        "log": "logs/private-component-policy-handover.log",
+        "log_sha256": "99d630561935eded6b9407f277b67f2f10d1bd165f206dd37525a81975dc8ce8"
+      },
+      {
+        "name": "package-version",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": false
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 0.12284075099978509,
+        "log": "logs/package-version.log",
+        "log_sha256": "050440a766bfb0d58be4118c7b84dce65f9401f1f56b409cf49be357dd034e7d"
+      },
+      {
+        "name": "package-documentation-staging",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": false
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 0.17086739000023954,
+        "log": "logs/package-documentation-staging.log",
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "package-metadata-equivalence",
+        "passed": true,
+        "not_run": false,
+        "counts": {
+          "reported": true,
+          "passed": 1,
+          "failed": 0,
+          "ignored": 0
+        },
+        "exit_code": 0,
+        "elapsed_seconds": 0.7728111850001369,
+        "log": "logs/package-metadata-equivalence.log",
+        "log_sha256": "b1c95da5e181d95c3a837b01b04513e2725984388b2256107771b77a2407ce77"
+      }
+    ]
+  },
+  "native_loopback_frozen_counts": {
+    "failed": 2,
+    "ignored": 0,
+    "passed": 64,
+    "total": 66
+  },
+  "native_loopback_corrected_counts": {
+    "failed": 0,
+    "ignored": 0,
+    "passed": 70,
+    "total": 70
+  }
+}

@@ -1,0 +1,286 @@
+{
+  "scope": "linear capstone sweep of every PF_X PT_LOAD segment in the four public extracted ELFs; no execution, no NAS",
+  "inputs": "C:\\Users\\a_tas\\Desktop\\MFMLAB\\Personal_Sync\\20-Coding\\P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65\\work\\issue7-native-evidence\\public-server",
+  "codes": [
+    "0x9003",
+    "0x9004",
+    "0xa003",
+    "0xa004"
+  ],
+  "files": [
+    {
+      "file": "syncd.elf",
+      "bytes": 8052033,
+      "sha256": "e2288b191e8db97673c3468595e3a2d441579d2da365927c1108c000549fdf9c",
+      "exec_segments": {
+        "0xea000": {
+          "vaddr": "0xea000",
+          "bytes": 6001493,
+          "decoded_instructions": 1269768,
+          "matched_instructions": 13
+        }
+      }
+    },
+    {
+      "file": "libsynosyncserver.so.elf",
+      "bytes": 3193715,
+      "sha256": "1677fcc08004cb9128ebd4efccd0d7053586de87042dd54880bc3e2e124b617c",
+      "exec_segments": {
+        "0xa2000": {
+          "vaddr": "0xa2000",
+          "bytes": 1867757,
+          "decoded_instructions": 428376,
+          "matched_instructions": 2
+        }
+      }
+    },
+    {
+      "file": "libsynosyncservercore.so.elf",
+      "bytes": 8374811,
+      "sha256": "cfcad81883c49285b34a986eec78dc4702bf8312d4b1d847a07b095fbb93ab3b",
+      "exec_segments": {
+        "0x1a8000": {
+          "vaddr": "0x1a8000",
+          "bytes": 5270749,
+          "decoded_instructions": 1171027,
+          "matched_instructions": 1
+        }
+      }
+    },
+    {
+      "file": "libsynodrivecommon.so.7.0.elf",
+      "bytes": 276753,
+      "sha256": "9f213f24bd8c4a3e9e3bbfbd5033e27086f98176b01cd824196e1846a057f32e",
+      "exec_segments": {
+        "0xb000": {
+          "vaddr": "0xb000",
+          "bytes": 185989,
+          "decoded_instructions": 42383,
+          "matched_instructions": 0
+        }
+      }
+    }
+  ],
+  "findings": {
+    "0x9003": [
+      {
+        "file": "syncd.elf",
+        "address": "0x22329b",
+        "mnemonic": "mov",
+        "op_str": "esi, 0x9003",
+        "immediate": "0x9003",
+        "role": "producer_immediate"
+      },
+      {
+        "file": "libsynosyncserver.so.elf",
+        "address": "0x1bda99",
+        "mnemonic": "sub",
+        "op_str": "esi, 0x9003",
+        "immediate": "0x9003",
+        "role": "consumer_or_compare"
+      }
+    ],
+    "0x9004": [
+      {
+        "file": "syncd.elf",
+        "address": "0x2231f3",
+        "mnemonic": "mov",
+        "op_str": "esi, 0x9004",
+        "immediate": "0x9004",
+        "role": "producer_immediate"
+      },
+      {
+        "file": "syncd.elf",
+        "address": "0x41f5cd",
+        "mnemonic": "cmp",
+        "op_str": "eax, 0x9004",
+        "immediate": "0x9004",
+        "role": "consumer_or_compare"
+      },
+      {
+        "file": "syncd.elf",
+        "address": "0x4819ae",
+        "mnemonic": "mov",
+        "op_str": "esi, 0x9004",
+        "immediate": "0x9004",
+        "role": "producer_immediate"
+      },
+      {
+        "file": "syncd.elf",
+        "address": "0x4b81ac",
+        "mnemonic": "cmp",
+        "op_str": "eax, 0x9004",
+        "immediate": "0x9004",
+        "role": "consumer_or_compare"
+      },
+      {
+        "file": "syncd.elf",
+        "address": "0x4b84f9",
+        "mnemonic": "mov",
+        "op_str": "esi, 0x9004",
+        "immediate": "0x9004",
+        "role": "producer_immediate"
+      },
+      {
+        "file": "syncd.elf",
+        "address": "0x62505a",
+        "mnemonic": "mov",
+        "op_str": "esi, 0x9004",
+        "immediate": "0x9004",
+        "role": "producer_immediate"
+      },
+      {
+        "file": "syncd.elf",
+        "address": "0x6255e2",
+        "mnemonic": "mov",
+        "op_str": "esi, 0x9004",
+        "immediate": "0x9004",
+        "role": "producer_immediate"
+      },
+      {
+        "file": "libsynosyncservercore.so.elf",
+        "address": "0x261879",
+        "mnemonic": "mov",
+        "op_str": "esi, 0x9004",
+        "immediate": "0x9004",
+        "role": "producer_immediate"
+      }
+    ],
+    "0xa003": [
+      {
+        "file": "syncd.elf",
+        "address": "0x2234a3",
+        "mnemonic": "mov",
+        "op_str": "esi, 0xa003",
+        "immediate": "0xa003",
+        "role": "producer_immediate"
+      }
+    ],
+    "0xa004": [
+      {
+        "file": "syncd.elf",
+        "address": "0x22342b",
+        "mnemonic": "mov",
+        "op_str": "esi, 0xa004",
+        "immediate": "0xa004",
+        "role": "producer_immediate"
+      },
+      {
+        "file": "syncd.elf",
+        "address": "0x41f981",
+        "mnemonic": "mov",
+        "op_str": "esi, 0xa004",
+        "immediate": "0xa004",
+        "role": "producer_immediate"
+      },
+      {
+        "file": "syncd.elf",
+        "address": "0x5d8837",
+        "mnemonic": "mov",
+        "op_str": "esi, 0xa004",
+        "immediate": "0xa004",
+        "role": "producer_immediate"
+      },
+      {
+        "file": "syncd.elf",
+        "address": "0x644d06",
+        "mnemonic": "mov",
+        "op_str": "esi, 0xa004",
+        "immediate": "0xa004",
+        "role": "producer_immediate"
+      },
+      {
+        "file": "libsynosyncserver.so.elf",
+        "address": "0x1bdb50",
+        "mnemonic": "cmp",
+        "op_str": "esi, 0xa004",
+        "immediate": "0xa004",
+        "role": "consumer_or_compare"
+      }
+    ]
+  },
+  "syncd_counts": {
+    "0x9003": 1,
+    "0x9004": 7,
+    "0xa003": 1,
+    "0xa004": 4
+  },
+  "all_file_counts": {
+    "0x9003": 2,
+    "0x9004": 8,
+    "0xa003": 1,
+    "0xa004": 5
+  },
+  "author_json_expected_syncd_counts": {
+    "0x9003": 1,
+    "0x9004": 7,
+    "0xa003": 1,
+    "0xa004": 4
+  },
+  "syncd_counts_reproduced": true,
+  "other_library_hits": {
+    "0x9003": [
+      {
+        "file": "libsynosyncserver.so.elf",
+        "address": "0x1bda99",
+        "mnemonic": "sub",
+        "op_str": "esi, 0x9003",
+        "immediate": "0x9003",
+        "role": "consumer_or_compare"
+      }
+    ],
+    "0x9004": [
+      {
+        "file": "libsynosyncservercore.so.elf",
+        "address": "0x261879",
+        "mnemonic": "mov",
+        "op_str": "esi, 0x9004",
+        "immediate": "0x9004",
+        "role": "producer_immediate"
+      }
+    ],
+    "0xa003": [],
+    "0xa004": [
+      {
+        "file": "libsynosyncserver.so.elf",
+        "address": "0x1bdb50",
+        "mnemonic": "cmp",
+        "op_str": "esi, 0xa004",
+        "immediate": "0xa004",
+        "role": "consumer_or_compare"
+      }
+    ]
+  },
+  "other_library_hit_count": 3,
+  "producer_counts_all_files": {
+    "0x9003": 1,
+    "0x9004": 6,
+    "0xa003": 1,
+    "0xa004": 4
+  },
+  "producer_counts_syncd": {
+    "36867": 1,
+    "36868": 5,
+    "40963": 1,
+    "40964": 4
+  },
+  "other_library_producer_hits": {
+    "0x9003": [],
+    "0x9004": [
+      {
+        "file": "libsynosyncservercore.so.elf",
+        "address": "0x261879",
+        "mnemonic": "mov",
+        "op_str": "esi, 0x9004",
+        "immediate": "0x9004",
+        "role": "producer_immediate"
+      }
+    ],
+    "0xa003": [],
+    "0xa004": []
+  },
+  "other_library_producer_count": 1,
+  "claim_9003_unique_producer": true,
+  "claim_9004_multiple_producers": true,
+  "passed": true
+}

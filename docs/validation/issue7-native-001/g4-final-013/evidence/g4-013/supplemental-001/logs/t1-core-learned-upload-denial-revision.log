@@ -1,0 +1,8 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.44s
+     Running unittests src/lib.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/drive_core-d0df5f485b1c9979)
+
+running 1 test
+test write_permissions::tests::learned_upload_denial_uses_current_revision_persists_and_expires ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 408 filtered out; finished in 0.36s
+

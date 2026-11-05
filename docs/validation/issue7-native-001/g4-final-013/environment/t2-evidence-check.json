@@ -1,0 +1,114 @@
+{
+  "scope": "T2 l2-source-002 evidence integrity + non-modification checks",
+  "t2_report": {
+    "path": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/fix-7/docs/validation/issue7-native-001/l2-source-002/REPORT.md",
+    "sha256": "a85d196d12e67061eecc6e2589eebe33d4ec3c97bebc8d4c2afa9a9a86ba9804",
+    "bytes": 21864
+  },
+  "evidence_root": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/issue7-native-evidence/l2-source-002",
+  "evidence_integrity": {
+    "manifest_sha256": "0950f1ad9980f83423402bdd3450d70ba32083ae745b19585586c642d735e9a2",
+    "sha256sums_entries": 60,
+    "files_on_disk": 62,
+    "sha256sums_mismatches": [],
+    "manifest_listed_files_missing": [],
+    "files_not_in_sha256sums": [
+      "inputs/SHA256SUMS.txt"
+    ],
+    "passed": true
+  },
+  "inputs": [
+    {
+      "file": "download-manifest.json",
+      "current_sha256": "a1fd82dca7ad23db2e5e0103aa25a8003dc274b44d520674eb06abdb5f480d1b",
+      "frozen_path": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/fix-7/docs/validation/issue7-native-001/server-static/download-manifest.json",
+      "frozen_sha256": "a1fd82dca7ad23db2e5e0103aa25a8003dc274b44d520674eb06abdb5f480d1b",
+      "match": true
+    },
+    {
+      "file": "libraries-manifest.json",
+      "current_sha256": "67490cdd1e6ff74e87985d30ca52ccdaef179d1db10ae25aa8e1ceb20c86c12e",
+      "frozen_path": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/fix-7/docs/validation/issue7-native-001/server-static/libraries-manifest.json",
+      "frozen_sha256": "67490cdd1e6ff74e87985d30ca52ccdaef179d1db10ae25aa8e1ceb20c86c12e",
+      "match": true
+    },
+    {
+      "file": "selected-members-manifest.json",
+      "current_sha256": "e5b9c6f49b743071bcf2d60691d6772c9f56123e1df09b184f5fe1ff4031a952",
+      "frozen_path": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/fix-7/docs/validation/issue7-native-001/server-static/selected-members-manifest.json",
+      "frozen_sha256": "e5b9c6f49b743071bcf2d60691d6772c9f56123e1df09b184f5fe1ff4031a952",
+      "match": true
+    }
+  ],
+  "inputs_passed": true,
+  "binaries": {
+    "spk_declared": "58417bbeb433d303b18715649b7bac07efbcef686468378456741eff8ef060fc",
+    "spk_frozen": "58417bbeb433d303b18715649b7bac07efbcef686468378456741eff8ef060fc",
+    "spk_match": true,
+    "members": [
+      {
+        "member": "sbin/syncd",
+        "declared": "e2288b191e8db97673c3468595e3a2d441579d2da365927c1108c000549fdf9c",
+        "frozen": "e2288b191e8db97673c3468595e3a2d441579d2da365927c1108c000549fdf9c",
+        "match": true
+      },
+      {
+        "member": "lib/libsynosyncserver.so",
+        "declared": "1677fcc08004cb9128ebd4efccd0d7053586de87042dd54880bc3e2e124b617c",
+        "frozen": "1677fcc08004cb9128ebd4efccd0d7053586de87042dd54880bc3e2e124b617c",
+        "match": true
+      },
+      {
+        "member": "lib/libsynosyncservercore.so",
+        "declared": "cfcad81883c49285b34a986eec78dc4702bf8312d4b1d847a07b095fbb93ab3b",
+        "frozen": "cfcad81883c49285b34a986eec78dc4702bf8312d4b1d847a07b095fbb93ab3b",
+        "match": true
+      },
+      {
+        "member": "lib/libsynodrivecommon.so.7.0",
+        "declared": "9f213f24bd8c4a3e9e3bbfbd5033e27086f98176b01cd824196e1846a057f32e",
+        "frozen": "9f213f24bd8c4a3e9e3bbfbd5033e27086f98176b01cd824196e1846a057f32e",
+        "match": true
+      }
+    ]
+  },
+  "binaries_passed": true,
+  "frozen_evidence_status": {
+    "command": [
+      "git",
+      "-c",
+      "safe.directory=*",
+      "--git-dir=/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/public-summary-20261031/.git",
+      "status",
+      "--porcelain",
+      "--",
+      "docs/validation/issue7-native-001/server-static",
+      "docs/validation/issue7-native-001/static",
+      "docs/validation/issue7-native-001/l2-static",
+      "docs/validation/issue7-native-001/server-capability",
+      "docs/validation/issue7-native-001/REPORT.md"
+    ],
+    "exit_code": 0,
+    "porcelain": [],
+    "clean": true
+  },
+  "t2_report_commit_status": {
+    "command": [
+      "git",
+      "-c",
+      "safe.directory=*",
+      "--git-dir=/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/public-summary-20261031/.git",
+      "ls-tree",
+      "-r",
+      "--name-only",
+      "fefb8ee0b02f68ec0e76d9cd89b6f37172d645b4",
+      "--",
+      "docs/validation/issue7-native-001/l2-source-002"
+    ],
+    "exit_code": 0,
+    "paths_in_commit": [],
+    "tracked_in_commit": false,
+    "note": "T2 report directory is uncommitted in fefb8ee; hashed here from the working tree as the reviewed artifact; it must be committed before packaging/freeze"
+  },
+  "passed": true
+}

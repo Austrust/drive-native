@@ -1,0 +1,25 @@
+{"command": "offline-documentation-staging", "passed": true, "counts": {"reported": true, "passed": 2, "failed": 0, "ignored": 0}}
+{"command": "clean-private-product-packages", "passed": true, "counts": {"reported": false}}
+{"command": "core-definite_read_refusal_survives_restart_without_automatic_retry", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 6}}
+{"command": "core-revoked_traversal_suppresses_existing_transport_retry_wakes", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 6}}
+{"command": "runtime-bridge_respects_read_denial_before_cached_body_or_new_flight", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 157}}
+{"command": "runtime-cancelled_flight_clears_retry_even_when_read_or_traverse_is_denied", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 157}}
+{"command": "runtime-concurrent_read_revocation_and_last_reader_cancel_leave_no_retry_intent", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 157}}
+{"command": "retry-clock-preflight", "passed": true, "counts": {"reported": true, "passed": 4, "failed": 0, "ignored": 0, "measured": 0, "filtered": 154}}
+{"command": "obsolete-ticket-preflight", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 157}}
+{"command": "original-retry-pair-preflight", "passed": true, "counts": {"reported": true, "passed": 2, "failed": 0, "ignored": 0, "measured": 0, "filtered": 156}}
+{"command": "runtime-lib-original-parallelism", "passed": true, "counts": {"reported": true, "passed": 157, "failed": 0, "ignored": 1, "measured": 0, "filtered": 0}}
+{"command": "native-read-stale-preflight", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 157}}
+{"command": "runtime-permission-preflight", "passed": true, "counts": {"reported": true, "passed": 7, "failed": 0, "ignored": 0, "measured": 0, "filtered": 151}}
+{"command": "runtime-profile-preflight", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 157}}
+{"command": "runtime-version-preflight", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 157}}
+{"command": "core-permission-preflight", "passed": true, "counts": {"reported": true, "passed": 26, "failed": 0, "ignored": 0, "measured": 0, "filtered": 383}}
+{"command": "core-v6-migration-preflight", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 8}}
+{"command": "kernel-parent-actions-preflight", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 4}}
+{"command": "sproto-permission-preflight", "passed": true, "counts": {"reported": true, "passed": 3, "failed": 0, "ignored": 0, "measured": 0, "filtered": 165}}
+{"command": "sproto-profile-preflight", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 167}}
+{"command": "native-loopback", "passed": false, "counts": {"reported": false}}
+{"command": "worker-trust-preflight", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 0}}
+{"command": "worker-elf-versions", "passed": false, "counts": {"reported": false}}
+{"command": "core-history-probe-prepare", "passed": false, "counts": {"reported": false}}
+{"command": "kernel-setattr-preflight", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 4}}

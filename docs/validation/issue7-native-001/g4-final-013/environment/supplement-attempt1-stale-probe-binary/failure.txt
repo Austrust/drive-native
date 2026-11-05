@@ -1,0 +1,5 @@
+Traceback (most recent call last):
+  File "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/issue7-validation/G4-evidence-bundle-013-final/harness/run-g4-013-supplements.py", line 239, in <module>
+    assert updated['all_passed'] is True and updated['counts']['total'] == 70, updated['counts']
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: {'failed': 2, 'ignored': 0, 'passed': 64, 'total': 66}

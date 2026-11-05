@@ -1,0 +1,10 @@
+# command: cargo test -p sproto --lib error::tests -p drive-core --lib write_permissions::tests --locked --offline -j2
+# started: 2026-11-05T16:35:00+08:00
+# purpose: re-run after T4-requested assert-only defence (final pre-freeze)
+error: the argument '--lib' cannot be used multiple times
+
+Usage: cargo test [OPTIONS] [TESTNAME] [-- [ARGS]...]
+
+For more information, try '--help'.
+# exit=1
+# finished: 2026-11-05T16:35:00+08:00

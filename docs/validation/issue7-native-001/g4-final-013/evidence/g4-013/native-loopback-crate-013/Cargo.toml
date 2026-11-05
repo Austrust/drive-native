@@ -1,0 +1,13 @@
+[package]
+name = "native-loopback-probe-013"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+sproto = { path = "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/source/crates/sproto", features = ["protocol-research"] }
+tokio = { version = "1", features = ["full"] }
+serde_json = "1"
+tempfile = "3"

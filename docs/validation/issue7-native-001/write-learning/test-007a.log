@@ -1,0 +1,46 @@
+# command: cargo test -p sproto --lib error::tests --locked --offline -j2
+# started: 2026-11-05T16:35:37+08:00
+# purpose: re-run after T4-requested assert-only defence (final pre-freeze)
+warning: unused import: `validate_path`
+ --> crates/sproto/src/actions/transfer.rs:4:36
+  |
+4 | use super::native::{NativeVersion, validate_path};
+  |                                    ^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `AsyncReadExt` and `AsyncSeekExt`
+  --> crates/sproto/src/actions/transfer.rs:14:17
+   |
+14 | use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWrite};
+   |                 ^^^^^^^^^^^^  ^^^^^^^^^^^^
+
+warning: method `send_binary` is never used
+  --> crates/sproto/src/channel.rs:80:25
+   |
+77 | impl Channel {
+   | ------------ method in this implementation
+...
+80 |     pub(crate) async fn send_binary<R: AsyncRead + Unpin>(
+   |                         ^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `sproto` (lib test) generated 3 warnings (run `cargo fix --lib -p sproto --tests` to apply 2 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.69s
+     Running unittests src/lib.rs (/home/drive-native-test/.cache/p032-writelearn-target/debug/deps/sproto-920adeb25dc9c94b)
+
+running 8 tests
+test error::tests::mutation_permission_hints_are_action_scoped_and_never_definite_refusals ... ok
+test error::tests::null_error ... ok
+test error::tests::error_missing_fields ... ok
+test error::tests::only_the_upload_create_acl_code_is_a_definite_mutation_refusal ... ok
+test error::tests::oversized_error_code_cannot_alias_a_permission_refusal ... ok
+test error::tests::no_error_field ... ok
+test error::tests::server_error ... ok
+test error::tests::session_invalid_errors ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 154 filtered out; finished in 0.01s
+
+# exit=0
+# finished: 2026-11-05T16:35:44+08:00

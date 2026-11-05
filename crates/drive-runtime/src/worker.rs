@@ -580,6 +580,13 @@ fn mutation_permission_response(
     if kind == "upload" {
         if let Some(node) = node {
             if node.version != drive_core::creations::CREATE_VERSION {
+                // Defence in depth (T4 review): sproto already guarantees this
+                // typed variant only for 0x9003, but the learning path must not
+                // publish a definite denial for any other numeric code.
+                debug_assert_eq!(
+                    code, 0x9003,
+                    "typed ACL denial must be the Create ACL code"
+                );
                 return Response::PermissionDenied {
                     node: node.id.clone(),
                     action: drive_core::write_permissions::Action::WriteContent,

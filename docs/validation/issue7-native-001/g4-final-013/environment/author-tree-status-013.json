@@ -1,0 +1,75 @@
+{
+  "worktree": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/fix-7",
+  "git_dir": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/public-summary-20261031/.git",
+  "head": {
+    "argv": [
+      "git",
+      "-c",
+      "safe.directory=*",
+      "--git-dir=/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/public-summary-20261031/.git",
+      "rev-parse",
+      "HEAD"
+    ],
+    "exit_code": 0,
+    "stdout": "ee3ba90b411cc345a5142d8e71483615e29df279",
+    "stderr": ""
+  },
+  "candidate_commit_object": {
+    "argv": [
+      "git",
+      "-c",
+      "safe.directory=*",
+      "--git-dir=/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/public-summary-20261031/.git",
+      "rev-parse",
+      "--verify",
+      "fefb8ee0b02f68ec0e76d9cd89b6f37172d645b4^{commit}"
+    ],
+    "exit_code": 0,
+    "stdout": "fefb8ee0b02f68ec0e76d9cd89b6f37172d645b4",
+    "stderr": ""
+  },
+  "candidate_tree": {
+    "argv": [
+      "git",
+      "-c",
+      "safe.directory=*",
+      "--git-dir=/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/public-summary-20261031/.git",
+      "rev-parse",
+      "--verify",
+      "fefb8ee0b02f68ec0e76d9cd89b6f37172d645b4^{tree}"
+    ],
+    "exit_code": 0,
+    "stdout": "72ab91c1eb290f0f642aa416e9e1c84c7c8dba2e",
+    "stderr": ""
+  },
+  "candidate_tree_entries": 44,
+  "status_porcelain": {
+    "argv": [
+      "git",
+      "-c",
+      "safe.directory=*",
+      "--git-dir=/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/public-summary-20261031/.git",
+      "status",
+      "--porcelain"
+    ],
+    "exit_code": 0,
+    "stdout": "D .gitattributes\n M .gitignore\n D Cargo.lock\n D Cargo.toml\n D DELIVERY_GATES.md\n D GOAL.md\n D LICENSE\n M README.md\n D crates/README.md\n D crates/drive-core/Cargo.toml\n D crates/drive-core/README.md\n D crates/drive-core/examples/durability_fixture.rs\n D crates/drive-core/examples/native_state_roundtrip.rs\n D crates/drive-core/examples/performance_fixture.rs\n D crates/drive-core/src/backend.rs\n D crates/drive-core/src/bin/drive-native-lab.rs\n D crates/drive-core/src/cache_policy.rs\n D crates/drive-core/src/cache_release.rs\n D crates/drive-core/src/commit_origin.rs\n D crates/drive-core/src/conflicts.rs\n D crates/drive-core/src/creations.rs\n D crates/drive-core/src/desktop_status.rs\n D crates/drive-core/src/directories.rs\n D crates/drive-core/src/directory_conflicts.rs\n D crates/drive-core/src/download_jobs.rs\n D crates/drive-core/src/drafts.rs\n D crates/drive-core/src/engine_bridge.rs\n D crates/drive-core/src/engine_upload.rs\n D crates/drive-core/src/filesystem.rs\n D crates/drive-core/src/lib.rs\n D crates/drive-core/src/namespace.rs\n D crates/drive-core/src/native.rs\n D crates/drive-core/src/native_directory.rs\n D crates/drive-core/src/native_namespace.rs\n D crates/drive-core/src/native_root_guard.rs\n D crates/drive-core/src/native_snapshot.rs\n D crates/drive-core/src/native_upload.rs\n D crates/drive-core/src/native_upload_origin.rs\n D crates/drive-core/src/removals.rs\n D crates/drive-core/src/replacements.rs\n D crates/drive-core/src/state.rs\n D crates/drive-core/src/transfer_policy.rs\n D crates/drive-core/src/upload_jobs.rs\n D crates/drive-core/src/upload_origin.rs\n D crates/drive-core/tests/cache_policy.rs\n D crates/drive-core/tests/conflicts.rs\n D crates/drive-core/tests/creation_conflicts.rs\n D crates/drive-core/tests/creations.rs\n D crates/drive-core/tests/directories.rs\n D crates/drive-core/tests/directory_conflicts.rs\n D crates/drive-core/tests/download_jobs.rs\n D crates/drive-core/tests/drafts.rs\n D crates/drive-core/tests/filesystem_metadata.rs\n D crates/drive-core/tests/metadata_performance.rs\n D crates/drive-core/tests/namespace.rs\n D crates/drive-core/tests/native_access.rs\n D crates/drive-core/tests/native_snapshot.rs\n D crates/drive-core/tests/package_upgrade.rs\n D crates/drive-core/tests/removals.rs\n D crates/drive-core/tests/replace_origin.rs\n D crates/drive-core/tests/replacements.rs\n D crates/drive-core/tests/snapshot_recovery.rs\n D crates/drive-core/tests/state_scenarios.rs\n D crates/drive-core/tests/streaming_recovery.rs\n D crates/drive-core/tests/upload_origin.rs\n D crates/drive-fs/Cargo.toml\n D crates/drive-fs/README.md\n D crates/drive-fs/examples/office_mount.rs\n D crates/drive-fs/src/lib.rs\n D crates/drive-fs/src/namespace.rs\n D crates/drive-fs/src/read_requests.rs\n D crates/drive-fs/src/writable.rs\n D crates/drive-fs/tests/interrupted.rs\n D crates/drive-fs/tests/mounted.rs\n D crates/drive-runtime/Cargo.toml\n D crates/drive-runtime/README.md\n D crates/drive-runtime/examples/desktop_page_bench.rs\n D crates/drive-runtime/examples/local_metadata_bench.rs\n D crates/drive-runtime/examples/mount_registry_roundtrip.rs\n D crates/drive-runtime/examples/multi_mount_fixture.rs\n D crates/drive-runtime/examples/native_access_probe.rs\n D crates/drive-runtime/examples/native_access_service.rs\n D crates/drive-runtime/examples/native_cache_roundtrip.rs\n D crates/drive-runtime/examples/native_cancel_roundtrip.rs\n D crates/drive-runtime/examples/native_conflict_roundtrip.rs\n D crates/drive-runtime/examples/native_directory_conflict.rs\n D crates/drive-runtime/examples/native_directory_recovery.rs\n D crates/drive-runtime/examples/native_directory_roundtrip.rs\n D crates/drive-runtime/examples/native_gio_roundtrip.rs\n D crates/drive-runtime/examples/native_identity_upload.rs\n D crates/drive-runtime/examples/native_mount_roundtrip.rs\n D crates/drive-runtime/examples/native_namespace_identity_races.rs\n D crates/drive-runtime/examples/native_office_roundtrip.rs\n D crates/drive-runtime/examples/native_package_upgrade.rs\n D crates/dr",
+    "stderr": ""
+  },
+  "log": {
+    "argv": [
+      "git",
+      "-c",
+      "safe.directory=*",
+      "--git-dir=/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/public-summary-20261031/.git",
+      "log",
+      "--oneline",
+      "-5",
+      "fefb8ee0b02f68ec0e76d9cd89b6f37172d645b4"
+    ],
+    "exit_code": 0,
+    "stdout": "fefb8ee fix(acl): learn the proven pre-commit upload ACL refusal\n9c28992 docs(acl): record final offline validation and local deb scope\n9c9aaba fix(acl): clean cancelled retry intent when a permission gate rejects\n2dafd12 fix(acl): stop background downloads after a definite read refusal\nad48f13 docs(acl): preserve independent failures and blocked final validation",
+    "stderr": ""
+  },
+  "candidate_archived_by": "git archive from this object database (see prepared source.json)"
+}

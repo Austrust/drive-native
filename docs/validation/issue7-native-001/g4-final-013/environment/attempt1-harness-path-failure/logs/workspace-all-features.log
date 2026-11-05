@@ -1,0 +1,72 @@
+   Compiling tokio v1.54.1
+   Compiling rustls v0.23.37
+   Compiling tracing v0.1.44
+   Compiling tokio-rustls v0.26.4
+   Compiling sproto v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/source/crates/sproto)
+   Compiling drive-core v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/source/crates/drive-core)
+   Compiling fuser v0.16.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/source/vendor/fuser)
+warning: struct `cuse_init_in` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:814:12
+    |
+814 | pub struct cuse_init_in {
+    |            ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: struct `cuse_init_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:823:12
+    |
+823 | pub struct cuse_init_out {
+    |            ^^^^^^^^^^^^^
+
+warning: struct `fuse_ioctl_iovec` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:868:12
+    |
+868 | pub struct fuse_ioctl_iovec {
+    |            ^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:996:12
+    |
+996 | pub struct fuse_notify_retrieve_out {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_in` is never constructed
+    --> vendor/fuser/src/ll/fuse_abi.rs:1006:12
+     |
+1006 | pub struct fuse_notify_retrieve_in {
+     |            ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `fuser` (lib) generated 5 warnings
+   Compiling zbus v6.1.0
+   Compiling drive-fs v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/source/crates/drive-fs)
+   Compiling drive-runtime v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/source/crates/drive-runtime)
+   Compiling console v0.16.3
+   Compiling clap_derive v4.6.0
+   Compiling tracing-subscriber v0.3.23
+   Compiling indicatif v0.18.4
+   Compiling clap v4.6.0
+warning: function `states` is never used
+  --> crates/drive-runtime/examples/support/service.rs:51:14
+   |
+51 | pub async fn states(p: &zbus::Proxy<'_>, path: &str) -> Result<serde_json::Value> {
+   |              ^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `wait_state` is never used
+  --> crates/drive-runtime/examples/support/service.rs:76:14
+   |
+76 | pub async fn wait_state(p: &zbus::Proxy<'_>, path: &str, status: &str) -> Result<()> {
+   |              ^^^^^^^^^^
+
+warning: `drive-runtime` (example "native_access_service") generated 2 warnings
+error: could not compile `drive-runtime` (example "native_conflict_roundtrip")
+
+Caused by:
+  process didn't exit successfully: `rustc --crate-name native_conflict_roundtrip --edition=2024 crates/drive-runtime/examples/native_conflict_roundtrip.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type bin --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 --cfg 'feature="native-research"' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("native-research"))' -C metadata=434b69d94c6e0c87 -C extra-filename=-33e585bfffda2286 --out-dir /home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/examples -L dependency=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps --extern drive_core=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/libdrive_core-2ad54493309c7420.rlib --extern drive_fs=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/libdrive_fs-6fe71c4779842879.rlib --extern drive_runtime=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/libdrive_runtime-bb0fbf610247b044.rlib --extern fuser=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/libfuser-76118c7a6592e096.rlib --extern libc=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/liblibc-eb47a281cd33d35e.rlib --extern nix=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/libnix-abd493f2636ed47f.rlib --extern rpassword=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/librpassword-259a670b8ba2d5a6.rlib --extern serde=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/libserde-a2a6a4d160d76ec3.rlib --extern serde_json=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/libserde_json-823a26216752c53d.rlib --extern sha2=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/libsha2-04d7736cc82c6bb2.rlib --extern sproto=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/libsproto-d73a0a684fb715f9.rlib --extern tempfile=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/libtempfile-5e47b4e12201a349.rlib --extern tokio=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/libtokio-bac44a1779f7c538.rlib --extern uuid=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/libuuid-0073e6c0a0bb3aa2.rlib --extern zbus=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/libzbus-77b5bc356f2f34f8.rlib -L native=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/build/libsqlite3-sys-16cd1f1f2086313a/out -L native=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/build/aws-lc-sys-6437d12c159a9030/out -L native=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/build/ring-75f524bd46ed2359/out` (signal: 15, SIGTERM: termination signal)
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `drive-runtime` (example "native_initialization_readonly")
+
+Caused by:
+  process didn't exit successfully: `rustc --crate-name native_initialization_readonly --edition=2024 crates/drive-runtime/examples/native_initialization_readonly.rs --error-format=json --json=diagnostic-rendered-ansi,artifacts,future-incompat --crate-type bin --emit=dep-info,link -C embed-bitcode=no -C debuginfo=2 --cfg 'feature="native-research"' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("native-research"))' -C metadata=5b91991858b46f33 -C extra-filename=-0c1291ec9bdfc4f8 --out-dir /home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/examples -L dependency=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps --extern drive_core=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/libdrive_core-2ad54493309c7420.rlib --extern drive_fs=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/libdrive_fs-6fe71c4779842879.rlib --extern drive_runtime=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/libdrive_runtime-bb0fbf610247b044.rlib --extern fuser=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/libfuser-76118c7a6592e096.rlib --extern libc=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/liblibc-eb47a281cd33d35e.rlib --extern nix=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/libnix-abd493f2636ed47f.rlib --extern rpassword=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/librpassword-259a670b8ba2d5a6.rlib --extern serde=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/libserde-a2a6a4d160d76ec3.rlib --extern serde_json=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/libserde_json-823a26216752c53d.rlib --extern sha2=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/libsha2-04d7736cc82c6bb2.rlib --extern sproto=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/libsproto-d73a0a684fb715f9.rlib --extern tempfile=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/libtempfile-5e47b4e12201a349.rlib --extern tokio=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/libtokio-bac44a1779f7c538.rlib --extern uuid=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/libuuid-0073e6c0a0bb3aa2.rlib --extern zbus=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/libzbus-77b5bc356f2f34f8.rlib -L native=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/build/libsqlite3-sys-16cd1f1f2086313a/out -L native=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/build/aws-lc-sys-6437d12c159a9030/out -L native=/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/build/ring-75f524bd46ed2359/out` (signal: 15, SIGTERM: termination signal)

@@ -1,0 +1,9 @@
+test_confirmation_clears_notice_without_assuming_other_queue_work_done (__main__.QueueTests.test_confirmation_clears_notice_without_assuming_other_queue_work_done) ... ok
+test_counts_mean_operations_not_connectivity_or_file_count (__main__.QueueTests.test_counts_mean_operations_not_connectivity_or_file_count) ... ok
+test_legacy_absent_and_invalid_counts_do_not_invent_uncertainty (__main__.QueueTests.test_legacy_absent_and_invalid_counts_do_not_invent_uncertainty) ... ok
+test_online_window_exposes_uncertainty_and_progress_cannot_mask_it (__main__.QueueTests.test_online_window_exposes_uncertainty_and_progress_cannot_mask_it) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.048s
+
+OK

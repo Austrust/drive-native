@@ -1,0 +1,105 @@
+{
+  "scope": "copied harness files vs frozen G4-012-final MANIFEST (read-only prior evidence)",
+  "prior_manifest": "C:\\Users\\a_tas\\Desktop\\MFMLAB\\Personal_Sync\\20-Coding\\P032-群晖Drive按需同步\\work\\issue7-validation\\G4-evidence-bundle-012-final\\MANIFEST.json",
+  "prior_manifest_sha256": "462d2efcc3b0aef2f58dd813c5c8242f58e15c7d5f0310c0c1a5ac95433e58b3",
+  "checked": 25,
+  "mismatches": [],
+  "known_intentional_differences": {
+    "run-native-loopback.sh": "intentional path-resolution adaptation; original bytes differ (header documents why)"
+  },
+  "verifier_authored_files": [
+    {
+      "path": "harness/check-bundle-013.py",
+      "sha256": "160f35951bdbb187fe8a393f49ccd38b8d3039304c48a6d5e10191ccf91cbf8a"
+    },
+    {
+      "path": "harness/check-harness-copies.py",
+      "sha256": "d1b9e1c5606c193217750ec915c56f58be90dfb7b5605c19d89896922e9bc34c"
+    },
+    {
+      "path": "harness/collect-environment-013.py",
+      "sha256": "9e2ae7b4997939e287a2e343b836a36b8936321debb8868571ef588a82ebf2fc"
+    },
+    {
+      "path": "harness/export-013.py",
+      "sha256": "80699b387d27a3849a71de1056e780e58dc6b1df054fc6df2da881311d46a041"
+    },
+    {
+      "path": "harness/finalize-bundle-013.py",
+      "sha256": "9b0bc98c37a94572d483dde31fd7004b4dff6b20678f5105b29075ce5cba2e0e"
+    },
+    {
+      "path": "harness/native-loopback-013/Cargo.toml.in",
+      "sha256": "1b4f0df744bc4c26c5ecc8b44e7d18805c29ee7dd1cbdf3c884eda9050f463e4"
+    },
+    {
+      "path": "harness/native-loopback-013/COVERAGE.md",
+      "sha256": "e45328e453eaa9ec3160c6dc5c980b5f766cea6e21650ae84597c852a39af9d7"
+    },
+    {
+      "path": "harness/native-loopback-013/main.rs",
+      "sha256": "2db159d6a21e78a31dc9ce131b569b35c76023619b97fa2f63df8d236dc2b883"
+    },
+    {
+      "path": "harness/native-loopback-013/prepare.py",
+      "sha256": "7b3f9ab37b274159d8b4db9ac4f03b9d78e5fdc6a6a478025acf8cf4c82c8445"
+    },
+    {
+      "path": "harness/native-loopback-013/README.md",
+      "sha256": "7cfa9c8d4bcee6f8c32c8b69a71a2557161fc7f46a7f6b9def28214f839c5d3c"
+    },
+    {
+      "path": "harness/native-loopback-013/RUNBOOK.md",
+      "sha256": "8e2b3582ce4d6abcf653fe75a266763a190b016ad0436028d93f72734db627c3"
+    },
+    {
+      "path": "harness/native-loopback-013/verify-lock.py",
+      "sha256": "eaddc49f34e67cd5663d2bbd4c962ab2f4e288bd4e258b5cccd4567285541692"
+    },
+    {
+      "path": "harness/native-loopback-013-patch.json",
+      "sha256": "f55358471d56a0301013410a01254a8988c17c58d8efaccd450deebfadebf5e6"
+    },
+    {
+      "path": "harness/patch-native-loopback-013.py",
+      "sha256": "6118906dd019b82c2c1a9f9e838cc30f3607274101cc9e74c103fa5f25042760"
+    },
+    {
+      "path": "harness/prepare-g4-013.py",
+      "sha256": "92205001ffd3cb0e8e0fc8cef081ba8a02cccfc536b6f166ca3c7d653684658c"
+    },
+    {
+      "path": "harness/run-g4-013-supplements.py",
+      "sha256": "9aa7cbf003ddf8500a428251d29bf40e3468ae42ab1fe884b8abca648021e817"
+    },
+    {
+      "path": "harness/run-g4-013.py",
+      "sha256": "88fa9b573ac109d85b1c7af2fcf4b2c02e81a0be58527f8031c411b1a9c5271d"
+    },
+    {
+      "path": "harness/run-native-loopback-013.sh",
+      "sha256": "9f2b6d4beed5b7e5c6b9bdd9abf1e053bbd13ccbad7a3881f9cf36c6b4885869"
+    },
+    {
+      "path": "harness/scan-server-immediates.py",
+      "sha256": "8dd856c07341f6d9e4072de2869527aa0ed4e1f004059cd761f566d31c25bb40"
+    },
+    {
+      "path": "harness/snapshot-verify.py",
+      "sha256": "805d84fb1369e5c047e7c2e72f9fe068f5e19f93781e0334dc83114c04eaf623"
+    },
+    {
+      "path": "harness/start-g4-013.sh",
+      "sha256": "3c929889e51aea56812dda075f125a8fa4a6f645d5e18dcd9b03ef9da406a155"
+    },
+    {
+      "path": "harness/verify-packaging-013.py",
+      "sha256": "fa8d63965daa1d015fd933647aef262cc7ea5ce16525e0bade4d12c5f24c2c79"
+    },
+    {
+      "path": "harness/verify-t2-evidence.py",
+      "sha256": "6452f30dd20c89dc878fea6d35759bf3b7c2293c38de9bd6a1e149370a85975e"
+    }
+  ],
+  "passed": true
+}

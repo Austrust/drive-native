@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/source/scripts/stage-docs.py", line 89, in <module>
+    stage(Path(__file__).resolve().parents[1], args.destination.resolve())
+  File "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/source/scripts/stage-docs.py", line 18, in stage
+    raise ValueError('set DRIVE_NATIVE_SOURCE_COMMIT to the source archive commit')
+ValueError: set DRIVE_NATIVE_SOURCE_COMMIT to the source archive commit

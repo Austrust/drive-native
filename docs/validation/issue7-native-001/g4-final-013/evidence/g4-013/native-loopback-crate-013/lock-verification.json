@@ -1,0 +1,11 @@
+{
+  "registry_dependencies_checked": 125,
+  "metadata_registry_dependencies_checked": 125,
+  "new_or_changed_registry_dependencies": [],
+  "metadata_registry_dependencies_absent_from_lock": [],
+  "unexpected_path_dependencies": [],
+  "all_registry_dependencies_match_frozen_candidate": true,
+  "source_cargo_lock_sha256": "fcaf7417018889efefaffd45ac2e4931a1b01dd5fc83e6a9fc9f0806093268dd",
+  "harness_cargo_lock_sha256": "286d97736ae29358137467946828e5001007e0d9ff67a0ba62f69da77c4c4fd9",
+  "cargo_metadata_sha256": "8f4375492bb7f96622839490edb9bb8a8504c44a11ebfefe26bda9f7396fa0df"
+}

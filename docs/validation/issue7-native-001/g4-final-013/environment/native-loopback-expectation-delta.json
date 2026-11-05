@@ -1,0 +1,183 @@
+{
+  "scope": "frozen 012 native-loopback expectation vs corrected verifier harness for the intended T1 classification change; only expected/observed fields of two cases change",
+  "harness_source": {
+    "frozen_012_main_sha256": "e9290665ceedcb9e21eb1c18b1bbc1c2016de471e3cb614c8c02b119c18c53bd",
+    "patched_main_sha256": "2db159d6a21e78a31dc9ce131b569b35c76023619b97fa2f63df8d236dc2b883",
+    "patch_record": "harness/native-loopback-013-patch.json",
+    "frozen_copy": "harness/native-loopback/main.rs",
+    "patched_copy": "harness/native-loopback-013/main.rs"
+  },
+  "frozen_run_counts": {
+    "failed": 2,
+    "ignored": 0,
+    "passed": 64,
+    "total": 66
+  },
+  "corrected_run_counts": {
+    "failed": 0,
+    "ignored": 0,
+    "passed": 70,
+    "total": 70
+  },
+  "expected_and_observed_changes": [
+    {
+      "case": "mkdir_reply_9003",
+      "frozen_expected": {
+        "code": 36867,
+        "kind": "mutation_permission_uncertain"
+      },
+      "frozen_observed": {
+        "kind": "other",
+        "message": "native mutation permission denial (0x9003); refused before commit"
+      },
+      "corrected_expected": {
+        "code": 36867,
+        "kind": "mutation_permission_denied"
+      },
+      "corrected_observed": {
+        "code": 36867,
+        "kind": "mutation_permission_denied"
+      }
+    },
+    {
+      "case": "upload_reply_9003",
+      "frozen_expected": {
+        "code": 36867,
+        "kind": "mutation_permission_uncertain"
+      },
+      "frozen_observed": {
+        "kind": "other",
+        "message": "native mutation permission denial (0x9003); refused before commit"
+      },
+      "corrected_expected": {
+        "code": 36867,
+        "kind": "mutation_permission_denied"
+      },
+      "corrected_observed": {
+        "code": 36867,
+        "kind": "mutation_permission_denied"
+      }
+    }
+  ],
+  "adversarial_additions": [
+    {
+      "bind_address": "127.0.0.1:42615",
+      "elapsed_seconds": 0.0035684,
+      "expected": {
+        "code": 36867,
+        "kind": "server"
+      },
+      "name": "download_reply_9003",
+      "observed": {
+        "code": 36867,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "download",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:41513",
+      "elapsed_seconds": 0.003509091,
+      "expected": {
+        "code": 40964,
+        "kind": "server"
+      },
+      "name": "download_reply_a004",
+      "observed": {
+        "code": 40964,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action": "download",
+          "action_requests": 1,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "action",
+          "request_fields_checked": true,
+          "upload_payload_bytes": 0
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:40347",
+      "elapsed_seconds": 0.002813984,
+      "expected": {
+        "code": 36867,
+        "kind": "server"
+      },
+      "name": "t1_setup_Auth_9003_is_generic",
+      "observed": {
+        "code": 36867,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action_requests": 0,
+          "commands": [
+            25,
+            18
+          ],
+          "reply_stage": "auth"
+        }
+      },
+      "status": "pass"
+    },
+    {
+      "bind_address": "127.0.0.1:32807",
+      "elapsed_seconds": 0.003345374,
+      "expected": {
+        "code": 36867,
+        "kind": "server"
+      },
+      "name": "t1_setup_Connect_9003_is_generic",
+      "observed": {
+        "code": 36867,
+        "kind": "server"
+      },
+      "passed": true,
+      "server": {
+        "passed": true,
+        "trace": {
+          "action_requests": 0,
+          "commands": [
+            25,
+            18,
+            25,
+            14
+          ],
+          "reply_stage": "connect"
+        }
+      },
+      "status": "pass"
+    }
+  ],
+  "unchanged_012_cases": 64,
+  "reason": "fefb8ee intentionally types a direct upload reply 0x9003 as MutationPermissionDenied; the native upload wire action also carries mkdir, so the sproto public API surfaces the typed variant there; the runtime worker downgrades creation/mkdir to a hint (T1 report).",
+  "judgement": "intended behaviour change, not a regression: all other 64 frozen cases produce identical observed classifications, and 4 adversarial cases prove the typed refusal does not leak into download or handshake classification"
+}

@@ -1,0 +1,18 @@
+{
+  "frozen_012_main_sha256": "e9290665ceedcb9e21eb1c18b1bbc1c2016de471e3cb614c8c02b119c18c53bd",
+  "pre_patch_main_sha256": "e9290665ceedcb9e21eb1c18b1bbc1c2016de471e3cb614c8c02b119c18c53bd",
+  "classify arm": {
+    "matched": 1,
+    "applied": true
+  },
+  "refusal expectation for upload/mkdir 0x9003": {
+    "matched": 1,
+    "applied": true
+  },
+  "adversarial additions (download/setup must stay generic)": {
+    "matched": 1,
+    "applied": true
+  },
+  "post_patch_main_sha256": "2db159d6a21e78a31dc9ce131b569b35c76023619b97fa2f63df8d236dc2b883",
+  "scope": "classify arm + upload/mkdir 0x9003 expectation (intended T1 delta) + download 0x9003/0xa004 and setup 0x9003 generic-classification additions; all other 012 expectations identical"
+}

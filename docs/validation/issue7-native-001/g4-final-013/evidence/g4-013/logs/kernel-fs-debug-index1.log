@@ -1,0 +1,213 @@
+   Compiling fuser v0.16.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/source/vendor/fuser)
+warning: unused import: `validate_path`
+ --> crates/sproto/src/actions/transfer.rs:4:36
+  |
+4 | use super::native::{NativeVersion, validate_path};
+  |                                    ^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `AsyncReadExt` and `AsyncSeekExt`
+  --> crates/sproto/src/actions/transfer.rs:14:17
+   |
+14 | use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWrite};
+   |                 ^^^^^^^^^^^^  ^^^^^^^^^^^^
+
+warning: function `binary_parts` is never used
+  --> crates/sproto/src/pstream/encode.rs:68:15
+   |
+68 | pub(crate) fn binary_parts(obj: &PObject) -> Result<(Vec<u8>, Vec<u8>, u64)> {
+   |               ^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `send_binary` is never used
+  --> crates/sproto/src/channel.rs:80:25
+   |
+77 | impl Channel {
+   | ------------ method in this implementation
+...
+80 |     pub(crate) async fn send_binary<R: AsyncRead + Unpin>(
+   |                         ^^^^^^^^^^^
+
+warning: function `mutation_reply_error` is never used
+  --> crates/sproto/src/error.rs:85:15
+   |
+85 | pub(crate) fn mutation_reply_error(action: &str, error: Error) -> Error {
+   |               ^^^^^^^^^^^^^^^^^^^^
+
+warning: `sproto` (lib) generated 5 warnings (run `cargo fix --lib -p sproto` to apply 2 suggestions)
+warning: method `verify_root` is never used
+  --> crates/drive-core/src/native_root_guard.rs:86:25
+   |
+26 | impl NativeReadSession {
+   | ---------------------- method in this implementation
+...
+86 |     pub(super) async fn verify_root(&self) -> Result<()> {
+   |                         ^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `drive-core` (lib) generated 1 warning
+warning: struct `cuse_init_in` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:814:12
+    |
+814 | pub struct cuse_init_in {
+    |            ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: struct `cuse_init_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:823:12
+    |
+823 | pub struct cuse_init_out {
+    |            ^^^^^^^^^^^^^
+
+warning: struct `fuse_ioctl_iovec` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:868:12
+    |
+868 | pub struct fuse_ioctl_iovec {
+    |            ^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:996:12
+    |
+996 | pub struct fuse_notify_retrieve_out {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_in` is never constructed
+    --> vendor/fuser/src/ll/fuse_abi.rs:1006:12
+     |
+1006 | pub struct fuse_notify_retrieve_in {
+     |            ^^^^^^^^^^^^^^^^^^^^^^^
+
+   Compiling drive-fs v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/source/crates/drive-fs)
+warning: `fuser` (lib) generated 5 warnings
+warning: unused imports: `MetadataExt` and `PermissionsExt`
+  --> crates/drive-fs/tests/preview_plus_revoke.rs:11:20
+   |
+11 |         unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
+   |                    ^^^^^^^^^^^                  ^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `names` is never used
+   --> crates/drive-fs/tests/preview_plus_revoke.rs:144:4
+    |
+144 | fn names(p: &Path) -> std::io::Result<Vec<String>> {
+    |    ^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `drive-fs` (test "preview_plus_revoke") generated 2 warnings (run `cargo fix --test "preview_plus_revoke" -p drive-fs` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 15.30s
+     Running unittests src/lib.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/drive_fs-48dd840b4a109301)
+
+running 7 tests
+test cached_close_tests::cached_readonly_sync_and_close_ignore_metadata_backlog ... ok
+test cached_close_tests::draft_and_writable_fsync_still_wait_for_metadata_checkpoint ... ok
+test cached_close_tests::failed_draft_release_reports_error_and_survives_gc_and_reopen ... ok
+test isolation_tests::held_content_reads_survive_all_metadata_workers_waiting_for_store ... ok
+test shutdown_tests::held_file_and_directory_do_not_hold_session_join_and_dirty_bytes_survive ... ok
+test shutdown_tests::stop_cancels_unfinished_network_read_without_waiting_for_download_timeout ... ok
+test shutdown_tests::stop_drains_accepted_local_jobs_and_preserves_successful_fsync ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 41 filtered out; finished in 4.34s
+
+     Running tests/deadlock_regression.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/deadlock_regression-571753791886200b)
+
+running 2 tests
+test invalidation_delivery_never_stalls_other_requests ... ok
+test rename_and_delete_under_ttl_do_not_deadlock_concurrent_old_path_stats ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.58s
+
+     Running tests/directory_views.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/directory_views-8bd073218be22d84)
+
+running 1 test
+test directory_continuation_and_seek_keep_one_view_without_waiting_for_store ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.49s
+
+     Running tests/entry_revalidation.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/entry_revalidation-c6abffb5b4322881)
+
+running 2 tests
+test new_open_of_old_name_does_not_truncate_renamed_object ... ok
+test new_open_of_old_path_does_not_truncate_object_moved_to_another_parent ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+
+     Running tests/interrupted.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/interrupted-9f3f301204623045)
+
+running 1 test
+test fatal_signal_cancels_kernel_read_and_frees_hydration_worker ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.25s
+
+     Running tests/mounted.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/mounted-1c702cca593bb656)
+
+running 6 tests
+test kernel_atomic_replace_keeps_source_inode_and_old_target_handle ... ok
+test kernel_cache_mount_metadata_reads_version_switch_and_offline_error ... ok
+test kernel_offline_nested_mkdir_moves_and_restart_preserve_tree_and_child_bytes ... ok
+test kernel_permissions_owner_restore_and_local_capacity_are_real ... ok
+test kernel_random_write_shared_handles_truncate_fsync_and_recovery ... ok
+test kernel_unlink_open_handles_same_name_recreate_and_offline_missing_guard ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.58s
+
+     Running tests/namespace_index_kernel.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/namespace_index_kernel-05865b8dcc0810b3)
+
+running 2 tests
+test indexed_plain_continuation_and_seek_do_not_wait_for_store ... ok
+test indexed_plus_continuation_and_seek_do_not_wait_for_store ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.99s
+
+     Running tests/permissions_kernel.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/permissions_kernel-2f7c9bf3359689fc)
+
+running 5 tests
+test live_revocation_restoration_and_list_vs_traverse ... ok
+test parent_self_permissions_do_not_deny_independent_child_removal_or_rename ... ok
+test root_a_b_and_action_classes_are_enforced_in_one_mount ... ok
+test setattr_only_persists_mtime_without_granting_content_writes_or_uploads ... ok
+test target_parent_cover_target_and_independent_submount ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.15s
+
+     Running tests/preview_plus_revoke.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/preview_plus_revoke-b9e25bbd93b765b8)
+
+running 1 test
+test preview_plus_cannot_disclose_denied_names_while_store_is_busy ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.26s
+
+     Running tests/preview_tests.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/preview_tests-91e4e1d89bb11323)
+
+running 7 tests
+test cold_preview_browses_received_parent_and_pending_is_not_empty ... ok
+test parent_preview_stream_is_revoked_when_a_listed_child_is_denied ... ok
+test preview_content_and_all_supported_mutations_reject_without_hydration_or_journal ... ok
+test preview_directory_continuation_is_revoked_after_denial ... ok
+test promotion_preserves_mount_and_inode_and_enables_authoritative_content_and_writes ... ok
+test restarted_candidate_recovers_same_mount_without_promoting_old_preview_handles ... ok
+test warm_authoritative_mount_does_not_read_the_pending_candidate ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.17s
+
+     Running tests/readdirplus.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/readdirplus-feb6981853912c58)
+
+running 2 tests
+test readdirplus_continuation_does_not_wait_for_a_busy_store ... ok
+test readdirplus_pages_stay_consistent_with_plain_metadata_and_invalidate ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.90s
+
+     Running tests/timestamps.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/timestamps-35b01fb076531e10)
+
+running 2 tests
+test atime_omit_does_not_download_and_directory_mtime_is_honestly_unsupported ... ok
+test touch_and_cp_preserve_file_mtime_with_durable_upload_intent ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.38s
+

@@ -1,0 +1,15 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.83s
+     Running unittests src/lib.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/target/debug/deps/sproto-b03e745c7e349904)
+
+running 8 tests
+test error::tests::error_missing_fields ... ok
+test error::tests::mutation_permission_hints_are_action_scoped_and_never_definite_refusals ... ok
+test error::tests::null_error ... ok
+test error::tests::no_error_field ... ok
+test error::tests::only_the_upload_create_acl_code_is_a_definite_mutation_refusal ... ok
+test error::tests::oversized_error_code_cannot_alias_a_permission_refusal ... ok
+test error::tests::server_error ... ok
+test error::tests::session_invalid_errors ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 160 filtered out; finished in 0.00s
+

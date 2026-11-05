@@ -1,0 +1,19 @@
+{
+  "repo": "None",
+  "git_dir": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/public-summary-20261031/.git",
+  "commit": "fefb8ee0b02f68ec0e76d9cd89b6f37172d645b4",
+  "root_tree": "72ab91c1eb290f0f642aa416e9e1c84c7c8dba2e",
+  "source": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/source",
+  "entries": 2483,
+  "verified_blobs": 2483,
+  "extra_files": [],
+  "allowed_extra_files": [
+    "vendor/fuser/Cargo.lock"
+  ],
+  "missing_files": [],
+  "problems": [],
+  "problem_count": 0,
+  "tree_listing_sha256": "8524b9164280d9c077e2d632222489970bda854a3ca06fea779cbe3586452c10",
+  "passed": true,
+  "method": "git ls-tree -r blob object ids + path set + executable bit; no product source writes"
+}

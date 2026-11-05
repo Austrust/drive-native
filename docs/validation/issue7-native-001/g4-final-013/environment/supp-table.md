@@ -1,0 +1,24 @@
+| 命令 | 通过 | 失败 | 忽略 | 退出码 | 状态 | 日志 |
+|---|---:|---:|---:|---:|---|---|
+| `native-loopback-updated` | 70 | 0 | 0 | 0 | 通过 | [logs/native-loopback-updated.log](evidence/g4-013/supplemental-001/logs/native-loopback-updated.log) |
+| `t1-sproto-error-tests` | 8 | 0 | 0 | 0 | 通过 | [logs/t1-sproto-error-tests.log](evidence/g4-013/supplemental-001/logs/t1-sproto-error-tests.log) |
+| `t1-worker-mutation-permission-tests` | 2 | 0 | 0 | 0 | 通过 | [logs/t1-worker-mutation-permission-tests.log](evidence/g4-013/supplemental-001/logs/t1-worker-mutation-permission-tests.log) |
+| `t1-bridge-learned-upload-denial` | 1 | 0 | 0 | 0 | 通过 | [logs/t1-bridge-learned-upload-denial.log](evidence/g4-013/supplemental-001/logs/t1-bridge-learned-upload-denial.log) |
+| `t1-bridge-ambiguous-upload-hint` | 1 | 0 | 0 | 0 | 通过 | [logs/t1-bridge-ambiguous-upload-hint.log](evidence/g4-013/supplemental-001/logs/t1-bridge-ambiguous-upload-hint.log) |
+| `t1-bridge-transport-loss-no-learn` | 1 | 0 | 0 | 0 | 通过 | [logs/t1-bridge-transport-loss-no-learn.log](evidence/g4-013/supplemental-001/logs/t1-bridge-transport-loss-no-learn.log) |
+| `t1-core-learned-upload-denial-revision` | 1 | 0 | 0 | 0 | 通过 | [logs/t1-core-learned-upload-denial-revision.log](evidence/g4-013/supplemental-001/logs/t1-core-learned-upload-denial-revision.log) |
+| `t1-core-definite-refusal-target-guard` | 1 | 0 | 0 | 0 | 通过 | [logs/t1-core-definite-refusal-target-guard.log](evidence/g4-013/supplemental-001/logs/t1-core-definite-refusal-target-guard.log) |
+| `t1-core-rename-remove-hints-no-rows` | 1 | 0 | 0 | 0 | 通过 | [logs/t1-core-rename-remove-hints-no-rows.log](evidence/g4-013/supplemental-001/logs/t1-core-rename-remove-hints-no-rows.log) |
+| `core-history-probe-prepare` | — | — | — | 0 | 通过 | [logs/core-history-probe-prepare.log](evidence/g4-013/supplemental-001/logs/core-history-probe-prepare.log) |
+| `core-history-probe` | 5 | 0 | 0 | 0 | 通过 | [logs/core-history-probe.log](evidence/g4-013/supplemental-001/logs/core-history-probe.log) |
+| `standard-check-all-targets` | — | — | — | 0 | 通过 | [logs/standard-check-all-targets.log](evidence/g4-013/supplemental-001/logs/standard-check-all-targets.log) |
+| `capacity-ignored-list` | — | — | — | 0 | 通过 | [logs/capacity-ignored-list.log](evidence/g4-013/supplemental-001/logs/capacity-ignored-list.log) |
+| `capacity-210k` | 1 | 0 | 0 | 0 | 通过 | [logs/capacity-210k.log](evidence/g4-013/supplemental-001/logs/capacity-210k.log) |
+| `tls-harness-build` | — | — | — | 0 | 通过 | [logs/tls-harness-build.log](evidence/g4-013/supplemental-001/logs/tls-harness-build.log) |
+| `tls-actual-worker-all-ten` | — | — | — | 0 | 通过 | [logs/tls-actual-worker-all-ten.log](evidence/g4-013/supplemental-001/logs/tls-actual-worker-all-ten.log) |
+| `old-component-build` | — | — | — | 0 | 通过 | [logs/old-component-build.log](evidence/g4-013/supplemental-001/logs/old-component-build.log) |
+| `new-component-build` | — | — | — | 0 | 通过 | [logs/new-component-build.log](evidence/g4-013/supplemental-001/logs/new-component-build.log) |
+| `private-component-policy-handover` | — | — | — | 0 | 通过 | [logs/private-component-policy-handover.log](evidence/g4-013/supplemental-001/logs/private-component-policy-handover.log) |
+| `package-version` | — | — | — | 0 | 通过 | [logs/package-version.log](evidence/g4-013/supplemental-001/logs/package-version.log) |
+| `package-documentation-staging` | — | — | — | 0 | 通过 | [logs/package-documentation-staging.log](evidence/g4-013/supplemental-001/logs/package-documentation-staging.log) |
+| `package-metadata-equivalence` | 1 | 0 | 0 | 0 | 通过 | [logs/package-metadata-equivalence.log](evidence/g4-013/supplemental-001/logs/package-metadata-equivalence.log) |

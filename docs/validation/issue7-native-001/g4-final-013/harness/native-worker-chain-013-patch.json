@@ -1,0 +1,36 @@
+{
+  "frozen_build_py_sha256": "ff2e1ab73355a38793b0544361c556da4c98798009c2dea4c4580452705c926f",
+  "adapted_build_py_sha256": "1b08daedc0164bfcf605a600ff811224621367e972016172e397663a435e5093",
+  "adaptation_anchor_matches": 1,
+  "changed_files": [
+    "harness/native-worker-chain-013/build.py"
+  ],
+  "reason": "host C free space was below the 40 GiB new-target gate while the target was an existing same-candidate private target; frozen 012 build.py only honors --reuse-completed-run when main all_commands_passed is True, which is False here only because of two documented verifier-harness issues",
+  "unchanged": [
+    "prepare.py",
+    "verify-lock.py",
+    "space.py",
+    "run.py",
+    "Cargo.toml.in",
+    "main.rs",
+    "codec.rs",
+    "README.md",
+    "RUNBOOK.md",
+    "HARNESS_SHA256.json",
+    "HARNESS_EXECUTION_SHA256.json"
+  ],
+  "files": {
+    "native-worker-chain-013/build.py": "1b08daedc0164bfcf605a600ff811224621367e972016172e397663a435e5093",
+    "native-worker-chain-013/Cargo.toml.in": "cbedbed99a18eb656cdfe9a442f5cd65cef92bf7325a53b3ca0d55d9d601119f",
+    "native-worker-chain-013/codec.rs": "5eaca3e517653408f4331bd0096e8cf9c0d9a464837315fd9fb0452763cb0b25",
+    "native-worker-chain-013/HARNESS_EXECUTION_SHA256.json": "998b10d4fd93c560e186501303966e7eda82b4a6ccc3fed41fa172a7ae8d217e",
+    "native-worker-chain-013/HARNESS_SHA256.json": "312a8297bc7627a4631494f3df4a66403bb093d0e60220eee7c66e7a6883b9cb",
+    "native-worker-chain-013/main.rs": "ea07d79a04b3469e7ec48261693598d37916d0d92ca442866cabff66e8ce9728",
+    "native-worker-chain-013/prepare.py": "4af913d2c19dafb9f3e59838ceb79cab6bc3753d5942795fbefcecbb845c87c2",
+    "native-worker-chain-013/README.md": "36f3a0ec63a8674e13af844cec2aa7a01d06dc98d716a43c4243b0f6e4b875e9",
+    "native-worker-chain-013/run.py": "82b31af21c3f155c11debcaf7f379a448e7dbb0fc7098a34cdccb9090b1ad06c",
+    "native-worker-chain-013/RUNBOOK.md": "1e226c8c88c2d209f4aff0011dae16789404548e49c1f0e4d28315e1301b59a3",
+    "native-worker-chain-013/space.py": "46602840bebb940e633236c50ae0b00f4572a72c841524b9c388c00dab103669",
+    "native-worker-chain-013/verify-lock.py": "c496ecd23e2b80cea2a70b9d87f132e9cba9422e85b030a8554fd2262b8d3bc0"
+  }
+}

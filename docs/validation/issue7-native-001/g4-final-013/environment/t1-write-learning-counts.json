@@ -1,0 +1,115 @@
+{
+  "scope": "T1 write-learning targeted tests, separately counted from the workspace matrix",
+  "commands": [
+    {
+      "name": "sproto-error-tests",
+      "passed": true,
+      "counts": {
+        "reported": true,
+        "passed": 8,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 160
+      }
+    },
+    {
+      "name": "worker-mutation-permission-tests",
+      "passed": true,
+      "counts": {
+        "reported": true,
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 156
+      }
+    },
+    {
+      "name": "bridge-learned-upload-denial",
+      "passed": true,
+      "counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 157
+      }
+    },
+    {
+      "name": "bridge-ambiguous-upload-hint",
+      "passed": true,
+      "counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 157
+      }
+    },
+    {
+      "name": "bridge-transport-loss-no-learn",
+      "passed": true,
+      "counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 157
+      }
+    },
+    {
+      "name": "core-learned-upload-denial-revision",
+      "passed": true,
+      "counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 408
+      }
+    },
+    {
+      "name": "core-definite-refusal-target-guard",
+      "passed": true,
+      "counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 408
+      }
+    },
+    {
+      "name": "core-rename-remove-hints-no-rows",
+      "passed": true,
+      "counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 408
+      }
+    }
+  ],
+  "total_test_executions": 16,
+  "new_tests_note": "9 new tests: 1 sproto classification, 2 worker binding, 3 bridge learning, 3 core learning/revision/guard; the sproto error::tests command also re-runs 7 pre-existing tests",
+  "workspace_delta": {
+    "all_features": {
+      "before_012": 976,
+      "now": 985,
+      "delta": 9
+    },
+    "default": {
+      "before_012": 966,
+      "now": 975,
+      "delta": 9
+    }
+  }
+}

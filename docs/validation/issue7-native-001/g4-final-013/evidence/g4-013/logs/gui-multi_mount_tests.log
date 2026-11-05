@@ -1,0 +1,10 @@
+test_changing_one_task_preserves_other_task_and_legacy (__main__.MultiMountTests.test_changing_one_task_preserves_other_task_and_legacy) ... ok
+test_legacy_and_two_instances_coexist_with_private_profiles (__main__.MultiMountTests.test_legacy_and_two_instances_coexist_with_private_profiles) ... ok
+test_mount_name_controls_local_name_without_changing_remote_scope (__main__.MultiMountTests.test_mount_name_controls_local_name_without_changing_remote_scope) ... ok
+test_overlapping_mounts_and_invalid_instance_are_rejected (__main__.MultiMountTests.test_overlapping_mounts_and_invalid_instance_are_rejected) ... ok
+test_restore_rejects_mount_claimed_by_another_task (__main__.MultiMountTests.test_restore_rejects_mount_claimed_by_another_task) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.079s
+
+OK

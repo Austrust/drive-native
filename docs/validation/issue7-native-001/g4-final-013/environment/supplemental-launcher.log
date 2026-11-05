@@ -1,0 +1,23 @@
+{"name": "native-loopback-updated", "passed": true, "counts": {"reported": true, "passed": 70, "failed": 0, "ignored": 0}}
+{"name": "t1-sproto-error-tests", "passed": true, "counts": {"reported": true, "passed": 8, "failed": 0, "ignored": 0, "measured": 0, "filtered": 160}}
+{"name": "t1-worker-mutation-permission-tests", "passed": true, "counts": {"reported": true, "passed": 2, "failed": 0, "ignored": 0, "measured": 0, "filtered": 156}}
+{"name": "t1-bridge-learned-upload-denial", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 157}}
+{"name": "t1-bridge-ambiguous-upload-hint", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 157}}
+{"name": "t1-bridge-transport-loss-no-learn", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 157}}
+{"name": "t1-core-learned-upload-denial-revision", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 408}}
+{"name": "t1-core-definite-refusal-target-guard", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 408}}
+{"name": "t1-core-rename-remove-hints-no-rows", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 408}}
+{"name": "core-history-probe-prepare", "passed": true, "counts": {"reported": false}}
+{"name": "core-history-probe", "passed": true, "counts": {"reported": true, "passed": 5, "failed": 0, "ignored": 0, "measured": 0, "filtered": 0}}
+{"name": "standard-check-all-targets", "passed": true, "counts": {"reported": false}}
+{"name": "capacity-ignored-list", "passed": true, "counts": {"reported": false}}
+{"name": "capacity-210k", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 408}}
+{"name": "tls-harness-build", "passed": true, "counts": {"reported": false}}
+{"name": "tls-actual-worker-all-ten", "passed": true, "counts": {"reported": false}}
+{"name": "old-component-build", "passed": true, "counts": {"reported": false}}
+{"name": "new-component-build", "passed": true, "counts": {"reported": false}}
+{"name": "private-component-policy-handover", "passed": true, "counts": {"reported": false}}
+{"name": "package-version", "passed": true, "counts": {"reported": false}}
+{"name": "package-documentation-staging", "passed": true, "counts": {"reported": false}}
+{"name": "package-metadata-equivalence", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0}}
+{"summary": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013/supplemental-001/summary.json", "all_passed": true}

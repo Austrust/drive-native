@@ -1,8 +1,8 @@
 # Issue #7 逐目录权限实现与验收报告
 
-状态：产品冻结 `9c9aaba` 通过独立 G4-012 完整矩阵及补测。根目录权限不再扩展为整盘只读；明确 Read 拒绝后不会自动下载重试，取消最后一个读取需求时会清理其重试意图。all-features 976通过/0失败/42忽略，default 966/0/37；内核、GUI、210k容量、真实本机worker链和组件数据保留结果见下表。此前41365a6的两条真实worker反例原件保留，原断言在新候选通过。本轮本地开发版本为 `0.1.0~dev20261105.1`；本文记录源码验证，包生成与实际内容检查以同交付的 `REPORT.md` 为准。真实 NAS ACL、精确写拒绝自动学习与独立 L2 来源仍未闭合，#7完整验收保持开放。
+状态：产品冻结 `fefb8ee` 通过独立 G4-013 完整矩阵及补测。根目录权限不再扩展为整盘只读；明确 Read 拒绝后不会自动下载重试，取消最后一个读取需求时会清理其重试意图；upload 直接响应 `0x9003` 且目标为已存在节点时自动学习为 `(node, write_content)=denied(observed)`（可证窄子集，见 [写拒绝学习增量](validation/issue7-native-001/write-learning/REPORT.md)）。G4-013 all-features 985通过/0失败/42忽略，default 975/0/37（相对 G4-012 各 +9 = T1 新增测试）；内核、GUI、210k容量、真实本机worker链和组件数据保留结果见下表。G4-012 的旧计数、旧期望与失败原件保持冻结，013 只声明差异。本轮本地开发版本 `0.1.0~dev20261105.2`；本文记录源码验证，包生成与实际内容检查以同交付的 `REPORT.md` 为准。真实 NAS ACL/0x9003 实际可达性、其余精确写拒绝码与独立 L2 来源仍未闭合，#7完整验收保持开放（真实 NAS 待 T7 结果补入）。
 基线是 #5/#2 集成 `ed1fabf`；工作分支 `codex/fix-7`，schema25 固定为权限迁移。
-原集成分支 `codex/fix-all-5-2-7` 的历史保留，本轮已将指定的 `codex/fix-7` 快进后继续。原交付 `3d35d7b` 后新增 `10c5e6c`、`d39a597`、`ca86a85`、`99aa587`，`4e6aaf7` 补齐旧 schema 夹具，`41365a6` 补上运行中系统时间变化时的下载退避门限，`2dafd12` 阻止已知读取拒绝被后台重试覆盖。增量原件与边界见[原生反馈记录](validation/issue7-native-001/REPORT.md)。
+原集成分支 `codex/fix-all-5-2-7` 的历史保留，本轮已将指定的 `codex/fix-7` 快进后继续。原交付 `3d35d7b` 后新增 `10c5e6c`、`d39a597`、`ca86a85`、`99aa587`，`4e6aaf7` 补齐旧 schema 夹具，`41365a6` 补上运行中系统时间变化时的下载退避门限，`2dafd12` 阻止已知读取拒绝被后台重试覆盖，`9c9aaba` 清理取消与权限检查相遇时的早退意图，`fefb8ee` 实现 upload/0x9003 窄子集的提交前 ACL 拒绝自动学习。增量原件与边界见[原生反馈记录](validation/issue7-native-001/REPORT.md)与[G4-013 独立报告](validation/issue7-native-001/g4-final-013/REPORT.md)。
 `9c9aaba` 在权限拒绝早退前重新检查取消和独立下载需求，保留 pin、旧缓存与其他 reader；同时准备上述deb版本及显式离线文档模式。包内的未内置材料指向配套源码归档，不生成未发布提交的GitHub入口。
 规格：项目 `work/plan-5-2-20261104/PLAN-7.md`；接口见 [CONTRACTS.md](CONTRACTS.md)。
 
@@ -29,10 +29,11 @@ entry TTL 恒 0，attr 默认 1000 ms；权限变化没有扩大 TTL。
 当前解析的原生 [NodeInfo](../crates/sproto/src/actions/list.rs) 只有身份、版本、类型、尺寸和时间等元数据，未解码逐动作 ACL；同文件的 ShareInfo.writable 是根级 hint，mode 不是 ACL 证据。
 成功确认会产生 observed；精确 typed PermissionDenied 接收契约只接受本次目标。
 增量实现仅在原生 `recv_download` 直接回复边界将已核实的 `0x3002/0x3008` 学为目标 Read 拒绝，返回 EACCES；认证、连接和前置读取不会误入此分类。依据与排除项见[官方客户端静态证据](validation/issue7-native-001/static/REPORT.md)。
-写请求的直接权限相关响应保留数字码和请求类型，历史显示“服务器返回权限相关响应，提交状态待核对”。仍保留 uncertain/cleanup_uncertain，不改成可重发 pending、不猜改名哪端拒绝、不写精确目录 ACL。官方服务端静态调查已证明特定 ACL middleware 在业务处理器前拒绝；但同码也来自 profile 路径过滤，码值不提供精确动作/节点归属，复合写入各阶段也未全部证明。**精确写拒绝自动学习仍未完成。**
+写请求的直接权限相关响应保留数字码和请求类型，历史显示“服务器返回权限相关响应，提交状态待核对”。除下述唯一可证窄子集外，仍保留 uncertain/cleanup_uncertain，不改成可重发 pending、不猜改名哪端拒绝、不写精确目录 ACL。官方服务端静态调查已证明特定 ACL middleware 在业务处理器前拒绝；但同码也来自 profile 路径过滤，码值不提供精确动作/节点归属，复合写入各阶段也未全部证明。
+本轮新增的唯一可证窄子集：**upload 直接响应 `0x9003` 且请求目标为已存在节点**时，sproto 在直接回复边界产生 typed `MutationPermissionDenied`，worker 绑定本次请求节点与 `write_content`，经既有 `refuse_operation` 学习为 `denied(observed, 当前 revision)`：journal 由 `targets_denied` 门禁阻止重发、history 记 failed/permission_denied，profile 变化/重连/重新核对按既有 revision 失效。`0x9004`/`0xa004`（与 profile 只读过滤同码）、`0xa003`（无已证生产者）、rename 源/目标、mkdir/replace 创建与复合阶段、`0x3002/0x3004` 一律保持原 hint/uncertain，不学习、不推导父目录/兄弟路径、不升格 L2。依据、判定表、测试与未实测项见[写拒绝学习增量](validation/issue7-native-001/write-learning/REPORT.md)；真实 NAS 的 `0x9003` 可达性/归属仍未实测（待 T7）。
 File Station 可选探测未实现且不调用；空间禁止只有测试注入证据，原生 L2 来源与更新接线未实现，当前生产初始化保持 unknown。
 新增[空间只读来源复核](validation/issue7-native-001/l2-static/REPORT.md)确认 team `privilege="read-only"` 有 SDK 共享配置来源，但节点能力中的只读投影还受 ACL 输出路径条件控制。仅限定 build=27892、精确字符串和 view_id 仍不足以证明全子树不可写，因此不接入 L2；这也不能简化为“所有 privilege 都只是根 ACL”。
-[typed 接收契约](../crates/drive-runtime/src/wire.rs)与 bridge/namespace 消费路径已实现；原生 Read 分类已接线，精确写拒绝的覆盖仍来自隔离 transport 夹具。静态码语义不等于真实 NAS 实测。
+[typed 接收契约](../crates/drive-runtime/src/wire.rs)与 bridge/namespace 消费路径已实现；原生 Read 分类已接线，精确写拒绝的唯一可证窄子集（upload/0x9003/已存在节点）已按同一 typed 契约接线并学习，其余写码仍只作诊断。静态码语义不等于真实 NAS 实测。
 官方服务端提供 `get_file_capability(view_id,path)`，成功响应为 `header.capabilities`，见[服务端静态证据](validation/issue7-native-001/server-static/REPORT.md)。[能力与身份补充证据](validation/issue7-native-001/server-capability/REPORT.md)确认响应不含节点身份/版本，按永久 ID 解析后也另行按路径查询，不能排除路径替换竞态；因此没有把该路径快照持久化为精确节点 ACL。字段名称也不等于当前同步操作的 ACL primitive，新建动作不能从目录 can_write 推导。这里记录的是已发现但尚不具备安全接线条件的来源，不再声称协议没有逐节点能力查询。
 
 同一证据确认有效 Delete 已包括服务端父链 ACL；父目录自身 Delete 不是 delete_child。unlink/rmdir 现在检查父 Traverse 与目标 Delete；rename 检查源父 Traverse、源 RenameSource、目标父 RenameTarget 和覆盖目标 Delete。FUSE 与持久队列使用同一对象边界，父遍历或目标明确拒绝仍阻断。这是对 PLAN-7 操作表中“父目录删除规则”的具体化，不把父自身权限当作对子项的继承规则。
@@ -57,25 +58,27 @@ GUI 显示用户只读、服务禁止、当前目录权限不足、权限待验�
 
 ## 迁移与阶段证据
 
-本轮的增量验证结果由[原生反馈记录](validation/issue7-native-001/REPORT.md)维护，最终命令、逐项名称和旧反例见[独立报告](validation/issue7-native-001/g4-final-012/REPORT.md)。各组存在重复，不能相加为唯一总数。
+本轮的增量验证结果由[原生反馈记录](validation/issue7-native-001/REPORT.md)维护，产品 `fefb8ee` 的最终命令、逐项名称、T1/T2 审阅与旧反例见[G4-013 独立报告](validation/issue7-native-001/g4-final-013/REPORT.md)；`9c9aaba` 的 [G4-012 报告](validation/issue7-native-001/g4-final-012/REPORT.md)保持历史冻结，013 只声明差异。各组存在重复，不能相加为唯一总数。
 
-| G4-012 / 9c9aaba | 通过 | 失败 | 忽略/范围 |
+| G4-013 / fefb8ee | 通过 | 失败 | 忽略/范围 |
 |---|---:|---:|---|
-| workspace all-features | 976 | 0 | 42忽略；显式内核和容量另列 |
-| workspace default | 966 | 0 | 37忽略 |
+| workspace all-features | 985 | 0 | 42忽略；相对 G4-012 的 976 为 T1 新增 9 项（显式内核和容量另列） |
+| workspace default | 975 | 0 | 37忽略；+9 |
 | FUSE debug / release INDEX1 | 各38 | 0 | 0 |
 | FUSE debug / release INDEX0 | 各36 | 0 | 各2项NSI专用不适用 |
 | FUSE attr TTL=0 | 38 | 0 | 正目录项TTL仍为0 |
 | runtime debug / release内核 | 各1 | 0 | 0 |
-| GUI 18套 | 148 | 0 | 0；另历史标签补测3项通过 |
-| 原生回环 / 实际worker版本 / 历史补测 | 66 / 3 / 5 | 0 | 0 |
-| Nemo / Nautilus | 各10 | 0 | 合成夹具 |
-| 文档打包回归 | 2 | 0 | 离线/原发布模式 |
-| 210k节点容量 | 1 | 0 | 原默认预算、显式ignored；不是G5基准 |
+| GUI 18套 | 148 | 0 | 0；另历史标签补测3项、Nemo/Nautilus各10通过 |
+| native loopback（冻结012 / 校正013期望） | 64 / 70 | 2 / 0 | 64/2为012旧期望原样运行；校正只改两处期望并加4个对抗例（delta见下） |
+| 文档打包回归 | 2 | 0 | 主矩阵离线/原发布模式；补测3条亦通过 |
+| 210k节点容量 | 1 | 0 | 显式ignored；功能容量，不是G5基准 |
 | 本机TLS→真实worker→IPC | 10 | 0 | 6项Bridge链、4项直接RPC；非NAS |
 | 策略切换与组件替换 | 8 | 0 | 真FSD/worker、私有D-Bus/FUSE；非dpkg安装 |
+| T1 write-learning 定向测试 | 16项测试执行 | 0 | 8条命令单独计数：sproto 8、worker 2、bridge 3、core 3；不与workspace相加 |
 
-新增读取/取消5项、双钟/旧ticket5项、原退避失败2项及runtime152/0/1也通过。主矩阵59条执行命令的计数与逐项清单一致；1310个唯一测试名称是不同层次的去重口径，不能与分组计数相加。组件补测确认legacy false须显式切换策略并重新挂载，旧进程固定旧worker、新pair正常启动，移除/恢复组件后pending正文、history、pin和cursor保留。真实NAS、Mint与实际dpkg安装/升级/重装仍未实测；新包解包检查不替代这些项目。
+**012→013 native-loopback delta（冻结保留 + 校正）**：T1 把 upload 直接回复 `0x9003` 分类为 typed `MutationPermissionDenied`，因此冻结的 012 loopback harness 中 `upload_reply_9003`、`mkdir_reply_9003` 两例由 `mutation_permission_uncertain` 期望变为 typed denied：旧期望原样运行 **64/2（原件保留）**；只改这两处期望并增加 4 个对抗用例的校正 harness 为 **70/0**。逐例比对只有这 2 例变化，其余 **64 例 observed 与 012 完全一致**；新增 4 例（download 0x9003、download 0xa004、auth/connect 阶段 0x9003）全部保持 generic `server`。012 的旧期望与旧报告不修改。
+
+主矩阵 58 条命令中 56 条通过、2 条非产品失败：`native-loopback`（上述冻结 012 期望 64/2）与 `core-history-probe-prepare`（证据包初版缺 `core-history-probe.rs`，验证者 harness 打包错误，补测重跑 5/0）；补测 22/22 命令通过。另有一次验证者自身 run 路径错误导致的主矩阵尝试1中止，原件保留且不记为产品失败。组件补测确认legacy false须显式切换策略并重新挂载，旧进程固定旧worker、新pair正常启动，移除/恢复组件后pending正文、history、pin和cursor保留。真实NAS、Mint与实际dpkg安装/升级/重装仍未实测；新包解包检查不替代这些项目。
 
 历史失败完整保留：[G4-006–010](validation/issue7-native-001/g4-through-010/REPORT.md)含首次revision遗漏、旧schema夹具、原退避两项失败及010准备阶段环境中断；新独立报告保留G4-011读取拒绝后后台重试的2项失败。修复没有放宽原断言。当前候选没有重跑G5，旧性能数字不移作新版本实测。
 

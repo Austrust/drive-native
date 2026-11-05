@@ -1,0 +1,48 @@
+{
+  "candidate_commit": "fefb8ee0b02f68ec0e76d9cd89b6f37172d645b4",
+  "worktree": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/fix-7",
+  "prepared_utc": "2026-11-05T06:43:09.503985+00:00",
+  "host_space_before_new_run": {
+    "utc": "2026-11-05T06:43:08.910054+00:00",
+    "command": [
+      "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+      "-NoLogo",
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+    ],
+    "host_drive": "C:",
+    "free_bytes": 81838788608,
+    "exit_code": 0,
+    "stdout": "81838788608",
+    "stderr": ""
+  },
+  "minimum_host_bytes": 42949672960,
+  "stage": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013-snapshot",
+  "archive": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/issue7-validation/prepared-g4-013/candidate.tar",
+  "complete": true,
+  "git_dir": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/public-summary-20261031/.git",
+  "archive_command": [
+    "git",
+    "-c",
+    "safe.directory=*",
+    "--git-dir=/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/public-summary-20261031/.git",
+    "archive",
+    "--format=tar",
+    "--output=/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/issue7-validation/prepared-g4-013/candidate.tar",
+    "fefb8ee0b02f68ec0e76d9cd89b6f37172d645b4"
+  ],
+  "candidate_archive_sha256": "816d9cc06c6486e54dc87a21a4db11eab7519537b1b30b3e27cc2270fde01765",
+  "archive_bytes": 79165440,
+  "object_type": "commit",
+  "snapshot_verification_before": {
+    "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-013-snapshot/snapshot-verification-before.json",
+    "passed": true,
+    "entries": 2483,
+    "problem_count": 0,
+    "tree_listing_sha256": "8524b9164280d9c077e2d632222489970bda854a3ca06fea779cbe3586452c10",
+    "root_tree": "72ab91c1eb290f0f642aa416e9e1c84c7c8dba2e"
+  },
+  "source_sha256": "7432e029936b5c277df80ff1384cc283cc2c383bd2cac2f44a7d05e1a95e707b"
+}
