@@ -578,19 +578,18 @@ impl Bridge {
             id: node.id.clone(),
             version: node.version.clone(),
         };
-        self.store
-            .lock()
-            .unwrap()
-            .begin_download(&ticket)
-            .map_err(|_| libc::EIO)?;
+        let permission_revision = {
+            let mut store = self.store.lock().unwrap();
+            store.begin_download(&ticket).map_err(|_| libc::EIO)?;
+            drive_core::write_permissions::session_revision(&store).map_err(|_| libc::EIO)?
+        };
         match self.transfer_once(node, flight) {
             Ok(()) => {
-                drive_core::write_permissions::observe_targets(&self.store.lock().unwrap(),&[(node.id.clone(),drive_core::write_permissions::Action::Read)],true).map_err(|_|libc::EIO)?;
-                self.store
-                    .lock()
-                    .unwrap()
-                    .finish_download(&ticket)
-                    .map_err(|_| libc::EIO)?;
+                let mut store = self.store.lock().unwrap();
+                if drive_core::write_permissions::session_revision(&store).map_err(|_|libc::EIO)? == permission_revision {
+                    drive_core::write_permissions::observe_targets(&store,&[(node.id.clone(),drive_core::write_permissions::Action::Read)],true).map_err(|_|libc::EIO)?;
+                }
+                store.finish_download(&ticket).map_err(|_|libc::EIO)?;
                 Ok(())
             }
             Err((errno, _, _)) if errno == libc::EINTR => {
@@ -606,13 +605,22 @@ impl Bridge {
             Err((errno, kind, code)) => {
                 self.download_failures_seen.fetch_add(1, Ordering::Relaxed);
                 *self.last_download_failure.lock().unwrap() = Some((kind.clone(), code));
-                if self
-                    .store
-                    .lock()
-                    .unwrap()
-                    .fail_download(&ticket, kind, code, unix_seconds())
-                    .is_err()
-                {
+                let persisted = {
+                    let mut store = self.store.lock().unwrap();
+                    // Publish the learned refusal and its retry gate under one
+                    // Store guard. A profile notification cannot clear the ACL
+                    // between them and leave a stale terminal download behind.
+                    if errno == libc::EACCES && kind == DownloadFailureKind::ServerRejected && code.is_none() {
+                        if drive_core::write_permissions::session_revision(&store).map_err(|_|libc::EIO)? != permission_revision {
+                            drive_core::write_permissions::defer_stale_read_refusal(&store, &ticket)
+                        } else {
+                            drive_core::write_permissions::observe_targets(&store,
+                                &[(node.id.clone(), drive_core::write_permissions::Action::Read)], false)
+                                .and_then(|_| store.fail_download(&ticket, kind, code, unix_seconds()))
+                        }
+                    } else { store.fail_download(&ticket, kind, code, unix_seconds()) }
+                };
+                if persisted.is_err() {
                     *self.last_error.lock().unwrap() = Some(
                         "cannot persist download failure; local state needs inspection".into(),
                     );
@@ -647,8 +655,7 @@ impl Bridge {
                 )
             })?;
         if let Response::PermissionDenied{node:refused,action:drive_core::write_permissions::Action::Read}=&response.body {
-            if refused!=&node.id{return Err((libc::EIO,InvalidContent,None));}
-            drive_core::write_permissions::observe_targets(&self.store.lock().unwrap(),&[(node.id.clone(),drive_core::write_permissions::Action::Read)],false).map_err(|_|(libc::EIO,LocalStorage,None))?;
+            if refused!=&node.id || response.descriptor.is_some(){return Err((libc::EIO,InvalidContent,None));}
             return Err((libc::EACCES,ServerRejected,None));
         }
         if let Response::Failed { category } = &response.body {
@@ -967,6 +974,13 @@ impl Bridge {
             *flight.done.lock().unwrap() = Some(result);
             flight.changed.notify_all();
             self.flights.lock().unwrap().remove(&key);
+            if result == Err(libc::EACCES)
+                && self.store.lock().unwrap().download_ready(&ticket, unix_seconds()).unwrap_or(false)
+            {
+                // A late refusal invalidated by a profile change stays queued.
+                // Wake only after releasing the old flight's deduplication key.
+                self.signal_upload();
+            }
             if cancel.is_some_and(|c| c.is_cancelled()) {
                 Err(libc::EINTR)
             } else {
@@ -1369,6 +1383,10 @@ impl Bridge {
                     Response::PermissionDenied{node,action} if !reconcile => {
                         drive_core::write_permissions::refuse_operation(&s,&op,false,&permission_targets,&node,action).map_err(io::Error::other)?;
                         blocked=Some("permission_denied".into());
+                    }
+                    Response::MutationPermissionUncertain { code } if !reconcile => {
+                        drive_core::write_permissions::mutation_permission_uncertain(&s,&op,false,code).map_err(io::Error::other)?;
+                        blocked=Some("permission_commit_uncertain".into());
                     }
                     Response::Conflict => {
                         s.conflict_upload(&op).map_err(io::Error::other)?;

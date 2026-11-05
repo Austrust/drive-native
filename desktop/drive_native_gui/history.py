@@ -11,7 +11,8 @@ from PySide6.QtWidgets import (
 from .history_actions import HistoryActions
 
 ACTIONS = {"upload": "上传", "download": "下载", "remote_change": "远端变更",
-           "rename": "改名", "move": "移动", "delete": "删除", "error": "错误"}
+           "rename": "改名", "move": "移动", "delete": "删除", "mkdir": "创建文件夹",
+           "replace": "替换文件", "error": "错误"}
 RESULTS = {"ok": "已完成", "failed": "失败", "cancelled": "已取消", "pending": "待处理"}
 
 

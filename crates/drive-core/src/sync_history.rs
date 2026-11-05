@@ -106,6 +106,10 @@ pub(crate) fn migrate(db: &Connection) -> Result<()> {
           WHEN json_extract(NEW.body,'$.node.parent') IS NOT json_extract(NEW.body,'$.parent') THEN 'move' ELSE 'rename' END", false)?;
     workflow_trigger(db, "history_download", "transfers", "NEW.direction='download'",
         "'download:'||NEW.id", "NEW.node", "'download'", true)?;
+    // Permission diagnostics for compound namespace operations must also be
+    // resolved when later reconciliation confirms or conflicts the operation.
+    workflow_trigger(db, "history_permission_namespace_extra", "namespace_ops",
+        "NEW.kind IN ('mkdir','replace')", "'namespace:'||NEW.id", "NEW.node", "NEW.kind", false)?;
     // Removing a transfer is not in itself success: cancellation, stale versions,
     // and explicitly clearing retries use the same operation. Require a published
     // matching body before labeling the record as completed.
@@ -239,6 +243,15 @@ fn record(db: &Connection, key: &str, node: &str, action: &str, result: &str,
         ON CONFLICT(operation_key) DO UPDATE SET seq=excluded.seq,result=excluded.result,
           error_kind=excluded.error_kind,error_summary=excluded.error_summary,completed_at=excluded.completed_at",
         params![mount.unwrap_or(root),node,name,parts.join("/"),action,result,error,now(),key])?;
+    Ok(())
+}
+
+pub(crate) fn record_permission_response(db: &Connection, key: &str, node: &str,
+    action: &str, native_action: &str, code: u32) -> Result<()> {
+    record(db, key, node, action, "pending", Some("permission_commit_uncertain"))?;
+    let detail = serde_json::json!({"permission_response": {"action": native_action, "code": code}});
+    db.execute("UPDATE sync_history SET error_summary='服务器返回权限相关响应，提交状态待核对',detail=?2 WHERE operation_key=?1",
+        params![key,detail.to_string()])?;
     Ok(())
 }
 

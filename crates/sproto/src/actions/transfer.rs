@@ -133,6 +133,16 @@ fn check_content(
     Ok(got)
 }
 
+fn download_reply_error(error: Error) -> Error {
+    match error {
+        // Official ProtoResp2ErrorCode: no permission / disabled download.
+        // Only this read-reply boundary can attach a node Read observation.
+        Error::Server { code: code @ (0x3002 | 0x3008), .. } =>
+            Error::DownloadPermissionDenied { code },
+        error => error,
+    }
+}
+
 impl Client {
     /// Download latest bytes, accept only the exact identity/version observed in
     /// metadata. `sync_id=0` requests contents; nonzero is NOT a version selector.
@@ -243,7 +253,7 @@ impl Client {
             let ch = guard.channel();
             ch.send(frame::SCMD_REQUEST, &request).await?;
             crate::flow::phase(crate::flow::Phase::Transferring);
-            ch.recv_download(&mut sink).await
+            ch.recv_download(&mut sink).await.map_err(download_reply_error)
         })
         .await
         .map_err(|_| Error::Timeout("download"))?;
@@ -482,7 +492,8 @@ impl Client {
                     ));
                 }
             }
-            let response = ch.recv().await?;
+            let response = ch.recv().await
+                .map_err(|error| crate::error::mutation_reply_error("upload", error))?;
             crate::error::check_server_error(&response)?;
             let r = receipt(&response)?;
             if r.hash != hash || r.size != size {
@@ -507,6 +518,14 @@ fn upload_mtime(seconds: u32) -> PObject {
 mod tests {
     use super::*;
     use tokio::io::AsyncWriteExt;
+    #[test]
+    fn only_verified_download_reply_codes_are_permission_evidence() {
+        for code in [0x3002u32, 0x3008, 0x3004, 0x8004, 0x9004, 0xffff] {
+            let error = download_reply_error(Error::Server { code, reason: "permission denied".into() });
+            assert_eq!(matches!(error, Error::DownloadPermissionDenied { .. }), matches!(code, 0x3002 | 0x3008));
+        }
+        assert!(matches!(download_reply_error(Error::Io(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "local"))), Error::Io(_)));
+    }
     fn expected() -> ContentVersion {
         ContentVersion {
             file_id: "99".into(),

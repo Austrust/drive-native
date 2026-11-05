@@ -348,6 +348,7 @@ impl Client {
                 ));
             }
             guard.channel().request(frame::SCMD_REQUEST, &request).await
+                .map_err(|error| crate::error::mutation_reply_error(action, error))
         }
         .await;
         guard.poison_on_err(result)

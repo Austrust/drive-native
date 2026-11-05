@@ -1,0 +1,297 @@
+[
+  {
+    "internal_error": 0,
+    "string_address": "0x31ef38",
+    "text": "Successful"
+  },
+  {
+    "internal_error": -1,
+    "string_address": "0x31ef43",
+    "text": "Interrupted"
+  },
+  {
+    "internal_error": -2,
+    "string_address": "0x31ef4f",
+    "text": "I/O error"
+  },
+  {
+    "internal_error": -3,
+    "string_address": "0x31ef59",
+    "text": "System error"
+  },
+  {
+    "internal_error": -4,
+    "string_address": "0x31ef66",
+    "text": "Invalid argument"
+  },
+  {
+    "internal_error": -5,
+    "string_address": "0x31ef77",
+    "text": "Protocal error"
+  },
+  {
+    "internal_error": -6,
+    "string_address": "0x31ef86",
+    "text": "Authentication failure"
+  },
+  {
+    "internal_error": -7,
+    "string_address": "0x31ef9d",
+    "text": "Server error"
+  },
+  {
+    "internal_error": -8,
+    "string_address": "0x31efaa",
+    "text": "Event conflict"
+  },
+  {
+    "internal_error": -9,
+    "string_address": "0x31efb9",
+    "text": "Connection timeout"
+  },
+  {
+    "internal_error": -10,
+    "string_address": "0x31efcc",
+    "text": "Incompatible version"
+  },
+  {
+    "internal_error": -11,
+    "string_address": "0x31efe1",
+    "text": "No such entry"
+  },
+  {
+    "internal_error": -12,
+    "string_address": "0x31efef",
+    "text": "Invalid username"
+  },
+  {
+    "internal_error": -13,
+    "string_address": "0x31ecf8",
+    "text": "Password and username not matched"
+  },
+  {
+    "internal_error": -14,
+    "string_address": "0x31f000",
+    "text": "DSM disabled"
+  },
+  {
+    "internal_error": -15,
+    "string_address": "0x31f00d",
+    "text": "User quota not enough"
+  },
+  {
+    "internal_error": -16,
+    "string_address": "0x31f061",
+    "text": "Disk is full"
+  },
+  {
+    "internal_error": -17,
+    "string_address": "0x31f023",
+    "text": "Sync Folder is miss"
+  },
+  {
+    "internal_error": -18,
+    "string_address": "0x31f037",
+    "text": "View missing/invalid"
+  },
+  {
+    "internal_error": -19,
+    "string_address": "0x31f04c",
+    "text": "no permission "
+  },
+  {
+    "internal_error": -20,
+    "string_address": "0x31ed20",
+    "text": "pull event by path, but the path is missing"
+  },
+  {
+    "internal_error": -21,
+    "string_address": "0x31ed50",
+    "text": "connection abort by setting flag"
+  },
+  {
+    "internal_error": -22,
+    "string_address": "0x31f05b",
+    "text": "Local Disk is full"
+  },
+  {
+    "internal_error": -23,
+    "string_address": "0x31f06e",
+    "text": "file locked or no permission"
+  },
+  {
+    "internal_error": -24,
+    "string_address": "0x31f08b",
+    "text": "ssl certificate verify fail"
+  },
+  {
+    "internal_error": -25,
+    "string_address": "0x31f0a7",
+    "text": "ssl certificate changed"
+  },
+  {
+    "internal_error": -26,
+    "string_address": "0x31f0bf",
+    "text": "permission is read-only"
+  },
+  {
+    "internal_error": -27,
+    "string_address": "0x31f0d7",
+    "text": "no permission to access"
+  },
+  {
+    "internal_error": -28,
+    "string_address": "0x31ed78",
+    "text": "retry server download on local modified"
+  },
+  {
+    "internal_error": -29,
+    "string_address": "0x31f0ef",
+    "text": "server enc share not mounted"
+  },
+  {
+    "internal_error": -30,
+    "string_address": "0x31f10c",
+    "text": "sync folder volume unmounted"
+  },
+  {
+    "internal_error": -31,
+    "string_address": "0x31f129",
+    "text": "sync folder not mounted"
+  },
+  {
+    "internal_error": -32,
+    "string_address": "0x31f141",
+    "text": "no access permission"
+  },
+  {
+    "internal_error": -33,
+    "string_address": "0x31f156",
+    "text": "build number changed"
+  },
+  {
+    "internal_error": -34,
+    "string_address": "0x31f16b",
+    "text": "file too big"
+  },
+  {
+    "internal_error": -35,
+    "string_address": "0x31f178",
+    "text": "IP is not allowed"
+  },
+  {
+    "internal_error": -36,
+    "string_address": "0x31f18a",
+    "text": "database id is changed"
+  },
+  {
+    "internal_error": -37,
+    "string_address": "0x31f1a1",
+    "text": "Otp required"
+  },
+  {
+    "internal_error": -38,
+    "string_address": "0x31f1ae",
+    "text": "user max tries"
+  },
+  {
+    "internal_error": -39,
+    "string_address": "0x31f1bd",
+    "text": "Invalid otp"
+  },
+  {
+    "internal_error": -40,
+    "string_address": "0x31f1c9",
+    "text": "Otp enforced"
+  },
+  {
+    "internal_error": -41,
+    "string_address": "0x31f1d6",
+    "text": "Share quota full"
+  },
+  {
+    "internal_error": -42,
+    "string_address": "0x31eda0",
+    "text": "Authentication failure and need wipe"
+  },
+  {
+    "internal_error": -43,
+    "string_address": "0x31f1e7",
+    "text": "Server home service disabled"
+  },
+  {
+    "internal_error": -44,
+    "string_address": "0x31f204",
+    "text": "User password expired"
+  },
+  {
+    "internal_error": -45,
+    "string_address": "0x31f21a",
+    "text": "User has no privilege"
+  },
+  {
+    "internal_error": -46,
+    "string_address": "0x31edc8",
+    "text": "User information is unavailable"
+  },
+  {
+    "internal_error": -47,
+    "string_address": "0x31f230",
+    "text": "Query path is not found"
+  },
+  {
+    "internal_error": -48,
+    "string_address": "0x31f248",
+    "text": "Server has been restored"
+  },
+  {
+    "internal_error": -49,
+    "string_address": "0x31ede8",
+    "text": "Sync root has been unregistered"
+  },
+  {
+    "internal_error": -50,
+    "string_address": "0x31f261",
+    "text": "User is not allowed"
+  },
+  {
+    "internal_error": -51,
+    "string_address": "0x31ee08",
+    "text": "Move a placeholder but origin file is removed from server"
+  },
+  {
+    "internal_error": -52,
+    "string_address": "0x31ee48",
+    "text": "Downloading a no hash version (not ready yet)."
+  },
+  {
+    "internal_error": -53,
+    "string_address": "0x31ee78",
+    "text": "Daemon detect index home migration on server"
+  },
+  {
+    "internal_error": -54,
+    "string_address": "0x31eea8",
+    "text": "Server is conducting index home migration"
+  },
+  {
+    "internal_error": -55,
+    "string_address": "0x31f275",
+    "text": "view is disabled download"
+  },
+  {
+    "internal_error": -56,
+    "string_address": "0x31f28f",
+    "text": "File is locked by others"
+  },
+  {
+    "internal_error": -57,
+    "string_address": "0x31eed8",
+    "text": "Detected other cloud storage service"
+  },
+  {
+    "internal_error": -58,
+    "string_address": "0x31ef00",
+    "text": "Daemon detect selective sync item renamed"
+  }
+]

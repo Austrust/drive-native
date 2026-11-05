@@ -100,6 +100,10 @@ impl Bridge {
                         drive_core::write_permissions::refuse_operation(&store,&op,true,&permission_targets,&node,action).map_err(io::Error::other)?;
                         return Ok(done);
                     }
+                    Response::MutationPermissionUncertain { code } if !reconcile => {
+                        drive_core::write_permissions::mutation_permission_uncertain(&store,&op,true,code).map_err(io::Error::other)?;
+                        return Ok(done);
+                    }
                     Response::Conflict => {
                         store.conflict_rename(&op).map_err(io::Error::other)?;
                         return Ok(done);
@@ -267,6 +271,9 @@ impl Bridge {
                 }
                 Response::PermissionDenied{node,action} if !reconcile => {
                     drive_core::write_permissions::refuse_operation(&store,&op,true,&permission_targets,&node,action).map_err(io::Error::other)?;Ok(0)
+                }
+                Response::MutationPermissionUncertain { code } if !reconcile => {
+                    drive_core::write_permissions::mutation_permission_uncertain(&store,&op,true,code).map_err(io::Error::other)?;Ok(0)
                 }
                 Response::Conflict => {
                     store.conflict_remove(&op).map_err(io::Error::other)?;
@@ -438,6 +445,9 @@ impl Bridge {
                 Response::PermissionDenied{node,action} if !reconcile => {
                     drive_core::write_permissions::refuse_operation(&s,&op,true,&permission_targets,&node,action).map_err(io::Error::other)?;return Ok(0);
                 }
+                Response::MutationPermissionUncertain { code } if !reconcile => {
+                    drive_core::write_permissions::mutation_permission_uncertain(&s,&op,true,code).map_err(io::Error::other)?;return Ok(0);
+                }
                 Response::Removed { identity } if cleanup => {
                     Some(s.confirm_replace_cleanup(&op, &identity))
                 }
@@ -519,6 +529,9 @@ impl Bridge {
                 }
                 Response::PermissionDenied{node,action} if !reconcile => {
                     drive_core::write_permissions::refuse_operation(&s,&op,true,&permission_targets,&node,action).map_err(io::Error::other)?;return Ok(0);
+                }
+                Response::MutationPermissionUncertain { code } if !reconcile => {
+                    drive_core::write_permissions::mutation_permission_uncertain(&s,&op,true,code).map_err(io::Error::other)?;return Ok(0);
                 }
                 Response::Conflict => {
                     s.conflict_directory(&op).map_err(io::Error::other)?;

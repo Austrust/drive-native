@@ -4,7 +4,7 @@ use crate::transport;
 #[test]
 fn profile_only_notification_invalidates_observed_acl_without_file_events() {
     use drive_core::write_permissions::{self as permissions, Action, Decision, LocalPolicy};
-    for profile_changed in [false, true] {
+    for (profile_changed, changed_views) in [(false, vec![]), (true, vec![]), (true, vec![8])] {
         let dir = tempfile::tempdir().unwrap();
         let mut store = Store::open(dir.path()).unwrap();
         let root = Node {
@@ -33,14 +33,19 @@ fn profile_only_notification_invalidates_observed_acl_without_file_events() {
             // Use the actual worker projection: the native bit must survive
             // even if only another view appears in changed_views.
             let body = crate::worker::notification_response(7, sproto::actions::native::Notification {
-                changed_views: vec![8], profile_changed, profile_digest: "next".into(),
+                changed_views, profile_changed, profile_digest: "next".into(),
             });
             transport::send(&mut peer, &Envelope {
                 version: VERSION, id: wait.id, body,
             }, None).unwrap();
             let (pull, _) = transport::receive::<Envelope<Command>>(&mut peer).unwrap();
             assert!(matches!(pull.body, Command::Pull { .. }));
-            // Close only after the bridge has applied the notification.
+            transport::send(&mut peer, &Envelope {
+                version: VERSION, id: pull.id, body: Response::Events(None),
+            }, None).unwrap();
+            let (next, _) = transport::receive::<Envelope<Command>>(&mut peer).unwrap();
+            assert!(matches!(next.body, Command::Wait { cursor, digest } if cursor == "1" && digest == "next"));
+            // Close only after notification application and resubscription.
         });
         assert!(bridge.event_loop().is_err());
         server.join().unwrap();

@@ -116,6 +116,9 @@ pub enum Response {
         node: String,
         action: drive_core::write_permissions::Action,
     },
+    /// Permission-related direct mutation response, not proof of non-commit
+    /// and not a precise node/action ACL observation.
+    MutationPermissionUncertain { code: u32 },
     Uncertain,
     Connected {
         restore: String,

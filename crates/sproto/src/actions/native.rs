@@ -545,3 +545,26 @@ mod minimal_tombstones {
         assert!(parse_events(&r, EventCursor(22000)).is_err());
     }
 }
+
+#[cfg(test)]
+mod profile_notifications {
+    use super::*;
+    #[test]
+    fn profile_only_changes_require_a_digest_and_preserve_the_notification_bit() {
+        let response = pmap! {"changes" => PObject::Array(vec![]),
+            "profile_changed" => 1u64, "profile_digest" => "new"};
+        let n = parse_notification(&response, "old").unwrap();
+        assert!(n.profile_changed);
+        assert!(n.changed_views.is_empty());
+        assert_eq!(n.profile_digest, "new");
+        let missing = pmap! {"changes" => PObject::Array(vec![]), "profile_changed" => 1u64};
+        assert!(parse_notification(&missing, "old").is_err());
+        let malformed = pmap! {"changes" => PObject::Array(vec![]),
+            "profile_changed" => 2u64, "profile_digest" => "new"};
+        assert!(parse_notification(&malformed, "old").is_err());
+        let unchanged = pmap! {"changes" => PObject::Array(vec![])};
+        let n = parse_notification(&unchanged, "old").unwrap();
+        assert!(!n.profile_changed);
+        assert_eq!(n.profile_digest, "old");
+    }
+}

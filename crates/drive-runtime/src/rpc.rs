@@ -497,6 +497,7 @@ mod tests {
     }
     #[test]
     fn protocol_version_mismatch_disconnects_all_waiters() {
+        for version in [20, VERSION + 1] {
         let (a, mut b) = UnixStream::pair().unwrap();
         let rpc = Rpc::new(a).unwrap();
         let server = std::thread::spawn(move || {
@@ -504,7 +505,7 @@ mod tests {
             transport::send(
                 &mut b,
                 &Envelope {
-                    version: VERSION + 1,
+                    version,
                     id: req.id,
                     body: Response::Events(None),
                 },
@@ -522,6 +523,8 @@ mod tests {
             .is_err()
         );
         server.join().unwrap();
+        assert!(!rpc.is_connected());
+        }
     }
 }
 

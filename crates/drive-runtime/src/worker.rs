@@ -163,6 +163,7 @@ pub async fn serve(socket: UnixStream) -> io::Result<()> {
                                 Ok(drive_core::native::NativeDirectoryOutcome::Conflict) => {
                                     Response::Conflict
                                 }
+                                Err(drive_core::Error::Native(sproto::Error::MutationPermissionUncertain { code })) => Response::MutationPermissionUncertain { code },
                                 _ => Response::Uncertain,
                             };
                             Ok((response, None))
@@ -196,6 +197,7 @@ pub async fn serve(socket: UnixStream) -> io::Result<()> {
                                 Ok(drive_core::native::NativeWriteOutcome::Conflict) => {
                                     Response::Conflict
                                 }
+                                Err(drive_core::Error::Native(sproto::Error::MutationPermissionUncertain { code })) => Response::MutationPermissionUncertain { code },
                                 _ => Response::Uncertain,
                             };
                             Ok((response, None))
@@ -208,6 +210,7 @@ pub async fn serve(socket: UnixStream) -> io::Result<()> {
                                     Response::Removed { identity }
                                 }
                                 Ok(NativeRemoveOutcome::Conflict) => Response::Conflict,
+                                Err(drive_core::Error::Native(sproto::Error::MutationPermissionUncertain { code })) => Response::MutationPermissionUncertain { code },
                                 _ => Response::Uncertain,
                             };
                             Ok((response, None))
@@ -223,6 +226,7 @@ pub async fn serve(socket: UnixStream) -> io::Result<()> {
                                     Response::DirectoryRenameRefresh { node }
                                 }
                                 Ok(NativeRenameOutcome::Conflict) => Response::Conflict,
+                                Err(drive_core::Error::Native(sproto::Error::MutationPermissionUncertain { code })) => Response::MutationPermissionUncertain { code },
                                 _ => Response::Uncertain,
                             };
                             Ok((response, None))
@@ -303,6 +307,7 @@ pub async fn serve(socket: UnixStream) -> io::Result<()> {
                                 Ok(drive_core::native::NativeWriteOutcome::Conflict) => {
                                     Response::Conflict
                                 }
+                                Err(drive_core::Error::Native(sproto::Error::MutationPermissionUncertain { code })) => Response::MutationPermissionUncertain { code },
                                 _ => Response::Uncertain,
                             };
                             Ok((response, None))
@@ -398,7 +403,10 @@ pub async fn serve(socket: UnixStream) -> io::Result<()> {
                             ))
                         }
                         Command::Download { node } => {
-                            let d = session.download(&node, staging.path()).await?;
+                            let d = match session.download(&node, staging.path()).await {
+                                Ok(d) => d,
+                                Err(error) => return download_error_response(&node.id, error),
+                            };
                             Ok((
                                 Response::Content {
                                     identity: d.identity,
@@ -506,6 +514,24 @@ pub(crate) fn notification_response(view: u64, n: sproto::actions::native::Notif
         changed: n.changed_views.contains(&view),
         profile_changed: n.profile_changed,
         digest: n.profile_digest,
+    }
+}
+
+/// Only used for the identity-addressed, read-only download request. These
+/// native codes are verified in the official client's ProtoResp2ErrorCode;
+/// see docs/validation/issue7-native-001/REPORT.md. Neither text messages nor
+/// local PermissionDenied I/O errors are evidence of a remote ACL decision.
+pub(crate) fn download_error_response(
+    node: &str,
+    error: drive_core::Error,
+) -> drive_core::Result<(Response, Option<OwnedFd>)> {
+    match error {
+        drive_core::Error::Native(sproto::Error::DownloadPermissionDenied { .. }) =>
+            Ok((Response::PermissionDenied {
+                node: node.to_owned(),
+                action: drive_core::write_permissions::Action::Read,
+            }, None)),
+        error => Err(error),
     }
 }
 

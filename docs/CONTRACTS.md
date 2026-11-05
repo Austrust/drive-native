@@ -116,7 +116,10 @@ GetOverview 追加字段：`writable_source`（user/legacy），`local_policy`�
 
 G3 追加两个 JSON-string IPC：`GetDirectoryPermissions({path})` 返回 `{task_id,path,node,policy,actions:{action:{state,source,verified_at,revision}}}`，state 为 allowed/denied/unknown；`SetWritePolicy({task_id,expected_revision,local_policy})` 用 revision 比较后保存，返回 `{saved:true,remount_required:bool}`。已挂载任务须重新挂载完整应用 RO/RW 选项；策略门禁立即限制新增写入。版本不符必须刷新，不覆盖另一窗口的选择。
 
-已核实的逐操作拒绝可经 worker `PermissionDenied{node,action}` 接收；必须匹配本次 durable intent 的目标，保留本地字节并在重新核对前停止该操作。未核实的 NAS 数字错误码不映射为此响应，保留既有 uncertain/reconcile。当前原生协议适配器不产生此 typed 响应，真实 NAS 拒绝分类属于外部未实测边界；隔离夹具覆盖接收行为。
+已核实的逐操作拒绝经 worker `PermissionDenied{node,action}` 接收；必须匹配本次目标。原生下载仅在 `recv_download` 直接回复边界将已核实 `0x3002/0x3008` 分类为 Read 拒绝；认证、连接、前置读取、本地 I/O、只读码和内容未就绪码不转换。学习拒绝与终态下载重试门禁在同一 Store guard 下发布。
+下载请求捕获权限 revision；期间发生通知或权限更新，迟到的读结果不再持久化旧 allow/deny。迟到拒绝仍向该次调用返回 EACCES，但下载意图回 pending，不留下终态权限重试门禁；后续只读尝试重新判定。此规则不重发任何写入。
+
+写请求的直接权限相关响应经 `MutationPermissionUncertain{code}` 保留，按 upload/remove/rename 的已核实小集合验证；进入 uncertain/cleanup_uncertain，不改成 pending，不学习任何精确节点 ACL，不猜改名哪端拒绝。历史 result=pending、error_kind=permission_commit_uncertain，summary 明确“提交状态待核对”；detail.permission_response 仅含请求动作和数字码，终态清错误提示而保留该次历史响应证据。重连/核对只可查询结果，不重发未知写入。写入终态无提交证明仍缺失，原 typed 写拒绝接收路径的覆盖仍来自隔离夹具。
 
 内部 worker IPC21 的 `Notification` 保留原生 `profile_changed`（与当前 view 文件变化 `changed` 分开）。该通知使当前挂载根的全部逐节点来源回 unknown、清除验证时间并递增 revision，即使没有文件事件；不改变用户策略、明确空间禁止或未确认写入意图。普通通知不清权限。属性仍受既定 1000ms 上限约束，须配套更新 fsd/worker，拒绝 IPC20 混用。
 

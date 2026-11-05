@@ -110,6 +110,7 @@ impl NativeReadSession {
             Err(sproto::Error::Server { code: 24579, .. }) => {
                 return Ok(NativeWriteOutcome::Conflict);
             }
+            Err(error @ sproto::Error::MutationPermissionUncertain { .. }) => return Err(error.into()),
             _ => return Ok(NativeWriteOutcome::Uncertain),
         };
         // A parent can be moved/deleted after preflight. Identity paths avoid

@@ -28,6 +28,16 @@ pub enum Error {
     #[error("Server error {code:#06x}: {reason}")]
     Server { code: u32, reason: String },
 
+    /// Classified only while receiving the identity-addressed download reply,
+    /// never from authentication, channel acquisition or mutation preflight.
+    #[error("native download permission denied ({code:#06x})")]
+    DownloadPermissionDenied { code: u32 },
+
+    /// An ACL/read-only response to a mutation, without proof that no partial
+    /// commit occurred. Callers must reconcile, never turn this into a retry.
+    #[error("native mutation permission response ({code:#06x}); commit unconfirmed")]
+    MutationPermissionUncertain { code: u32 },
+
     /// `PStream` decode error
     #[error("PStream decode error: {0}")]
     Decode(String),
@@ -56,6 +66,16 @@ pub enum Error {
 /// The result type used throughout the library.
 pub type Result<T> = std::result::Result<T, Error>;
 
+pub(crate) fn mutation_reply_error(action: &str, error: Error) -> Error {
+    match error {
+        Error::Server { code, .. } if matches!((action, code),
+            ("upload" | "remove" | "rename", 0x3002 | 0x3004)
+            | ("upload", 0x9003 | 0x9004)
+            | ("remove", 0xa003 | 0xa004)) => Error::MutationPermissionUncertain { code },
+        error => error,
+    }
+}
+
 /// Inspect a response `PObject` for an `"error"` field.
 /// Maps session error codes (0x4001-0x4003) to `SessionInvalid`,
 /// all other non-null errors to `Error::Server`.
@@ -68,11 +88,9 @@ pub fn check_server_error(obj: &PObject) -> Result<()> {
         return Ok(());
     }
 
-    #[allow(
-        clippy::cast_possible_truncation,
-        reason = "server error codes are small integers, always fit in u32"
-    )]
-    let code = err.get("code").and_then(PObject::as_int).unwrap_or(0) as u32;
+    // A malformed wide integer must not alias a recognized permission code.
+    let code = u32::try_from(err.get("code").and_then(PObject::as_int).unwrap_or(0))
+        .map_err(|_| Error::Decode("server error code exceeds u32".into()))?;
     let reason = err
         .get("reason")
         .and_then(|v| v.as_str())
@@ -148,6 +166,27 @@ mod tests {
                 assert_eq!(reason, "unknown");
             }
             _ => panic!("expected Error::Server, got {err:?}"),
+        }
+    }
+    #[test]
+    fn oversized_error_code_cannot_alias_a_permission_refusal() {
+        let obj = pmap! { "error" => pmap! {
+            "code" => 0x1_0000_3002u64, "reason" => "no permission",
+        }};
+        assert!(matches!(check_server_error(&obj), Err(Error::Decode(_))));
+    }
+    #[test]
+    fn mutation_permission_hints_are_action_scoped_and_never_definite_refusals() {
+        for (action, code, permission) in [
+            ("upload", 0x9003, true), ("upload", 0x9004, true),
+            ("upload", 0x9005, false), ("remove", 0xa003, true),
+            ("remove", 0xa004, true), ("remove", 0xa005, false),
+            ("rename", 0x3002, true), ("rename", 0x9004, false),
+            ("upload", 0x3004, true), ("list", 0x3002, false),
+            ("upload", 0x6003, false), ("remove", 0xa002, false),
+        ] {
+            let error = mutation_reply_error(action, Error::Server { code, reason: "permission denied".into() });
+            assert_eq!(matches!(error, Error::MutationPermissionUncertain { .. }), permission);
         }
     }
 }

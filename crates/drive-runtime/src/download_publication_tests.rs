@@ -2,6 +2,82 @@ use super::*;
 use std::{io::Read, sync::mpsc};
 
 #[test]
+fn native_read_refusal_learns_only_the_requested_identity_and_recheck_releases_retry() {
+    use drive_core::write_permissions::{self as permissions, Action, Decision};
+    for (code, invalidate_inflight) in [(0x3002u32, false), (0x3008, false),
+        (0x3004, false), (0x8004, false), (0x9004, false), (0xffff, false), (0x3002, true)] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(dir.path()).unwrap();
+        let nodes: Vec<Node> = [("root", None, true), ("file", Some("root"), false),
+            ("sibling", Some("root"), false)].into_iter().map(|(id, parent, directory)| Node {
+                id: id.into(), parent: parent.map(str::to_owned), name: id.into(),
+                version: "v1".into(), directory, metadata: None,
+            }).collect();
+        store.install_remote_snapshot(&nodes, "1", "server").unwrap();
+        store.ensure_fs_root("root").unwrap();
+        let (socket, mut peer) = UnixStream::pair().unwrap();
+        peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let bridge = Bridge::from_connection(Arc::new(drive_core::SharedStore::new(store)),
+            Arc::new(Rpc::new(socket).unwrap())).unwrap();
+        let response_store = bridge.store.clone();
+        let server = std::thread::spawn(move || {
+            let (request, _) = crate::transport::receive::<Envelope<Command>>(&mut peer).unwrap();
+            let Command::Download { node } = request.body else { panic!("expected download") };
+            if invalidate_inflight {
+                permissions::invalidate_remote_permissions(&response_store.lock().unwrap(), "root").unwrap();
+            }
+            // Receive-boundary classification -> production worker mapper ->
+            // IPC. The protocol's raw reply mapping has a separate test.
+            let error = drive_core::Error::Native(if matches!(code, 0x3002 | 0x3008) {
+                sproto::Error::DownloadPermissionDenied { code }
+            } else { sproto::Error::Server {
+                code, reason: "permission denied; synthetic secret must not leave worker".into(),
+            }});
+            let body = match crate::worker::download_error_response(&node.id, error) {
+                Ok((body, fd)) => { assert!(fd.is_none()); body },
+                Err(_) => Response::Failed { category: format!("native_server_code:{code}") },
+            };
+            crate::transport::send(&mut peer, &Envelope {
+                version: VERSION, id: request.id, body,
+            }, None).unwrap();
+        });
+        let flight = Flight {
+            demand: Mutex::new(Demand { keep: true, ..Demand::default() }),
+            done: Mutex::new(None), changed: Condvar::new(),
+        };
+        let refused = matches!(code, 0x3002 | 0x3008);
+        assert_eq!(bridge.transfer(&nodes[1], &flight), Err(if refused { libc::EACCES } else { libc::EIO }));
+        server.join().unwrap();
+        let store = bridge.store.lock().unwrap();
+        assert_eq!(permissions::decide(&store, "root", "file", Action::Read).unwrap(),
+            if refused && !invalidate_inflight { Decision::Deny } else { Decision::Unknown });
+        for (node, action) in [("root", Action::Read), ("sibling", Action::Read), ("file", Action::WriteContent)] {
+            assert_eq!(permissions::decide(&store, "root", node, action).unwrap(), Decision::Unknown);
+        }
+        assert!(store.open_cached("file").is_err());
+        assert_eq!(store.download_failure("file").unwrap().is_some(), !invalidate_inflight);
+        if invalidate_inflight {
+            assert!(store.download_ready(&DownloadTicket { id: "file".into(), version: "v1".into() }, unix_seconds()).unwrap());
+        }
+        permissions::invalidate_remote_permissions(&store, "root").unwrap();
+        assert_eq!(permissions::decide(&store, "root", "file", Action::Read).unwrap(), Decision::Unknown);
+        assert_eq!(store.download_failure("file").unwrap().is_none(), refused);
+    }
+}
+
+#[test]
+fn local_io_and_transport_errors_are_not_native_permission_evidence() {
+    for error in [
+        drive_core::Error::Io(io::Error::from_raw_os_error(libc::EACCES)),
+        drive_core::Error::Native(sproto::Error::Timeout("synthetic download")),
+        drive_core::Error::Native(sproto::Error::SessionInvalid),
+        drive_core::Error::Native(sproto::Error::Server { code: 0x3002, reason: "preflight is not a download reply".into() }),
+    ] {
+        assert!(crate::worker::download_error_response("file", error).is_err());
+    }
+}
+
+#[test]
 fn publication_classification_preserves_storage_errors() {
     assert_eq!(
         download_publication_error(drive_core::Error::Io(io::Error::from_raw_os_error(

@@ -193,6 +193,7 @@ impl NativeReadSession {
                 code: 40962 | 36872,
                 ..
             }) => Ok(NativeRenameOutcome::Conflict),
+            Err(error @ sproto::Error::MutationPermissionUncertain { .. }) => Err(error.into()),
             _ => Ok(NativeRenameOutcome::Uncertain),
         }
     }
@@ -306,6 +307,7 @@ impl NativeReadSession {
         match self.client.remove_at_identity(&target).await {
             Ok(_) => self.reconcile_remove_job(job, &target).await,
             Err(sproto::Error::Server { code: 40962, .. }) => Ok(NativeRemoveOutcome::Conflict),
+            Err(error @ sproto::Error::MutationPermissionUncertain { .. }) => Err(error.into()),
             _ => Ok(NativeRemoveOutcome::Uncertain),
         }
     }

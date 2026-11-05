@@ -358,6 +358,20 @@ pub fn reset_session(store: &Store) -> Result<()> {
     }
     Ok(())
 }
+/// Capture before a read request and compare while publishing its observation.
+/// Any intervening evidence/policy update makes that observation conservative:
+/// it may complete the call but must not resurrect a stale cached decision.
+pub fn session_revision(store: &Store) -> Result<Option<(String, u64)>> {
+    filesystem_root(store)?.map(|root| {
+        let revision = policy(store, &root)?.write_policy_revision;
+        Ok((root, revision))
+    }).transpose()
+}
+pub fn defer_stale_read_refusal(store: &Store, ticket: &crate::DownloadTicket) -> Result<()> {
+    store.db.execute("UPDATE transfers SET state='pending',error=NULL WHERE node=?1 AND version=?2 AND direction='download' AND state='inflight'",
+        params![ticket.id,ticket.version])?;
+    Ok(())
+}
 /// Targets are identities from the durable intent, not a possibly renamed path.
 pub fn namespace_targets(kind: &str, body: &str) -> Result<Vec<(String, Action)>> {
     let mut targets = Vec::new();
@@ -465,6 +479,33 @@ pub fn upload_targets(node: &crate::Node) -> Vec<(String, Action)> {
     } else {
         vec![(node.id.clone(), Action::WriteContent)]
     }
+}
+
+/// Preserve a direct permission-related reply without inventing a definite
+/// non-commit or guessing which participant in a compound mutation was denied.
+/// This operation and its bytes remain in reconciliation; no ACL row changes.
+pub fn mutation_permission_uncertain(store: &Store, operation: &str, namespace: bool, code: u32) -> Result<()> {
+    let (table, prefix) = if namespace { ("namespace_ops", "namespace") } else { ("operations", "upload") };
+    let tx = store.db.unchecked_transaction()?;
+    let (node, kind, state): (String, String, String) = tx.query_row(
+        &format!("SELECT node,kind,state FROM {table} WHERE id=?1"), [operation],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+    let action = match (namespace, kind.as_str(), state.as_str()) {
+        (false, "upload", "inflight") => "upload",
+        (true, "mkdir" | "replace", "inflight") => "upload",
+        (true, "replace", "cleanup_inflight") | (true, "remove", "inflight") => "remove",
+        (true, "rename", "inflight") => "rename",
+        _ => return Err(invalid()),
+    };
+    if !matches!((action, code), ("upload" | "remove" | "rename", 0x3002 | 0x3004)
+        | ("upload", 0x9003 | 0x9004) | ("remove", 0xa003 | 0xa004)) {
+        return Err(invalid());
+    }
+    tx.execute(&format!("UPDATE {table} SET state=CASE state WHEN 'cleanup_inflight' THEN 'cleanup_uncertain' ELSE 'uncertain' END WHERE id=?1"), [operation])?;
+    crate::sync_history::record_permission_response(&tx, &format!("{prefix}:{operation}"), &node,
+        if namespace { kind.as_str() } else { "upload" }, action, code)?;
+    tx.commit()?;
+    Ok(())
 }
 pub(crate) fn has_denials(store: &Store) -> Result<bool> {
     Ok(store.db.query_row(
@@ -617,10 +658,55 @@ mod tests {
         );
     }
     #[test]
-    fn profile_change_expires_all_node_sources_but_preserves_scope_policy_and_intents() {
+    fn mutation_permission_hint_preserves_uncertainty_bytes_and_unknown_acl() {
         let (_d, mut s) = fixture();
         let op = s.save_local("f", b"unconfirmed content").unwrap();
         s.mark_upload_started(&op).unwrap();
+        assert!(mutation_permission_uncertain(&s, &op, false, 0x9005).is_err());
+        assert_eq!(s.upload_job(&op).unwrap().state, "inflight");
+        mutation_permission_uncertain(&s, &op, false, 0x9004).unwrap();
+        assert_eq!(s.upload_job(&op).unwrap().state, "uncertain");
+        assert_eq!(decide(&s, "root", "f", Action::WriteContent).unwrap(), Decision::Unknown);
+        assert!(mutation_permission_uncertain(&s, &op, false, 0x9004).is_err());
+        reset_session(&s).unwrap();
+        assert_eq!(s.upload_job(&op).unwrap().state, "uncertain");
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(&mut s.open_cached("f").unwrap(), &mut bytes).unwrap();
+        assert_eq!(bytes, b"unconfirmed content");
+        let rows = s.sync_history(&crate::sync_history::HistoryQuery::default()).unwrap().records;
+        assert_eq!(rows[0].error_kind.as_deref(), Some("permission_commit_uncertain"));
+        assert_eq!(rows[0].result, "pending");
+        s.confirm_upload(&op, "v2").unwrap();
+        let rows = s.sync_history(&crate::sync_history::HistoryQuery::default()).unwrap().records;
+        assert_eq!(rows[0].result, "ok");
+        assert!(rows[0].error_kind.is_none());
+    }
+    #[test]
+    fn directory_permission_hint_keeps_journal_and_reconciliation_barrier() {
+        let (_d, mut s) = fixture();
+        s.create_local_directory("A", "unconfirmed", 0o755).unwrap();
+        let op = s.scheduled_directory().unwrap().unwrap().job.operation;
+        s.mark_directory_started(&op).unwrap();
+        mutation_permission_uncertain(&s, &op, true, 0x9004).unwrap();
+        assert_eq!(s.scheduled_directory().unwrap().unwrap().state, "uncertain");
+        assert!(s.mark_directory_started(&op).is_err());
+        assert_eq!(decide(&s, "root", "A", Action::CreateDir).unwrap(), Decision::Unknown);
+        let rows = s.sync_history(&crate::sync_history::HistoryQuery::default()).unwrap().records;
+        assert_eq!(rows[0].action, "mkdir");
+        assert_eq!(rows[0].error_kind.as_deref(), Some("permission_commit_uncertain"));
+        s.conflict_directory(&op).unwrap();
+        let rows = s.sync_history(&crate::sync_history::HistoryQuery::default()).unwrap().records;
+        assert_eq!(rows[0].error_kind.as_deref(), Some("conflict"));
+    }
+    #[test]
+    fn profile_change_expires_all_node_sources_but_preserves_scope_policy_and_intents() {
+        for uncertain in [false, true] {
+        let (_d, mut s) = fixture();
+        let op = s.save_local("f", b"unconfirmed content").unwrap();
+        if uncertain {
+            s.mark_upload_started(&op).unwrap();
+            s.mark_upload_uncertain(&op).unwrap();
+        }
         let state = s.upload_job(&op).unwrap().state;
         record_observed(&s, "root", "f", Action::Read, false).unwrap();
         inject(&s, "root", "A", Action::CreateDir, Decision::Deny).unwrap();
@@ -639,7 +725,11 @@ mod tests {
         assert_eq!(policy.server_capability, ServerCapability::SpaceForbidden);
         assert_eq!(policy.write_policy_revision, revision + 1);
         assert_eq!(s.upload_job(&op).unwrap().state, state);
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(&mut s.open_cached("f").unwrap(), &mut bytes).unwrap();
+        assert_eq!(bytes, b"unconfirmed content");
         assert_eq!(s.db.query_row("SELECT count(*) FROM directory_permissions WHERE root='root' AND verified_at IS NOT NULL", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+        }
     }
     #[test]
     fn traverse_is_distinct_from_list() {

@@ -117,6 +117,7 @@ fn definite_permission_refusal_retains_body_allows_sibling_and_rechecks() {
 #[test]
 fn uncertain_commit_uses_read_only_reconciliation_and_never_replays_upload() {
     use std::io::Read;
+    for permission_refusal in [false, true] {
     let (a, mut b) = UnixStream::pair().unwrap();
     let server = std::thread::spawn(move || {
         handshake(&mut b);
@@ -154,6 +155,8 @@ fn uncertain_commit_uses_read_only_reconciliation_and_never_replays_upload() {
                         confirmed.metadata.as_mut().unwrap().mtime =
                             u64::from(confirmed_mtime.unwrap());
                         Response::Committed { node: confirmed }
+                    } else if permission_refusal {
+                        Response::MutationPermissionUncertain { code: 0x9004 }
                     } else {
                         Response::Uncertain
                     },
@@ -165,6 +168,14 @@ fn uncertain_commit_uses_read_only_reconciliation_and_never_replays_upload() {
     });
     let (_dir, store, bridge) = fixture(a);
     assert_eq!(bridge.upload_pending(false).unwrap(), 0);
+    if permission_refusal {
+        let s = store.lock().unwrap();
+        let history = s.sync_history(&drive_core::sync_history::HistoryQuery::default()).unwrap();
+        let entry = history.records.iter().find(|r| r.error_kind.as_deref() == Some("permission_commit_uncertain")).unwrap();
+        assert_eq!(entry.result, "pending");
+        assert_eq!(entry.detail.as_ref().unwrap()["permission_response"]["code"], 0x9004);
+        drive_core::write_permissions::reset_session(&s).unwrap();
+    }
     assert_eq!(
         store
             .lock()
@@ -181,6 +192,7 @@ fn uncertain_commit_uses_read_only_reconciliation_and_never_replays_upload() {
         Status::LocalComplete
     );
     server.join().unwrap();
+    }
 }
 #[test]
 fn stopped_worker_leaves_saved_operation_pending_without_marking_it_submitted() {

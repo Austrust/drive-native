@@ -1,0 +1,79 @@
+{
+  "input_binary": "C:\\Users\\a_tas\\Documents\\deepseek-harness\\default-workspace\\synodrive\\linux_x\\opt\\Synology\\SynologyDrive\\package\\cloudstation\\bin\\cloud-drive-daemon",
+  "sha256": "ea01d634762060424f4a5fd3fccb3f5c0ba7c10a81e90e144706fb2b8406314a",
+  "bytes": 64436312,
+  "symbol_source": "C:\\Users\\a_tas\\Desktop\\MFMLAB\\Personal_Sync\\20-Coding\\P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65\\work\\platform-deep\\daemon-symbols.json",
+  "symbol_source_sha256": "9e6ddbac1c53c822ba4e270cbbbc979d7908f5bec3370f8203e4c871f9cb7f1e",
+  "method": "ELF section mapping and Capstone static disassembly; no binary execution",
+  "capstone_version": "6.0.0",
+  "functions": [
+    {
+      "symbol": "_Z19ProtoResp2ErrorCodej",
+      "address": "0x22c090",
+      "bytes": 834,
+      "file": "function-22c090.asm"
+    },
+    {
+      "symbol": "_ZN13HandlerHelper34ConvertResponseErrorToHandlerErrorEj",
+      "address": "0x11e600",
+      "bytes": 70,
+      "file": "function-11e600.asm"
+    },
+    {
+      "symbol": "_ZN21DownloadRemoteHandler27HandleDownloadResponseErrorEj",
+      "address": "0xb8af0",
+      "bytes": 1522,
+      "file": "function-b8af0.asm"
+    },
+    {
+      "symbol": "_ZN18UploadLocalHandler25HandleUploadResponseErrorEj",
+      "address": "0xf9040",
+      "bytes": 7266,
+      "file": "function-f9040.asm"
+    },
+    {
+      "symbol": "_ZN19RemoveRemoteHandler25HandleRemoveResponseErrorEjRK10DBFileInfo",
+      "address": "0xe0840",
+      "bytes": 6229,
+      "file": "function-e0840.asm"
+    },
+    {
+      "symbol": "_ZN19RenameRemoteHandler25HandleRenameResponseErrorERK7PObject",
+      "address": "0xeee00",
+      "bytes": 1975,
+      "file": "function-eee00.asm"
+    },
+    {
+      "symbol": "_ZN7Channel5CloseEv",
+      "address": "0x2baaf0",
+      "bytes": 855,
+      "file": "function-2baaf0.asm"
+    },
+    {
+      "symbol": "_ZN14ProtocolClient23RecvResponseFromChannelER7ChannelR7PObjectS3_",
+      "address": "0x6b710",
+      "bytes": 2007,
+      "file": "function-6b710.asm"
+    },
+    {
+      "symbol": "_ZN22UpdatePrivilegeHandler16IsProfileChangedEv",
+      "address": "0x173570",
+      "bytes": 3440,
+      "file": "function-173570.asm"
+    },
+    {
+      "symbol": "_ZN22UpdatePrivilegeHandler13ReloadProfileEv",
+      "address": "0x172620",
+      "bytes": 2514,
+      "file": "function-172620.asm"
+    }
+  ],
+  "error_table_address": "0x5d27c0",
+  "index_evidence": "Channel::Close at 0x2baca4 negates the internal code before indexing the table",
+  "limitations": [
+    "No live server probe",
+    "No verification of server mutation commit boundaries",
+    "Static client version does not establish every server version's behavior",
+    "String annotations are evidence aids, not wire schema definitions"
+  ]
+}
