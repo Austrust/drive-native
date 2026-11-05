@@ -1,6 +1,6 @@
 # Issue #7 逐目录权限实现与验收报告
 
-状态：产品冻结 `fefb8ee` 通过独立 G4-013 完整矩阵及补测。根目录权限不再扩展为整盘只读；明确 Read 拒绝后不会自动下载重试，取消最后一个读取需求时会清理其重试意图；upload 直接响应 `0x9003` 且目标为已存在节点时自动学习为 `(node, write_content)=denied(observed)`（可证窄子集，见 [写拒绝学习增量](validation/issue7-native-001/write-learning/REPORT.md)）。G4-013 all-features 985通过/0失败/42忽略，default 975/0/37（相对 G4-012 各 +9 = T1 新增测试）；内核、GUI、210k容量、真实本机worker链和组件数据保留结果见下表。G4-012 的旧计数、旧期望与失败原件保持冻结，013 只声明差异。本轮本地开发版本 `0.1.0~dev20261105.2`；本文记录源码验证，包生成与实际内容检查以同交付的 `REPORT.md` 为准。真实 NAS ACL/0x9003 实际可达性、其余精确写拒绝码与独立 L2 来源仍未闭合，#7完整验收保持开放（真实 NAS 待 T7 结果补入）。
+状态：产品冻结 `fefb8ee` 通过独立 G4-013 完整矩阵及补测。根目录权限不再扩展为整盘只读；明确 Read 拒绝后不会自动下载重试，取消最后一个读取需求时会清理其重试意图；upload 直接响应 `0x9003` 且目标为已存在节点时自动学习为 `(node, write_content)=denied(observed)`（可证窄子集，见 [写拒绝学习增量](validation/issue7-native-001/write-learning/REPORT.md)）。G4-013 all-features 985通过/0失败/42忽略，default 975/0/37（相对 G4-012 各 +9 = T1 新增测试）；内核、GUI、210k容量、真实本机worker链和组件数据保留结果见下表。G4-012 的旧计数、旧期望与失败原件保持冻结，013 只声明差异。本轮本地开发版本 `0.1.0~dev20261105.2`；本文记录源码验证，包生成与实际内容检查以同交付的 `REPORT.md` 为准。真实 NAS 只读挂载健康检查已执行，但 `initial_index` 被服务端/网络断连阻塞（.2，build 17892；见[真实 NAS 阻塞报告](validation/real-nas-initial-index-20261105/REPORT.md)）；真实 NAS ACL/0x9003 实际可达性、其余精确写拒绝码与独立 L2 来源仍未闭合，#7 完整验收保持开放，不因 G4-013 合成矩阵关闭。
 基线是 #5/#2 集成 `ed1fabf`；工作分支 `codex/fix-7`，schema25 固定为权限迁移。
 原集成分支 `codex/fix-all-5-2-7` 的历史保留，本轮已将指定的 `codex/fix-7` 快进后继续。原交付 `3d35d7b` 后新增 `10c5e6c`、`d39a597`、`ca86a85`、`99aa587`，`4e6aaf7` 补齐旧 schema 夹具，`41365a6` 补上运行中系统时间变化时的下载退避门限，`2dafd12` 阻止已知读取拒绝被后台重试覆盖，`9c9aaba` 清理取消与权限检查相遇时的早退意图，`fefb8ee` 实现 upload/0x9003 窄子集的提交前 ACL 拒绝自动学习。增量原件与边界见[原生反馈记录](validation/issue7-native-001/REPORT.md)与[G4-013 独立报告](validation/issue7-native-001/g4-final-013/REPORT.md)。
 `9c9aaba` 在权限拒绝早退前重新检查取消和独立下载需求，保留 pin、旧缓存与其他 reader；同时准备上述deb版本及显式离线文档模式。包内的未内置材料指向配套源码归档，不生成未发布提交的GitHub入口。
@@ -78,9 +78,21 @@ GUI 显示用户只读、服务禁止、当前目录权限不足、权限待验�
 
 **012→013 native-loopback delta（冻结保留 + 校正）**：T1 把 upload 直接回复 `0x9003` 分类为 typed `MutationPermissionDenied`，因此冻结的 012 loopback harness 中 `upload_reply_9003`、`mkdir_reply_9003` 两例由 `mutation_permission_uncertain` 期望变为 typed denied：旧期望原样运行 **64/2（原件保留）**；只改这两处期望并增加 4 个对抗用例的校正 harness 为 **70/0**。逐例比对只有这 2 例变化，其余 **64 例 observed 与 012 完全一致**；新增 4 例（download 0x9003、download 0xa004、auth/connect 阶段 0x9003）全部保持 generic `server`。012 的旧期望与旧报告不修改。
 
-主矩阵 58 条命令中 56 条通过、2 条非产品失败：`native-loopback`（上述冻结 012 期望 64/2）与 `core-history-probe-prepare`（证据包初版缺 `core-history-probe.rs`，验证者 harness 打包错误，补测重跑 5/0）；补测 22/22 命令通过。另有一次验证者自身 run 路径错误导致的主矩阵尝试1中止，原件保留且不记为产品失败。组件补测确认legacy false须显式切换策略并重新挂载，旧进程固定旧worker、新pair正常启动，移除/恢复组件后pending正文、history、pin和cursor保留。真实NAS、Mint与实际dpkg安装/升级/重装仍未实测；新包解包检查不替代这些项目。
+主矩阵 58 条命令中 56 条通过、2 条非产品失败：`native-loopback`（上述冻结 012 期望 64/2）与 `core-history-probe-prepare`（证据包初版缺 `core-history-probe.rs`，验证者 harness 打包错误，补测重跑 5/0）；补测 22/22 命令通过。另有一次验证者自身 run 路径错误导致的主矩阵尝试1中止，原件保留且不记为产品失败。组件补测确认legacy false须显式切换策略并重新挂载，旧进程固定旧worker、新pair正常启动，移除/恢复组件后pending正文、history、pin和cursor保留。真实 NAS 已做只读挂载健康检查但 `initial_index` 阻塞（见下节）；Mint 与实际 dpkg 安装/升级/重装仍未实测；新包解包检查不替代这些项目。
 
 历史失败完整保留：[G4-006–010](validation/issue7-native-001/g4-through-010/REPORT.md)含首次revision遗漏、旧schema夹具、原退避两项失败及010准备阶段环境中断；新独立报告保留G4-011读取拒绝后后台重试的2项失败。修复没有放宽原断言。当前候选没有重跑G5，旧性能数字不移作新版本实测。
+
+## 真实 NAS 只读挂载健康检查（阻塞，2026-11-05）
+
+新开发包 `0.1.0~dev20261105.2`（产品行为 `fefb8ee` + assert-only，无初始化代码改动）在真实 NAS（`[redacted-test-host]`、TLS `[redacted-test-tls-name]`、build 17892、非管理员测试账号）做只读挂载健康检查：
+
+- selector 登录与列表正常：team root list 约 0.03s、folders=18；personal root folders=3。
+- fsd `initial_index` **两次均失败**：错误类 `native_transport` / `native_response_timeout`，TLS `UnexpectedEof: peer closed connection without TLS close_notify`；`nodes=0`，无残留挂载。失败在初始化候选接收阶段，未提交。
+- 隔离只读探针（Lead）：`list_dir` 小请求 200/200 通过；`pull_event` cursor=0 常成功（约 516 events，next=2000），紧接 cursor=2000 常被断连；子目录 watermark S0 可进入 enumerate（10s 约 948 目录/8351 节点），但约 1000 次 list 请求内被断连；根 `/` 走 legacy `collect_snapshot_seed`。
+- 归因边界：只证明“长初始化序列中被服务端/网络中断 + 产品无每请求重试/断点续拉 → 初始化无法完成”；**未找到根因**，未证明版本差异、会话限制或协议字段语义；不是 T1 窄子集修复引入的已证回归。项目既有记录（[initialization-owner-20261101](../../../outputs/drive-native/initialization-owner-20261101/REPORT.md)、[development-20261101-3](../../../outputs/drive-native/delivery/development-20261101-3/RELEASE_NOTES.md)、[development-20261101-4](../../../outputs/drive-native/delivery/development-20261101-4/RELEASE_NOTES.md)、[personal-003](../../../work/initialization-pipeline-8/docs/validation/personal-003/REPORT.md)）早已标注真实 NAS 初始化/续扫未完成，本次是既有集成缺口在 #7 候选上的暴露。
+- 后续（待下轮验证，不在本轮改产品代码）：P0 为 `list_dir`/`pull_event` 每请求有限重试 + 断点续拉；P1 根 scope watermark 路径可行性；P2 旧版本/账号/网络对照。
+
+完整证据、已证/未证边界与建议见[真实 NAS initial_index 阻塞报告](validation/real-nas-initial-index-20261105/REPORT.md)。**真实 NAS ACL/e2e 验收因此未完成，Issue #7 保持开放。**
 
 以下计数和场景表对应此前冻结 `bae1ef1` 的完整G4，作为历史证据保留，不能当作新候选的通过计数。
 
@@ -112,5 +124,4 @@ GUI 148 / 0 / 0 中含权限 5 项、selector 7 项。迁移/旧 reader 独立�
 | unknown | 尝试不等于授权；确认后学习 | 注入/typed receipt 通过；原生拒绝码映射未实测 |
 | GUI 四态与恢复 | 离屏 fixture / 截图，非真实 NAS | 通过；完整窗口浅/深四态共 8 图 |
 
-未移除 DefaultPermissions，因此不宣称实现了另一套用户态 POSIX 权限系统。全部真实 ACL 验收仍由用户/Lead
-在专用测试共享执行；本轮未连接 NAS、未读凭据、未操作生产数据、未 push 或发布。
+未移除 DefaultPermissions，因此不宣称实现了另一套用户态 POSIX 权限系统。全部真实 ACL 验收仍由用户/Lead 在专用测试共享执行；T1 未连接 NAS、未读凭据、未操作生产数据、未 push 或发布。2026-11-05 的真实 NAS 只读健康检查已执行但 `initial_index` 阻塞（见[真实 NAS 阻塞报告](validation/real-nas-initial-index-20261105/REPORT.md)），真实 NAS ACL/e2e 仍未完成，#7 保持开放。
