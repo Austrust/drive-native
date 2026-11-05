@@ -1,0 +1,26 @@
+{
+  "candidate_commit": "9c9aabae447d92275f93dae65320788240a03113",
+  "observed_utc": "2026-11-05T04:32:40.208567+00:00",
+  "owned_validation_elf_processes": [],
+  "cargo_or_rustc_processes": [],
+  "residual_validation_mounts": [],
+  "inspection_errors": [
+    {
+      "pid": 236,
+      "error": "permission error; ownership audit incomplete"
+    },
+    {
+      "pid": 241,
+      "error": "permission error; ownership audit incomplete"
+    }
+  ],
+  "scope": "process names and own-user executable links only; no process arguments or credentials read",
+  "input_hashes": {
+    "summary.json": "72c976c4f79deb28d716958022776bb1d01f6c6e7630f7db6f654af417da13ae",
+    "supplemental-001/summary.json": "4c91873602ce0fa18fbd436d6f76ebf59860c37b566105aebfb189a2396254fe",
+    "native-worker-chain-001/results.json": "f9b49e108b8a93f0d2c5fdd002205fd9897e41e78c82a2c3f37737435101ec91",
+    "component-policy-handover-001/result.json": "49ea0ad41b6eb71f0eb3f03ab56ad13759243f10f20b31aa6334b0ccc40c151d",
+    "final-integrity.json": "a2092f6ebc1ffe137506d18cba7b0dd749951c14ccea673454cd0e7c5a417b17"
+  },
+  "passed": false
+}

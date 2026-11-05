@@ -1,0 +1,18 @@
+{
+  "candidate_commit": "9c9aabae447d92275f93dae65320788240a03113",
+  "candidate_archive_sha256": "81e6cf72a6858d53adf038ed255a3666347870bf8b5c1e4c3e94bff79d41e7d1",
+  "archive_command": [
+    "git",
+    "-C",
+    "C:\\Users\\a_tas\\Desktop\\MFMLAB\\Personal_Sync\\20-Coding\\P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65\\work\\fix-7",
+    "archive",
+    "--format=tar",
+    "--output=C:\\Users\\a_tas\\Desktop\\MFMLAB\\Personal_Sync\\20-Coding\\P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65\\work\\issue7-validation\\prepared-g4-012\\candidate.tar",
+    "9c9aabae447d92275f93dae65320788240a03113"
+  ],
+  "authorization": "Root authorized final G4-012 on 2026-11-05; cancellation cleanup, terminal refusal, package metadata and offline docs frozen together.",
+  "harness_sha256": "88fa9b573ac109d85b1c7af2fcf4b2c02e81a0be58527f8031c411b1a9c5271d",
+  "cache_policy": "Cargo.lock registry dependencies only; no workspace/path artifacts; force clean four product packages; source metadata touched, bytes unchanged",
+  "compile_cache_control": "CARGO_INCREMENTAL=0; profiles, parallelism and assertions unchanged",
+  "host_space_gate": "C>=40GiB before new target; C>=10GiB before each command; unknown stops"
+}

@@ -1,0 +1,10 @@
+{
+  "candidate_commit": "41365a650eb7d7df696046e21b7671697231f851",
+  "frozen_source": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-011/source",
+  "scope": "synthetic 127.0.0.1 pstream server and public sproto Client APIs; no NAS, real credentials, worker ELF or live ACL verification",
+  "prepared_only": true,
+  "source_cargo_lock_sha256": "fcaf7417018889efefaffd45ac2e4931a1b01dd5fc83e6a9fc9f0806093268dd",
+  "initial_harness_cargo_lock_sha256": "fcaf7417018889efefaffd45ac2e4931a1b01dd5fc83e6a9fc9f0806093268dd",
+  "harness_source_sha256": "e9290665ceedcb9e21eb1c18b1bbc1c2016de471e3cb614c8c02b119c18c53bd",
+  "harness_manifest_sha256": "7be3e514afbe9f559c0ed97b38b5ad173acb4c5697f602294ee996b8222ddd92"
+}

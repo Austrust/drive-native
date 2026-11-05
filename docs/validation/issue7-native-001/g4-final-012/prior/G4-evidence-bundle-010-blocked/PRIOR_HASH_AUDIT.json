@@ -1,0 +1,1030 @@
+{
+  "scope": "Compare existing log/screenshot/summary bytes against hashes already recorded before the environment fault; excluded binaries are not re-read.",
+  "checks": [
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-006/logs/native-read-stale-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-006/summary.json",
+      "expected_sha256": "7a4e78d4ffa75f8188e109b9a0238d5d4a49236651f59c1ffc98f9e20bbf4b03",
+      "actual_sha256": "7a4e78d4ffa75f8188e109b9a0238d5d4a49236651f59c1ffc98f9e20bbf4b03",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/logs/native-read-stale-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/summary.json",
+      "expected_sha256": "7ae904888c0ce0b70a8c87f700859d975cb612ba503006757a3727ef373846ad",
+      "actual_sha256": "7ae904888c0ce0b70a8c87f700859d975cb612ba503006757a3727ef373846ad",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/logs/runtime-permission-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/summary.json",
+      "expected_sha256": "27e55f532e9276943152dde9452b2680794b201c6508f215db2489155e29f085",
+      "actual_sha256": "27e55f532e9276943152dde9452b2680794b201c6508f215db2489155e29f085",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/logs/runtime-profile-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/summary.json",
+      "expected_sha256": "80ab81f66fe245127608afa482b6d499f81ab758c0d50bbf6b19ce2c7aee7b02",
+      "actual_sha256": "80ab81f66fe245127608afa482b6d499f81ab758c0d50bbf6b19ce2c7aee7b02",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/logs/runtime-version-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/summary.json",
+      "expected_sha256": "5f1d610fde2eab6497b697ecd82649e6a3ce0105e9f2d2b9e3cd896c370a61c5",
+      "actual_sha256": "5f1d610fde2eab6497b697ecd82649e6a3ce0105e9f2d2b9e3cd896c370a61c5",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/logs/core-permission-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/summary.json",
+      "expected_sha256": "1083b35d073fdc183e832b04df1d74e24b5ea7f3d9433d129717c8b0f8554c45",
+      "actual_sha256": "1083b35d073fdc183e832b04df1d74e24b5ea7f3d9433d129717c8b0f8554c45",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/logs/sproto-permission-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/summary.json",
+      "expected_sha256": "a6edfb723d685a611238592ea680d4bc83502c2c01de9e2ed023ce7e41eb58c5",
+      "actual_sha256": "a6edfb723d685a611238592ea680d4bc83502c2c01de9e2ed023ce7e41eb58c5",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/logs/sproto-profile-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/summary.json",
+      "expected_sha256": "b269bece9e19136696ca507acd43ca20eeffc55609f60a367a4b7de5bd4b8824",
+      "actual_sha256": "b269bece9e19136696ca507acd43ca20eeffc55609f60a367a4b7de5bd4b8824",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/logs/native-loopback.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/summary.json",
+      "expected_sha256": "c8f75043f7f834f61104f7c0dcedd1541a8122cab6ff0cbcf9efb2273da76390",
+      "actual_sha256": "c8f75043f7f834f61104f7c0dcedd1541a8122cab6ff0cbcf9efb2273da76390",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/logs/worker-trust-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/summary.json",
+      "expected_sha256": "5b8f30511d1f6d71e63ebd2f82e8703f6c115d9d60b7f021217f76d0428a9b92",
+      "actual_sha256": "5b8f30511d1f6d71e63ebd2f82e8703f6c115d9d60b7f021217f76d0428a9b92",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/logs/worker-elf-versions.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/summary.json",
+      "expected_sha256": "e69dc79884a941f83ac0858ad4351c39d050e9205b2290e59f2e0beebaffc188",
+      "actual_sha256": "e69dc79884a941f83ac0858ad4351c39d050e9205b2290e59f2e0beebaffc188",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/logs/core-history-probe-prepare.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/summary.json",
+      "expected_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "actual_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/logs/core-history-probe.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/summary.json",
+      "expected_sha256": "c6c0ee45435e650d0b55e13d87a12234c1b56b157045a8a339b4cc9fdd300daa",
+      "actual_sha256": "c6c0ee45435e650d0b55e13d87a12234c1b56b157045a8a339b4cc9fdd300daa",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/logs/kernel-setattr-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/summary.json",
+      "expected_sha256": "ead04b536066074eb7c3412c8f636d15865fbbfc8e8e591f90de3872b3aabcd5",
+      "actual_sha256": "ead04b536066074eb7c3412c8f636d15865fbbfc8e8e591f90de3872b3aabcd5",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/logs/workspace-all-features.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/summary.json",
+      "expected_sha256": "99c83c8138ed07cd4c02444fed59cf3afb424cfa15c1dc4bd36b713b8e9fcb79",
+      "actual_sha256": "99c83c8138ed07cd4c02444fed59cf3afb424cfa15c1dc4bd36b713b8e9fcb79",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/logs/clean-private-product-packages.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/summary.json",
+      "expected_sha256": "e3a01281cddcae7efbf3703afc658b6546c74ac5020db919f63361bbc3dcd81f",
+      "actual_sha256": "e3a01281cddcae7efbf3703afc658b6546c74ac5020db919f63361bbc3dcd81f",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/logs/runtime-lib-all-features.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/summary.json",
+      "expected_sha256": "ae7324ba1e11658afa02e7f5106bb316ffb6825c742f2c18da96cab5b0fcc054",
+      "actual_sha256": "ae7324ba1e11658afa02e7f5106bb316ffb6825c742f2c18da96cab5b0fcc054",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/logs/native-loopback-build.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/summary.json",
+      "expected_sha256": "71dbedd0520db4f322d7f2129c65c4ad04bbc7b63904c0f573de21a0e11c4d71",
+      "actual_sha256": "71dbedd0520db4f322d7f2129c65c4ad04bbc7b63904c0f573de21a0e11c4d71",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/logs/native-loopback.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/summary.json",
+      "expected_sha256": "e0f7bbfe0db279e7b6b822f740eda57ac07a145e01fe5a13625593287c837dcd",
+      "actual_sha256": "e0f7bbfe0db279e7b6b822f740eda57ac07a145e01fe5a13625593287c837dcd",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/logs/core-history-probe.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/summary.json",
+      "expected_sha256": "63902a8daaf2a19e8182c56eec352808c7dc1dcac9ce6a226ad589e61e4e99dd",
+      "actual_sha256": "63902a8daaf2a19e8182c56eec352808c7dc1dcac9ce6a226ad589e61e4e99dd",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/logs/workspace-all-features.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/summary.json",
+      "expected_sha256": "5784f969adcba2088382d94f611ef025c22c2a77590a40211a4ad2aacdc27d01",
+      "actual_sha256": "5784f969adcba2088382d94f611ef025c22c2a77590a40211a4ad2aacdc27d01",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/logs/core-fs-runtime-default.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/summary.json",
+      "expected_sha256": "802eca6f6cd85b9cdcda7db67c452eb092c7338f74522047d92eb213e12c3c93",
+      "actual_sha256": "802eca6f6cd85b9cdcda7db67c452eb092c7338f74522047d92eb213e12c3c93",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/logs/worker-elf-versions.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/summary.json",
+      "expected_sha256": "3ae16a1f979bf94795b35c6e8e4847ecfe77cbb93b6837c236486b638a4471c7",
+      "actual_sha256": "3ae16a1f979bf94795b35c6e8e4847ecfe77cbb93b6837c236486b638a4471c7",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/logs/gui-gui_unit_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/summary.json",
+      "expected_sha256": "6ca6f944577e385273fc927aa8722c54418e4045821a89170666cef912274e87",
+      "actual_sha256": "6ca6f944577e385273fc927aa8722c54418e4045821a89170666cef912274e87",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/logs/gui-cache_gui_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/summary.json",
+      "expected_sha256": "2495a6c2c85c1759da02b82031153a2743af10516addb20bb42fdc53e880856c",
+      "actual_sha256": "2495a6c2c85c1759da02b82031153a2743af10516addb20bb42fdc53e880856c",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/logs/gui-conflict_gui_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/summary.json",
+      "expected_sha256": "b3519d3db1bed6d01222c35668b3659d94b737a19ed6ddb46f54c5bc658210b8",
+      "actual_sha256": "b3519d3db1bed6d01222c35668b3659d94b737a19ed6ddb46f54c5bc658210b8",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/logs/gui-hidden_dialog_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/summary.json",
+      "expected_sha256": "f72779464a77ada88fd46547b46b8b31fd8866b0f94496d2da593d16f873b5d8",
+      "actual_sha256": "f72779464a77ada88fd46547b46b8b31fd8866b0f94496d2da593d16f873b5d8",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/logs/gui-lazy_gui_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/summary.json",
+      "expected_sha256": "b72689a1494bde8d16c43aaa937bcc3d691554db137d06c256843fa64ecceb2c",
+      "actual_sha256": "b72689a1494bde8d16c43aaa937bcc3d691554db137d06c256843fa64ecceb2c",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/logs/gui-multi_mount_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/summary.json",
+      "expected_sha256": "ea0b6fdb09a2128dc7e1e99cf7505b01ca5f85f517d0ee62bbc3026fe459b0cb",
+      "actual_sha256": "ea0b6fdb09a2128dc7e1e99cf7505b01ca5f85f517d0ee62bbc3026fe459b0cb",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/logs/gui-trust_gui_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/summary.json",
+      "expected_sha256": "783f721f01d81b52483b7d1ca89a0ba3371b74b4fdb56f4f33dfbaae6bf8da33",
+      "actual_sha256": "783f721f01d81b52483b7d1ca89a0ba3371b74b4fdb56f4f33dfbaae6bf8da33",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/logs/gui-transfer_gui_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/summary.json",
+      "expected_sha256": "53b95de5c47f8ff2f2a31b77ccdcd170bb4614b319c842b6014ba96b8ee20f21",
+      "actual_sha256": "53b95de5c47f8ff2f2a31b77ccdcd170bb4614b319c842b6014ba96b8ee20f21",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/logs/gui-theme_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/summary.json",
+      "expected_sha256": "73267ee34bbcc9e2e05fac0f08e73aef4fc813973f0330b6aee48121512fce1a",
+      "actual_sha256": "73267ee34bbcc9e2e05fac0f08e73aef4fc813973f0330b6aee48121512fce1a",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/logs/gui-selector_gui_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/summary.json",
+      "expected_sha256": "b6636df9a607c31c77cdee4550691099e351c753353d4cf68564489fe68a71f3",
+      "actual_sha256": "b6636df9a607c31c77cdee4550691099e351c753353d4cf68564489fe68a71f3",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/logs/gui-backend_upgrade_test.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/summary.json",
+      "expected_sha256": "7a2accc3912e47e58f20f8bc92ad5d50573d4ab8e25cb903045ac0f675b76234",
+      "actual_sha256": "7a2accc3912e47e58f20f8bc92ad5d50573d4ab8e25cb903045ac0f675b76234",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/logs/gui-pause_handover_test.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/summary.json",
+      "expected_sha256": "a3a2f489c07577d3ae77fd0e1d04c926bc6dcc86be231741c1521951444a12dc",
+      "actual_sha256": "a3a2f489c07577d3ae77fd0e1d04c926bc6dcc86be231741c1521951444a12dc",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/logs/gui-initialization_gui_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/summary.json",
+      "expected_sha256": "ada8f8f45c2562a0e36fb039cc14863da5f697ee73ecc09a102da9eba38f15f9",
+      "actual_sha256": "ada8f8f45c2562a0e36fb039cc14863da5f697ee73ecc09a102da9eba38f15f9",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/logs/gui-unified_manager_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/summary.json",
+      "expected_sha256": "0eb37ac504d8f658a27e5045dc8694b37d5549a513aa0291081e0e4dbba06ea2",
+      "actual_sha256": "0eb37ac504d8f658a27e5045dc8694b37d5549a513aa0291081e0e4dbba06ea2",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/logs/gui-gui_instance_test.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/summary.json",
+      "expected_sha256": "2542a3ea3d13205435f1e6a7480da82fe856f98109045154e86e7e762d6ca837",
+      "actual_sha256": "2542a3ea3d13205435f1e6a7480da82fe856f98109045154e86e7e762d6ca837",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/logs/gui-queue_gui_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/summary.json",
+      "expected_sha256": "1a266ff5d4edaf8bc5665cd0585b232fb64d44d8cc3098bb55b04b1935646c7b",
+      "actual_sha256": "1a266ff5d4edaf8bc5665cd0585b232fb64d44d8cc3098bb55b04b1935646c7b",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/logs/gui-history_gui_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/summary.json",
+      "expected_sha256": "656bc2fb021f729f844f63259e880302a028f03b459b0d7bc817e041328e8a02",
+      "actual_sha256": "656bc2fb021f729f844f63259e880302a028f03b459b0d7bc817e041328e8a02",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/logs/gui-permission_gui_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/summary.json",
+      "expected_sha256": "6db295e4a9e8b305900c63745139213f451c92722b401d96dd8fd631022d9821",
+      "actual_sha256": "6db295e4a9e8b305900c63745139213f451c92722b401d96dd8fd631022d9821",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/logs/gui-permission-history-labels.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001/summary.json",
+      "expected_sha256": "d0f28ff53e81495226dc1a01bd2db0adb6ece99f9de71b47b6867905216085dc",
+      "actual_sha256": "d0f28ff53e81495226dc1a01bd2db0adb6ece99f9de71b47b6867905216085dc",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/clean-private-product-packages.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "0e2f661f8234e8abd4a7b2217aefa23c515eb9ae468d9b86a030b52c3386c942",
+      "actual_sha256": "0e2f661f8234e8abd4a7b2217aefa23c515eb9ae468d9b86a030b52c3386c942",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/native-read-stale-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "4c304c90f8e0208814df4d4cb35ec5e35b8d4daf4e6e6d8ae4c3062e09a00c77",
+      "actual_sha256": "4c304c90f8e0208814df4d4cb35ec5e35b8d4daf4e6e6d8ae4c3062e09a00c77",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/runtime-permission-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "6c2d52c2960eeb38010456103754c07bd3667675ce83a68374ebd974af17889b",
+      "actual_sha256": "6c2d52c2960eeb38010456103754c07bd3667675ce83a68374ebd974af17889b",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/runtime-profile-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "e52939bffb2057ca3b289abc67d3eb619385b633465516aca9f0cb414c913256",
+      "actual_sha256": "e52939bffb2057ca3b289abc67d3eb619385b633465516aca9f0cb414c913256",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/runtime-version-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "6ee2fe2e72b356a72bc379ab7cd0814c04373e6535cb33a6826808bfb05bcad8",
+      "actual_sha256": "6ee2fe2e72b356a72bc379ab7cd0814c04373e6535cb33a6826808bfb05bcad8",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/core-permission-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "67fe7ccf4fa4db49d401c1ad3011e3b8d5413c99482a1243696a31ccc8b242ca",
+      "actual_sha256": "67fe7ccf4fa4db49d401c1ad3011e3b8d5413c99482a1243696a31ccc8b242ca",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/core-v6-migration-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "17e1a98a836f2016332f24e37c5285c6cd936d2e3bbed9d05833ccbdeec8da39",
+      "actual_sha256": "17e1a98a836f2016332f24e37c5285c6cd936d2e3bbed9d05833ccbdeec8da39",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/kernel-parent-actions-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "2036f14f0a2514c720a7f794eebd3f5411cb64f194d9dfa8402ae9060df9ea25",
+      "actual_sha256": "2036f14f0a2514c720a7f794eebd3f5411cb64f194d9dfa8402ae9060df9ea25",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/sproto-permission-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "377b227b3308734cb58989c3328306c8de6b5dc3f455575ec1acf0380598c6f2",
+      "actual_sha256": "377b227b3308734cb58989c3328306c8de6b5dc3f455575ec1acf0380598c6f2",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/sproto-profile-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "887bcd05296f67465d0bb784f1ad9ff478fdec37f14a3edba3ae877694c06142",
+      "actual_sha256": "887bcd05296f67465d0bb784f1ad9ff478fdec37f14a3edba3ae877694c06142",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/native-loopback.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "144431572b481cc34361a51795051a9806015adb5551d1c6a269e95a487900e8",
+      "actual_sha256": "144431572b481cc34361a51795051a9806015adb5551d1c6a269e95a487900e8",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/worker-trust-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "062a46fc8b65479522a827be8509b8ef5f8c5c7967d373bc5fd118b95dd8852b",
+      "actual_sha256": "062a46fc8b65479522a827be8509b8ef5f8c5c7967d373bc5fd118b95dd8852b",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/worker-elf-versions.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "70fed7d57ea4a5176bbc05c1d3ac5f4e366fe179876665021db7ae3f07a61da8",
+      "actual_sha256": "70fed7d57ea4a5176bbc05c1d3ac5f4e366fe179876665021db7ae3f07a61da8",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/core-history-probe-prepare.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "actual_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/core-history-probe.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "dbdce16defc656c321f434a6365ed66e770609b9d1247debe9a401a986872086",
+      "actual_sha256": "dbdce16defc656c321f434a6365ed66e770609b9d1247debe9a401a986872086",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/kernel-setattr-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "5bbcba4ae82c4a79eb916d513463dafa67baebb58c2c95db20fe4a4311e5d1c1",
+      "actual_sha256": "5bbcba4ae82c4a79eb916d513463dafa67baebb58c2c95db20fe4a4311e5d1c1",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/workspace-all-features.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "62d937c1d3ffc12903d04f5da319f5de25d35177b057697c9f642017757430b4",
+      "actual_sha256": "62d937c1d3ffc12903d04f5da319f5de25d35177b057697c9f642017757430b4",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/workspace-default.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "e40ad0bf01cb7a8d8c0b46e74e507c52a176cbff2684e75a01afb38ba57eb11a",
+      "actual_sha256": "e40ad0bf01cb7a8d8c0b46e74e507c52a176cbff2684e75a01afb38ba57eb11a",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/vendored-fuser-wire.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "8daefeec3699fdee45a87234d237895f6c259cf6cea98584d4850f1a72d4066b",
+      "actual_sha256": "8daefeec3699fdee45a87234d237895f6c259cf6cea98584d4850f1a72d4066b",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/kernel-fs-debug-index1.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "b871c222ff68e5e994adeb0b7552dc5f73e0644f67e4ed850a4f29a0c2b6b2d0",
+      "actual_sha256": "b871c222ff68e5e994adeb0b7552dc5f73e0644f67e4ed850a4f29a0c2b6b2d0",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/kernel-fs-debug-index0.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "fa7dc9ade5c5562db0df17b78f6ae45c5c84b29a806e28b144cd5ef86c2da524",
+      "actual_sha256": "fa7dc9ade5c5562db0df17b78f6ae45c5c84b29a806e28b144cd5ef86c2da524",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/kernel-runtime-debug.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "c0f50fcbe2b2a421680f0d6f4a32049c046994b66b2f09562b1269efda2713b0",
+      "actual_sha256": "c0f50fcbe2b2a421680f0d6f4a32049c046994b66b2f09562b1269efda2713b0",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/kernel-fs-release-index1.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "99696c3cee3051c089196596f702d786c3fc96413d460468a92cbe2cdcc94436",
+      "actual_sha256": "99696c3cee3051c089196596f702d786c3fc96413d460468a92cbe2cdcc94436",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/runtime-private-dbus.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "38e5a64bb077adb3943097bfa0c2217a29553774866807b292c003761cb7bc7a",
+      "actual_sha256": "38e5a64bb077adb3943097bfa0c2217a29553774866807b292c003761cb7bc7a",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-gui_unit_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "3fa9cc8e306682db81830868fd7778d496592fbad1966ff8c519fee44a140880",
+      "actual_sha256": "3fa9cc8e306682db81830868fd7778d496592fbad1966ff8c519fee44a140880",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-cache_gui_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "a41d8f2078dc8fc2a84851cc812c049264e9d314c356b185bd464bf5449760a2",
+      "actual_sha256": "a41d8f2078dc8fc2a84851cc812c049264e9d314c356b185bd464bf5449760a2",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-conflict_gui_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "42babdd88503b8a800b294b150fa79d7ebf2f1821ef01c800c2ced5bd3d9da45",
+      "actual_sha256": "42babdd88503b8a800b294b150fa79d7ebf2f1821ef01c800c2ced5bd3d9da45",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-hidden_dialog_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "d80ef5cf9cb1963051a289f7847716f82eaf019af64f04920dde7b7f7e4de2f3",
+      "actual_sha256": "d80ef5cf9cb1963051a289f7847716f82eaf019af64f04920dde7b7f7e4de2f3",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-lazy_gui_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "3d98b94791a69b4408b3673b1597470a70ddee5b9e30605f3b3211e2d8726dfb",
+      "actual_sha256": "3d98b94791a69b4408b3673b1597470a70ddee5b9e30605f3b3211e2d8726dfb",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-multi_mount_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "8862986856d662567ae6166eeddefa238846ca4df8091081c08fc21e5db1ff09",
+      "actual_sha256": "8862986856d662567ae6166eeddefa238846ca4df8091081c08fc21e5db1ff09",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-trust_gui_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "2bd626eaaa5f07c3c6c5080e7089c0b7cf44b94db6c012d686e08800a5e718ef",
+      "actual_sha256": "2bd626eaaa5f07c3c6c5080e7089c0b7cf44b94db6c012d686e08800a5e718ef",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-transfer_gui_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "1651271d6e6736d22b55d6d7482a6ce06fe0100ddfeb780ce5bcdb82cc21e43e",
+      "actual_sha256": "1651271d6e6736d22b55d6d7482a6ce06fe0100ddfeb780ce5bcdb82cc21e43e",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-theme_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "73267ee34bbcc9e2e05fac0f08e73aef4fc813973f0330b6aee48121512fce1a",
+      "actual_sha256": "73267ee34bbcc9e2e05fac0f08e73aef4fc813973f0330b6aee48121512fce1a",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-selector_gui_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "409a12f3fb0b87f031fb5ff195ac56ef0f4b0f7b75d39aa9120587504c0a343b",
+      "actual_sha256": "409a12f3fb0b87f031fb5ff195ac56ef0f4b0f7b75d39aa9120587504c0a343b",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-backend_upgrade_test.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "7a2accc3912e47e58f20f8bc92ad5d50573d4ab8e25cb903045ac0f675b76234",
+      "actual_sha256": "7a2accc3912e47e58f20f8bc92ad5d50573d4ab8e25cb903045ac0f675b76234",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-pause_handover_test.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "ea138ba613571fc8384f50e50fa1b3531ff1247979bf1cc82ea85c1c76c87a62",
+      "actual_sha256": "ea138ba613571fc8384f50e50fa1b3531ff1247979bf1cc82ea85c1c76c87a62",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-initialization_gui_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "b3a39b57a87c7b86c9f1c3c68fab153fa4c688ba4d04c0e11755c70d2e9d4e07",
+      "actual_sha256": "b3a39b57a87c7b86c9f1c3c68fab153fa4c688ba4d04c0e11755c70d2e9d4e07",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-unified_manager_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "d90cf5e86594977b1b4da07713bba8ae8269e679287f35590ece6dd1ed60842e",
+      "actual_sha256": "d90cf5e86594977b1b4da07713bba8ae8269e679287f35590ece6dd1ed60842e",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-gui_instance_test.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "84e8653fe92a69cd5e74493e54ec1440dd25a01ac876e01a683509820594797a",
+      "actual_sha256": "84e8653fe92a69cd5e74493e54ec1440dd25a01ac876e01a683509820594797a",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-queue_gui_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "f579efe05fd82bda531cd5e50ef4ef1c03eaad632bf381d4b5ee55f92ce53b05",
+      "actual_sha256": "f579efe05fd82bda531cd5e50ef4ef1c03eaad632bf381d4b5ee55f92ce53b05",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-history_gui_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "cd715b9b1874bf9d5b05cb4ab8ca171be4cbb5bbc84201f437aca61238548482",
+      "actual_sha256": "cd715b9b1874bf9d5b05cb4ab8ca171be4cbb5bbc84201f437aca61238548482",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-permission_gui_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "725726711717a835072800ef29d65d2638e9f320a8088bb3501bb69bdcbdc02e",
+      "actual_sha256": "725726711717a835072800ef29d65d2638e9f320a8088bb3501bb69bdcbdc02e",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-permission-history-labels.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "d0f28ff53e81495226dc1a01bd2db0adb6ece99f9de71b47b6867905216085dc",
+      "actual_sha256": "d0f28ff53e81495226dc1a01bd2db0adb6ece99f9de71b47b6867905216085dc",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/provider-nemo.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "3feb06d3d202d9db2a99dcee095daa528bb08815925f42c26a31ba31aed7a69e",
+      "actual_sha256": "3feb06d3d202d9db2a99dcee095daa528bb08815925f42c26a31ba31aed7a69e",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/provider-nautilus.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "0b94b90e2214fbb9a4606a8802a9ee7e0330151c9c565175efce2523448a2af6",
+      "actual_sha256": "0b94b90e2214fbb9a4606a8802a9ee7e0330151c9c565175efce2523448a2af6",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/unified-ui-render.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "172d4f7cb177c7ce404b195f8201e01967107acb6c9956592ab33fea8d018f61",
+      "actual_sha256": "172d4f7cb177c7ce404b195f8201e01967107acb6c9956592ab33fea8d018f61",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/acl-screenshots/acl-user.png",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "7b24863ffa11a2187463de8ad087837289ac426b356eea8a96748eaa0ba97833",
+      "actual_sha256": "7b24863ffa11a2187463de8ad087837289ac426b356eea8a96748eaa0ba97833",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/acl-screenshots/acl-space.png",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "046398fc4b1e336ab498961d35d0ad210ffd4ee7e7ae08ebbdb053530679ced5",
+      "actual_sha256": "046398fc4b1e336ab498961d35d0ad210ffd4ee7e7ae08ebbdb053530679ced5",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/acl-screenshots/acl-directory.png",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "68446c371b21a0c636a25ee7ea8b9d49c22591d8bf2e0ed0c0725b9b7c6fc75b",
+      "actual_sha256": "68446c371b21a0c636a25ee7ea8b9d49c22591d8bf2e0ed0c0725b9b7c6fc75b",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/acl-screenshots/acl-unknown.png",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "expected_sha256": "56707bcba3680128ee520e214f0c4b8b1234cc528a72dfeb023bcd57f23ddc72",
+      "actual_sha256": "56707bcba3680128ee520e214f0c4b8b1234cc528a72dfeb023bcd57f23ddc72",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/summary.json",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "ffed793194b313205b7c32688fa1dbd6fd84d97b54fb00b58d86e2056afa3098",
+      "actual_sha256": "ffed793194b313205b7c32688fa1dbd6fd84d97b54fb00b58d86e2056afa3098",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/clean-private-product-packages.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "0e2f661f8234e8abd4a7b2217aefa23c515eb9ae468d9b86a030b52c3386c942",
+      "actual_sha256": "0e2f661f8234e8abd4a7b2217aefa23c515eb9ae468d9b86a030b52c3386c942",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/native-read-stale-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "4c304c90f8e0208814df4d4cb35ec5e35b8d4daf4e6e6d8ae4c3062e09a00c77",
+      "actual_sha256": "4c304c90f8e0208814df4d4cb35ec5e35b8d4daf4e6e6d8ae4c3062e09a00c77",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/runtime-permission-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "6c2d52c2960eeb38010456103754c07bd3667675ce83a68374ebd974af17889b",
+      "actual_sha256": "6c2d52c2960eeb38010456103754c07bd3667675ce83a68374ebd974af17889b",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/runtime-profile-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "e52939bffb2057ca3b289abc67d3eb619385b633465516aca9f0cb414c913256",
+      "actual_sha256": "e52939bffb2057ca3b289abc67d3eb619385b633465516aca9f0cb414c913256",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/runtime-version-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "6ee2fe2e72b356a72bc379ab7cd0814c04373e6535cb33a6826808bfb05bcad8",
+      "actual_sha256": "6ee2fe2e72b356a72bc379ab7cd0814c04373e6535cb33a6826808bfb05bcad8",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/core-permission-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "67fe7ccf4fa4db49d401c1ad3011e3b8d5413c99482a1243696a31ccc8b242ca",
+      "actual_sha256": "67fe7ccf4fa4db49d401c1ad3011e3b8d5413c99482a1243696a31ccc8b242ca",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/core-v6-migration-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "17e1a98a836f2016332f24e37c5285c6cd936d2e3bbed9d05833ccbdeec8da39",
+      "actual_sha256": "17e1a98a836f2016332f24e37c5285c6cd936d2e3bbed9d05833ccbdeec8da39",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/kernel-parent-actions-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "2036f14f0a2514c720a7f794eebd3f5411cb64f194d9dfa8402ae9060df9ea25",
+      "actual_sha256": "2036f14f0a2514c720a7f794eebd3f5411cb64f194d9dfa8402ae9060df9ea25",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/sproto-permission-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "377b227b3308734cb58989c3328306c8de6b5dc3f455575ec1acf0380598c6f2",
+      "actual_sha256": "377b227b3308734cb58989c3328306c8de6b5dc3f455575ec1acf0380598c6f2",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/sproto-profile-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "887bcd05296f67465d0bb784f1ad9ff478fdec37f14a3edba3ae877694c06142",
+      "actual_sha256": "887bcd05296f67465d0bb784f1ad9ff478fdec37f14a3edba3ae877694c06142",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/native-loopback.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "144431572b481cc34361a51795051a9806015adb5551d1c6a269e95a487900e8",
+      "actual_sha256": "144431572b481cc34361a51795051a9806015adb5551d1c6a269e95a487900e8",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/worker-trust-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "062a46fc8b65479522a827be8509b8ef5f8c5c7967d373bc5fd118b95dd8852b",
+      "actual_sha256": "062a46fc8b65479522a827be8509b8ef5f8c5c7967d373bc5fd118b95dd8852b",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/worker-elf-versions.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "70fed7d57ea4a5176bbc05c1d3ac5f4e366fe179876665021db7ae3f07a61da8",
+      "actual_sha256": "70fed7d57ea4a5176bbc05c1d3ac5f4e366fe179876665021db7ae3f07a61da8",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/core-history-probe-prepare.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "actual_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/core-history-probe.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "dbdce16defc656c321f434a6365ed66e770609b9d1247debe9a401a986872086",
+      "actual_sha256": "dbdce16defc656c321f434a6365ed66e770609b9d1247debe9a401a986872086",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/kernel-setattr-preflight.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "5bbcba4ae82c4a79eb916d513463dafa67baebb58c2c95db20fe4a4311e5d1c1",
+      "actual_sha256": "5bbcba4ae82c4a79eb916d513463dafa67baebb58c2c95db20fe4a4311e5d1c1",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/workspace-all-features.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "62d937c1d3ffc12903d04f5da319f5de25d35177b057697c9f642017757430b4",
+      "actual_sha256": "62d937c1d3ffc12903d04f5da319f5de25d35177b057697c9f642017757430b4",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/workspace-default.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "e40ad0bf01cb7a8d8c0b46e74e507c52a176cbff2684e75a01afb38ba57eb11a",
+      "actual_sha256": "e40ad0bf01cb7a8d8c0b46e74e507c52a176cbff2684e75a01afb38ba57eb11a",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/vendored-fuser-wire.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "8daefeec3699fdee45a87234d237895f6c259cf6cea98584d4850f1a72d4066b",
+      "actual_sha256": "8daefeec3699fdee45a87234d237895f6c259cf6cea98584d4850f1a72d4066b",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/kernel-fs-debug-index1.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "b871c222ff68e5e994adeb0b7552dc5f73e0644f67e4ed850a4f29a0c2b6b2d0",
+      "actual_sha256": "b871c222ff68e5e994adeb0b7552dc5f73e0644f67e4ed850a4f29a0c2b6b2d0",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/kernel-fs-debug-index0.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "fa7dc9ade5c5562db0df17b78f6ae45c5c84b29a806e28b144cd5ef86c2da524",
+      "actual_sha256": "fa7dc9ade5c5562db0df17b78f6ae45c5c84b29a806e28b144cd5ef86c2da524",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/kernel-runtime-debug.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "c0f50fcbe2b2a421680f0d6f4a32049c046994b66b2f09562b1269efda2713b0",
+      "actual_sha256": "c0f50fcbe2b2a421680f0d6f4a32049c046994b66b2f09562b1269efda2713b0",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/kernel-fs-release-index1.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "99696c3cee3051c089196596f702d786c3fc96413d460468a92cbe2cdcc94436",
+      "actual_sha256": "99696c3cee3051c089196596f702d786c3fc96413d460468a92cbe2cdcc94436",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/runtime-private-dbus.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "38e5a64bb077adb3943097bfa0c2217a29553774866807b292c003761cb7bc7a",
+      "actual_sha256": "38e5a64bb077adb3943097bfa0c2217a29553774866807b292c003761cb7bc7a",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-gui_unit_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "3fa9cc8e306682db81830868fd7778d496592fbad1966ff8c519fee44a140880",
+      "actual_sha256": "3fa9cc8e306682db81830868fd7778d496592fbad1966ff8c519fee44a140880",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-cache_gui_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "a41d8f2078dc8fc2a84851cc812c049264e9d314c356b185bd464bf5449760a2",
+      "actual_sha256": "a41d8f2078dc8fc2a84851cc812c049264e9d314c356b185bd464bf5449760a2",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-conflict_gui_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "42babdd88503b8a800b294b150fa79d7ebf2f1821ef01c800c2ced5bd3d9da45",
+      "actual_sha256": "42babdd88503b8a800b294b150fa79d7ebf2f1821ef01c800c2ced5bd3d9da45",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-hidden_dialog_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "d80ef5cf9cb1963051a289f7847716f82eaf019af64f04920dde7b7f7e4de2f3",
+      "actual_sha256": "d80ef5cf9cb1963051a289f7847716f82eaf019af64f04920dde7b7f7e4de2f3",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-lazy_gui_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "3d98b94791a69b4408b3673b1597470a70ddee5b9e30605f3b3211e2d8726dfb",
+      "actual_sha256": "3d98b94791a69b4408b3673b1597470a70ddee5b9e30605f3b3211e2d8726dfb",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-multi_mount_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "8862986856d662567ae6166eeddefa238846ca4df8091081c08fc21e5db1ff09",
+      "actual_sha256": "8862986856d662567ae6166eeddefa238846ca4df8091081c08fc21e5db1ff09",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-trust_gui_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "2bd626eaaa5f07c3c6c5080e7089c0b7cf44b94db6c012d686e08800a5e718ef",
+      "actual_sha256": "2bd626eaaa5f07c3c6c5080e7089c0b7cf44b94db6c012d686e08800a5e718ef",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-transfer_gui_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "1651271d6e6736d22b55d6d7482a6ce06fe0100ddfeb780ce5bcdb82cc21e43e",
+      "actual_sha256": "1651271d6e6736d22b55d6d7482a6ce06fe0100ddfeb780ce5bcdb82cc21e43e",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-theme_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "73267ee34bbcc9e2e05fac0f08e73aef4fc813973f0330b6aee48121512fce1a",
+      "actual_sha256": "73267ee34bbcc9e2e05fac0f08e73aef4fc813973f0330b6aee48121512fce1a",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-selector_gui_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "409a12f3fb0b87f031fb5ff195ac56ef0f4b0f7b75d39aa9120587504c0a343b",
+      "actual_sha256": "409a12f3fb0b87f031fb5ff195ac56ef0f4b0f7b75d39aa9120587504c0a343b",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-backend_upgrade_test.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "7a2accc3912e47e58f20f8bc92ad5d50573d4ab8e25cb903045ac0f675b76234",
+      "actual_sha256": "7a2accc3912e47e58f20f8bc92ad5d50573d4ab8e25cb903045ac0f675b76234",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-pause_handover_test.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "ea138ba613571fc8384f50e50fa1b3531ff1247979bf1cc82ea85c1c76c87a62",
+      "actual_sha256": "ea138ba613571fc8384f50e50fa1b3531ff1247979bf1cc82ea85c1c76c87a62",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-initialization_gui_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "b3a39b57a87c7b86c9f1c3c68fab153fa4c688ba4d04c0e11755c70d2e9d4e07",
+      "actual_sha256": "b3a39b57a87c7b86c9f1c3c68fab153fa4c688ba4d04c0e11755c70d2e9d4e07",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-unified_manager_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "d90cf5e86594977b1b4da07713bba8ae8269e679287f35590ece6dd1ed60842e",
+      "actual_sha256": "d90cf5e86594977b1b4da07713bba8ae8269e679287f35590ece6dd1ed60842e",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-gui_instance_test.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "84e8653fe92a69cd5e74493e54ec1440dd25a01ac876e01a683509820594797a",
+      "actual_sha256": "84e8653fe92a69cd5e74493e54ec1440dd25a01ac876e01a683509820594797a",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-queue_gui_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "f579efe05fd82bda531cd5e50ef4ef1c03eaad632bf381d4b5ee55f92ce53b05",
+      "actual_sha256": "f579efe05fd82bda531cd5e50ef4ef1c03eaad632bf381d4b5ee55f92ce53b05",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-history_gui_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "cd715b9b1874bf9d5b05cb4ab8ca171be4cbb5bbc84201f437aca61238548482",
+      "actual_sha256": "cd715b9b1874bf9d5b05cb4ab8ca171be4cbb5bbc84201f437aca61238548482",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-permission_gui_tests.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "725726711717a835072800ef29d65d2638e9f320a8088bb3501bb69bdcbdc02e",
+      "actual_sha256": "725726711717a835072800ef29d65d2638e9f320a8088bb3501bb69bdcbdc02e",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/gui-permission-history-labels.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "d0f28ff53e81495226dc1a01bd2db0adb6ece99f9de71b47b6867905216085dc",
+      "actual_sha256": "d0f28ff53e81495226dc1a01bd2db0adb6ece99f9de71b47b6867905216085dc",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/provider-nemo.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "3feb06d3d202d9db2a99dcee095daa528bb08815925f42c26a31ba31aed7a69e",
+      "actual_sha256": "3feb06d3d202d9db2a99dcee095daa528bb08815925f42c26a31ba31aed7a69e",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/provider-nautilus.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "0b94b90e2214fbb9a4606a8802a9ee7e0330151c9c565175efce2523448a2af6",
+      "actual_sha256": "0b94b90e2214fbb9a4606a8802a9ee7e0330151c9c565175efce2523448a2af6",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/logs/unified-ui-render.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/inventory-001.json",
+      "expected_sha256": "172d4f7cb177c7ce404b195f8201e01967107acb6c9956592ab33fea8d018f61",
+      "actual_sha256": "172d4f7cb177c7ce404b195f8201e01967107acb6c9956592ab33fea8d018f61",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/clock-probe-001/case-1.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/clock-probe-001/results.json",
+      "expected_sha256": "103ae85396d05a8337a5d7dcda268abcd32c684852664fe4720699ef1572fd69",
+      "actual_sha256": "103ae85396d05a8337a5d7dcda268abcd32c684852664fe4720699ef1572fd69",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/clock-probe-001/case-2.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/clock-probe-001/results.json",
+      "expected_sha256": "f6a9d51f50f463f59050a42ac8b3afe227646e22cf51ce3f343e448e86c8e861",
+      "actual_sha256": "f6a9d51f50f463f59050a42ac8b3afe227646e22cf51ce3f343e448e86c8e861",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/clock-diagnostic-001/clean-products.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/clock-diagnostic-001/summary.json",
+      "expected_sha256": "1fb28860e1558386ec44ebcd8b31541d686eea5d45f4dbf36c0cc49e731aeae5",
+      "actual_sha256": "1fb28860e1558386ec44ebcd8b31541d686eea5d45f4dbf36c0cc49e731aeae5",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/clock-diagnostic-001/build-diagnostic.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/clock-diagnostic-001/summary.json",
+      "expected_sha256": "b82dbe9e14a4853f0291162fb9c15befcf29d6b9fce8c08e849c821acb258975",
+      "actual_sha256": "b82dbe9e14a4853f0291162fb9c15befcf29d6b9fce8c08e849c821acb258975",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/clock-diagnostic-001/two-original-cases-concurrent.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/clock-diagnostic-001/summary.json",
+      "expected_sha256": "158a404abcda73c6276ebee1f4c5d3b4ad4833c89f487ba8303f42ed4ebc0bae",
+      "actual_sha256": "158a404abcda73c6276ebee1f4c5d3b4ad4833c89f487ba8303f42ed4ebc0bae",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/clock-diagnostic-001/runtime-full-original-parallelism.log",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/clock-diagnostic-001/summary.json",
+      "expected_sha256": "223b8bb0829558747d70d3ff577e7ab25f0501cdff2e6c98bc6a1f71f5f61291",
+      "actual_sha256": "223b8bb0829558747d70d3ff577e7ab25f0501cdff2e6c98bc6a1f71f5f61291",
+      "matched": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/clock-diagnostic-001/summary.json",
+      "authority": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/clock-diagnostic-001/diagnostic-audit.json",
+      "expected_sha256": "11673e97087d5b178de51ab2ce1507525ea6f3c4cc9b9fc073d54d1aea0f7b38",
+      "actual_sha256": "11673e97087d5b178de51ab2ce1507525ea6f3c4cc9b9fc073d54d1aea0f7b38",
+      "matched": true
+    }
+  ],
+  "matched": 146,
+  "mismatches": [],
+  "limitation": "Files without a pre-existing hash receive only current copy/manifest integrity, not a historical integrity claim."
+}

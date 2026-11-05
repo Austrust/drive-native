@@ -1,0 +1,59 @@
+{"command": "offline-documentation-staging", "passed": true, "counts": {"reported": true, "passed": 2, "failed": 0, "ignored": 0}}
+{"command": "clean-private-product-packages", "passed": true, "counts": {"reported": false}}
+{"command": "core-definite_read_refusal_survives_restart_without_automatic_retry", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 6}}
+{"command": "core-revoked_traversal_suppresses_existing_transport_retry_wakes", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 6}}
+{"command": "runtime-bridge_respects_read_denial_before_cached_body_or_new_flight", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 152}}
+{"command": "runtime-cancelled_flight_clears_retry_even_when_read_or_traverse_is_denied", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 152}}
+{"command": "runtime-concurrent_read_revocation_and_last_reader_cancel_leave_no_retry_intent", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 152}}
+{"command": "retry-clock-preflight", "passed": true, "counts": {"reported": true, "passed": 4, "failed": 0, "ignored": 0, "measured": 0, "filtered": 149}}
+{"command": "obsolete-ticket-preflight", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 152}}
+{"command": "original-retry-pair-preflight", "passed": true, "counts": {"reported": true, "passed": 2, "failed": 0, "ignored": 0, "measured": 0, "filtered": 151}}
+{"command": "runtime-lib-original-parallelism", "passed": true, "counts": {"reported": true, "passed": 152, "failed": 0, "ignored": 1, "measured": 0, "filtered": 0}}
+{"command": "native-read-stale-preflight", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 152}}
+{"command": "runtime-permission-preflight", "passed": true, "counts": {"reported": true, "passed": 4, "failed": 0, "ignored": 0, "measured": 0, "filtered": 149}}
+{"command": "runtime-profile-preflight", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 152}}
+{"command": "runtime-version-preflight", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 152}}
+{"command": "core-permission-preflight", "passed": true, "counts": {"reported": true, "passed": 23, "failed": 0, "ignored": 0, "measured": 0, "filtered": 383}}
+{"command": "core-v6-migration-preflight", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 8}}
+{"command": "kernel-parent-actions-preflight", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 4}}
+{"command": "sproto-permission-preflight", "passed": true, "counts": {"reported": true, "passed": 3, "failed": 0, "ignored": 0, "measured": 0, "filtered": 164}}
+{"command": "sproto-profile-preflight", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 166}}
+{"command": "native-loopback", "passed": true, "counts": {"reported": true, "passed": 66, "failed": 0, "ignored": 0}}
+{"command": "worker-trust-preflight", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 0}}
+{"command": "worker-elf-versions", "passed": true, "counts": {"reported": true, "passed": 3, "failed": 0, "ignored": 0}}
+{"command": "core-history-probe-prepare", "passed": true, "counts": {"reported": false}}
+{"command": "core-history-probe", "passed": true, "counts": {"reported": true, "passed": 5, "failed": 0, "ignored": 0, "measured": 0, "filtered": 0}}
+{"command": "kernel-setattr-preflight", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 4}}
+{"command": "workspace-all-features", "passed": true, "counts": {"reported": true, "passed": 976, "failed": 0, "ignored": 42, "measured": 0, "filtered": 0}}
+{"command": "workspace-default", "passed": true, "counts": {"reported": true, "passed": 966, "failed": 0, "ignored": 37, "measured": 0, "filtered": 0}}
+{"command": "vendored-fuser-wire", "passed": true, "counts": {"reported": true, "passed": 55, "failed": 0, "ignored": 0, "measured": 0, "filtered": 0}}
+{"command": "kernel-fs-debug-index1", "passed": true, "counts": {"reported": true, "passed": 38, "failed": 0, "ignored": 0, "measured": 0, "filtered": 41}}
+{"command": "kernel-fs-debug-index0", "passed": true, "counts": {"reported": true, "passed": 36, "failed": 0, "ignored": 0, "measured": 0, "filtered": 43}}
+{"command": "kernel-runtime-debug", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 152}}
+{"command": "kernel-fs-release-index1", "passed": true, "counts": {"reported": true, "passed": 38, "failed": 0, "ignored": 0, "measured": 0, "filtered": 41}}
+{"command": "kernel-fs-release-index0", "passed": true, "counts": {"reported": true, "passed": 36, "failed": 0, "ignored": 0, "measured": 0, "filtered": 43}}
+{"command": "kernel-runtime-release", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 152}}
+{"command": "kernel-fs-release-attr0", "passed": true, "counts": {"reported": true, "passed": 38, "failed": 0, "ignored": 0, "measured": 0, "filtered": 41}}
+{"command": "runtime-private-dbus", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0, "measured": 0, "filtered": 24}}
+{"command": "gui-gui_unit_tests", "passed": true, "counts": {"reported": true, "passed": 5, "failed": 0, "ignored": 0}}
+{"command": "gui-cache_gui_tests", "passed": true, "counts": {"reported": true, "passed": 5, "failed": 0, "ignored": 0}}
+{"command": "gui-conflict_gui_tests", "passed": true, "counts": {"reported": true, "passed": 24, "failed": 0, "ignored": 0}}
+{"command": "gui-hidden_dialog_tests", "passed": true, "counts": {"reported": true, "passed": 3, "failed": 0, "ignored": 0}}
+{"command": "gui-lazy_gui_tests", "passed": true, "counts": {"reported": true, "passed": 4, "failed": 0, "ignored": 0}}
+{"command": "gui-multi_mount_tests", "passed": true, "counts": {"reported": true, "passed": 5, "failed": 0, "ignored": 0}}
+{"command": "gui-trust_gui_tests", "passed": true, "counts": {"reported": true, "passed": 6, "failed": 0, "ignored": 0}}
+{"command": "gui-transfer_gui_tests", "passed": true, "counts": {"reported": true, "passed": 6, "failed": 0, "ignored": 0}}
+{"command": "gui-theme_tests", "passed": true, "counts": {"reported": true, "passed": 1, "failed": 0, "ignored": 0}}
+{"command": "gui-selector_gui_tests", "passed": true, "counts": {"reported": true, "passed": 7, "failed": 0, "ignored": 0}}
+{"command": "gui-backend_upgrade_test", "passed": true, "counts": {"reported": true, "passed": 11, "failed": 0, "ignored": 0}}
+{"command": "gui-pause_handover_test", "passed": true, "counts": {"reported": true, "passed": 5, "failed": 0, "ignored": 0}}
+{"command": "gui-initialization_gui_tests", "passed": true, "counts": {"reported": true, "passed": 10, "failed": 0, "ignored": 0}}
+{"command": "gui-unified_manager_tests", "passed": true, "counts": {"reported": true, "passed": 27, "failed": 0, "ignored": 0}}
+{"command": "gui-gui_instance_test", "passed": true, "counts": {"reported": true, "passed": 3, "failed": 0, "ignored": 0}}
+{"command": "gui-queue_gui_tests", "passed": true, "counts": {"reported": true, "passed": 4, "failed": 0, "ignored": 0}}
+{"command": "gui-history_gui_tests", "passed": true, "counts": {"reported": true, "passed": 17, "failed": 0, "ignored": 0}}
+{"command": "gui-permission_gui_tests", "passed": true, "counts": {"reported": true, "passed": 5, "failed": 0, "ignored": 0}}
+{"command": "gui-permission-history-labels", "passed": true, "counts": {"reported": true, "passed": 3, "failed": 0, "ignored": 0}}
+{"command": "provider-nemo", "passed": true, "counts": {"reported": true, "passed": 10, "failed": 0, "ignored": 0}}
+{"command": "provider-nautilus", "passed": true, "counts": {"reported": true, "passed": 10, "failed": 0, "ignored": 0}}
+{"command": "unified-ui-render", "passed": true, "counts": {"reported": false}}

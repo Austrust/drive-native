@@ -1,0 +1,14 @@
+{
+  "all_commands_completed": true,
+  "all_commands_exited_zero": true,
+  "max_monotonic_read_bracket_ns": 144500,
+  "minimum_elapsed_at_original_assert_point_ns": 1186085949,
+  "all_captured_assert_points_ge_900ms": true,
+  "limits": [
+    "original assertion follows diagnostic Store read and logging; only captured elapsed describes original assertion point",
+    "wall delta uses u128 subtraction: a backward step spanning one helper could panic before diagnostic; this run emitted all six expected helper lines",
+    "no failing retry observed in diagnostic; adjacent realtime discontinuity occurred after helper retry packets",
+    "sampling demonstrates guest clock divergence only; source of discontinuity is not established"
+  ],
+  "summary_sha256": "11673e97087d5b178de51ab2ce1507525ea6f3c4cc9b9fc073d54d1aea0f7b38"
+}

@@ -1,0 +1,11 @@
+   Compiling sproto v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/source/crates/sproto)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 12.44s
+     Running unittests src/lib.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/target/debug/deps/sproto-8b5c0e0ddbc32155)
+
+running 3 tests
+test actions::transfer::tests::only_verified_download_reply_codes_are_permission_evidence ... ok
+test error::tests::mutation_permission_hints_are_action_scoped_and_never_definite_refusals ... ok
+test error::tests::oversized_error_code_cannot_alias_a_permission_refusal ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 164 filtered out; finished in 0.00s
+

@@ -1,0 +1,17 @@
+{
+  "candidate_commit": "41365a650eb7d7df696046e21b7671697231f851",
+  "run": "g4-010",
+  "stage": "shutil.copytree of completed g4-009 private target",
+  "test_commands_started": 0,
+  "product_failure": false,
+  "environment_failure": true,
+  "source_originals_preserved": true,
+  "partial_target_must_not_be_reused": true,
+  "copy_exit_code": 1,
+  "first_reported_error": "Errno 5 Input/output error copying debug/examples/native_snapshot_paging_races",
+  "subsequent_error": "Errno 30 Read-only file system",
+  "launch_error": "distribution disk mounted read-only as fallback; Wsl/Service/E_UNEXPECTED",
+  "raw_tool_output_limit": "copy traceback tool output was truncated from approximately 20255 tokens; this file is an observed-error record, not a full stderr replacement",
+  "repair_actions_taken": [],
+  "recorded_utc": "2026-11-05T02:59:09.5022737Z"
+}

@@ -1,0 +1,153 @@
+{
+  "candidate_commit": "9c9aabae447d92275f93dae65320788240a03113",
+  "source_summary_sha256": "4c91873602ce0fa18fbd436d6f76ebf59860c37b566105aebfb189a2396254fe",
+  "main_matrix_complete": true,
+  "commands": [
+    {
+      "name": "capacity-ignored-list",
+      "exit_code": 0,
+      "reported_counts": {
+        "reported": false
+      },
+      "inventory_counts": {
+        "ok": 0,
+        "FAILED": 0,
+        "ignored": 0,
+        "unparsed": 0
+      },
+      "counts_reconciled": true,
+      "log": "logs/capacity-ignored-list.log",
+      "log_sha256": "34c6961771e81be27d8872f7fc88c3dcc74e593def3bb2135c34b0dfe9abd19b",
+      "tests": []
+    },
+    {
+      "name": "capacity-210k",
+      "exit_code": 0,
+      "reported_counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 405
+      },
+      "inventory_counts": {
+        "ok": 1,
+        "FAILED": 0,
+        "ignored": 0,
+        "unparsed": 0
+      },
+      "counts_reconciled": true,
+      "log": "logs/capacity-210k.log",
+      "log_sha256": "9affa48c05ea22e87c4da455ed32eb4e813900fdbe34b7eb26da694a3eb7275e",
+      "tests": [
+        {
+          "suite": "drive_core",
+          "name": "status_snapshot::tests::default_budget_admits_210k_node_snapshot_without_holding_store",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "name": "tls-harness-build",
+      "exit_code": 0,
+      "reported_counts": {
+        "reported": false
+      },
+      "inventory_counts": {
+        "ok": 0,
+        "FAILED": 0,
+        "ignored": 0,
+        "unparsed": 0
+      },
+      "counts_reconciled": true,
+      "log": "logs/tls-harness-build.log",
+      "log_sha256": "d820fc9017618fbf3c7bd21930e9830adeb99d84581d637033ddb3ff161ef201",
+      "tests": []
+    },
+    {
+      "name": "tls-actual-worker-all-ten",
+      "exit_code": 0,
+      "reported_counts": {
+        "reported": false
+      },
+      "inventory_counts": {
+        "ok": 0,
+        "FAILED": 0,
+        "ignored": 0,
+        "unparsed": 0
+      },
+      "counts_reconciled": true,
+      "log": "logs/tls-actual-worker-all-ten.log",
+      "log_sha256": "11f930560d911137ca29f3e2a574a3e554925e401646b4d110bc8dc4fc8895e5",
+      "tests": []
+    },
+    {
+      "name": "old-component-build",
+      "exit_code": 0,
+      "reported_counts": {
+        "reported": false
+      },
+      "inventory_counts": {
+        "ok": 0,
+        "FAILED": 0,
+        "ignored": 0,
+        "unparsed": 0
+      },
+      "counts_reconciled": true,
+      "log": "logs/old-component-build.log",
+      "log_sha256": "d825e45c812269c7aa06ee7c2727bfd02dab168b5024cd59f1e85540c291429d",
+      "tests": []
+    },
+    {
+      "name": "new-component-build",
+      "exit_code": 0,
+      "reported_counts": {
+        "reported": false
+      },
+      "inventory_counts": {
+        "ok": 0,
+        "FAILED": 0,
+        "ignored": 0,
+        "unparsed": 0
+      },
+      "counts_reconciled": true,
+      "log": "logs/new-component-build.log",
+      "log_sha256": "c604d0ef588eb1d727c437f580efc667af6318c9f3814abeb239555abc09776a",
+      "tests": []
+    },
+    {
+      "name": "private-component-policy-handover",
+      "exit_code": 0,
+      "reported_counts": {
+        "reported": false
+      },
+      "inventory_counts": {
+        "ok": 0,
+        "FAILED": 0,
+        "ignored": 0,
+        "unparsed": 0
+      },
+      "counts_reconciled": true,
+      "log": "logs/private-component-policy-handover.log",
+      "log_sha256": "49ea0ad41b6eb71f0eb3f03ab56ad13759243f10f20b31aa6334b0ccc40c151d",
+      "tests": []
+    }
+  ],
+  "note": "Per-command executions; repeated modes are not an additive unique total.",
+  "unique_tests": [
+    {
+      "suite": "drive_core",
+      "name": "status_snapshot::tests::default_budget_admits_210k_node_snapshot_without_holding_store",
+      "observations": [
+        {
+          "command": "capacity-210k",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    }
+  ],
+  "all_reported_counts_reconciled": true
+}

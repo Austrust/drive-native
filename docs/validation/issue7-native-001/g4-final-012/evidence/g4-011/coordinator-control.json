@@ -1,0 +1,12 @@
+{
+  "reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+  "defer_commands": [
+    "vendored-fuser-wire",
+    "kernel-fs-*",
+    "kernel-runtime-*",
+    "runtime-private-dbus",
+    "gui-*",
+    "provider-*",
+    "unified-ui-render"
+  ]
+}

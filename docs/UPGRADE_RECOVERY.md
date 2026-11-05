@@ -1,8 +1,12 @@
 # 暂停、升级与恢复
 
+本地开发版 `0.1.0~dev20261105.1` 使用schema25、IPC21：schema24增加同步历史，25增加用户读写策略和逐动作权限。FSD与worker须成对更新；旧程序不能读取新schema，不可沿用下面历史同schema版本的读回结论。独立G4已覆盖迁移、备份与旧reader拒绝；私有D-Bus/FUSE组件补测确认策略切换、重挂载、组件替换后pending正文、history、pin和cursor保留。它不是实际dpkg安装/升级/重装；后者及真实NAS/Mint均未实测，准确范围见[#7报告](FIX_7_REPORT.md)。
+
+旧任务 `writable=false` 会保留为“用户设为只读”。如要按远端逐目录权限判断，在“读写设置”选择“按远端目录权限同步”，保存后停止并重新启动该挂载；“重新核对”只使旧权限观测失效，不改变用户只读策略。先保存并关闭挂载中的文件、暂停任务，再更新完整组件。正常更新不清缓存；未上传修改和完整状态必须保留。
+
 本文说明源码中的升级机制及实际验证。历史 `0.1.0~dev20261101.6` 已发布，schema22／IPC18；[包验证011](validation/native-package-011/REPORT.md)完成`.5 → .6`暂停接管、schema20→22迁移与备份核验、旧schema20 ELF拒绝、新版重开及同版／purge重装，保留两份pending编辑和dirty草稿。未覆盖旧初始化候选或未知提交升级；未执行包管理器降级，未观察或强制构造非空WAL。正常升级不要求清缓存，最终状态以[DELIVERY_GATES](../DELIVERY_GATES.md)为准。历史同schema `.4 → .5` 见[包010](validation/native-package-010/REPORT.md)，更早迁移见[008](validation/native-package-008/REPORT.md)和[007](validation/native-package-007/REPORT.md)。
 
-最新 `0.1.0~dev20261103.9` 的[包验证014](validation/native-package-014/REPORT.md)已完成 `.8 → .9` 同schema23／IPC20的实际暂停接管、旧版成对ELF成功读回、同版重装及purge后重装；两份dirty草稿、两项pending操作和显式上传mtime意图保持。安装版的恢复能力与 `RecheckIssues` 暂停响应已通过真实本地D-Bus核验，操作后仍暂停。此结果不涉及数据库降级或迁移备份，也不覆盖未知提交、活跃初始化候选升级、认证网络IPC或Mint实机。
+历史 `0.1.0~dev20261103.9` 的[包验证014](validation/native-package-014/REPORT.md)已完成 `.8 → .9` 同schema23／IPC20的实际暂停接管、旧版成对ELF成功读回、同版重装及purge后重装；两份dirty草稿、两项pending操作和显式上传mtime意图保持。安装版的恢复能力与 `RecheckIssues` 暂停响应已通过真实本地D-Bus核验，操作后仍暂停。此结果不涉及数据库降级或迁移备份，也不覆盖未知提交、活跃初始化候选升级、认证网络IPC或Mint实机。
 
 ## 正常升级
 
@@ -32,7 +36,7 @@
 
 已发布 `.1` 使用 SQLite schema18、`.2` 使用schema19；20261101 `.3` 增加与代次绑定的游标重置许可，`.4` 保持数据库版本20。Store 打开旧版本数据库时先使用 SQLite `VACUUM INTO` 保存包含已提交 WAL 内容的一致备份，再迁移。新版本数据库由较旧二进制拒绝打开，不能通过手改 `user_version` 或清缓存绕过。备份恢复也不能自动涵盖升级后新增的未上传编辑，必须保留完整用户状态。
 
-此前同schema回退验证不证明 schema19 或20可降级。真实旧二进制拒绝、18→19暂停迁移及未上传数据保留已通过[包验证007](validation/native-package-007/REPORT.md)；未承诺任意旧版本可降级。历史 `.3` 内部IPC升至17，20261101 `.6` 使用IPC18；最新014构建使用IPC20，仍须切换配套FSD／worker；详见[进度接口](INITIALIZATION_PROGRESS.md)及[持久候选基础](INITIALIZATION_PERSISTENCE.md)。当前Service已接入生产候选调度；schema19→20暂停接管、迁移备份、旧ELF拒绝以及重装保留两份pending编辑与草稿已通过[本批包验证008](validation/native-package-008/REPORT.md)。安装夹具没有提交结果未知的操作，相关runtime回归不等于该类升级已验证。当前cold元数据预览与安装验证分别记录于[包011](validation/native-package-011/REPORT.md)，正文仍等全局ready。
+此前同schema回退验证不证明 schema19 或20可降级。真实旧二进制拒绝、18→19暂停迁移及未上传数据保留已通过[包验证007](validation/native-package-007/REPORT.md)；未承诺任意旧版本可降级。历史 `.3` 内部IPC升至17，20261101 `.6` 使用IPC18；历史014构建使用IPC20，仍须切换配套FSD／worker；详见[进度接口](INITIALIZATION_PROGRESS.md)及[持久候选基础](INITIALIZATION_PERSISTENCE.md)。当前Service已接入生产候选调度；schema19→20暂停接管、迁移备份、旧ELF拒绝以及重装保留两份pending编辑与草稿已通过[本批包验证008](validation/native-package-008/REPORT.md)。安装夹具没有提交结果未知的操作，相关runtime回归不等于该类升级已验证。当前cold元数据预览与安装验证分别记录于[包011](validation/native-package-011/REPORT.md)，正文仍等全局ready。
 
 `.6`从已发布schema20升级到schema22，包含schema21的原生事件证据及schema22的预览inode、权限撤销与预算状态。隔离Ubuntu安装已验证迁移备份、旧reader拒绝以及未上传数据保留；这不代表干净OS或Mint，也不覆盖旧候选和未知提交。冷预览转正是同一挂载内的状态事务，和升级时正常卸载／重挂载不同。孤立草稿不会被预览自动清理，需保留并诊断。
 

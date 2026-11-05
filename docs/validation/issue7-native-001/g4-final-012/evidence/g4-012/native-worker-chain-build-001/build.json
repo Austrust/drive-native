@@ -1,0 +1,239 @@
+{
+  "candidate_commit": "9c9aabae447d92275f93dae65320788240a03113",
+  "source": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-012/source",
+  "target": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-012/target",
+  "completed_same_candidate_target_reuse": {
+    "run": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-012",
+    "summary_sha256": "72c976c4f79deb28d716958022776bb1d01f6c6e7630f7db6f654af417da13ae",
+    "elf_witness_sha256": "70ff595efd7b2dfb0411921207b223e1b4ff0f940a8319ba88b8df6341fe960e",
+    "authorization": "root approved sequential same-candidate completed target reuse; no parallel build and no cross-candidate sharing"
+  },
+  "crate": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-012/native-worker-chain-build-001/native-worker-chain-crate",
+  "started_utc": "2026-11-05T04:28:36.920310+00:00",
+  "complete": true,
+  "passed": true,
+  "source_lock_before": "fcaf7417018889efefaffd45ac2e4931a1b01dd5fc83e6a9fc9f0806093268dd",
+  "commands": [
+    {
+      "name": "prepare",
+      "argv": [
+        "/usr/bin/python3",
+        "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/issue7-validation/native-worker-chain-012/prepare.py",
+        "--source",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-012/source",
+        "--output",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-012/native-worker-chain-build-001/native-worker-chain-crate",
+        "--candidate",
+        "9c9aabae447d92275f93dae65320788240a03113"
+      ],
+      "started_utc": "2026-11-05T04:28:37.402997+00:00",
+      "stdout": "prepare.stdout.log",
+      "stderr": "prepare.stderr.log",
+      "host_space_before": {
+        "helper_path": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/issue7-validation/prepared-g4-012/run-g4.py",
+        "helper_sha256": "88fa9b573ac109d85b1c7af2fcf4b2c02e81a0be58527f8031c411b1a9c5271d",
+        "minimum_free_bytes": 10737418240,
+        "minimum_free_gib": 10,
+        "observation": {
+          "utc": "2026-11-05T04:28:37.403008+00:00",
+          "command": [
+            "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+          ],
+          "host_drive": "C:",
+          "free_bytes": 29761777664,
+          "exit_code": 0,
+          "stdout": "29761777664",
+          "stderr": ""
+        },
+        "passed": true
+      },
+      "process_group": 586,
+      "exit_code": 0,
+      "elapsed_seconds": 0.1140280919998986,
+      "finished_utc": "2026-11-05T04:28:37.993346+00:00",
+      "stdout_sha256": "f8f500c3cc853f03d407e4d81f3d8192711a79e52073c1df08d9ef213f38f897",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "passed": true
+    },
+    {
+      "name": "metadata",
+      "argv": [
+        "cargo",
+        "metadata",
+        "--offline",
+        "--format-version",
+        "1",
+        "--manifest-path",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-012/native-worker-chain-build-001/native-worker-chain-crate/Cargo.toml"
+      ],
+      "started_utc": "2026-11-05T04:28:37.994029+00:00",
+      "stdout": "metadata.stdout.log",
+      "stderr": "metadata.stderr.log",
+      "host_space_before": {
+        "helper_path": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/issue7-validation/prepared-g4-012/run-g4.py",
+        "helper_sha256": "88fa9b573ac109d85b1c7af2fcf4b2c02e81a0be58527f8031c411b1a9c5271d",
+        "minimum_free_bytes": 10737418240,
+        "minimum_free_gib": 10,
+        "observation": {
+          "utc": "2026-11-05T04:28:37.994037+00:00",
+          "command": [
+            "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+          ],
+          "host_drive": "C:",
+          "free_bytes": 29761777664,
+          "exit_code": 0,
+          "stdout": "29761777664",
+          "stderr": ""
+        },
+        "passed": true
+      },
+      "process_group": 589,
+      "exit_code": 0,
+      "elapsed_seconds": 3.475305386999935,
+      "finished_utc": "2026-11-05T04:28:41.930504+00:00",
+      "stdout_sha256": "f891b91dfa708f0ba920ea67b7f790a4a9426740ff3237706ab1037cd1508934",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "passed": true
+    },
+    {
+      "name": "verify-lock",
+      "argv": [
+        "/usr/bin/python3",
+        "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/issue7-validation/native-worker-chain-012/verify-lock.py",
+        "--source",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-012/source",
+        "--crate",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-012/native-worker-chain-build-001/native-worker-chain-crate",
+        "--metadata",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-012/native-worker-chain-build-001/metadata.stdout.log"
+      ],
+      "started_utc": "2026-11-05T04:28:41.932755+00:00",
+      "stdout": "verify-lock.stdout.log",
+      "stderr": "verify-lock.stderr.log",
+      "host_space_before": {
+        "helper_path": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/issue7-validation/prepared-g4-012/run-g4.py",
+        "helper_sha256": "88fa9b573ac109d85b1c7af2fcf4b2c02e81a0be58527f8031c411b1a9c5271d",
+        "minimum_free_bytes": 10737418240,
+        "minimum_free_gib": 10,
+        "observation": {
+          "utc": "2026-11-05T04:28:41.932767+00:00",
+          "command": [
+            "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+          ],
+          "host_drive": "C:",
+          "free_bytes": 29761769472,
+          "exit_code": 0,
+          "stdout": "29761769472",
+          "stderr": ""
+        },
+        "passed": true
+      },
+      "process_group": 597,
+      "exit_code": 0,
+      "elapsed_seconds": 0.16430101800006014,
+      "finished_utc": "2026-11-05T04:28:42.593059+00:00",
+      "stdout_sha256": "f73d30c0c1f271ff2a58eac83bcb4ba2d17aa6bd67227969ad3326e33baf9387",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "passed": true
+    },
+    {
+      "name": "build",
+      "argv": [
+        "cargo",
+        "build",
+        "--offline",
+        "--locked",
+        "--manifest-path",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-012/native-worker-chain-build-001/native-worker-chain-crate/Cargo.toml",
+        "--message-format=json"
+      ],
+      "started_utc": "2026-11-05T04:28:42.593490+00:00",
+      "stdout": "build.stdout.log",
+      "stderr": "build.stderr.log",
+      "host_space_before": {
+        "helper_path": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/issue7-validation/prepared-g4-012/run-g4.py",
+        "helper_sha256": "88fa9b573ac109d85b1c7af2fcf4b2c02e81a0be58527f8031c411b1a9c5271d",
+        "minimum_free_bytes": 10737418240,
+        "minimum_free_gib": 10,
+        "observation": {
+          "utc": "2026-11-05T04:28:42.593497+00:00",
+          "command": [
+            "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+          ],
+          "host_drive": "C:",
+          "free_bytes": 29761769472,
+          "exit_code": 0,
+          "stdout": "29761769472",
+          "stderr": ""
+        },
+        "passed": true
+      },
+      "process_group": 599,
+      "exit_code": 0,
+      "elapsed_seconds": 22.418075068000007,
+      "finished_utc": "2026-11-05T04:29:08.415647+00:00",
+      "stdout_sha256": "c4824b54dd49a4f373d6dcc57270ca878ca71fdb15f614912f2fb4d7e9323e8c",
+      "stderr_sha256": "b2fd71661505c256ac47cf757aee19aecd603d9dedaaa47a675902df77bfc9f3",
+      "passed": true
+    }
+  ],
+  "driver_files": {
+    "build.py": "ff2e1ab73355a38793b0544361c556da4c98798009c2dea4c4580452705c926f",
+    "prepare.py": "4af913d2c19dafb9f3e59838ceb79cab6bc3753d5942795fbefcecbb845c87c2",
+    "verify-lock.py": "c496ecd23e2b80cea2a70b9d87f132e9cba9422e85b030a8554fd2262b8d3bc0",
+    "space.py": "46602840bebb940e633236c50ae0b00f4572a72c841524b9c388c00dab103669",
+    "Cargo.toml.in": "cbedbed99a18eb656cdfe9a442f5cd65cef92bf7325a53b3ca0d55d9d601119f",
+    "main.rs": "ea07d79a04b3469e7ec48261693598d37916d0d92ca442866cabff66e8ce9728",
+    "codec.rs": "5eaca3e517653408f4331bd0096e8cf9c0d9a464837315fd9fb0452763cb0b25"
+  },
+  "host_space_before_new_target": {
+    "helper_path": "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-\u7fa4\u6656Drive\u6309\u9700\u540c\u6b65/work/issue7-validation/prepared-g4-012/run-g4.py",
+    "helper_sha256": "88fa9b573ac109d85b1c7af2fcf4b2c02e81a0be58527f8031c411b1a9c5271d",
+    "minimum_free_bytes": 10737418240,
+    "minimum_free_gib": 10,
+    "observation": {
+      "utc": "2026-11-05T04:28:36.937619+00:00",
+      "command": [
+        "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+      ],
+      "host_drive": "C:",
+      "free_bytes": 29761777664,
+      "exit_code": 0,
+      "stdout": "29761777664",
+      "stderr": ""
+    },
+    "passed": true
+  },
+  "binary": {
+    "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-012/target/debug/native-worker-chain-probe",
+    "sha256": "ab2a7d67a1ae598b8348cef3a42688a4da6d1b7b6d4d2315db6126b5c05d36c6"
+  },
+  "finished_utc": "2026-11-05T04:29:08.667436+00:00",
+  "source_lock_after": "fcaf7417018889efefaffd45ac2e4931a1b01dd5fc83e6a9fc9f0806093268dd",
+  "source_lock_unchanged": true
+}

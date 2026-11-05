@@ -1,0 +1,17 @@
+[package]
+name = "native-worker-chain-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+drive-core = { path = @CORE_PATH@, features = ["native"] }
+drive-runtime = { path = @RUNTIME_PATH@, features = ["native-research"] }
+serde_json = "1"
+rustls = { version = "0.23", features = ["ring"] }
+libc = "0.2"
+
+[patch.crates-io]
+fuser = { path = @FUSER_PATH@ }

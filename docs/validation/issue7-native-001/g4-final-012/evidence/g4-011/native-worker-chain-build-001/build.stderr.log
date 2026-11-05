@@ -1,0 +1,10 @@
+   Compiling rustls-webpki v0.103.10
+   Compiling fuser v0.16.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-011/source/vendor/fuser)
+   Compiling rustls v0.23.37
+   Compiling tokio-rustls v0.26.4
+   Compiling sproto v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-011/source/crates/sproto)
+   Compiling drive-core v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-011/source/crates/drive-core)
+   Compiling drive-fs v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-011/source/crates/drive-fs)
+   Compiling drive-runtime v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-011/source/crates/drive-runtime)
+   Compiling native-worker-chain-probe v0.0.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-011/native-worker-chain-build-001/native-worker-chain-crate)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 28.20s

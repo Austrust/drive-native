@@ -1,0 +1,1845 @@
+{
+  "complete": true,
+  "candidate_commit": "41365a650eb7d7df696046e21b7671697231f851",
+  "source": {
+    "candidate_commit": "41365a650eb7d7df696046e21b7671697231f851",
+    "candidate_archive_sha256": "e0ac9b59fb6111129dece4dc15f10501160a9e9c49462d72ddaadbf742693ec3",
+    "archive_command": "git -C work/fix-7 archive --format=tar --output=../issue7-validation/prepared-g4-011/candidate.tar 41365a650eb7d7df696046e21b7671697231f851",
+    "authorization": "root formally authorized G4-011 after compact002 and host free space approximately 78.9GiB; unchanged product candidate",
+    "cache_policy": "Cargo.lock registry dependencies only from completed g4-009 target, no product artifacts; touch source metadata unchanged bytes, clean all four product packages",
+    "compile_cache_control": "CARGO_INCREMENTAL=0; original profiles/test parallelism/assertions unchanged",
+    "host_space_gate": "C>=40GiB before new target; C>=10GiB before every command; unknown reading stops"
+  },
+  "start": "2026-11-05T03:38:51.462928+00:00",
+  "environment": "WSL2 Ubuntu-24.04; synthetic/local only; no NAS",
+  "target_seed": null,
+  "registry_seed": {
+    "source": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/target",
+    "copied_files": 6425,
+    "copied_bytes": 3294545628,
+    "selection": "Cargo.lock registry+ packages only; debug/release deps/fingerprint/build; copied bytes, no workspace/path packages, no test ELFs or incremental"
+  },
+  "host_space_gate": {
+    "start_minimum_bytes": 42949672960,
+    "before_command_minimum_bytes": 10737418240,
+    "start_observation": {
+      "utc": "2026-11-05T03:38:40.232674+00:00",
+      "command": [
+        "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+      ],
+      "host_drive": "C:",
+      "free_bytes": 84587737088,
+      "exit_code": 0,
+      "stdout": "84587737088",
+      "stderr": ""
+    },
+    "source": "Windows Get-PSDrive C; guest df does not substitute"
+  },
+  "compile_cache_control": {
+    "CARGO_INCREMENTAL": "0",
+    "scope": "compiler cache only; test profiles, parallelism and assertions unchanged"
+  },
+  "harness_sha256": "11502f1bfeeb901dbea88577add81aa0346f85929b8169f8465b470f9151aa79",
+  "commands": [
+    {
+      "name": "clean-private-product-packages",
+      "command": [
+        "cargo",
+        "clean",
+        "-p",
+        "drive-core",
+        "-p",
+        "drive-fs",
+        "-p",
+        "drive-runtime",
+        "-p",
+        "sproto"
+      ],
+      "environment_overrides": {},
+      "kind": "prepare",
+      "start": "2026-11-05T03:38:52.127097+00:00",
+      "log": "logs/clean-private-product-packages.log",
+      "host_space_before": {
+        "utc": "2026-11-05T03:38:51.617478+00:00",
+        "command": [
+          "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+        ],
+        "host_drive": "C:",
+        "free_bytes": 82635816960,
+        "exit_code": 0,
+        "stdout": "82635816960",
+        "stderr": ""
+      },
+      "end": "2026-11-05T03:38:53.901075+00:00",
+      "elapsed_seconds": 1.7735561000000004,
+      "exit_code": 0,
+      "log_sha256": "0bdaeb2aa6a92a0fdfec2d2cc4d0ab71946de5d0654e08c526e4629130ae0f28",
+      "counts": {
+        "reported": false
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "retry-clock-preflight",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "-p",
+        "drive-runtime",
+        "--lib",
+        "--all-features",
+        "download_retry_clock::tests",
+        "--",
+        "--nocapture"
+      ],
+      "environment_overrides": {},
+      "kind": "rust",
+      "start": "2026-11-05T03:38:54.391772+00:00",
+      "log": "logs/retry-clock-preflight.log",
+      "host_space_before": {
+        "utc": "2026-11-05T03:38:53.903106+00:00",
+        "command": [
+          "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+        ],
+        "host_drive": "C:",
+        "free_bytes": 82635894784,
+        "exit_code": 0,
+        "stdout": "82635894784",
+        "stderr": ""
+      },
+      "end": "2026-11-05T03:39:02.193029+00:00",
+      "elapsed_seconds": 30.250919443999997,
+      "exit_code": 0,
+      "log_sha256": "13bb16990bd1b2c73d087a58be26139e10a01ebbb1f8863fb61b9693ad154ad9",
+      "counts": {
+        "reported": true,
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 146
+      },
+      "required_tests": {
+        "forward_wall_jump_cannot_shorten_a_published_delay": true,
+        "restart_remaining_delay_is_seeded_once_and_reset_releases_it": true,
+        "new_attempts_versions_and_terminal_failures_do_not_reuse_an_old_gate": true,
+        "backward_wall_jump_does_not_bypass_the_durable_deadline": true
+      },
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "obsolete-ticket-preflight",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "-p",
+        "drive-runtime",
+        "--lib",
+        "--all-features",
+        "obsolete_ticket_cannot_displace_current_version_retry_gate",
+        "--",
+        "--nocapture"
+      ],
+      "environment_overrides": {},
+      "kind": "rust",
+      "start": "2026-11-05T03:39:25.189714+00:00",
+      "log": "logs/obsolete-ticket-preflight.log",
+      "host_space_before": {
+        "utc": "2026-11-05T03:39:02.195966+00:00",
+        "command": [
+          "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+        ],
+        "host_drive": "C:",
+        "free_bytes": 81559629824,
+        "exit_code": 0,
+        "stdout": "81559629824",
+        "stderr": ""
+      },
+      "end": "2026-11-05T03:39:28.415879+00:00",
+      "elapsed_seconds": 3.225697547000003,
+      "exit_code": 0,
+      "log_sha256": "363d2408ef0112f7dc77c3fe681ad8eb7ff1173fcd7b226db10e6d58ee775f1f",
+      "counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 149
+      },
+      "required_tests": {
+        "obsolete_ticket_cannot_displace_current_version_retry_gate": true
+      },
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "original-retry-pair-preflight",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "-p",
+        "drive-runtime",
+        "--lib",
+        "--all-features",
+        "concurrent_foreground_reads_wait_for_",
+        "--",
+        "--nocapture"
+      ],
+      "environment_overrides": {},
+      "kind": "rust",
+      "start": "2026-11-05T03:39:28.920263+00:00",
+      "log": "logs/original-retry-pair-preflight.log",
+      "host_space_before": {
+        "utc": "2026-11-05T03:39:28.418818+00:00",
+        "command": [
+          "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+        ],
+        "host_drive": "C:",
+        "free_bytes": 81559531520,
+        "exit_code": 0,
+        "stdout": "81559531520",
+        "stderr": ""
+      },
+      "end": "2026-11-05T03:39:34.302748+00:00",
+      "elapsed_seconds": 5.381906612999998,
+      "exit_code": 0,
+      "log_sha256": "60782c52d726b9f0e9a06344b416297ce19a8bbe530fdd57556411ecf557cab0",
+      "counts": {
+        "reported": true,
+        "passed": 2,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 148
+      },
+      "required_tests": {
+        "concurrent_foreground_reads_wait_for_shared_retry_without_reopen": true,
+        "concurrent_foreground_reads_wait_for_transport_backoff_after_reconnect": true
+      },
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "runtime-lib-original-parallelism",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "-p",
+        "drive-runtime",
+        "--lib",
+        "--all-features",
+        "--",
+        "--nocapture"
+      ],
+      "environment_overrides": {},
+      "kind": "rust",
+      "start": "2026-11-05T03:39:34.798929+00:00",
+      "log": "logs/runtime-lib-original-parallelism.log",
+      "host_space_before": {
+        "utc": "2026-11-05T03:39:34.306133+00:00",
+        "command": [
+          "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+        ],
+        "host_drive": "C:",
+        "free_bytes": 81525997568,
+        "exit_code": 0,
+        "stdout": "81525997568",
+        "stderr": ""
+      },
+      "end": "2026-11-05T03:39:49.215129+00:00",
+      "elapsed_seconds": 14.404281797000003,
+      "exit_code": 0,
+      "log_sha256": "6f2ffabd40948149eea2e75aede0cb94a9dd85f95813b586ce5f1171adc37947",
+      "counts": {
+        "reported": true,
+        "passed": 149,
+        "failed": 0,
+        "ignored": 1,
+        "measured": 0,
+        "filtered": 0
+      },
+      "required_tests": {
+        "concurrent_foreground_reads_wait_for_shared_retry_without_reopen": true,
+        "concurrent_foreground_reads_wait_for_transport_backoff_after_reconnect": true,
+        "forward_wall_jump_cannot_shorten_a_published_delay": true,
+        "restart_remaining_delay_is_seeded_once_and_reset_releases_it": true,
+        "new_attempts_versions_and_terminal_failures_do_not_reuse_an_old_gate": true,
+        "backward_wall_jump_does_not_bypass_the_durable_deadline": true,
+        "obsolete_ticket_cannot_displace_current_version_retry_gate": true
+      },
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "native-read-stale-preflight",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "-p",
+        "drive-runtime",
+        "--lib",
+        "--all-features",
+        "native_read_refusal_learns_only_the_requested_identity_and_recheck_releases_retry",
+        "--",
+        "--test-threads=1"
+      ],
+      "environment_overrides": {},
+      "kind": "rust",
+      "start": "2026-11-05T03:39:49.736340+00:00",
+      "log": "logs/native-read-stale-preflight.log",
+      "host_space_before": {
+        "utc": "2026-11-05T03:39:49.226296+00:00",
+        "command": [
+          "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+        ],
+        "host_drive": "C:",
+        "free_bytes": 81388826624,
+        "exit_code": 0,
+        "stdout": "81388826624",
+        "stderr": ""
+      },
+      "end": "2026-11-05T03:39:53.466182+00:00",
+      "elapsed_seconds": 3.7291343499999954,
+      "exit_code": 0,
+      "log_sha256": "d3265bb6006af2ce985f949abe254571728bb8de743d605d1aabfb5b3f182b0c",
+      "counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 149
+      },
+      "required_tests": {
+        "native_read_refusal_learns_only_the_requested_identity_and_recheck_releases_retry": true
+      },
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "runtime-permission-preflight",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "-p",
+        "drive-runtime",
+        "--lib",
+        "--all-features",
+        "permission",
+        "--",
+        "--test-threads=1"
+      ],
+      "environment_overrides": {},
+      "kind": "rust",
+      "start": "2026-11-05T03:39:53.964571+00:00",
+      "log": "logs/runtime-permission-preflight.log",
+      "host_space_before": {
+        "utc": "2026-11-05T03:39:53.473598+00:00",
+        "command": [
+          "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+        ],
+        "host_drive": "C:",
+        "free_bytes": 81385922560,
+        "exit_code": 0,
+        "stdout": "81385922560",
+        "stderr": ""
+      },
+      "end": "2026-11-05T03:39:58.294132+00:00",
+      "elapsed_seconds": 4.328932522999992,
+      "exit_code": 0,
+      "log_sha256": "eccd6934ff56ec1483f802bd81971b3271124f846a0a55db27c92c6972f6d850",
+      "counts": {
+        "reported": true,
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 146
+      },
+      "required_tests": {
+        "definite_permission_refusal_retains_body_allows_sibling_and_rechecks": true,
+        "local_io_and_transport_errors_are_not_native_permission_evidence": true
+      },
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "runtime-profile-preflight",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "-p",
+        "drive-runtime",
+        "--lib",
+        "--all-features",
+        "profile_only_notification",
+        "--",
+        "--test-threads=1"
+      ],
+      "environment_overrides": {},
+      "kind": "rust",
+      "start": "2026-11-05T03:39:58.831442+00:00",
+      "log": "logs/runtime-profile-preflight.log",
+      "host_space_before": {
+        "utc": "2026-11-05T03:39:58.296592+00:00",
+        "command": [
+          "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+        ],
+        "host_drive": "C:",
+        "free_bytes": 81249759232,
+        "exit_code": 0,
+        "stdout": "81249759232",
+        "stderr": ""
+      },
+      "end": "2026-11-05T03:40:02.109628+00:00",
+      "elapsed_seconds": 3.2768792950000005,
+      "exit_code": 0,
+      "log_sha256": "e8e89691a7953f3cdeae24466723cb1d90aaafd11448c28cb6d39583d2a2f3d1",
+      "counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 149
+      },
+      "required_tests": {
+        "profile_only_notification_invalidates_observed_acl_without_file_events": true
+      },
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "runtime-version-preflight",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "-p",
+        "drive-runtime",
+        "--lib",
+        "--all-features",
+        "protocol_version_mismatch",
+        "--",
+        "--test-threads=1"
+      ],
+      "environment_overrides": {},
+      "kind": "rust",
+      "start": "2026-11-05T03:40:02.607775+00:00",
+      "log": "logs/runtime-version-preflight.log",
+      "host_space_before": {
+        "utc": "2026-11-05T03:40:02.112524+00:00",
+        "command": [
+          "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+        ],
+        "host_drive": "C:",
+        "free_bytes": 81250009088,
+        "exit_code": 0,
+        "stdout": "81250009088",
+        "stderr": ""
+      },
+      "end": "2026-11-05T03:40:05.835539+00:00",
+      "elapsed_seconds": 3.2268611890000045,
+      "exit_code": 0,
+      "log_sha256": "160ad057beafcb90344a568ce1d8349f6d185d01bd3acc2d8a6af278fe8c4345",
+      "counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 149
+      },
+      "required_tests": {
+        "protocol_version_mismatch_disconnects_all_waiters": true
+      },
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "core-permission-preflight",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "-p",
+        "drive-core",
+        "--lib",
+        "--all-features",
+        "write_permissions::tests",
+        "--",
+        "--test-threads=1"
+      ],
+      "environment_overrides": {},
+      "kind": "rust",
+      "start": "2026-11-05T03:40:06.364765+00:00",
+      "log": "logs/core-permission-preflight.log",
+      "host_space_before": {
+        "utc": "2026-11-05T03:40:05.838053+00:00",
+        "command": [
+          "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+        ],
+        "host_drive": "C:",
+        "free_bytes": 81251553280,
+        "exit_code": 0,
+        "stdout": "81251553280",
+        "stderr": ""
+      },
+      "end": "2026-11-05T03:40:33.911268+00:00",
+      "elapsed_seconds": 26.822966836999996,
+      "exit_code": 0,
+      "log_sha256": "390337eea7b6fb06a3d9409956a7e7fc5fbdbb7cd59cc9d185636cfa6064b008",
+      "counts": {
+        "reported": true,
+        "passed": 23,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 383
+      },
+      "required_tests": {
+        "parent_self_denials_do_not_stall_child_remove_or_rename_journals": true
+      },
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "core-v6-migration-preflight",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "-p",
+        "drive-core",
+        "--test",
+        "removals",
+        "--all-features",
+        "v6_migration_preserves_queued_move_and_inflight_becomes_uncertain",
+        "--",
+        "--exact",
+        "--test-threads=1"
+      ],
+      "environment_overrides": {},
+      "kind": "rust",
+      "start": "2026-11-05T03:40:34.372310+00:00",
+      "log": "logs/core-v6-migration-preflight.log",
+      "host_space_before": {
+        "utc": "2026-11-05T03:40:33.913573+00:00",
+        "command": [
+          "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+        ],
+        "host_drive": "C:",
+        "free_bytes": 81241346048,
+        "exit_code": 0,
+        "stdout": "81241346048",
+        "stderr": ""
+      },
+      "end": "2026-11-05T03:40:47.376809+00:00",
+      "elapsed_seconds": 13.003724407000007,
+      "exit_code": 0,
+      "log_sha256": "bcf9574583fd881fb907eaf33aff936fa477945ba388ef6d0dd66ba740d1cc79",
+      "counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 8
+      },
+      "required_tests": {
+        "v6_migration_preserves_queued_move_and_inflight_becomes_uncertain": true
+      },
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "kernel-parent-actions-preflight",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "-p",
+        "drive-fs",
+        "--test",
+        "permissions_kernel",
+        "--all-features",
+        "parent_self_permissions_do_not_deny_independent_child_removal_or_rename",
+        "--",
+        "--ignored",
+        "--exact",
+        "--test-threads=1"
+      ],
+      "environment_overrides": {
+        "DRIVE_NATIVE_FS_DIAGNOSTICS": "1"
+      },
+      "kind": "rust",
+      "start": "2026-11-05T03:40:47.969378+00:00",
+      "log": "logs/kernel-parent-actions-preflight.log",
+      "host_space_before": {
+        "utc": "2026-11-05T03:40:47.381006+00:00",
+        "command": [
+          "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+        ],
+        "host_drive": "C:",
+        "free_bytes": 81234796544,
+        "exit_code": 0,
+        "stdout": "81234796544",
+        "stderr": ""
+      },
+      "end": "2026-11-05T03:41:06.162421+00:00",
+      "elapsed_seconds": 15.247014110999999,
+      "exit_code": 0,
+      "log_sha256": "4a1453422c4230e0547d5aa737f10eccb8ebe2049ba0442a4ba4b5b20f37579f",
+      "counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 4
+      },
+      "required_tests": {
+        "parent_self_permissions_do_not_deny_independent_child_removal_or_rename": true
+      },
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "sproto-permission-preflight",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "-p",
+        "sproto",
+        "--lib",
+        "--all-features",
+        "permission",
+        "--",
+        "--test-threads=1"
+      ],
+      "environment_overrides": {},
+      "kind": "rust",
+      "start": "2026-11-05T03:41:06.747906+00:00",
+      "log": "logs/sproto-permission-preflight.log",
+      "host_space_before": {
+        "utc": "2026-11-05T03:41:06.165099+00:00",
+        "command": [
+          "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+        ],
+        "host_drive": "C:",
+        "free_bytes": 81231630336,
+        "exit_code": 0,
+        "stdout": "81231630336",
+        "stderr": ""
+      },
+      "end": "2026-11-05T03:41:26.957360+00:00",
+      "elapsed_seconds": 20.208618366999985,
+      "exit_code": 0,
+      "log_sha256": "ed47d8988c1bda268a8cda6191f087563fc55a0479e14f9fc4adefe617304dc7",
+      "counts": {
+        "reported": true,
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 164
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "sproto-profile-preflight",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "-p",
+        "sproto",
+        "--lib",
+        "--all-features",
+        "profile_only_changes",
+        "--",
+        "--test-threads=1"
+      ],
+      "environment_overrides": {},
+      "kind": "rust",
+      "start": "2026-11-05T03:41:27.491548+00:00",
+      "log": "logs/sproto-profile-preflight.log",
+      "host_space_before": {
+        "utc": "2026-11-05T03:41:26.960547+00:00",
+        "command": [
+          "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+        ],
+        "host_drive": "C:",
+        "free_bytes": 80983232512,
+        "exit_code": 0,
+        "stdout": "80983232512",
+        "stderr": ""
+      },
+      "end": "2026-11-05T03:41:33.831617+00:00",
+      "elapsed_seconds": 3.3751447100000007,
+      "exit_code": 0,
+      "log_sha256": "f2bb1f029a0b0253c6b01f59b54008c9418c2c3f4a6ccf810a329f21dd31cd9c",
+      "counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 166
+      },
+      "required_tests": {
+        "profile_only_changes_require_a_digest_and_preserve_the_notification_bit": true
+      },
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "native-loopback",
+      "command": [
+        "bash",
+        "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/issue7-validation/run-native-loopback.sh",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-011",
+        "41365a650eb7d7df696046e21b7671697231f851"
+      ],
+      "environment_overrides": {},
+      "kind": "json",
+      "start": "2026-11-05T03:41:34.335200+00:00",
+      "log": "logs/native-loopback.log",
+      "host_space_before": {
+        "utc": "2026-11-05T03:41:33.834798+00:00",
+        "command": [
+          "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+        ],
+        "host_drive": "C:",
+        "free_bytes": 80915943424,
+        "exit_code": 0,
+        "stdout": "80915943424",
+        "stderr": ""
+      },
+      "end": "2026-11-05T03:41:46.130862+00:00",
+      "elapsed_seconds": 11.79475354600001,
+      "exit_code": 0,
+      "log_sha256": "00b343fb5421d8e1cf437808bcbfa09b7078c9f4e6a8a7cf1e34c96874ddb4bd",
+      "counts": {
+        "reported": true,
+        "passed": 66,
+        "failed": 0,
+        "ignored": 0
+      },
+      "result_path": "native-loopback-results.json",
+      "result_sha256": "76dae1dc5b7605969a1cb0d5c03e7bd17e95b19070858229e7502fcf9d7ff738",
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "worker-trust-preflight",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "-p",
+        "drive-runtime",
+        "--test",
+        "trust_worker",
+        "--all-features",
+        "--",
+        "--test-threads=1"
+      ],
+      "environment_overrides": {},
+      "kind": "rust",
+      "start": "2026-11-05T03:41:46.620170+00:00",
+      "log": "logs/worker-trust-preflight.log",
+      "host_space_before": {
+        "utc": "2026-11-05T03:41:46.134222+00:00",
+        "command": [
+          "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+        ],
+        "host_drive": "C:",
+        "free_bytes": 80782712832,
+        "exit_code": 0,
+        "stdout": "80782712832",
+        "stderr": ""
+      },
+      "end": "2026-11-05T03:42:02.127305+00:00",
+      "elapsed_seconds": 15.505958198000002,
+      "exit_code": 0,
+      "log_sha256": "1d58c8ef43322bc57f1a31dcd87f8ca8261305b177f1367c4788942ccd341702",
+      "counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 0
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "worker-elf-versions",
+      "command": [
+        "python3",
+        "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/issue7-validation/verify-worker-versions.py",
+        "--worker",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-011/target/debug/drive-native-worker",
+        "--output",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-011/worker-versions.json"
+      ],
+      "environment_overrides": {},
+      "kind": "json",
+      "start": "2026-11-05T03:42:02.644539+00:00",
+      "log": "logs/worker-elf-versions.log",
+      "host_space_before": {
+        "utc": "2026-11-05T03:42:02.129965+00:00",
+        "command": [
+          "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+        ],
+        "host_drive": "C:",
+        "free_bytes": 80672350208,
+        "exit_code": 0,
+        "stdout": "80672350208",
+        "stderr": ""
+      },
+      "end": "2026-11-05T03:42:03.015321+00:00",
+      "elapsed_seconds": 0.3698511110000027,
+      "exit_code": 0,
+      "log_sha256": "e9985454a8b0e769fe776d1dbb6a2d92a9a0d8c4bc9967b17a6336da46e75b2e",
+      "counts": {
+        "reported": true,
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0
+      },
+      "result_path": "worker-versions.json",
+      "result_sha256": "e9985454a8b0e769fe776d1dbb6a2d92a9a0d8c4bc9967b17a6336da46e75b2e",
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "core-history-probe-prepare",
+      "command": [
+        "python3",
+        "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/issue7-validation/prepare-core-probe.py",
+        "--source",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-011/source",
+        "--output",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-011/core-history-probe"
+      ],
+      "environment_overrides": {},
+      "kind": "prepare",
+      "start": "2026-11-05T03:42:03.525029+00:00",
+      "log": "logs/core-history-probe-prepare.log",
+      "host_space_before": {
+        "utc": "2026-11-05T03:42:03.017858+00:00",
+        "command": [
+          "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+        ],
+        "host_drive": "C:",
+        "free_bytes": 80672350208,
+        "exit_code": 0,
+        "stdout": "80672350208",
+        "stderr": ""
+      },
+      "end": "2026-11-05T03:42:08.570835+00:00",
+      "elapsed_seconds": 2.1254045560000066,
+      "exit_code": 0,
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "counts": {
+        "reported": false
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "core-history-probe",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "--manifest-path",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-011/core-history-probe/Cargo.toml",
+        "--",
+        "--test-threads=1"
+      ],
+      "environment_overrides": {},
+      "kind": "rust",
+      "start": "2026-11-05T03:42:09.268219+00:00",
+      "log": "logs/core-history-probe.log",
+      "host_space_before": {
+        "utc": "2026-11-05T03:42:08.574034+00:00",
+        "command": [
+          "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+        ],
+        "host_drive": "C:",
+        "free_bytes": 80674189312,
+        "exit_code": 0,
+        "stdout": "80674189312",
+        "stderr": ""
+      },
+      "end": "2026-11-05T03:42:22.166128+00:00",
+      "elapsed_seconds": 12.89593927300001,
+      "exit_code": 0,
+      "log_sha256": "f28e44686605c008ce8919b3b36fc666fd0376d4ca81e94eed14a74f4db64e8a",
+      "counts": {
+        "reported": true,
+        "passed": 5,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 0
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "kernel-setattr-preflight",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "-p",
+        "drive-fs",
+        "--test",
+        "permissions_kernel",
+        "--all-features",
+        "setattr_only_persists_mtime_without_granting_content_writes_or_uploads",
+        "--",
+        "--ignored",
+        "--exact",
+        "--test-threads=1"
+      ],
+      "environment_overrides": {
+        "DRIVE_NATIVE_FS_DIAGNOSTICS": "1"
+      },
+      "kind": "rust",
+      "start": "2026-11-05T03:42:22.720385+00:00",
+      "log": "logs/kernel-setattr-preflight.log",
+      "host_space_before": {
+        "utc": "2026-11-05T03:42:22.168721+00:00",
+        "command": [
+          "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+        ],
+        "host_drive": "C:",
+        "free_bytes": 80557838336,
+        "exit_code": 0,
+        "stdout": "80557838336",
+        "stderr": ""
+      },
+      "end": "2026-11-05T03:42:25.896442+00:00",
+      "elapsed_seconds": 3.1744847569999877,
+      "exit_code": 0,
+      "log_sha256": "835ff63a30bba949b9aa67b485180ad6511b82a7f5777912eaad88c5fbe008b9",
+      "counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 4
+      },
+      "required_tests": {
+        "setattr_only_persists_mtime_without_granting_content_writes_or_uploads": true
+      },
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "workspace-all-features",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "--workspace",
+        "--all-features"
+      ],
+      "environment_overrides": {},
+      "kind": "rust",
+      "start": "2026-11-05T03:42:26.555501+00:00",
+      "log": "logs/workspace-all-features.log",
+      "host_space_before": {
+        "utc": "2026-11-05T03:42:25.899088+00:00",
+        "command": [
+          "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+        ],
+        "host_drive": "C:",
+        "free_bytes": 80557768704,
+        "exit_code": 0,
+        "stdout": "80557768704",
+        "stderr": ""
+      },
+      "end": "2026-11-05T03:46:16.819479+00:00",
+      "elapsed_seconds": 209.574584803,
+      "exit_code": 0,
+      "log_sha256": "a0b8c9c64fd5a7c764b165249a95bf4668706c5255151cf682b9e8a33c5275e0",
+      "counts": {
+        "reported": true,
+        "passed": 971,
+        "failed": 0,
+        "ignored": 42,
+        "measured": 0,
+        "filtered": 0
+      },
+      "required_tests": {
+        "definite_permission_refusal_retains_body_allows_sibling_and_rechecks": true,
+        "first_denial_publication_waits_for_existing_bounded_reply": true,
+        "cached_reply_lease_does_not_wait_for_ordinary_metadata_store": true
+      },
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "workspace-default",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "--workspace"
+      ],
+      "environment_overrides": {},
+      "kind": "rust",
+      "start": "2026-11-05T03:46:17.403255+00:00",
+      "log": "logs/workspace-default.log",
+      "host_space_before": {
+        "utc": "2026-11-05T03:46:16.828418+00:00",
+        "command": [
+          "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe",
+          "-NoLogo",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "[Console]::Out.Write((Get-PSDrive -Name C).Free)"
+        ],
+        "host_drive": "C:",
+        "free_bytes": 69634752512,
+        "exit_code": 0,
+        "stdout": "69634752512",
+        "stderr": ""
+      },
+      "end": "2026-11-05T03:50:12.190033+00:00",
+      "elapsed_seconds": 217.19727180899997,
+      "exit_code": 0,
+      "log_sha256": "0531154e72c86cd7c5b233feb862117579588a4dfe1ff9aaa40340e048f8ac4d",
+      "counts": {
+        "reported": true,
+        "passed": 961,
+        "failed": 0,
+        "ignored": 37,
+        "measured": 0,
+        "filtered": 0
+      },
+      "required_tests": {},
+      "residual_mounts_after_command": [],
+      "passed": true
+    },
+    {
+      "name": "vendored-fuser-wire",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--manifest-path",
+        "vendor/fuser/Cargo.toml",
+        "--lib",
+        "--no-default-features",
+        "--features",
+        "abi-7-31"
+      ],
+      "kind": "rust",
+      "not_run": true,
+      "coordinator_reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+      "counts": {
+        "reported": false
+      },
+      "start": "2026-11-05T03:50:12.808293+00:00"
+    },
+    {
+      "name": "kernel-fs-debug-index1",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "-p",
+        "drive-fs",
+        "--lib",
+        "--tests",
+        "--all-features",
+        "--",
+        "--ignored",
+        "--test-threads=1"
+      ],
+      "kind": "rust",
+      "not_run": true,
+      "coordinator_reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+      "counts": {
+        "reported": false
+      },
+      "start": "2026-11-05T03:50:13.346688+00:00"
+    },
+    {
+      "name": "kernel-fs-debug-index0",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "-p",
+        "drive-fs",
+        "--lib",
+        "--tests",
+        "--all-features",
+        "--",
+        "--ignored",
+        "--test-threads=1",
+        "--skip",
+        "indexed_plain_continuation_and_seek_do_not_wait_for_store",
+        "--skip",
+        "indexed_plus_continuation_and_seek_do_not_wait_for_store"
+      ],
+      "kind": "rust",
+      "not_run": true,
+      "coordinator_reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+      "counts": {
+        "reported": false
+      },
+      "start": "2026-11-05T03:50:13.875169+00:00"
+    },
+    {
+      "name": "kernel-runtime-debug",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "-p",
+        "drive-runtime",
+        "--lib",
+        "--all-features",
+        "--",
+        "--ignored",
+        "--test-threads=1"
+      ],
+      "kind": "rust",
+      "not_run": true,
+      "coordinator_reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+      "counts": {
+        "reported": false
+      },
+      "start": "2026-11-05T03:50:14.403993+00:00"
+    },
+    {
+      "name": "kernel-fs-release-index1",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "--release",
+        "-p",
+        "drive-fs",
+        "--lib",
+        "--tests",
+        "--all-features",
+        "--",
+        "--ignored",
+        "--test-threads=1"
+      ],
+      "kind": "rust",
+      "not_run": true,
+      "coordinator_reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+      "counts": {
+        "reported": false
+      },
+      "start": "2026-11-05T03:50:14.923060+00:00"
+    },
+    {
+      "name": "kernel-fs-release-index0",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "--release",
+        "-p",
+        "drive-fs",
+        "--lib",
+        "--tests",
+        "--all-features",
+        "--",
+        "--ignored",
+        "--test-threads=1",
+        "--skip",
+        "indexed_plain_continuation_and_seek_do_not_wait_for_store",
+        "--skip",
+        "indexed_plus_continuation_and_seek_do_not_wait_for_store"
+      ],
+      "kind": "rust",
+      "not_run": true,
+      "coordinator_reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+      "counts": {
+        "reported": false
+      },
+      "start": "2026-11-05T03:50:15.433442+00:00"
+    },
+    {
+      "name": "kernel-runtime-release",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "--release",
+        "-p",
+        "drive-runtime",
+        "--lib",
+        "--all-features",
+        "--",
+        "--ignored",
+        "--test-threads=1"
+      ],
+      "kind": "rust",
+      "not_run": true,
+      "coordinator_reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+      "counts": {
+        "reported": false
+      },
+      "start": "2026-11-05T03:50:15.953731+00:00"
+    },
+    {
+      "name": "kernel-fs-release-attr0",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "--release",
+        "-p",
+        "drive-fs",
+        "--lib",
+        "--tests",
+        "--all-features",
+        "--",
+        "--ignored",
+        "--test-threads=1"
+      ],
+      "kind": "rust",
+      "not_run": true,
+      "coordinator_reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+      "counts": {
+        "reported": false
+      },
+      "start": "2026-11-05T03:50:16.517102+00:00"
+    },
+    {
+      "name": "runtime-private-dbus",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "-p",
+        "drive-runtime",
+        "--test",
+        "desktop",
+        "--all-features",
+        "recovery_action_real_dbus_preserves_unknown_queue_and_user_pause",
+        "--",
+        "--ignored",
+        "--exact",
+        "--test-threads=1"
+      ],
+      "kind": "rust",
+      "not_run": true,
+      "coordinator_reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+      "counts": {
+        "reported": false
+      },
+      "start": "2026-11-05T03:50:17.057338+00:00"
+    },
+    {
+      "name": "gui-gui_unit_tests",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/gui_unit_tests.py",
+        "-v"
+      ],
+      "kind": "gui",
+      "not_run": true,
+      "coordinator_reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+      "counts": {
+        "reported": false
+      },
+      "start": "2026-11-05T03:50:17.579314+00:00"
+    },
+    {
+      "name": "gui-cache_gui_tests",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/cache_gui_tests.py",
+        "-v"
+      ],
+      "kind": "gui",
+      "not_run": true,
+      "coordinator_reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+      "counts": {
+        "reported": false
+      },
+      "start": "2026-11-05T03:50:18.103903+00:00"
+    },
+    {
+      "name": "gui-conflict_gui_tests",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/conflict_gui_tests.py",
+        "-v"
+      ],
+      "kind": "gui",
+      "not_run": true,
+      "coordinator_reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+      "counts": {
+        "reported": false
+      },
+      "start": "2026-11-05T03:50:18.650271+00:00"
+    },
+    {
+      "name": "gui-hidden_dialog_tests",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/hidden_dialog_tests.py",
+        "-v"
+      ],
+      "kind": "gui",
+      "not_run": true,
+      "coordinator_reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+      "counts": {
+        "reported": false
+      },
+      "start": "2026-11-05T03:50:22.083375+00:00"
+    },
+    {
+      "name": "gui-lazy_gui_tests",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/lazy_gui_tests.py",
+        "-v"
+      ],
+      "kind": "gui",
+      "not_run": true,
+      "coordinator_reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+      "counts": {
+        "reported": false
+      },
+      "start": "2026-11-05T03:50:22.610795+00:00"
+    },
+    {
+      "name": "gui-multi_mount_tests",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/multi_mount_tests.py",
+        "-v"
+      ],
+      "kind": "gui",
+      "not_run": true,
+      "coordinator_reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+      "counts": {
+        "reported": false
+      },
+      "start": "2026-11-05T03:50:23.161199+00:00"
+    },
+    {
+      "name": "gui-trust_gui_tests",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/trust_gui_tests.py",
+        "-v"
+      ],
+      "kind": "gui",
+      "not_run": true,
+      "coordinator_reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+      "counts": {
+        "reported": false
+      },
+      "start": "2026-11-05T03:50:23.693591+00:00"
+    },
+    {
+      "name": "gui-transfer_gui_tests",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/transfer_gui_tests.py",
+        "-v"
+      ],
+      "kind": "gui",
+      "not_run": true,
+      "coordinator_reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+      "counts": {
+        "reported": false
+      },
+      "start": "2026-11-05T03:50:24.212699+00:00"
+    },
+    {
+      "name": "gui-theme_tests",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/theme_tests.py",
+        "-v"
+      ],
+      "kind": "gui",
+      "not_run": true,
+      "coordinator_reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+      "counts": {
+        "reported": false
+      },
+      "start": "2026-11-05T03:50:24.737496+00:00"
+    },
+    {
+      "name": "gui-selector_gui_tests",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/selector_gui_tests.py",
+        "-v"
+      ],
+      "kind": "gui",
+      "not_run": true,
+      "coordinator_reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+      "counts": {
+        "reported": false
+      },
+      "start": "2026-11-05T03:50:25.372032+00:00"
+    },
+    {
+      "name": "gui-backend_upgrade_test",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/backend_upgrade_test.py",
+        "-v"
+      ],
+      "kind": "gui",
+      "not_run": true,
+      "coordinator_reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+      "counts": {
+        "reported": false
+      },
+      "start": "2026-11-05T03:50:25.982483+00:00"
+    },
+    {
+      "name": "gui-pause_handover_test",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/pause_handover_test.py",
+        "-v"
+      ],
+      "kind": "gui",
+      "not_run": true,
+      "coordinator_reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+      "counts": {
+        "reported": false
+      },
+      "start": "2026-11-05T03:50:26.589388+00:00"
+    },
+    {
+      "name": "gui-initialization_gui_tests",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/initialization_gui_tests.py",
+        "-v"
+      ],
+      "kind": "gui",
+      "not_run": true,
+      "coordinator_reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+      "counts": {
+        "reported": false
+      },
+      "start": "2026-11-05T03:50:27.144682+00:00"
+    },
+    {
+      "name": "gui-unified_manager_tests",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/unified_manager_tests.py",
+        "-v"
+      ],
+      "kind": "gui",
+      "not_run": true,
+      "coordinator_reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+      "counts": {
+        "reported": false
+      },
+      "start": "2026-11-05T03:50:27.733050+00:00"
+    },
+    {
+      "name": "gui-gui_instance_test",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/gui_instance_test.py",
+        "-v"
+      ],
+      "kind": "gui",
+      "not_run": true,
+      "coordinator_reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+      "counts": {
+        "reported": false
+      },
+      "start": "2026-11-05T03:50:28.309205+00:00"
+    },
+    {
+      "name": "gui-queue_gui_tests",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/queue_gui_tests.py",
+        "-v"
+      ],
+      "kind": "gui",
+      "not_run": true,
+      "coordinator_reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+      "counts": {
+        "reported": false
+      },
+      "start": "2026-11-05T03:50:28.981088+00:00"
+    },
+    {
+      "name": "gui-history_gui_tests",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/history_gui_tests.py",
+        "-v"
+      ],
+      "kind": "gui",
+      "not_run": true,
+      "coordinator_reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+      "counts": {
+        "reported": false
+      },
+      "start": "2026-11-05T03:50:29.516577+00:00"
+    },
+    {
+      "name": "gui-permission_gui_tests",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/permission_gui_tests.py",
+        "-v"
+      ],
+      "kind": "gui",
+      "not_run": true,
+      "coordinator_reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+      "counts": {
+        "reported": false
+      },
+      "start": "2026-11-05T03:50:30.048700+00:00"
+    },
+    {
+      "name": "gui-permission-history-labels",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/issue7-validation/verify-history-labels.py",
+        "-v"
+      ],
+      "kind": "gui",
+      "not_run": true,
+      "coordinator_reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+      "counts": {
+        "reported": false
+      },
+      "start": "2026-11-05T03:50:30.575534+00:00"
+    },
+    {
+      "name": "provider-nemo",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/usr/bin/python3",
+        "desktop/tests/filemanager_provider_tests.py",
+        "-v"
+      ],
+      "kind": "gui",
+      "not_run": true,
+      "coordinator_reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+      "counts": {
+        "reported": false
+      },
+      "start": "2026-11-05T03:50:31.139301+00:00"
+    },
+    {
+      "name": "provider-nautilus",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/usr/bin/python3",
+        "desktop/tests/filemanager_provider_tests.py",
+        "-v"
+      ],
+      "kind": "gui",
+      "not_run": true,
+      "coordinator_reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+      "counts": {
+        "reported": false
+      },
+      "start": "2026-11-05T03:50:31.698629+00:00"
+    },
+    {
+      "name": "unified-ui-render",
+      "command": [
+        "dbus-run-session",
+        "--",
+        "/opt/drive-native-build/gui-venv/bin/python",
+        "desktop/tests/unified_gui_render.py",
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-011/screenshots"
+      ],
+      "kind": "render",
+      "not_run": true,
+      "coordinator_reason": "Coordinator confirmed new typed Read-denial scheduling defect; preserve current workspace-default completion, defer remaining groups, reproduce with real TLS worker chain before a new frozen candidate.",
+      "counts": {
+        "reported": false
+      },
+      "start": "2026-11-05T03:50:32.319606+00:00"
+    }
+  ],
+  "source_mtime_reset_at": "2026-11-05T03:38:51.287882+00:00",
+  "source_content_unchanged_after_mtime_reset": true,
+  "index0_not_applicable": {
+    "indexed_plain_continuation_and_seek_do_not_wait_for_store": "Explicitly asserts NSI is enabled; fully exercised by index1 debug/release and attr0 groups.",
+    "indexed_plus_continuation_and_seek_do_not_wait_for_store": "Explicitly asserts NSI is enabled; fully exercised by index1 debug/release and attr0 groups."
+  },
+  "count_note": "Executions are separate; repeated groups are not additive distinct-test coverage.",
+  "nautilus_private_dependency": {
+    "source_prefix": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/nautilus-private/prefix",
+    "copied_file_sha256": {
+      "usr/lib/x86_64-linux-gnu/libnautilus-extension.so.4": "a401bb6a5d63b404cfc9dcd1d1d2841ea08bdc7a31394b88ca45ef168c96fa7f",
+      "usr/lib/x86_64-linux-gnu/girepository-1.0/Nautilus-4.0.typelib": "9a8baf7aa7b2302947ed5e6ae27afed60ef8d3fe976b93e2604fd89ca1952313",
+      "usr/share/doc/libnautilus-extension4/copyright": "700eb4955652ce41f145333fb73d05ce22c9ab1f2905fb81999a31f71c3e57ff",
+      "usr/share/doc/libnautilus-extension4/changelog.Debian.gz": "01d3629073da74da8f1007deeb2247cd62d7111f5f4dd022d52d40e257a5c6f9",
+      "usr/share/doc/gir1.2-nautilus-4.0/copyright": "700eb4955652ce41f145333fb73d05ce22c9ab1f2905fb81999a31f71c3e57ff",
+      "usr/share/doc/gir1.2-nautilus-4.0/changelog.Debian.gz": "01d3629073da74da8f1007deeb2247cd62d7111f5f4dd022d52d40e257a5c6f9"
+    },
+    "scope": "Ubuntu packages privately extracted, no system installation; initial system-GI failure remains in G4-001/G4-002 originals."
+  },
+  "acl_screenshots": {
+    "user": null,
+    "space": null,
+    "directory": null,
+    "unknown": null
+  },
+  "acl_screenshots_complete": false,
+  "end": "2026-11-05T03:50:32.321484+00:00",
+  "residual_owned_mounts": [],
+  "changed_source_files": [],
+  "new_source_files": [],
+  "command_counts": {
+    "passed": 22,
+    "failed": 0,
+    "not_run": 31
+  },
+  "all_commands_passed": false
+}

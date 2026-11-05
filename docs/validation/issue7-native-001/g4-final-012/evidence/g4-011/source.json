@@ -1,0 +1,9 @@
+{
+  "candidate_commit": "41365a650eb7d7df696046e21b7671697231f851",
+  "candidate_archive_sha256": "e0ac9b59fb6111129dece4dc15f10501160a9e9c49462d72ddaadbf742693ec3",
+  "archive_command": "git -C work/fix-7 archive --format=tar --output=../issue7-validation/prepared-g4-011/candidate.tar 41365a650eb7d7df696046e21b7671697231f851",
+  "authorization": "root formally authorized G4-011 after compact002 and host free space approximately 78.9GiB; unchanged product candidate",
+  "cache_policy": "Cargo.lock registry dependencies only from completed g4-009 target, no product artifacts; touch source metadata unchanged bytes, clean all four product packages",
+  "compile_cache_control": "CARGO_INCREMENTAL=0; original profiles/test parallelism/assertions unchanged",
+  "host_space_gate": "C>=40GiB before new target; C>=10GiB before every command; unknown reading stops"
+}

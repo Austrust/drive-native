@@ -1,0 +1,13 @@
+{
+  "candidate_commit": "9c9aabae447d92275f93dae65320788240a03113",
+  "observed_utc": "2026-11-05T04:33:44.084692+00:00",
+  "prior_audit_sha256": "7c0b83d469445514a024d49c01f0e6892f4ca9bfd94324d7c2007ee8be0d98e8",
+  "prior_permission_errors_resolved": [],
+  "owned_validation_elf_processes": [],
+  "cargo_or_rustc_processes": [],
+  "residual_validation_mounts": [],
+  "inspection_errors": [],
+  "changed_input_evidence": [],
+  "scope": "root only reads process comm/UID/exe links and mountinfo; no arguments, credentials, service changes or process termination",
+  "passed": true
+}

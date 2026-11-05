@@ -1,0 +1,77 @@
+{
+  "reason": "Recover host disk for independent issue #7 verification; only reproducible incremental build caches.",
+  "preserved": [
+    "all test ELF files in deps/examples",
+    "sources",
+    "logs",
+    "manifests",
+    "old-artifacts",
+    "clock diagnostic evidence",
+    "registry dependencies"
+  ],
+  "targets": [
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-001/target/debug/incremental",
+      "files": 25605,
+      "allocated_bytes": 5737836544,
+      "logical_bytes": 5684618315,
+      "removed": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/incremental",
+      "files": 51373,
+      "allocated_bytes": 11373699072,
+      "logical_bytes": 11266541588,
+      "removed": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-003/target/debug/incremental",
+      "files": 51909,
+      "allocated_bytes": 11550814208,
+      "logical_bytes": 11442588149,
+      "removed": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-004/target/debug/incremental",
+      "files": 51918,
+      "allocated_bytes": 11516809216,
+      "logical_bytes": 11409384694,
+      "removed": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-005/target/debug/incremental",
+      "files": 54777,
+      "allocated_bytes": 12639076352,
+      "logical_bytes": 12525659122,
+      "removed": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-006/target/debug/incremental",
+      "files": 54777,
+      "allocated_bytes": 12694396928,
+      "logical_bytes": 12579723944,
+      "removed": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/target/debug/incremental",
+      "files": 24577,
+      "allocated_bytes": 5309681664,
+      "logical_bytes": 5259355658,
+      "removed": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/target/debug/incremental",
+      "files": 30681,
+      "allocated_bytes": 6912454656,
+      "logical_bytes": 6851503212,
+      "removed": true
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/clock-diagnostic-001/target/debug/incremental",
+      "files": 1115,
+      "allocated_bytes": 461996032,
+      "logical_bytes": 459601430,
+      "removed": true
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "candidate_commit": "4e6aaf7166fd370076adf43a0dad3e6ecdca36d6",
+  "candidate_archive_sha256": "ca59a75a2e2fd8fa0fa59bc2b0a3813183a5615b6ca80e8f8a620211d311ff83",
+  "archive_command": "git -C work/fix-7 archive --format=tar --output=../issue7-validation/prepared-g4-009/candidate.tar 4e6aaf7166fd370076adf43a0dad3e6ecdca36d6",
+  "authorization": "root authorized final G4 matrix; product content 99aa587 plus old schema fixtures dropping the new trigger without changing assertions",
+  "cache_policy": "copy only completed target, touch extracted source metadata without changing bytes, cargo clean all four workspace packages before tests"
+}

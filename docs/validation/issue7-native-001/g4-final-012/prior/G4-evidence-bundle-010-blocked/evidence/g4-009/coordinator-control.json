@@ -1,0 +1,8 @@
+{
+  "at": "2026-11-05T02:39:54.615922+00:00",
+  "reason": "root requested defer expensive release while investigating unchanged 900ms retry assertions; continue unrelated debug/GUI groups",
+  "defer_commands": [
+    "kernel-fs-release-*",
+    "kernel-runtime-release"
+  ]
+}

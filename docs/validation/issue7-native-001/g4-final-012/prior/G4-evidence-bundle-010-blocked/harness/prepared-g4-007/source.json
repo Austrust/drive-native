@@ -1,0 +1,7 @@
+{
+  "candidate_commit": "ca86a85e2be9c83c7a59407fc0737114158ecf7f",
+  "candidate_archive_sha256": "cfa5c2ca267b33b8dad72db3d222ecd15ad281a9df52cb0a7fc524ae6e0a3b48",
+  "archive_command": "git -C work/fix-7 archive --format=tar --output=../issue7-validation/prepared-g4-007/candidate.tar ca86a85e2be9c83c7a59407fc0737114158ecf7f",
+  "authorization": "root explicitly authorized ca86a85 G4-007 after preserving d39a597 failure; no NAS, production data, G5 or publication",
+  "source_scope": "exact git commit archive; working-tree documentation edits excluded"
+}

@@ -1,0 +1,163 @@
+{
+  "schema_version": 1,
+  "observation_status": "observed_metadata_only",
+  "observed_utc": "2026-11-05T04:17:36.422813+00:00",
+  "provenance": {
+    "tool": "WSL Ubuntu-24.04 Python 3 pathlib/stat read-only metadata inventory",
+    "user": "drive-native-test",
+    "scope_authority": "coordinator request: g4-009 and g4-011 main target only; g4-012 excluded; no deletion",
+    "retention": "Original observation preserved; file creation is not a new measurement"
+  },
+  "utc": "2026-11-05T04:17:36.422813+00:00",
+  "scope": "Only g4-009 and g4-011 target/{debug,release}/deps entries ending .rlib/.rmeta/.d; metadata stat only; no contents/hash/delete; no traversal of ELF/.so/source/log/build/incremental/fingerprint/012.",
+  "method": "allocated=st_blocks*512; global dedup by st_dev+st_ino; this is guest file allocation, not immediate host C/VHD reclaim",
+  "groups": [
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/target/debug/deps/*.rlib",
+      "file_paths": 297,
+      "unique_inodes": 297,
+      "path_size_bytes": 2371074668,
+      "path_allocated_bytes": 2371657728,
+      "inode_unique_size_bytes": 2371074668,
+      "inode_unique_allocated_bytes": 2371657728
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/target/debug/deps/*.rmeta",
+      "file_paths": 414,
+      "unique_inodes": 414,
+      "path_size_bytes": 594677741,
+      "path_allocated_bytes": 595574784,
+      "inode_unique_size_bytes": 594677741,
+      "inode_unique_allocated_bytes": 595574784
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/target/debug/deps/*.d",
+      "file_paths": 590,
+      "unique_inodes": 590,
+      "path_size_bytes": 5899999,
+      "path_allocated_bytes": 7352320,
+      "inode_unique_size_bytes": 5899999,
+      "inode_unique_allocated_bytes": 7352320
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/target/release/deps/*.rlib",
+      "file_paths": 120,
+      "unique_inodes": 120,
+      "path_size_bytes": 280254568,
+      "path_allocated_bytes": 280506368,
+      "inode_unique_size_bytes": 280254568,
+      "inode_unique_allocated_bytes": 280506368
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/target/release/deps/*.rmeta",
+      "file_paths": 120,
+      "unique_inodes": 120,
+      "path_size_bytes": 183378603,
+      "path_allocated_bytes": 183635968,
+      "inode_unique_size_bytes": 183378603,
+      "inode_unique_allocated_bytes": 183635968
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/target/release/deps/*.d",
+      "file_paths": 143,
+      "unique_inodes": 143,
+      "path_size_bytes": 1517383,
+      "path_allocated_bytes": 1839104,
+      "inode_unique_size_bytes": 1517383,
+      "inode_unique_allocated_bytes": 1839104
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-011/target/debug/deps/*.rlib",
+      "file_paths": 287,
+      "unique_inodes": 287,
+      "path_size_bytes": 2061587528,
+      "path_allocated_bytes": 2062159872,
+      "inode_unique_size_bytes": 2061587528,
+      "inode_unique_allocated_bytes": 2062159872
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-011/target/debug/deps/*.rmeta",
+      "file_paths": 401,
+      "unique_inodes": 401,
+      "path_size_bytes": 571792324,
+      "path_allocated_bytes": 572674048,
+      "inode_unique_size_bytes": 571792324,
+      "inode_unique_allocated_bytes": 572674048
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-011/target/debug/deps/*.d",
+      "file_paths": 549,
+      "unique_inodes": 549,
+      "path_size_bytes": 5562281,
+      "path_allocated_bytes": 6905856,
+      "inode_unique_size_bytes": 5562281,
+      "inode_unique_allocated_bytes": 6905856
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-011/target/release/deps/*.rlib",
+      "file_paths": 111,
+      "unique_inodes": 111,
+      "path_size_bytes": 234763784,
+      "path_allocated_bytes": 234995712,
+      "inode_unique_size_bytes": 234763784,
+      "inode_unique_allocated_bytes": 234995712
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-011/target/release/deps/*.rmeta",
+      "file_paths": 111,
+      "unique_inodes": 111,
+      "path_size_bytes": 157937812,
+      "path_allocated_bytes": 158179328,
+      "inode_unique_size_bytes": 157937812,
+      "inode_unique_allocated_bytes": 158179328
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-011/target/release/deps/*.d",
+      "file_paths": 118,
+      "unique_inodes": 118,
+      "path_size_bytes": 1401131,
+      "path_allocated_bytes": 1654784,
+      "inode_unique_size_bytes": 1401131,
+      "inode_unique_allocated_bytes": 1654784
+    }
+  ],
+  "absent_dirs": [],
+  "skipped_nonregular_or_symlink_files": 0,
+  "errors": [],
+  "global": {
+    "file_paths": 3261,
+    "unique_inodes": 3261,
+    "inode_unique_size_bytes": 6469847822,
+    "inode_unique_allocated_bytes": 6477135872,
+    "duplicate_inode_groups": 0,
+    "inodes_with_unscanned_hardlinks": 0,
+    "allocated_bytes_with_unscanned_hardlinks": 0,
+    "allocated_bytes_without_unscanned_hardlinks": 6477135872
+  },
+  "duplicate_samples": [],
+  "grouped_by_run": [
+    {
+      "run": "g4-009",
+      "paths": 1684,
+      "size_bytes": 3436802962,
+      "allocated_bytes": 3440566272,
+      "debug_allocated": 2974584832,
+      "release_allocated": 465981440
+    },
+    {
+      "run": "g4-011",
+      "paths": 1577,
+      "size_bytes": 3033044860,
+      "allocated_bytes": 3036569600,
+      "debug_allocated": 2641739776,
+      "release_allocated": 394829824
+    }
+  ],
+  "limitations": [
+    "Only direct entries in the four specified deps directories were enumerated; no recursive traversal.",
+    "Allocated bytes are guest filesystem st_blocks*512, not measured immediate Windows C drive recovery or VHD compaction savings.",
+    "No file content was read or hashed; no deletion, build, test, benchmark, WSL stop, or production scan was performed.",
+    "All source/log/ELF/.so files, separate diagnostic or native-worker-chain targets, and all g4-012 data were excluded.",
+    "Statistics describe the stated observation time, not future deletion safety or current free space."
+  ]
+}

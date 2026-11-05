@@ -1,0 +1,426 @@
+{
+  "sha256": "1677fcc08004cb9128ebd4efccd0d7053586de87042dd54880bc3e2e124b617c",
+  "bytes": 3193715,
+  "machine": "x86-64",
+  "has_section_table": false,
+  "dynamic_symbol_count": 5545,
+  "pattern": "GetAdvSharePrivilege",
+  "functions": [
+    {
+      "name": "_ZN3SDK20GetAdvSharePrivilegeERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEES7_",
+      "address": "0x10f940",
+      "size": 1649,
+      "disassembly": "function-10f940.asm",
+      "references": [
+        {
+          "address": "0x10f982",
+          "instruction": "call 0xa7580",
+          "references": [
+            "PLT:_ZN3SDK14ReentrantMutex11GetInstanceEv"
+          ]
+        },
+        {
+          "address": "0x10f99e",
+          "instruction": "call 0xa71d0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x10f9d3",
+          "instruction": "call 0xa3710",
+          "references": [
+            "PLT:_ZN3SDK14ReentrantMutex4LockENSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x10f9e9",
+          "instruction": "call 0xa2a10",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x10f9fc",
+          "instruction": "call 0xa7750",
+          "references": [
+            "PLT:SYNOShareGet"
+          ]
+        },
+        {
+          "address": "0x10fa33",
+          "instruction": "call 0xa76f0",
+          "references": [
+            "PLT:SLIBShareIsForbiddenGet"
+          ]
+        },
+        {
+          "address": "0x10fa59",
+          "instruction": "call 0xa8f70",
+          "references": [
+            "PLT:SYNOShareFree"
+          ]
+        },
+        {
+          "address": "0x10fa5e",
+          "instruction": "call 0xa7580",
+          "references": [
+            "PLT:_ZN3SDK14ReentrantMutex11GetInstanceEv"
+          ]
+        },
+        {
+          "address": "0x10fa66",
+          "instruction": "call 0xa2210",
+          "references": [
+            "PLT:_ZN3SDK14ReentrantMutex6UnlockEv"
+          ]
+        },
+        {
+          "address": "0x10fa90",
+          "instruction": "lea r15, [rip + 0x15eab9]",
+          "references": [
+            "sdk_debug"
+          ]
+        },
+        {
+          "address": "0x10faaa",
+          "instruction": "call 0xa8b60",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x10fac3",
+          "instruction": "call 0xa2a10",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x10fad1",
+          "instruction": "call 0xa6000",
+          "references": [
+            "PLT:SLIBCErrGet"
+          ]
+        },
+        {
+          "address": "0x10faea",
+          "instruction": "call 0xa7490",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x10faf2",
+          "instruction": "call 0xab2c0",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x10fb16",
+          "instruction": "lea r9, [rip + 0x15ea3e]",
+          "references": [
+            "sdk-cpp.cpp"
+          ]
+        },
+        {
+          "address": "0x10fb5a",
+          "instruction": "call 0xa81a0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x10fb66",
+          "instruction": "call 0xa83c0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE10_M_disposeEv"
+          ]
+        },
+        {
+          "address": "0x10fb70",
+          "instruction": "lea r15, [rip + 0x15e9d9]",
+          "references": [
+            "sdk_debug"
+          ]
+        },
+        {
+          "address": "0x10fb8a",
+          "instruction": "call 0xa8b60",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x10fb95",
+          "instruction": "call 0xa83c0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE10_M_disposeEv"
+          ]
+        },
+        {
+          "address": "0x10fba3",
+          "instruction": "call 0xa5050",
+          "references": [
+            "PLT:SLIBCErrorGetLine"
+          ]
+        },
+        {
+          "address": "0x10fbae",
+          "instruction": "call 0xab030",
+          "references": [
+            "PLT:SLIBCErrorGetFile"
+          ]
+        },
+        {
+          "address": "0x10fbb6",
+          "instruction": "call 0xa6000",
+          "references": [
+            "PLT:SLIBCErrGet"
+          ]
+        },
+        {
+          "address": "0x10fbc9",
+          "instruction": "call 0xa7490",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x10fbd5",
+          "instruction": "call 0xab2c0",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x10fc06",
+          "instruction": "lea r9, [rip + 0x15e94e]",
+          "references": [
+            "sdk-cpp.cpp"
+          ]
+        },
+        {
+          "address": "0x10fc4b",
+          "instruction": "call 0xa81a0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x10fc57",
+          "instruction": "call 0xa83c0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE10_M_disposeEv"
+          ]
+        },
+        {
+          "address": "0x10fc73",
+          "instruction": "call 0xa62a0",
+          "references": [
+            "PLT:SLIBShareIsOnlyAcl"
+          ]
+        },
+        {
+          "address": "0x10fc93",
+          "instruction": "call 0xabce0",
+          "references": [
+            "PLT:SLIBGroupInfoListGet"
+          ]
+        },
+        {
+          "address": "0x10fcc1",
+          "instruction": "call 0xa4730",
+          "references": [
+            "PLT:SLIBCSzListFree"
+          ]
+        },
+        {
+          "address": "0x10fcd1",
+          "instruction": "call 0xa3400",
+          "references": [
+            "PLT:SLIBShareIsReadOnlyGet"
+          ]
+        },
+        {
+          "address": "0x10fd01",
+          "instruction": "call 0xa4730",
+          "references": [
+            "PLT:SLIBCSzListFree"
+          ]
+        },
+        {
+          "address": "0x10fd20",
+          "instruction": "call 0xa3400",
+          "references": [
+            "PLT:SLIBShareIsReadOnlyGet"
+          ]
+        },
+        {
+          "address": "0x10fd40",
+          "instruction": "lea r15, [rip + 0x15e809]",
+          "references": [
+            "sdk_debug"
+          ]
+        },
+        {
+          "address": "0x10fd5a",
+          "instruction": "call 0xa8b60",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x10fd65",
+          "instruction": "call 0xa83c0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE10_M_disposeEv"
+          ]
+        },
+        {
+          "address": "0x10fd73",
+          "instruction": "call 0xa5050",
+          "references": [
+            "PLT:SLIBCErrorGetLine"
+          ]
+        },
+        {
+          "address": "0x10fd7e",
+          "instruction": "call 0xab030",
+          "references": [
+            "PLT:SLIBCErrorGetFile"
+          ]
+        },
+        {
+          "address": "0x10fd8a",
+          "instruction": "call 0xa6000",
+          "references": [
+            "PLT:SLIBCErrGet"
+          ]
+        },
+        {
+          "address": "0x10fd92",
+          "instruction": "call 0xa7490",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x10fd9a",
+          "instruction": "call 0xab2c0",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x10fdcf",
+          "instruction": "lea r9, [rip + 0x15e785]",
+          "references": [
+            "sdk-cpp.cpp"
+          ]
+        },
+        {
+          "address": "0x10fe0f",
+          "instruction": "call 0xa81a0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x10fe20",
+          "instruction": "lea r15, [rip + 0x15e729]",
+          "references": [
+            "sdk_debug"
+          ]
+        },
+        {
+          "address": "0x10fe3a",
+          "instruction": "call 0xa8b60",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x10fe45",
+          "instruction": "call 0xa83c0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE10_M_disposeEv"
+          ]
+        },
+        {
+          "address": "0x10fe53",
+          "instruction": "call 0xa5050",
+          "references": [
+            "PLT:SLIBCErrorGetLine"
+          ]
+        },
+        {
+          "address": "0x10fe5e",
+          "instruction": "call 0xab030",
+          "references": [
+            "PLT:SLIBCErrorGetFile"
+          ]
+        },
+        {
+          "address": "0x10fe66",
+          "instruction": "call 0xa6000",
+          "references": [
+            "PLT:SLIBCErrGet"
+          ]
+        },
+        {
+          "address": "0x10fe79",
+          "instruction": "call 0xa7490",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x10fe85",
+          "instruction": "call 0xab2c0",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x10feb6",
+          "instruction": "lea r9, [rip + 0x15e69e]",
+          "references": [
+            "sdk-cpp.cpp"
+          ]
+        },
+        {
+          "address": "0x10fefb",
+          "instruction": "call 0xa81a0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x10ff26",
+          "instruction": "call 0xa4730",
+          "references": [
+            "PLT:SLIBCSzListFree"
+          ]
+        },
+        {
+          "address": "0x10ff36",
+          "instruction": "call 0xa3400",
+          "references": [
+            "PLT:SLIBShareIsReadOnlyGet"
+          ]
+        },
+        {
+          "address": "0x10ff40",
+          "instruction": "call 0xa4170",
+          "references": [
+            "PLT:__stack_chk_fail"
+          ]
+        }
+      ]
+    }
+  ],
+  "binary_executed": false,
+  "method": "PT_DYNAMIC and GNU/SysV hash; bounded dynamic symbols; RIP references and direct/PLT calls; no execution"
+}

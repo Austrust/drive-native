@@ -1,0 +1,599 @@
+{
+  "schema_version": 1,
+  "observation_status": "observed_metadata_only",
+  "observed_utc": "2026-11-05T04:13:35.921271+00:00",
+  "provenance": {
+    "tool": "WSL Ubuntu-24.04 Python 3 pathlib/stat read-only metadata inventory",
+    "user": "drive-native-test",
+    "scope_authority": "coordinator request: g4-001 through g4-007 only; no deletion",
+    "retention": "Original observation preserved; file creation is not a new measurement"
+  },
+  "utc": "2026-11-05T04:13:35.921271+00:00",
+  "scope": "Only g4-001 through g4-007 target/{debug,release}/deps entries ending .rlib/.rmeta/.d; metadata stat only; no contents/hash/delete; no traversal of ELF/.so/source/log/build/incremental/fingerprint/009/011/012.",
+  "method": "allocated=st_blocks*512; global dedup by st_dev+st_ino; this is guest file allocation, not immediate host C/VHD reclaim",
+  "groups": [
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-001/target/debug/deps/*.rlib",
+      "file_paths": 205,
+      "unique_inodes": 205,
+      "path_size_bytes": 1600317136,
+      "path_allocated_bytes": 1600737280,
+      "inode_unique_size_bytes": 1600317136,
+      "inode_unique_allocated_bytes": 1600737280
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-001/target/debug/deps/*.rmeta",
+      "file_paths": 386,
+      "unique_inodes": 386,
+      "path_size_bytes": 451266407,
+      "path_allocated_bytes": 451960832,
+      "inode_unique_size_bytes": 451266407,
+      "inode_unique_allocated_bytes": 451960832
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-001/target/debug/deps/*.d",
+      "file_paths": 538,
+      "unique_inodes": 538,
+      "path_size_bytes": 4010988,
+      "path_allocated_bytes": 5435392,
+      "inode_unique_size_bytes": 4010988,
+      "inode_unique_allocated_bytes": 5435392
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-001/target/release/deps/*.rlib",
+      "file_paths": 120,
+      "unique_inodes": 120,
+      "path_size_bytes": 280042436,
+      "path_allocated_bytes": 280297472,
+      "inode_unique_size_bytes": 280042436,
+      "inode_unique_allocated_bytes": 280297472
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-001/target/release/deps/*.rmeta",
+      "file_paths": 120,
+      "unique_inodes": 120,
+      "path_size_bytes": 183344522,
+      "path_allocated_bytes": 183607296,
+      "inode_unique_size_bytes": 183344522,
+      "inode_unique_allocated_bytes": 183607296
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-001/target/release/deps/*.d",
+      "file_paths": 143,
+      "unique_inodes": 143,
+      "path_size_bytes": 1517383,
+      "path_allocated_bytes": 1839104,
+      "inode_unique_size_bytes": 1517383,
+      "inode_unique_allocated_bytes": 1839104
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/*.rlib",
+      "file_paths": 235,
+      "unique_inodes": 235,
+      "path_size_bytes": 1860611662,
+      "path_allocated_bytes": 1861107712,
+      "inode_unique_size_bytes": 1860611662,
+      "inode_unique_allocated_bytes": 1861107712
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/*.rmeta",
+      "file_paths": 416,
+      "unique_inodes": 416,
+      "path_size_bytes": 491730964,
+      "path_allocated_bytes": 492494848,
+      "inode_unique_size_bytes": 491730964,
+      "inode_unique_allocated_bytes": 492494848
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/debug/deps/*.d",
+      "file_paths": 569,
+      "unique_inodes": 569,
+      "path_size_bytes": 4606348,
+      "path_allocated_bytes": 6086656,
+      "inode_unique_size_bytes": 4606348,
+      "inode_unique_allocated_bytes": 6086656
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/release/deps/*.rlib",
+      "file_paths": 120,
+      "unique_inodes": 120,
+      "path_size_bytes": 280065794,
+      "path_allocated_bytes": 280317952,
+      "inode_unique_size_bytes": 280065794,
+      "inode_unique_allocated_bytes": 280317952
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/release/deps/*.rmeta",
+      "file_paths": 120,
+      "unique_inodes": 120,
+      "path_size_bytes": 183345402,
+      "path_allocated_bytes": 183607296,
+      "inode_unique_size_bytes": 183345402,
+      "inode_unique_allocated_bytes": 183607296
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/target/release/deps/*.d",
+      "file_paths": 143,
+      "unique_inodes": 143,
+      "path_size_bytes": 1517383,
+      "path_allocated_bytes": 1839104,
+      "inode_unique_size_bytes": 1517383,
+      "inode_unique_allocated_bytes": 1839104
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-003/target/debug/deps/*.rlib",
+      "file_paths": 235,
+      "unique_inodes": 235,
+      "path_size_bytes": 1861151894,
+      "path_allocated_bytes": 1861636096,
+      "inode_unique_size_bytes": 1861151894,
+      "inode_unique_allocated_bytes": 1861636096
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-003/target/debug/deps/*.rmeta",
+      "file_paths": 416,
+      "unique_inodes": 416,
+      "path_size_bytes": 491787394,
+      "path_allocated_bytes": 492539904,
+      "inode_unique_size_bytes": 491787394,
+      "inode_unique_allocated_bytes": 492539904
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-003/target/debug/deps/*.d",
+      "file_paths": 569,
+      "unique_inodes": 569,
+      "path_size_bytes": 4606348,
+      "path_allocated_bytes": 6086656,
+      "inode_unique_size_bytes": 4606348,
+      "inode_unique_allocated_bytes": 6086656
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-003/target/release/deps/*.rlib",
+      "file_paths": 120,
+      "unique_inodes": 120,
+      "path_size_bytes": 280195962,
+      "path_allocated_bytes": 280449024,
+      "inode_unique_size_bytes": 280195962,
+      "inode_unique_allocated_bytes": 280449024
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-003/target/release/deps/*.rmeta",
+      "file_paths": 120,
+      "unique_inodes": 120,
+      "path_size_bytes": 183370218,
+      "path_allocated_bytes": 183631872,
+      "inode_unique_size_bytes": 183370218,
+      "inode_unique_allocated_bytes": 183631872
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-003/target/release/deps/*.d",
+      "file_paths": 143,
+      "unique_inodes": 143,
+      "path_size_bytes": 1517383,
+      "path_allocated_bytes": 1839104,
+      "inode_unique_size_bytes": 1517383,
+      "inode_unique_allocated_bytes": 1839104
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-004/target/debug/deps/*.rlib",
+      "file_paths": 235,
+      "unique_inodes": 235,
+      "path_size_bytes": 1861154518,
+      "path_allocated_bytes": 1861648384,
+      "inode_unique_size_bytes": 1861154518,
+      "inode_unique_allocated_bytes": 1861648384
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-004/target/debug/deps/*.rmeta",
+      "file_paths": 416,
+      "unique_inodes": 416,
+      "path_size_bytes": 491787458,
+      "path_allocated_bytes": 492539904,
+      "inode_unique_size_bytes": 491787458,
+      "inode_unique_allocated_bytes": 492539904
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-004/target/debug/deps/*.d",
+      "file_paths": 569,
+      "unique_inodes": 569,
+      "path_size_bytes": 4606348,
+      "path_allocated_bytes": 6086656,
+      "inode_unique_size_bytes": 4606348,
+      "inode_unique_allocated_bytes": 6086656
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-004/target/release/deps/*.rlib",
+      "file_paths": 120,
+      "unique_inodes": 120,
+      "path_size_bytes": 280195764,
+      "path_allocated_bytes": 280449024,
+      "inode_unique_size_bytes": 280195764,
+      "inode_unique_allocated_bytes": 280449024
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-004/target/release/deps/*.rmeta",
+      "file_paths": 120,
+      "unique_inodes": 120,
+      "path_size_bytes": 183370250,
+      "path_allocated_bytes": 183631872,
+      "inode_unique_size_bytes": 183370250,
+      "inode_unique_allocated_bytes": 183631872
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-004/target/release/deps/*.d",
+      "file_paths": 143,
+      "unique_inodes": 143,
+      "path_size_bytes": 1517383,
+      "path_allocated_bytes": 1839104,
+      "inode_unique_size_bytes": 1517383,
+      "inode_unique_allocated_bytes": 1839104
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-005/target/debug/deps/*.rlib",
+      "file_paths": 286,
+      "unique_inodes": 286,
+      "path_size_bytes": 2565432996,
+      "path_allocated_bytes": 2566000640,
+      "inode_unique_size_bytes": 2565432996,
+      "inode_unique_allocated_bytes": 2566000640
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-005/target/debug/deps/*.rmeta",
+      "file_paths": 467,
+      "unique_inodes": 467,
+      "path_size_bytes": 594210385,
+      "path_allocated_bytes": 595087360,
+      "inode_unique_size_bytes": 594210385,
+      "inode_unique_allocated_bytes": 595087360
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-005/target/debug/deps/*.d",
+      "file_paths": 631,
+      "unique_inodes": 631,
+      "path_size_bytes": 5568920,
+      "path_allocated_bytes": 7172096,
+      "inode_unique_size_bytes": 5568920,
+      "inode_unique_allocated_bytes": 7172096
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-005/target/release/deps/*.rlib",
+      "file_paths": 120,
+      "unique_inodes": 120,
+      "path_size_bytes": 280203322,
+      "path_allocated_bytes": 280457216,
+      "inode_unique_size_bytes": 280203322,
+      "inode_unique_allocated_bytes": 280457216
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-005/target/release/deps/*.rmeta",
+      "file_paths": 120,
+      "unique_inodes": 120,
+      "path_size_bytes": 183370252,
+      "path_allocated_bytes": 183631872,
+      "inode_unique_size_bytes": 183370252,
+      "inode_unique_allocated_bytes": 183631872
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-005/target/release/deps/*.d",
+      "file_paths": 143,
+      "unique_inodes": 143,
+      "path_size_bytes": 1517383,
+      "path_allocated_bytes": 1839104,
+      "inode_unique_size_bytes": 1517383,
+      "inode_unique_allocated_bytes": 1839104
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-006/target/debug/deps/*.rlib",
+      "file_paths": 286,
+      "unique_inodes": 286,
+      "path_size_bytes": 2565503020,
+      "path_allocated_bytes": 2566070272,
+      "inode_unique_size_bytes": 2565503020,
+      "inode_unique_allocated_bytes": 2566070272
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-006/target/debug/deps/*.rmeta",
+      "file_paths": 467,
+      "unique_inodes": 467,
+      "path_size_bytes": 594221746,
+      "path_allocated_bytes": 595103744,
+      "inode_unique_size_bytes": 594221746,
+      "inode_unique_allocated_bytes": 595103744
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-006/target/debug/deps/*.d",
+      "file_paths": 631,
+      "unique_inodes": 631,
+      "path_size_bytes": 5568920,
+      "path_allocated_bytes": 7172096,
+      "inode_unique_size_bytes": 5568920,
+      "inode_unique_allocated_bytes": 7172096
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-006/target/release/deps/*.rlib",
+      "file_paths": 120,
+      "unique_inodes": 120,
+      "path_size_bytes": 280203322,
+      "path_allocated_bytes": 280457216,
+      "inode_unique_size_bytes": 280203322,
+      "inode_unique_allocated_bytes": 280457216
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-006/target/release/deps/*.rmeta",
+      "file_paths": 120,
+      "unique_inodes": 120,
+      "path_size_bytes": 183370252,
+      "path_allocated_bytes": 183631872,
+      "inode_unique_size_bytes": 183370252,
+      "inode_unique_allocated_bytes": 183631872
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-006/target/release/deps/*.d",
+      "file_paths": 143,
+      "unique_inodes": 143,
+      "path_size_bytes": 1517383,
+      "path_allocated_bytes": 1839104,
+      "inode_unique_size_bytes": 1517383,
+      "inode_unique_allocated_bytes": 1839104
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/target/debug/deps/*.rlib",
+      "file_paths": 290,
+      "unique_inodes": 290,
+      "path_size_bytes": 2053792044,
+      "path_allocated_bytes": 2054377472,
+      "inode_unique_size_bytes": 2053792044,
+      "inode_unique_allocated_bytes": 2054377472
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/target/debug/deps/*.rmeta",
+      "file_paths": 407,
+      "unique_inodes": 407,
+      "path_size_bytes": 577791309,
+      "path_allocated_bytes": 578670592,
+      "inode_unique_size_bytes": 577791309,
+      "inode_unique_allocated_bytes": 578670592
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/target/debug/deps/*.d",
+      "file_paths": 559,
+      "unique_inodes": 559,
+      "path_size_bytes": 5837531,
+      "path_allocated_bytes": 7196672,
+      "inode_unique_size_bytes": 5837531,
+      "inode_unique_allocated_bytes": 7196672
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/target/release/deps/*.rlib",
+      "file_paths": 120,
+      "unique_inodes": 120,
+      "path_size_bytes": 280203322,
+      "path_allocated_bytes": 280457216,
+      "inode_unique_size_bytes": 280203322,
+      "inode_unique_allocated_bytes": 280457216
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/target/release/deps/*.rmeta",
+      "file_paths": 120,
+      "unique_inodes": 120,
+      "path_size_bytes": 183370252,
+      "path_allocated_bytes": 183631872,
+      "inode_unique_size_bytes": 183370252,
+      "inode_unique_allocated_bytes": 183631872
+    },
+    {
+      "absolute_pattern": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/target/release/deps/*.d",
+      "file_paths": 143,
+      "unique_inodes": 143,
+      "path_size_bytes": 1517383,
+      "path_allocated_bytes": 1839104,
+      "inode_unique_size_bytes": 1517383,
+      "inode_unique_allocated_bytes": 1839104
+    }
+  ],
+  "absent_dirs": [],
+  "skipped_nonregular_or_symlink_files": 0,
+  "errors": [],
+  "global": {
+    "file_paths": 11494,
+    "unique_inodes": 11494,
+    "inode_unique_size_bytes": 21350837087,
+    "inode_unique_allocated_bytes": 21376344064,
+    "duplicate_inode_groups": 0,
+    "inodes_with_unscanned_hardlinks": 0,
+    "allocated_bytes_with_unscanned_hardlinks": 0,
+    "allocated_bytes_without_unscanned_hardlinks": 21376344064
+  },
+  "duplicate_samples": [],
+  "grouped_by_run": [
+    {
+      "run": "g4-001",
+      "paths": 1512,
+      "size_bytes": 2520498872,
+      "allocated_bytes": 2523877376,
+      "debug_allocated": 2058133504,
+      "release_allocated": 465743872,
+      "suffix": {
+        ".rlib": {
+          "files": 325,
+          "size_bytes": 1880359572,
+          "allocated_bytes": 1881034752
+        },
+        ".rmeta": {
+          "files": 506,
+          "size_bytes": 634610929,
+          "allocated_bytes": 635568128
+        },
+        ".d": {
+          "files": 681,
+          "size_bytes": 5528371,
+          "allocated_bytes": 7274496
+        }
+      },
+      "allocated_GiB": "2.350544"
+    },
+    {
+      "run": "g4-002",
+      "paths": 1603,
+      "size_bytes": 2821877553,
+      "allocated_bytes": 2825453568,
+      "debug_allocated": 2359689216,
+      "release_allocated": 465764352,
+      "suffix": {
+        ".rlib": {
+          "files": 355,
+          "size_bytes": 2140677456,
+          "allocated_bytes": 2141425664
+        },
+        ".rmeta": {
+          "files": 536,
+          "size_bytes": 675076366,
+          "allocated_bytes": 676102144
+        },
+        ".d": {
+          "files": 712,
+          "size_bytes": 6123731,
+          "allocated_bytes": 7925760
+        }
+      },
+      "allocated_GiB": "2.631409"
+    },
+    {
+      "run": "g4-003",
+      "paths": 1603,
+      "size_bytes": 2822629199,
+      "allocated_bytes": 2826182656,
+      "debug_allocated": 2360262656,
+      "release_allocated": 465920000,
+      "suffix": {
+        ".rlib": {
+          "files": 355,
+          "size_bytes": 2141347856,
+          "allocated_bytes": 2142085120
+        },
+        ".rmeta": {
+          "files": 536,
+          "size_bytes": 675157612,
+          "allocated_bytes": 676171776
+        },
+        ".d": {
+          "files": 712,
+          "size_bytes": 6123731,
+          "allocated_bytes": 7925760
+        }
+      },
+      "allocated_GiB": "2.632088"
+    },
+    {
+      "run": "g4-004",
+      "paths": 1603,
+      "size_bytes": 2822631721,
+      "allocated_bytes": 2826194944,
+      "debug_allocated": 2360274944,
+      "release_allocated": 465920000,
+      "suffix": {
+        ".rlib": {
+          "files": 355,
+          "size_bytes": 2141350282,
+          "allocated_bytes": 2142097408
+        },
+        ".rmeta": {
+          "files": 536,
+          "size_bytes": 675157708,
+          "allocated_bytes": 676171776
+        },
+        ".d": {
+          "files": 712,
+          "size_bytes": 6123731,
+          "allocated_bytes": 7925760
+        }
+      },
+      "allocated_GiB": "2.632099"
+    },
+    {
+      "run": "g4-005",
+      "paths": 1767,
+      "size_bytes": 3630303258,
+      "allocated_bytes": 3634188288,
+      "debug_allocated": 3168260096,
+      "release_allocated": 465928192,
+      "suffix": {
+        ".rlib": {
+          "files": 406,
+          "size_bytes": 2845636318,
+          "allocated_bytes": 2846457856
+        },
+        ".rmeta": {
+          "files": 587,
+          "size_bytes": 777580637,
+          "allocated_bytes": 778719232
+        },
+        ".d": {
+          "files": 774,
+          "size_bytes": 7086303,
+          "allocated_bytes": 9011200
+        }
+      },
+      "allocated_GiB": "3.384602"
+    },
+    {
+      "run": "g4-006",
+      "paths": 1767,
+      "size_bytes": 3630384643,
+      "allocated_bytes": 3634274304,
+      "debug_allocated": 3168346112,
+      "release_allocated": 465928192,
+      "suffix": {
+        ".rlib": {
+          "files": 406,
+          "size_bytes": 2845706342,
+          "allocated_bytes": 2846527488
+        },
+        ".rmeta": {
+          "files": 587,
+          "size_bytes": 777591998,
+          "allocated_bytes": 778735616
+        },
+        ".d": {
+          "files": 774,
+          "size_bytes": 7086303,
+          "allocated_bytes": 9011200
+        }
+      },
+      "allocated_GiB": "3.384682"
+    },
+    {
+      "run": "g4-007",
+      "paths": 1639,
+      "size_bytes": 3102511841,
+      "allocated_bytes": 3106172928,
+      "debug_allocated": 2640244736,
+      "release_allocated": 465928192,
+      "suffix": {
+        ".rlib": {
+          "files": 410,
+          "size_bytes": 2333995366,
+          "allocated_bytes": 2334834688
+        },
+        ".rmeta": {
+          "files": 527,
+          "size_bytes": 761161561,
+          "allocated_bytes": 762302464
+        },
+        ".d": {
+          "files": 702,
+          "size_bytes": 7354914,
+          "allocated_bytes": 9035776
+        }
+      },
+      "allocated_GiB": "2.892849"
+    }
+  ],
+  "limitations": [
+    "Only direct directory entries in the 14 specified deps directories were enumerated; no recursive traversal.",
+    "Allocated bytes are guest filesystem st_blocks*512, not measured immediate Windows C drive recovery or VHD compaction savings.",
+    "No file content was read or hashed; no deletion, build, test, benchmark, WSL stop, or production scan was performed.",
+    "The inventory excludes .so and extensionless executable/test binaries, sources, logs, build directories, incremental directories, fingerprints, g4-009/g4-011/g4-012 and their dependency seeds.",
+    "Statistics describe the stated observation time, not future deletion safety or current free space."
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "authorization": "Existing explicit user approval to stop Ubuntu-24.04 and compact its VHD",
+  "distribution": "Ubuntu-24.04",
+  "vhd_length": 509138173952,
+  "host_free_bytes": 23996100608,
+  "cleanup": "incremental-cache-cleanup.json",
+  "command": "wsl --manage Ubuntu-24.04 --compact"
+}

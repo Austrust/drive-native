@@ -1,0 +1,10 @@
+test_profile_is_private_exclusive_and_no_secret_field (__main__.DesktopTests.test_profile_is_private_exclusive_and_no_secret_field) ... ok
+test_profile_rejects_symlink_shared_mode_fifo_and_bad_schema (__main__.DesktopTests.test_profile_rejects_symlink_shared_mode_fifo_and_bad_schema) ... ok
+test_status_refresh_preserves_item_focus_and_selection (__main__.DesktopTests.test_status_refresh_preserves_item_focus_and_selection) ... ok
+test_string_array_signature_including_empty_and_unicode (__main__.DesktopTests.test_string_array_signature_including_empty_and_unicode) ... ok
+test_unlock_checks_task_and_owner_before_sending_credential (__main__.DesktopTests.test_unlock_checks_task_and_owner_before_sending_credential) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.112s
+
+OK

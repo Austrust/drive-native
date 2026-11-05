@@ -1,0 +1,8 @@
+{
+  "candidate_commit": "41365a650eb7d7df696046e21b7671697231f851",
+  "changed_source_files": [],
+  "new_source_files": [],
+  "allowed_new_file": "vendor/fuser/Cargo.lock (excluded vendored crate offline test lock)",
+  "residual_owned_mounts": [],
+  "passed": true
+}

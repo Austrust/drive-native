@@ -1,0 +1,67 @@
+[
+  {
+    "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-006",
+    "candidate": "d39a59769e0c0abcde033ae0f74bb2806f218d8a",
+    "scope": "Original private run retained; target, binary, source and databases excluded from this portable bundle."
+  },
+  {
+    "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007",
+    "candidate": "ca86a85e2be9c83c7a59407fc0737114158ecf7f",
+    "scope": "Original private run retained; target, binary, source and databases excluded from this portable bundle."
+  },
+  {
+    "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/fresh-001",
+    "candidate": "ca86a85e2be9c83c7a59407fc0737114158ecf7f",
+    "scope": "Original private run retained; target, binary, source and databases excluded from this portable bundle."
+  },
+  {
+    "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009",
+    "candidate": "4e6aaf7166fd370076adf43a0dad3e6ecdca36d6",
+    "scope": "Original private run retained; target, binary, source and databases excluded from this portable bundle."
+  },
+  {
+    "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/clock-probe-001/drive_runtime-a3339dac1c16b0f4",
+    "sha256": "1ab33faacb0397018d144156d5da501cbdeba6f56c03471e5f7c28d99996e53a",
+    "scope": "Unchanged original test ELF used only for clock probe."
+  },
+  {
+    "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/clock-diagnostic-001/target/debug/deps/drive_runtime-1666268cebacefe5",
+    "sha256": "5f0c4171fead09c0314c4706a217816743732450c8b8938c410a48fa7cc0f5c7",
+    "scope": "Derived test-only diagnostic ELF; original candidate unchanged; not acceptance evidence."
+  },
+  {
+    "path": "C:\\Users\\a_tas\\Desktop\\MFMLAB\\Personal_Sync\\20-Coding\\P032-群晖Drive按需同步\\work\\issue7-validation\\prepared-g4-006\\candidate.tar",
+    "sha256": "960f53a9881f173fe070b298260ac6fb93c7e5fe336d2b5d8e440ae184dfc178",
+    "commit": "d39a59769e0c0abcde033ae0f74bb2806f218d8a",
+    "scope": "Reproducible Git archive removed after hash verification to recover host space; raw evidence retained.",
+    "rebuild": "git -C work/fix-7 archive --format=tar --output=../issue7-validation/prepared-g4-006/candidate.tar d39a59769e0c0abcde033ae0f74bb2806f218d8a"
+  },
+  {
+    "path": "C:\\Users\\a_tas\\Desktop\\MFMLAB\\Personal_Sync\\20-Coding\\P032-群晖Drive按需同步\\work\\issue7-validation\\prepared-g4-007\\candidate.tar",
+    "sha256": "cfa5c2ca267b33b8dad72db3d222ecd15ad281a9df52cb0a7fc524ae6e0a3b48",
+    "commit": "ca86a85e2be9c83c7a59407fc0737114158ecf7f",
+    "scope": "Reproducible Git archive removed after hash verification to recover host space; raw evidence retained.",
+    "rebuild": "git -C work/fix-7 archive --format=tar --output=../issue7-validation/prepared-g4-007/candidate.tar ca86a85e2be9c83c7a59407fc0737114158ecf7f"
+  },
+  {
+    "path": "C:\\Users\\a_tas\\Desktop\\MFMLAB\\Personal_Sync\\20-Coding\\P032-群晖Drive按需同步\\work\\issue7-validation\\prepared-g4-008\\candidate.tar",
+    "sha256": "5e3631f707eaacb3bd788257e7f5beb315802100c185a1e6d81c8c66bc1c1445",
+    "commit": "99aa587e83fc409883ecd3e0d3f60fe8640b2e06",
+    "scope": "Reproducible Git archive removed after hash verification to recover host space; raw evidence retained.",
+    "rebuild": "git -C work/fix-7 archive --format=tar --output=../issue7-validation/prepared-g4-008/candidate.tar 99aa587e83fc409883ecd3e0d3f60fe8640b2e06"
+  },
+  {
+    "path": "C:\\Users\\a_tas\\Desktop\\MFMLAB\\Personal_Sync\\20-Coding\\P032-群晖Drive按需同步\\work\\issue7-validation\\prepared-g4-009\\candidate.tar",
+    "sha256": "ca59a75a2e2fd8fa0fa59bc2b0a3813183a5615b6ca80e8f8a620211d311ff83",
+    "commit": "4e6aaf7166fd370076adf43a0dad3e6ecdca36d6",
+    "scope": "Reproducible Git archive removed after hash verification to recover host space; raw evidence retained.",
+    "rebuild": "git -C work/fix-7 archive --format=tar --output=../issue7-validation/prepared-g4-009/candidate.tar 4e6aaf7166fd370076adf43a0dad3e6ecdca36d6"
+  },
+  {
+    "path": "C:\\Users\\a_tas\\Desktop\\MFMLAB\\Personal_Sync\\20-Coding\\P032-群晖Drive按需同步\\work\\issue7-validation\\prepared-g4-010\\candidate.tar",
+    "sha256": "e0ac9b59fb6111129dece4dc15f10501160a9e9c49462d72ddaadbf742693ec3",
+    "commit": "41365a650eb7d7df696046e21b7671697231f851",
+    "scope": "Reproducible Git archive removed after hash verification to recover host space; raw evidence retained.",
+    "rebuild": "git -C work/fix-7 archive --format=tar --output=../issue7-validation/prepared-g4-010/candidate.tar 41365a650eb7d7df696046e21b7671697231f851"
+  }
+]

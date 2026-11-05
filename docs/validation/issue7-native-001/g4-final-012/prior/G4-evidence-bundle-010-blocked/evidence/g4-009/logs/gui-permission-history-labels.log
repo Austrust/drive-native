@@ -1,0 +1,8 @@
+test_confirmed_row_removes_hint_from_tooltip_and_retains_response_detail (__main__.PermissionHistoryLabels.test_confirmed_row_removes_hint_from_tooltip_and_retains_response_detail) ... ok
+test_mkdir_label_is_chinese (__main__.PermissionHistoryLabels.test_mkdir_label_is_chinese) ... ok
+test_replace_label_is_chinese (__main__.PermissionHistoryLabels.test_replace_label_is_chinese) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.001s
+
+OK

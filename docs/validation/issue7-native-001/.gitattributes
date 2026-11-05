@@ -2,4 +2,6 @@
 static/** -text
 server-static/** -text
 server-capability/** -text
+l2-static/** -text
 g4-through-010/** -text
+g4-final-012/** -text

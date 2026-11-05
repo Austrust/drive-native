@@ -1,0 +1,17 @@
+{
+  "candidate_commit": "41365a650eb7d7df696046e21b7671697231f851",
+  "frozen_source": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-011/source",
+  "prepared_only": true,
+  "scope": "synthetic localhost native TLS service; actual worker ELF and public Bridge; no relay or upstream",
+  "source_cargo_lock_sha256": "fcaf7417018889efefaffd45ac2e4931a1b01dd5fc83e6a9fc9f0806093268dd",
+  "initial_harness_cargo_lock_sha256": "fcaf7417018889efefaffd45ac2e4931a1b01dd5fc83e6a9fc9f0806093268dd",
+  "files": {
+    "Cargo.lock": "fcaf7417018889efefaffd45ac2e4931a1b01dd5fc83e6a9fc9f0806093268dd",
+    "Cargo.toml": "6a0597ad5303682453cb48803656b03ec2a8cc4cd5179305e6c373fadd5ab053",
+    "src/codec.rs": "5eaca3e517653408f4331bd0096e8cf9c0d9a464837315fd9fb0452763cb0b25",
+    "src/main.rs": "ea07d79a04b3469e7ec48261693598d37916d0d92ca442866cabff66e8ce9728",
+    "fixtures/server.pem": "49b56349c288932aebd1befef17f5e11822beb08a7b74ac54f8cdcb6fccfa344",
+    "fixtures/ca.pem": "79f1b87bc25db408602e1c76ce2eceeaa6015f3ccbf3a667926315ca4ecc5834",
+    "fixtures/server-key.pem": "ba8961bf391a243c98caae9eca75c4181bc20b7ec333b91c87189e7bf6426875"
+  }
+}

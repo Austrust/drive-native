@@ -1,9 +1,155 @@
 {
-  "product_commit": "41365a650eb7d7df696046e21b7671697231f851",
-  "g4_files_checked": 221,
-  "g4_bad_hashes": [],
-  "g4_manifest_sha256": "37109309399b943f2b942ef26b49c5d284e903052182b5bda1f9f7f633e19bb9",
-  "markdown_files": 19,
-  "local_links_checked": 324,
-  "bad_links": []
+  "product_commit": "9c9aabae447d92275f93dae65320788240a03113",
+  "scope": "Current #7 delivery prose, direct navigation and copied immutable evidence",
+  "bundles": [
+    {
+      "path": "g4-through-010",
+      "files_checked": 221,
+      "manifest_sha256": "37109309399b943f2b942ef26b49c5d284e903052182b5bda1f9f7f633e19bb9"
+    },
+    {
+      "path": "g4-final-012",
+      "files_checked": 550,
+      "manifest_sha256": "462d2efcc3b0aef2f58dd813c5c8242f58e15c7d5f0310c0c1a5ac95433e58b3"
+    },
+    {
+      "path": "l2-static",
+      "files_checked": 27,
+      "manifest_sha256": "19ec9aa70de2b8aa205e5034e9da05c10e669c03f785f53c6b48dcabbbf63584"
+    }
+  ],
+  "bad_hashes": [],
+  "bad_links": [],
+  "local_links_checked": 590,
+  "remote_links_unchecked": 14,
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 10664,
+      "lines": 100
+    },
+    {
+      "path": "DELIVERY_GATES.md",
+      "bytes": 22886,
+      "lines": 103
+    },
+    {
+      "path": "docs/FIX_7_REPORT.md",
+      "bytes": 14499,
+      "lines": 113
+    },
+    {
+      "path": "docs/FIX_5_2_REPORT.md",
+      "bytes": 12470,
+      "lines": 137
+    },
+    {
+      "path": "docs/RELEASE_NOTES.md",
+      "bytes": 14335,
+      "lines": 126
+    },
+    {
+      "path": "docs/UPGRADE_RECOVERY.md",
+      "bytes": 9519,
+      "lines": 65
+    },
+    {
+      "path": "docs/CONTRACTS.md",
+      "bytes": 18521,
+      "lines": 159
+    },
+    {
+      "path": "docs/FILE_TIMESTAMPS.md",
+      "bytes": 4242,
+      "lines": 36
+    },
+    {
+      "path": "docs/validation/issue7-native-001/README.md",
+      "bytes": 1017,
+      "lines": 11
+    },
+    {
+      "path": "docs/validation/issue7-native-001/REPORT.md",
+      "bytes": 14395,
+      "lines": 79
+    },
+    {
+      "path": "docs/validation/issue7-native-001/g4-through-010/COVERAGE.md",
+      "bytes": 14879,
+      "lines": 183
+    },
+    {
+      "path": "docs/validation/issue7-native-001/g4-through-010/REPORT.md",
+      "bytes": 15683,
+      "lines": 161
+    },
+    {
+      "path": "docs/validation/issue7-native-001/g4-final-012/COVERAGE.md",
+      "bytes": 1423,
+      "lines": 14
+    },
+    {
+      "path": "docs/validation/issue7-native-001/g4-final-012/REPORT.md",
+      "bytes": 18133,
+      "lines": 198
+    },
+    {
+      "path": "docs/validation/issue7-native-001/l2-static/COMMANDS.md",
+      "bytes": 3146,
+      "lines": 31
+    },
+    {
+      "path": "docs/validation/issue7-native-001/l2-static/README.md",
+      "bytes": 308,
+      "lines": 5
+    },
+    {
+      "path": "docs/validation/issue7-native-001/l2-static/REPORT.md",
+      "bytes": 9849,
+      "lines": 72
+    },
+    {
+      "path": "docs/validation/issue7-native-001/static/README.md",
+      "bytes": 361,
+      "lines": 6
+    },
+    {
+      "path": "docs/validation/issue7-native-001/static/REPORT.md",
+      "bytes": 8620,
+      "lines": 67
+    },
+    {
+      "path": "docs/validation/issue7-native-001/server-static/COMMANDS.md",
+      "bytes": 3575,
+      "lines": 37
+    },
+    {
+      "path": "docs/validation/issue7-native-001/server-static/README.md",
+      "bytes": 923,
+      "lines": 9
+    },
+    {
+      "path": "docs/validation/issue7-native-001/server-static/REPORT.md",
+      "bytes": 9689,
+      "lines": 66
+    },
+    {
+      "path": "docs/validation/issue7-native-001/server-capability/COMMANDS.md",
+      "bytes": 1675,
+      "lines": 16
+    },
+    {
+      "path": "docs/validation/issue7-native-001/server-capability/README.md",
+      "bytes": 524,
+      "lines": 7
+    },
+    {
+      "path": "docs/validation/issue7-native-001/server-capability/REPORT.md",
+      "bytes": 8682,
+      "lines": 56
+    }
+  ],
+  "author_check_logs_verified": 13,
+  "markdown_files": 25,
+  "passed": true
 }

@@ -1,0 +1,62 @@
+{
+  "candidate_commit": "9c9aabae447d92275f93dae65320788240a03113",
+  "final_run": "g4-012",
+  "acceptance_status": "passed_matrix_and_supplements",
+  "old_413_tls_counterexample": {
+    "passed": 8,
+    "failed": 2
+  },
+  "missing_optional_files": [
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-011/cache-provenance.json",
+      "destination": "evidence/g4-011/cache-provenance.json",
+      "required": false
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-011/failure.txt",
+      "destination": "evidence/g4-011/failure.txt",
+      "required": false
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-011/coordinator-stop.json",
+      "destination": "evidence/g4-011/coordinator-stop.json",
+      "required": false
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-011/closeout.json",
+      "destination": "evidence/g4-011/closeout.json",
+      "required": false
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-011/closeout-root-assisted.json",
+      "destination": "evidence/g4-011/closeout-root-assisted.json",
+      "required": false
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-012/cache-provenance.json",
+      "destination": "evidence/g4-012/cache-provenance.json",
+      "required": false
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-012/failure.txt",
+      "destination": "evidence/g4-012/failure.txt",
+      "required": false
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-012/coordinator-stop.json",
+      "destination": "evidence/g4-012/coordinator-stop.json",
+      "required": false
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-012/coordinator-control.json",
+      "destination": "evidence/g4-012/coordinator-control.json",
+      "required": false
+    },
+    {
+      "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-012/retry-preflight-clock-audit.json",
+      "destination": "evidence/g4-012/retry-preflight-clock-audit.json",
+      "required": false
+    }
+  ],
+  "scope": "G4 increment and synthetic private component/TLS validation; no new G5, real NAS or Debian lifecycle claim"
+}

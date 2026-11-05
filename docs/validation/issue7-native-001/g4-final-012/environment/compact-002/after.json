@@ -1,0 +1,7 @@
+{
+  "exit_code": 0,
+  "vhd_length": 448729710592,
+  "host_free_bytes": 84682522624,
+  "log_sha256": "c85395551c92704296050972b09142f9d1054161e77cd6c90d81ad2a1a444226",
+  "outcome": "Compaction succeeded; host free space exceeds 40 GiB validation startup gate."
+}

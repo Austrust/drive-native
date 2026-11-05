@@ -1,0 +1,9 @@
+{
+  "authorization": "User explicitly approved stopping Ubuntu-24.04 and compacting its virtual disk",
+  "distribution": "Ubuntu-24.04",
+  "vhd": "C:\\Users\\a_tas\\AppData\\Local\\wsl\\{3134a02d-6c96-4a2c-858b-d03dc8e77694}\\ext4.vhdx",
+  "vhd_length": 532881080320,
+  "host_free_bytes": 292610048,
+  "command": "wsl --manage Ubuntu-24.04 --compact",
+  "evidence_commit": "ad48f1350d367aadff5c6eaf7f16d1722cf2e192"
+}

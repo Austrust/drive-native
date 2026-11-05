@@ -1,0 +1,63 @@
+{
+  "samples": 2052,
+  "max_read_bracket_ns": 124400,
+  "largest_differences": [
+    {
+      "index": 2012,
+      "wall_delta_ns": 22500975024,
+      "monotonic_delta_ns": 10111601.0,
+      "difference_ns": 22490863423.0,
+      "mono_since_first_seconds": 20.390354075
+    },
+    {
+      "index": 1992,
+      "wall_delta_ns": -22469441400,
+      "monotonic_delta_ns": 10140002.0,
+      "difference_ns": -22479581402.0,
+      "mono_since_first_seconds": 20.18778
+    },
+    {
+      "index": 1247,
+      "wall_delta_ns": 10145303,
+      "monotonic_delta_ns": 10206503.0,
+      "difference_ns": -61200.0,
+      "mono_since_first_seconds": 12.632654867
+    },
+    {
+      "index": 1246,
+      "wall_delta_ns": 10250903,
+      "monotonic_delta_ns": 10190403.0,
+      "difference_ns": 60500.0,
+      "mono_since_first_seconds": 12.622448364
+    },
+    {
+      "index": 1354,
+      "wall_delta_ns": 10152503,
+      "monotonic_delta_ns": 10132003.0,
+      "difference_ns": 20500.0,
+      "mono_since_first_seconds": 13.721580203
+    },
+    {
+      "index": 1762,
+      "wall_delta_ns": 10185703,
+      "monotonic_delta_ns": 10168153.0,
+      "difference_ns": 17550.0,
+      "mono_since_first_seconds": 17.858180939
+    },
+    {
+      "index": 1763,
+      "wall_delta_ns": 10135902,
+      "monotonic_delta_ns": 10153352.0,
+      "difference_ns": -17450.0,
+      "mono_since_first_seconds": 17.868334291
+    },
+    {
+      "index": 346,
+      "wall_delta_ns": 10155902,
+      "monotonic_delta_ns": 10139152.0,
+      "difference_ns": 16750.0,
+      "mono_since_first_seconds": 3.50496617
+    }
+  ],
+  "scope": "actual guest adjacent-clock observations during unchanged retry pair and full runtime commands; no attribution to old failures or host causes"
+}

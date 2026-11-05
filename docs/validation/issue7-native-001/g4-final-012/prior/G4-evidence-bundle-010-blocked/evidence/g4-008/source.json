@@ -1,0 +1,7 @@
+{
+  "candidate_commit": "99aa587e83fc409883ecd3e0d3f60fe8640b2e06",
+  "candidate_archive_sha256": "5e3631f707eaacb3bd788257e7f5beb315802100c185a1e6d81c8c66bc1c1445",
+  "archive_command": "git -C work/fix-7 archive --format=tar --output=../issue7-validation/prepared-g4-008/candidate.tar 99aa587e83fc409883ecd3e0d3f60fe8640b2e06",
+  "authorization": "root authorized final G4 full issue7 matrix including new parent-self action semantics; no G5/production/NAS/publication",
+  "cache_policy": "copy only completed target, touch extracted source metadata without changing bytes, cargo clean all four workspace packages before tests"
+}

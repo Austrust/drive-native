@@ -1,0 +1,8 @@
+{
+  "source": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-011/source",
+  "candidate_lock_sha256": "fcaf7417018889efefaffd45ac2e4931a1b01dd5fc83e6a9fc9f0806093268dd",
+  "harness_lock_sha256": "64bc250f96d885e8932a605816fe787ae9baf5c7f5204af386d8558f7a959134",
+  "harness_source_sha256": "6283d66474815b5d401a2d9077ddb83d95e0e84ad6a68943f1ceed5f27ce3fc5",
+  "registry_dependencies_checked": 83,
+  "registry_dependencies_match_frozen_candidate": true
+}

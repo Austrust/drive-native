@@ -1,0 +1,15 @@
+{
+  "runs": [
+    "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-011",
+    "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-012"
+  ],
+  "exclusions": [
+    "target and source trees",
+    "Git tar archives",
+    "ELF/test binaries/libraries",
+    "databases",
+    "TLS certificate/private key files",
+    "package/cache trees"
+  ],
+  "note": "No excluded artifact is opened or rehashed. Its pre-existing metadata remains in the copied original summaries."
+}
