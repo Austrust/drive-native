@@ -1,0 +1,7 @@
+{
+  "candidate_commit": "d39a59769e0c0abcde033ae0f74bb2806f218d8a",
+  "candidate_archive_sha256": "960f53a9881f173fe070b298260ac6fb93c7e5fe336d2b5d8e440ae184dfc178",
+  "archive_command": "git -C work/fix-7 archive --format=tar --output=../issue7-validation/prepared-g4-006/candidate.tar d39a59769e0c0abcde033ae0f74bb2806f218d8a",
+  "authorization": "root explicitly authorized independent G4-006; no NAS, production data, G5 or publication",
+  "product_tree_clean_before_archive": true
+}

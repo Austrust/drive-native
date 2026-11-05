@@ -1,0 +1,11 @@
+test_der_import_and_selected_removal (__main__.Tests.test_der_import_and_selected_removal) ... ok
+test_failed_load_disables_mutation (__main__.Tests.test_failed_load_disables_mutation) ... ok
+test_import_duplicate_private_key_and_limit_leave_existing_values (__main__.Tests.test_import_duplicate_private_key_and_limit_leave_existing_values) ... ok
+test_reload_after_uncertain_save_uses_visible_settings_and_fresh_version (__main__.Tests.test_reload_after_uncertain_save_uses_visible_settings_and_fresh_version) ... ok
+test_save_carries_task_and_version_and_failure_keeps_user_selection (__main__.Tests.test_save_carries_task_and_version_and_failure_keeps_user_selection) ... ok
+test_wizard_persists_only_connection_that_was_authenticated (__main__.Tests.test_wizard_persists_only_connection_that_was_authenticated) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.107s
+
+OK

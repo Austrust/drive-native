@@ -1,0 +1,51 @@
+{
+  "candidate_commit": "d39a59769e0c0abcde033ae0f74bb2806f218d8a",
+  "source_summary_sha256": "00ba766e751ab747c0bc6e5d1fc4d4245a68ed0d5f4875c267b27390861c0537",
+  "main_matrix_complete": true,
+  "commands": [
+    {
+      "name": "native-read-stale-preflight",
+      "exit_code": 101,
+      "reported_counts": {
+        "reported": true,
+        "passed": 0,
+        "failed": 1,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 144
+      },
+      "inventory_counts": {
+        "ok": 0,
+        "FAILED": 1,
+        "ignored": 0,
+        "unparsed": 0
+      },
+      "counts_reconciled": true,
+      "log": "logs/native-read-stale-preflight.log",
+      "log_sha256": "7a4e78d4ffa75f8188e109b9a0238d5d4a49236651f59c1ffc98f9e20bbf4b03",
+      "tests": [
+        {
+          "suite": "drive_runtime",
+          "name": "bridge::download_publication_tests::native_read_refusal_learns_only_the_requested_identity_and_recheck_releases_retry",
+          "status": "FAILED",
+          "reason": null
+        }
+      ]
+    }
+  ],
+  "note": "Counts are executions per command; repeated modes are not additive unique coverage.",
+  "unique_tests": [
+    {
+      "suite": "drive_runtime",
+      "name": "bridge::download_publication_tests::native_read_refusal_learns_only_the_requested_identity_and_recheck_releases_retry",
+      "observations": [
+        {
+          "command": "native-read-stale-preflight",
+          "status": "FAILED",
+          "reason": null
+        }
+      ]
+    }
+  ],
+  "all_reported_counts_reconciled": true
+}

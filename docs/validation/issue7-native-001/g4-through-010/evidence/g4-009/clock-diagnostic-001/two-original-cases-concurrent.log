@@ -1,0 +1,9 @@
+
+running 2 tests
+RETRY_CLOCK_DIAGNOSTIC {"elapsed_before_diagnostic_ns":1191481047,"failed_at":1793846878,"failure":{"attempts":1,"retry_at":1793846880},"failure_category":"transport","foreground":true,"packet_top_level_keys":["Download"],"queued_observer":false,"unix_seconds_after_receive":1793846880,"wall_elapsed_ns":1191481047,"wall_end_ns":1793846880008745187,"wall_start_ns":1793846878817264140}
+RETRY_CLOCK_DIAGNOSTIC {"elapsed_before_diagnostic_ns":1191657747,"failed_at":1793846878,"failure":{"attempts":1,"retry_at":1793846880},"failure_category":"native_server_code:32772","foreground":true,"packet_top_level_keys":["Download"],"queued_observer":false,"unix_seconds_after_receive":1793846880,"wall_elapsed_ns":1191657847,"wall_end_ns":1793846880011259186,"wall_start_ns":1793846878819601339}
+test bridge::download_scheduler_tests::concurrent_foreground_reads_wait_for_transport_backoff_after_reconnect ... ok
+test bridge::download_scheduler_tests::concurrent_foreground_reads_wait_for_shared_retry_without_reopen ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 143 filtered out; finished in 1.43s
+

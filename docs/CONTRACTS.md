@@ -119,7 +119,9 @@ G3 追加两个 JSON-string IPC：`GetDirectoryPermissions({path})` 返回 `{tas
 已核实的逐操作拒绝经 worker `PermissionDenied{node,action}` 接收；必须匹配本次目标。原生下载仅在 `recv_download` 直接回复边界将已核实 `0x3002/0x3008` 分类为 Read 拒绝；认证、连接、前置读取、本地 I/O、只读码和内容未就绪码不转换。学习拒绝与终态下载重试门禁在同一 Store guard 下发布。
 下载请求捕获权限 revision；期间发生通知或权限更新，迟到的读结果不再持久化旧 allow/deny。迟到拒绝仍向该次调用返回 EACCES，但下载意图回 pending，不留下终态权限重试门禁；后续只读尝试重新判定。此规则不重发任何写入。
 
-写请求的直接权限相关响应经 `MutationPermissionUncertain{code}` 保留，按 upload/remove/rename 的已核实小集合验证；进入 uncertain/cleanup_uncertain，不改成 pending，不学习任何精确节点 ACL，不猜改名哪端拒绝。历史 result=pending、error_kind=permission_commit_uncertain，summary 明确“提交状态待核对”；detail.permission_response 仅含请求动作和数字码，终态清错误提示而保留该次历史响应证据。重连/核对只可查询结果，不重发未知写入。写入终态无提交证明仍缺失，原 typed 写拒绝接收路径的覆盖仍来自隔离夹具。
+下载自动退避保留 schema1 的持久 retry_at，并按 `(node,version,完整failure指纹)` 绑定进程内 Instant 门限。失败发布时以传给 fail_download 的同一墙钟值计算完整退避；前台等待和前台/后台发送资格均检查双门限，重连保留、进程重启仅从持久剩余时间恢复一次。双门限到期正常放行；清除失败记录则提前释放当前门限。旧版本 ticket 不得读取新版本 failure 或驱逐其门限。该规则不改变 core 的纯数据库 now 参数契约、schema25、IPC21 或 FUSE TTL。
+
+写请求的直接权限相关响应经 `MutationPermissionUncertain{code}` 保留，按 upload/remove/rename 的已核实小集合验证；进入 uncertain/cleanup_uncertain，不改成 pending，不学习任何精确节点 ACL，不猜改名哪端拒绝。历史 result=pending、error_kind=permission_commit_uncertain，summary 明确“提交状态待核对”；detail.permission_response 仅含请求动作和数字码，终态清错误提示而保留该次历史响应证据。重连/核对只可查询结果，不重发未知写入。静态证据证明特定 ACL middleware 的提交前拒绝，但同码多来源、精确动作归属和复合阶段的证明未齐，原 typed 写拒绝接收路径的覆盖仍来自隔离夹具。
 
 内部 worker IPC21 的 `Notification` 保留原生 `profile_changed`（与当前 view 文件变化 `changed` 分开）。该通知使当前挂载根的全部逐节点来源回 unknown、清除验证时间并递增 revision，即使没有文件事件；不改变用户策略、明确空间禁止或未确认写入意图。普通通知不清权限。属性仍受既定 1000ms 上限约束，须配套更新 fsd/worker，拒绝 IPC20 混用。
 
@@ -139,7 +141,7 @@ NotifyHub 失败/丢消息与 publication degraded 联动，不能因索引命�
 
 **有效动作的对象边界（服务端静态证据澄清）：** Delete 表示目标自身的有效删除权限（已包含服务端父链 ACL），不是 delete_child；RenameSource 也表示源节点自身。unlink/rmdir 检查父 Traverse + 目标 Delete，不从父自身 Delete 或 CreateDir 推断子项删除。rename 检查源父 Traverse + 源 RenameSource + 目标父 RenameTarget + 覆盖目标 Delete。该语义同时用于 FUSE 与持久队列；父遍历和目标拒绝仍阻断操作。参见 [官方服务端证据](validation/issue7-native-001/server-static/REPORT.md)。
 
-G4 错误码校正：只有逐节点所有相关写动作均 denied 才投影去掉写位；L1/L2 整任务限制不借 mode 抢先产生 EACCES，仍由挂载只读选项或实际操作入口返回 EROFS。预览 inode 保留自己的身份与拒绝检查，正文 EAGAIN、写操作 EROFS，不提前改成权威 ENOENT。
+G4 错误码校正：只有普通文件 WriteContent 与 Setattr 同时 denied 才投影去掉写位；L1/L2 整任务限制不借 mode 抢先产生 EACCES，仍由挂载只读选项或实际操作入口返回 EROFS。预览 inode 保留自己的身份与拒绝检查，正文 EAGAIN、写操作 EROFS，不提前改成权威 ENOENT。
 
 本地 mtime 准备按 Setattr 授权，不能因复用草稿 helper 额外要求 WriteContent；普通写/截断仍要求 WriteContent。
 既有原生 mtime 写回采用整文件上传，其远端 WriteContent 门禁保留。Setattr 允许而内容上传拒绝时，只承诺本地持久保存，保留 pending；元数据专用远端写回未实现，见 [文件时间契约](FILE_TIMESTAMPS.md)。

@@ -1,3 +1,5 @@
 *.log -text
 static/** -text
 server-static/** -text
+server-capability/** -text
+g4-through-010/** -text

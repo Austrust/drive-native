@@ -1,0 +1,168 @@
+{
+  "created_at_utc": "2026-11-05T02:19:49.531405+00:00",
+  "purpose": "capability fields and atomic identity boundary supplement",
+  "product_code_changed": false,
+  "product_tests_run": false,
+  "product_builds_run": false,
+  "nas_contacted": false,
+  "synology_code_executed": false,
+  "binary_artifacts_included": false,
+  "functions": 17,
+  "files": [
+    {
+      "path": "analyze-server-elf.py",
+      "bytes": 4962,
+      "sha256": "c9ac55f9a0df1e736a6d612ee66abed1274267d69c407c8150468f512a0a858f"
+    },
+    {
+      "path": "COMMANDS.md",
+      "bytes": 1675,
+      "sha256": "d7ecbcd060e86350233d3fd533e259f826e800569d05bbcee48959549e640d46"
+    },
+    {
+      "path": "download-manifest.json",
+      "bytes": 1563,
+      "sha256": "a1fd82dca7ad23db2e5e0103aa25a8003dc274b44d520674eb06abdb5f480d1b"
+    },
+    {
+      "path": "raw/acl/analysis.json",
+      "bytes": 20640,
+      "sha256": "22f46b7d4088c8f693a276c481a554cf0f71595d60fec9b3666a11a4572c0370"
+    },
+    {
+      "path": "raw/acl/function-222c50.asm",
+      "bytes": 3914,
+      "sha256": "98dc918ccc1bc6654ffdbe75bb89c7a81043a1435c1408303133f9c9a0e6b2ee"
+    },
+    {
+      "path": "raw/acl/function-223710.asm",
+      "bytes": 6339,
+      "sha256": "e98af7c5a64423e0b501976b55b312ab84b7810f33f982b20be7e358fa226dc3"
+    },
+    {
+      "path": "raw/acl/function-2253b0.asm",
+      "bytes": 14787,
+      "sha256": "1248741b3a71d28c144d6e135973d4b04e1fe108505fb1263226826b3a10e74a"
+    },
+    {
+      "path": "raw/acl/function-225d50.asm",
+      "bytes": 9103,
+      "sha256": "a1a676e86789156f5acbe1c4275eb468d90a122313272738700356972fc6f251"
+    },
+    {
+      "path": "raw/acl/function-2261e0.asm",
+      "bytes": 9101,
+      "sha256": "cf9ee3511ef330cd66953239b919751b85b44f42d93b97cc416c451a7e074f3d"
+    },
+    {
+      "path": "raw/acl/symbols.json",
+      "bytes": 1281802,
+      "sha256": "291fa595ba6a0fe304d7030f899d0b0732b0ff064e0425be3ae912b26c48e2dc"
+    },
+    {
+      "path": "raw/fields/analysis.json",
+      "bytes": 9158,
+      "sha256": "b7be6e2307c1d66e7d707cf86b8ddc21a600d931c62d98f9a893a3d4ecaa622f"
+    },
+    {
+      "path": "raw/fields/function-256ea0.asm",
+      "bytes": 11456,
+      "sha256": "4b91cbe5433ee8060047d4c6426b65fff11b33a8cb3cb41f3c446acc899cf41b"
+    },
+    {
+      "path": "raw/fields/function-257450.asm",
+      "bytes": 544,
+      "sha256": "8fdba6b27e596d746586a34ae7c613fc7b92bed6e934569a37949e3512d3f703"
+    },
+    {
+      "path": "raw/fields/symbols.json",
+      "bytes": 2139803,
+      "sha256": "2d28c70aaabc337719f2df8c9e4c730b4d9bad0ea38de337c370c46360e79578"
+    },
+    {
+      "path": "raw/identity/analysis.json",
+      "bytes": 95261,
+      "sha256": "3eac8df47405bb80b2fc9658fb2853e742ac77e8583d736a0a63c363b52e7c96"
+    },
+    {
+      "path": "raw/identity/function-24ab80.asm",
+      "bytes": 19552,
+      "sha256": "79d5a2db9c8bd32b9b39425b057c71154f30327644c4cb266826125679ff1738"
+    },
+    {
+      "path": "raw/identity/function-24bc60.asm",
+      "bytes": 25409,
+      "sha256": "1e84da1a8dfc6d0140f358986a815c1b608095efa2744c013349f4a12fc7114d"
+    },
+    {
+      "path": "raw/identity/function-24ca00.asm",
+      "bytes": 6611,
+      "sha256": "369efa0ab1c87b46ee21180a550261c83cf2ae5553de96205ef46b909fd1317e"
+    },
+    {
+      "path": "raw/identity/function-24cd00.asm",
+      "bytes": 1818,
+      "sha256": "adae470ffca8fe081570f46f2f9b3930523a94d44f80a691a30e5f4de7d5243d"
+    },
+    {
+      "path": "raw/identity/function-24cdc0.asm",
+      "bytes": 17154,
+      "sha256": "5cc22ace4fa24ca414026f030e0d98e309b2987769f037703c697824bb845561"
+    },
+    {
+      "path": "raw/identity/function-24dd10.asm",
+      "bytes": 6107,
+      "sha256": "d57cce79d780407c5db3e267d6e4d96a47148c8b5455a064b711b1fa71f41352"
+    },
+    {
+      "path": "raw/identity/function-287e20.asm",
+      "bytes": 24560,
+      "sha256": "249d7c1e58bdeddf8437b199f54c2bf37ffd5d5a715f5ebd25c2ffe811fae078"
+    },
+    {
+      "path": "raw/identity/function-355dd0.asm",
+      "bytes": 8001,
+      "sha256": "5e6e6c837c3b8d71325090b0ef7b42fd51fabdedf89874e8c9a585002f080094"
+    },
+    {
+      "path": "raw/identity/function-3561b0.asm",
+      "bytes": 18433,
+      "sha256": "766a870663260fbdcdce1c9bdb2cd5cb2e98b384ffb49828013a6fe9ef3cdc6c"
+    },
+    {
+      "path": "raw/identity/function-374e50.asm",
+      "bytes": 2521,
+      "sha256": "663f3b1579afbd6dc954720f69354e64358aa4fba370ccca0184a34b33d70b7b"
+    },
+    {
+      "path": "raw/identity/symbols.json",
+      "bytes": 1281802,
+      "sha256": "291fa595ba6a0fe304d7030f899d0b0732b0ff064e0425be3ae912b26c48e2dc"
+    },
+    {
+      "path": "raw/rename-vtables.txt",
+      "bytes": 1700,
+      "sha256": "d5b192848718ce737877fceaf374432eb17f06884e42903577b8e05058d74cbd"
+    },
+    {
+      "path": "README.md",
+      "bytes": 524,
+      "sha256": "c65aaa2dcb8afb4c6c15194e98a68a8838199d3d86bfe80f4bc299fc71dbbf8d"
+    },
+    {
+      "path": "REPORT.md",
+      "bytes": 8682,
+      "sha256": "975c802bb198d058171d2f5822397478d57d462d5c2fb81b7de2b83f684a615a"
+    },
+    {
+      "path": "reproduce-static.py",
+      "bytes": 2190,
+      "sha256": "bf220490e44628aea48d6146915452c78f4af30190302c7874cb071ba2f558dd"
+    },
+    {
+      "path": "selected-members-manifest.json",
+      "bytes": 889,
+      "sha256": "e5b9c6f49b743071bcf2d60691d6772c9f56123e1df09b184f5fe1ff4031a952"
+    }
+  ]
+}

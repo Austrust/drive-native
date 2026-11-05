@@ -1,0 +1,12 @@
+{
+  "target": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-010/target",
+  "candidate": "41365a650eb7d7df696046e21b7671697231f851",
+  "reason": "Never-used partial cache; copy failed with I/O and read-only filesystem before clean/build/test.",
+  "preserved": [
+    "source",
+    "source.json",
+    "logs",
+    "all prior run targets and evidence"
+  ],
+  "removed": true
+}

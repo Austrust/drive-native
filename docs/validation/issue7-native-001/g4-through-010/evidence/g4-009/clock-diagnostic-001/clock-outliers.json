@@ -1,0 +1,68 @@
+[
+  {
+    "index": 1201,
+    "since_sample_start_seconds": 12.289246558,
+    "wall_delta_ns": -22376765270,
+    "mono_delta_ns": 10173047.0,
+    "samples": [
+      {
+        "monotonic_before_ns": 73167003403,
+        "realtime_ns": 1793846890712276615,
+        "monotonic_after_ns": 73167005503
+      },
+      {
+        "monotonic_before_ns": 73177144900,
+        "realtime_ns": 1793846890722417712,
+        "monotonic_after_ns": 73177146700
+      },
+      {
+        "monotonic_before_ns": 73187317897,
+        "realtime_ns": 1793846868345652442,
+        "monotonic_after_ns": 73187319797
+      },
+      {
+        "monotonic_before_ns": 73197573896,
+        "realtime_ns": 1793846868355908341,
+        "monotonic_after_ns": 73197575596
+      },
+      {
+        "monotonic_before_ns": 73207705194,
+        "realtime_ns": 1793846868366039839,
+        "monotonic_after_ns": 73207707094
+      }
+    ]
+  },
+  {
+    "index": 1227,
+    "since_sample_start_seconds": 12.552712513,
+    "wall_delta_ns": 22393860094,
+    "mono_delta_ns": 10133448.0,
+    "samples": [
+      {
+        "monotonic_before_ns": 73430505256,
+        "realtime_ns": 1793846868588840001,
+        "monotonic_after_ns": 73430507756
+      },
+      {
+        "monotonic_before_ns": 73440650454,
+        "realtime_ns": 1793846868598984899,
+        "monotonic_after_ns": 73440652254
+      },
+      {
+        "monotonic_before_ns": 73450783852,
+        "realtime_ns": 1793846890992844993,
+        "monotonic_after_ns": 73450785752
+      },
+      {
+        "monotonic_before_ns": 73460908550,
+        "realtime_ns": 1793846891002969791,
+        "monotonic_after_ns": 73460910550
+      },
+      {
+        "monotonic_before_ns": 73471032049,
+        "realtime_ns": 1793846891013093190,
+        "monotonic_after_ns": 73471033849
+      }
+    ]
+  }
+]

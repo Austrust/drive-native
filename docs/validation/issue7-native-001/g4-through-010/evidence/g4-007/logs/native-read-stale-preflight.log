@@ -1,0 +1,87 @@
+   Compiling fuser v0.16.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/source/vendor/fuser)
+warning: struct `cuse_init_in` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:814:12
+    |
+814 | pub struct cuse_init_in {
+    |            ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: struct `cuse_init_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:823:12
+    |
+823 | pub struct cuse_init_out {
+    |            ^^^^^^^^^^^^^
+
+warning: struct `fuse_ioctl_iovec` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:868:12
+    |
+868 | pub struct fuse_ioctl_iovec {
+    |            ^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:996:12
+    |
+996 | pub struct fuse_notify_retrieve_out {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_in` is never constructed
+    --> vendor/fuser/src/ll/fuse_abi.rs:1006:12
+     |
+1006 | pub struct fuse_notify_retrieve_in {
+     |            ^^^^^^^^^^^^^^^^^^^^^^^
+
+   Compiling drive-fs v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/source/crates/drive-fs)
+warning: `fuser` (lib) generated 5 warnings
+   Compiling drive-runtime v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/source/crates/drive-runtime)
+warning: unused variable: `op`
+  --> crates/drive-runtime/src/namespace_schedule_tests.rs:57:10
+   |
+57 |     let (op, child_file) = {
+   |          ^^ help: if this is intentional, prefix it with an underscore: `_op`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `drive-runtime` (lib test) generated 1 warning (run `cargo fix --lib -p drive-runtime --tests` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 20.19s
+     Running unittests src/lib.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/target/debug/deps/drive_runtime-1666268cebacefe5)
+
+running 1 test
+test bridge::download_publication_tests::native_read_refusal_learns_only_the_requested_identity_and_recheck_releases_retry ... FAILED
+
+failures:
+
+---- bridge::download_publication_tests::native_read_refusal_learns_only_the_requested_identity_and_recheck_releases_retry stdout ----
+
+thread 'bridge::download_publication_tests::native_read_refusal_learns_only_the_requested_identity_and_recheck_releases_retry' (2246) panicked at crates/drive-runtime/src/download_publication_tests.rs:52:9:
+assertion `left == right` failed
+  left: Deny
+ right: Unknown
+stack backtrace:
+   0: __rustc::rust_begin_unwind
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/std/src/panicking.rs:679:5
+   1: core::panicking::panic_fmt
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/panicking.rs:80:14
+   2: core::panicking::assert_failed_inner
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/panicking.rs:452:17
+   3: core::panicking::assert_failed::<drive_core::write_permissions::Decision, drive_core::write_permissions::Decision>
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/panicking.rs:407:5
+   4: drive_runtime::bridge::download_publication_tests::native_read_refusal_learns_only_the_requested_identity_and_recheck_releases_retry
+             at ./src/download_publication_tests.rs:52:9
+   5: drive_runtime::bridge::download_publication_tests::native_read_refusal_learns_only_the_requested_identity_and_recheck_releases_retry::{closure#0}
+             at ./src/download_publication_tests.rs:5:87
+   6: <drive_runtime::bridge::download_publication_tests::native_read_refusal_learns_only_the_requested_identity_and_recheck_releases_retry::{closure#0} as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/ops/function.rs:250:5
+   7: <fn() -> core::result::Result<(), alloc::string::String> as core::ops::function::FnOnce<()>>::call_once
+             at /rustc/58cf8f9c35b355199727627d07ae34a4e2846d67/library/core/src/ops/function.rs:250:5
+note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
+
+
+failures:
+    bridge::download_publication_tests::native_read_refusal_learns_only_the_requested_identity_and_recheck_releases_retry
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 144 filtered out; finished in 0.68s
+
+error: test failed, to rerun pass `-p drive-runtime --lib`
+error: 1 target failed:
+    `-p drive-runtime --lib`

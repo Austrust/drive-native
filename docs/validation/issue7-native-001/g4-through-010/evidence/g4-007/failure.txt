@@ -1,0 +1,15 @@
+Traceback (most recent call last):
+  File "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/issue7-validation/run-g4.py", line 194, in main
+    execute('workspace-all-features',cargo+['--workspace','--all-features'],required_tests=(ACL_RUNTIME_TEST,)+ACL_PUBLICATION_TESTS)
+  File "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/issue7-validation/run-g4.py", line 168, in execute
+    if interrupted:raise interrupted
+                   ^^^^^^^^^^^^^^^^^
+  File "/mnt/c/Users/a_tas/Desktop/MFMLAB/Personal_Sync/20-Coding/P032-群晖Drive按需同步/work/issue7-validation/run-g4.py", line 142, in execute
+    try:process.wait(timeout=timeout)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 1264, in wait
+    return self._wait(timeout=timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 2047, in _wait
+    time.sleep(delay)
+KeyboardInterrupt

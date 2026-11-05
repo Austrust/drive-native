@@ -1,0 +1,20 @@
+{
+  "candidate_commit": "ca86a85e2be9c83c7a59407fc0737114158ecf7f",
+  "old_test_elf_sha256": "12e5a0139c2ece8c2c23d4b5fe21496fa08671dcfb10082c08236d63878eb1d8",
+  "old_test_elf": "old-artifacts/drive_runtime-1666268cebacefe5",
+  "old_elf_embedded_core_path_counts": {
+    "005": 0,
+    "006": 0,
+    "007": 0
+  },
+  "source_content_before_matches_archive": true,
+  "timestamp_adjustment_at": "2026-11-05T02:09:05.085911+00:00",
+  "reason": "git archive commit mtimes may be older than copied Cargo artifacts; force clean only this private target product packages and touch extracted source metadata",
+  "source_content_after_matches_archive": true,
+  "new_test_elf_sha256": "e0afc200c7deae66e24e4a9f62d17955f9741400eec2d8141e9585ea1e915357",
+  "new_elf_embedded_core_path_counts": {
+    "005": 0,
+    "006": 0,
+    "007": 0
+  }
+}

@@ -1,0 +1,63 @@
+   Compiling sproto v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/source/crates/sproto)
+   Compiling fuser v0.16.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/source/vendor/fuser)
+warning: struct `cuse_init_in` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:814:12
+    |
+814 | pub struct cuse_init_in {
+    |            ^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: struct `cuse_init_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:823:12
+    |
+823 | pub struct cuse_init_out {
+    |            ^^^^^^^^^^^^^
+
+warning: struct `fuse_ioctl_iovec` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:868:12
+    |
+868 | pub struct fuse_ioctl_iovec {
+    |            ^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_out` is never constructed
+   --> vendor/fuser/src/ll/fuse_abi.rs:996:12
+    |
+996 | pub struct fuse_notify_retrieve_out {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `fuse_notify_retrieve_in` is never constructed
+    --> vendor/fuser/src/ll/fuse_abi.rs:1006:12
+     |
+1006 | pub struct fuse_notify_retrieve_in {
+     |            ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `fuser` (lib) generated 5 warnings
+   Compiling drive-core v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/source/crates/drive-core)
+   Compiling drive-fs v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/source/crates/drive-fs)
+   Compiling drive-runtime v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/source/crates/drive-runtime)
+warning: unused variable: `op`
+  --> crates/drive-runtime/src/namespace_schedule_tests.rs:57:10
+   |
+57 |     let (op, child_file) = {
+   |          ^^ help: if this is intentional, prefix it with an underscore: `_op`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `states` is never used
+  --> crates/drive-runtime/examples/support/service.rs:51:14
+   |
+51 | pub async fn states(p: &zbus::Proxy<'_>, path: &str) -> Result<serde_json::Value> {
+   |              ^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `wait_state` is never used
+  --> crates/drive-runtime/examples/support/service.rs:76:14
+   |
+76 | pub async fn wait_state(p: &zbus::Proxy<'_>, path: &str, status: &str) -> Result<()> {
+   |              ^^^^^^^^^^
+
+warning: `drive-runtime` (example "native_access_service") generated 2 warnings
+warning: `drive-runtime` (lib test) generated 1 warning (run `cargo fix --lib -p drive-runtime --tests` to apply 1 suggestion)
+warning: `drive-runtime` (example "native_trust_roundtrip") generated 2 warnings (2 duplicates)

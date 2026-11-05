@@ -4,7 +4,7 @@
 
 基线 `codex/fs-recovery-safe-9 @ d555944`；#5/#2 集成分支 `codex/fix-5-2 @ ed1fabf`。
 随后 #7 在 `codex/fix-7` 单线实现；共同候选及结果以本报告最终验证章节为准。
-最终本地交付分支为 `codex/fix-all-5-2-7`；产品代码冻结于 `bae1ef1`，其后只提交报告、导航及验证原件。
+本报告 G4/G5 对应产品冻结 `bae1ef1`，原交付记录为 `3d35d7b`。随后 `codex/fix-all-5-2-7` 继续补 #7 原生权限反馈，见 [#7 当前报告](FIX_7_REPORT.md)；这些增量没有重跑 G5，本文耗时不能移作新候选实测值。
 规格为项目 `work/plan-5-2-20261104/PLAN.md` 和 `PLAN-ULTRA.md`。
 
 ## 实现范围

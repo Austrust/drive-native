@@ -1,0 +1,290 @@
+{
+  "candidate_commit": "4e6aaf7166fd370076adf43a0dad3e6ecdca36d6",
+  "scope": "diagnostic test-only derived source; original assertions retained; no pass counts certify the candidate",
+  "original_source": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/source",
+  "target": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/clock-diagnostic-001/target",
+  "commands": [
+    {
+      "name": "clean-products",
+      "argv": [
+        "cargo",
+        "clean",
+        "-p",
+        "drive-core",
+        "-p",
+        "drive-fs",
+        "-p",
+        "drive-runtime",
+        "-p",
+        "sproto"
+      ],
+      "log": "clean-products.log",
+      "utc_start": "2026-11-05T02:47:18.913148+00:00",
+      "exit_code": 0,
+      "elapsed_seconds": 1.8266534000000014,
+      "log_sha256": "1fb28860e1558386ec44ebcd8b31541d686eea5d45f4dbf36c0cc49e731aeae5"
+    },
+    {
+      "name": "build-diagnostic",
+      "argv": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "-p",
+        "drive-runtime",
+        "--lib",
+        "--all-features",
+        "--no-run",
+        "--message-format=json"
+      ],
+      "log": "build-diagnostic.log",
+      "utc_start": "2026-11-05T02:47:20.740752+00:00",
+      "exit_code": 0,
+      "elapsed_seconds": 37.329554749,
+      "log_sha256": "b82dbe9e14a4853f0291162fb9c15befcf29d6b9fce8c08e849c821acb258975"
+    },
+    {
+      "name": "two-original-cases-concurrent",
+      "argv": [
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/clock-diagnostic-001/target/debug/deps/drive_runtime-1666268cebacefe5",
+        "concurrent_foreground_reads_wait_for_",
+        "--nocapture",
+        "--test-threads=2"
+      ],
+      "log": "two-original-cases-concurrent.log",
+      "utc_start": "2026-11-05T02:47:58.443388+00:00",
+      "exit_code": 0,
+      "elapsed_seconds": 1.6178122199999976,
+      "log_sha256": "158a404abcda73c6276ebee1f4c5d3b4ad4833c89f487ba8303f42ed4ebc0bae"
+    },
+    {
+      "name": "runtime-full-original-parallelism",
+      "argv": [
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/clock-diagnostic-001/target/debug/deps/drive_runtime-1666268cebacefe5",
+        "--nocapture"
+      ],
+      "log": "runtime-full-original-parallelism.log",
+      "utc_start": "2026-11-05T02:48:00.061819+00:00",
+      "exit_code": 0,
+      "elapsed_seconds": 13.027843533999992,
+      "log_sha256": "223b8bb0829558747d70d3ff577e7ab25f0501cdff2e6c98bc6a1f71f5f61291"
+    }
+  ],
+  "stage": "complete",
+  "complete": true,
+  "instrumentation": {
+    "path": "crates/drive-runtime/src/bridge.rs",
+    "before_sha256": "1047003bdb67abf848bfe0fc1ecd73ec95a1c85c836000a38cb49b37b5452218",
+    "after_sha256": "f5fc5f2ad2b4284511b8eafaafb70251abeabc161af92bbbb4294a9211277abd",
+    "notice": "Elapsed captured at original assertion point. Logging and a Store read occur before the original assertion; diagnostic passes are not final-candidate acceptance."
+  },
+  "changed_source_files": [
+    "crates/drive-runtime/src/bridge.rs"
+  ],
+  "registry_seed": {
+    "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/target",
+    "copied_files": 4972,
+    "copied_bytes": 2838661564,
+    "excluded_product_prefixes": [
+      "drive_core",
+      "drive_fs",
+      "drive_runtime",
+      "sproto",
+      "fuser",
+      "drive-core",
+      "drive-fs",
+      "drive-runtime"
+    ],
+    "excluded": "test ELFs, incremental, workspace/vendored product fingerprint/build/deps artifacts"
+  },
+  "binary": {
+    "path": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/clock-diagnostic-001/target/debug/deps/drive_runtime-1666268cebacefe5",
+    "sha256": "5f0c4171fead09c0314c4706a217816743732450c8b8938c410a48fa7cc0f5c7"
+  },
+  "clock": {
+    "samples": 1434,
+    "read_order": "monotonic_before -> realtime -> monotonic_after",
+    "requested_interval_seconds": 0.01,
+    "largest_differences": [
+      {
+        "wall_delta_ns": -22376765270,
+        "monotonic_delta_ns": 10173047.0,
+        "difference_ns": -22386938317.0
+      },
+      {
+        "wall_delta_ns": 22393860094,
+        "monotonic_delta_ns": 10133448.0,
+        "difference_ns": 22383726646.0
+      },
+      {
+        "wall_delta_ns": 10808797,
+        "monotonic_delta_ns": 10740147.0,
+        "difference_ns": 68650.0
+      },
+      {
+        "wall_delta_ns": 10159597,
+        "monotonic_delta_ns": 10228197.0,
+        "difference_ns": -68600.0
+      },
+      {
+        "wall_delta_ns": 10708297,
+        "monotonic_delta_ns": 10776146.5,
+        "difference_ns": -67849.5
+      },
+      {
+        "wall_delta_ns": 11374496,
+        "monotonic_delta_ns": 11306696.5,
+        "difference_ns": 67799.5
+      },
+      {
+        "wall_delta_ns": 10333597,
+        "monotonic_delta_ns": 10400147.0,
+        "difference_ns": -66550.0
+      },
+      {
+        "wall_delta_ns": 10344397,
+        "monotonic_delta_ns": 10277897.0,
+        "difference_ns": 66500.0
+      },
+      {
+        "wall_delta_ns": 10141097,
+        "monotonic_delta_ns": 10160547.0,
+        "difference_ns": -19450.0
+      },
+      {
+        "wall_delta_ns": 10190397,
+        "monotonic_delta_ns": 10170997.0,
+        "difference_ns": 19400.0
+      }
+    ]
+  },
+  "diagnostics": [
+    {
+      "command": "two-original-cases-concurrent",
+      "value": {
+        "elapsed_before_diagnostic_ns": 1191481047,
+        "failed_at": 1793846878,
+        "failure": {
+          "attempts": 1,
+          "retry_at": 1793846880
+        },
+        "failure_category": "transport",
+        "foreground": true,
+        "packet_top_level_keys": [
+          "Download"
+        ],
+        "queued_observer": false,
+        "unix_seconds_after_receive": 1793846880,
+        "wall_elapsed_ns": 1191481047,
+        "wall_end_ns": 1793846880008745187,
+        "wall_start_ns": 1793846878817264140
+      }
+    },
+    {
+      "command": "two-original-cases-concurrent",
+      "value": {
+        "elapsed_before_diagnostic_ns": 1191657747,
+        "failed_at": 1793846878,
+        "failure": {
+          "attempts": 1,
+          "retry_at": 1793846880
+        },
+        "failure_category": "native_server_code:32772",
+        "foreground": true,
+        "packet_top_level_keys": [
+          "Download"
+        ],
+        "queued_observer": false,
+        "unix_seconds_after_receive": 1793846880,
+        "wall_elapsed_ns": 1191657847,
+        "wall_end_ns": 1793846880011259186,
+        "wall_start_ns": 1793846878819601339
+      }
+    },
+    {
+      "command": "runtime-full-original-parallelism",
+      "value": {
+        "elapsed_before_diagnostic_ns": 1261236226,
+        "failed_at": 1793846881,
+        "failure": {
+          "attempts": 1,
+          "retry_at": 1793846883
+        },
+        "failure_category": "transport",
+        "foreground": true,
+        "packet_top_level_keys": [
+          "Download"
+        ],
+        "queued_observer": false,
+        "unix_seconds_after_receive": 1793846883,
+        "wall_elapsed_ns": 1261236426,
+        "wall_end_ns": 1793846883013315296,
+        "wall_start_ns": 1793846881752078870
+      }
+    },
+    {
+      "command": "runtime-full-original-parallelism",
+      "value": {
+        "elapsed_before_diagnostic_ns": 1186085949,
+        "failed_at": 1793846881,
+        "failure": {
+          "attempts": 1,
+          "retry_at": 1793846883
+        },
+        "failure_category": "native_server_code:32772",
+        "foreground": true,
+        "packet_top_level_keys": [
+          "Download"
+        ],
+        "queued_observer": true,
+        "unix_seconds_after_receive": 1793846883,
+        "wall_elapsed_ns": 1186085849,
+        "wall_end_ns": 1793846883028093892,
+        "wall_start_ns": 1793846881842008043
+      }
+    },
+    {
+      "command": "runtime-full-original-parallelism",
+      "value": {
+        "elapsed_before_diagnostic_ns": 1258492527,
+        "failed_at": 1793846881,
+        "failure": {
+          "attempts": 1,
+          "retry_at": 1793846883
+        },
+        "failure_category": "native_server_code:32772",
+        "foreground": true,
+        "packet_top_level_keys": [
+          "Download"
+        ],
+        "queued_observer": false,
+        "unix_seconds_after_receive": 1793846883,
+        "wall_elapsed_ns": 1258492627,
+        "wall_end_ns": 1793846883031504791,
+        "wall_start_ns": 1793846881773012164
+      }
+    },
+    {
+      "command": "runtime-full-original-parallelism",
+      "value": {
+        "elapsed_before_diagnostic_ns": 2051005593,
+        "failed_at": 1793846882,
+        "failure": {
+          "attempts": 1,
+          "retry_at": 1793846884
+        },
+        "failure_category": "native_server_code:32772",
+        "foreground": false,
+        "packet_top_level_keys": [
+          "Download"
+        ],
+        "queued_observer": false,
+        "unix_seconds_after_receive": 1793846884,
+        "wall_elapsed_ns": 2051005193,
+        "wall_end_ns": 1793846884321782009,
+        "wall_start_ns": 1793846882270776816
+      }
+    }
+  ]
+}

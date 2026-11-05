@@ -1,0 +1,2175 @@
+{
+  "candidate_commit": "ca86a85e2be9c83c7a59407fc0737114158ecf7f",
+  "source_summary_sha256": "701b812d252d60b428874c2c0cd4f875a9305af4594c5f95bbc02e5210c23eca",
+  "main_matrix_complete": false,
+  "commands": [
+    {
+      "name": "native-read-stale-preflight",
+      "exit_code": 101,
+      "reported_counts": {
+        "reported": true,
+        "passed": 0,
+        "failed": 1,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 144
+      },
+      "inventory_counts": {
+        "ok": 0,
+        "FAILED": 1,
+        "ignored": 0,
+        "unparsed": 0
+      },
+      "counts_reconciled": true,
+      "log": "logs/native-read-stale-preflight.log",
+      "log_sha256": "7ae904888c0ce0b70a8c87f700859d975cb612ba503006757a3727ef373846ad",
+      "tests": [
+        {
+          "suite": "drive_runtime",
+          "name": "bridge::download_publication_tests::native_read_refusal_learns_only_the_requested_identity_and_recheck_releases_retry",
+          "status": "FAILED",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "name": "runtime-permission-preflight",
+      "exit_code": 0,
+      "reported_counts": {
+        "reported": true,
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 141
+      },
+      "inventory_counts": {
+        "ok": 4,
+        "FAILED": 0,
+        "ignored": 0,
+        "unparsed": 0
+      },
+      "counts_reconciled": true,
+      "log": "logs/runtime-permission-preflight.log",
+      "log_sha256": "27e55f532e9276943152dde9452b2680794b201c6508f215db2489155e29f085",
+      "tests": [
+        {
+          "suite": "drive_runtime",
+          "name": "bridge::download_publication_tests::local_io_and_transport_errors_are_not_native_permission_evidence",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "drive_runtime",
+          "name": "bridge::initialization_owner::tests::deferred_page_does_not_turn_transport_permission_or_root_errors_into_rechecks",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "drive_runtime",
+          "name": "bridge::upload_tests::definite_permission_refusal_retains_body_allows_sibling_and_rechecks",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "drive_runtime",
+          "name": "desktop::preview::tests::unready_permission_and_preview_status_remain_distinct_from_authoritative_empty_state",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "name": "runtime-profile-preflight",
+      "exit_code": 0,
+      "reported_counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 144
+      },
+      "inventory_counts": {
+        "ok": 1,
+        "FAILED": 0,
+        "ignored": 0,
+        "unparsed": 0
+      },
+      "counts_reconciled": true,
+      "log": "logs/runtime-profile-preflight.log",
+      "log_sha256": "80ab81f66fe245127608afa482b6d499f81ab758c0d50bbf6b19ce2c7aee7b02",
+      "tests": [
+        {
+          "suite": "drive_runtime",
+          "name": "bridge::event_transfer_tests::profile_only_notification_invalidates_observed_acl_without_file_events",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "name": "runtime-version-preflight",
+      "exit_code": 0,
+      "reported_counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 144
+      },
+      "inventory_counts": {
+        "ok": 1,
+        "FAILED": 0,
+        "ignored": 0,
+        "unparsed": 0
+      },
+      "counts_reconciled": true,
+      "log": "logs/runtime-version-preflight.log",
+      "log_sha256": "5f1d610fde2eab6497b697ecd82649e6a3ce0105e9f2d2b9e3cd896c370a61c5",
+      "tests": [
+        {
+          "suite": "drive_runtime",
+          "name": "rpc::tests::protocol_version_mismatch_disconnects_all_waiters",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "name": "core-permission-preflight",
+      "exit_code": 0,
+      "reported_counts": {
+        "reported": true,
+        "passed": 22,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 383
+      },
+      "inventory_counts": {
+        "ok": 22,
+        "FAILED": 0,
+        "ignored": 0,
+        "unparsed": 0
+      },
+      "counts_reconciled": true,
+      "log": "logs/core-permission-preflight.log",
+      "log_sha256": "1083b35d073fdc183e832b04df1d74e24b5ea7f3d9433d129717c8b0f8554c45",
+      "tests": [
+        {
+          "suite": "drive_core",
+          "name": "write_permissions::tests::a_new_draft_rechecks_its_parents_create_permission",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "drive_core",
+          "name": "write_permissions::tests::action_classes_are_independent",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "drive_core",
+          "name": "write_permissions::tests::cached_reply_lease_does_not_wait_for_ordinary_metadata_store",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "drive_core",
+          "name": "write_permissions::tests::decisions_survive_restart_and_recheck_preserves_data",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "drive_core",
+          "name": "write_permissions::tests::definite_refusal_preserves_bytes_and_uncertain_is_never_reset",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "drive_core",
+          "name": "write_permissions::tests::denied_namespace_intent_does_not_block_independent_sibling",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "drive_core",
+          "name": "write_permissions::tests::directory_permission_hint_keeps_journal_and_reconciliation_barrier",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "drive_core",
+          "name": "write_permissions::tests::explicit_and_space_limits_override_child_allow",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "drive_core",
+          "name": "write_permissions::tests::first_denial_publication_waits_for_existing_bounded_reply",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "drive_core",
+          "name": "write_permissions::tests::independent_subroot_stops_at_its_own_ancestry_boundary",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "drive_core",
+          "name": "write_permissions::tests::malformed_pending_intent_keeps_the_existing_fail_closed_barrier",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "drive_core",
+          "name": "write_permissions::tests::mutation_permission_hint_preserves_uncertainty_bytes_and_unknown_acl",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "drive_core",
+          "name": "write_permissions::tests::precise_source_wins_over_a_late_observed_success",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "drive_core",
+          "name": "write_permissions::tests::profile_change_expires_all_node_sources_but_preserves_scope_policy_and_intents",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "drive_core",
+          "name": "write_permissions::tests::recheck_releases_only_the_typed_read_refusal_retry_gate",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "drive_core",
+          "name": "write_permissions::tests::recheck_resets_observed_but_never_explicit_read_only",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "drive_core",
+          "name": "write_permissions::tests::remote_overlay_ancestry_is_not_bypassed_by_local_move",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "drive_core",
+          "name": "write_permissions::tests::revision_conflict_does_not_replace_a_user_policy",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "drive_core",
+          "name": "write_permissions::tests::root_denial_does_not_become_a_child_write_policy",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "drive_core",
+          "name": "write_permissions::tests::schema24_migration_preserves_history_dirty_bytes_and_backup",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "drive_core",
+          "name": "write_permissions::tests::traverse_is_distinct_from_list",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "drive_core",
+          "name": "write_permissions::tests::unknown_attempt_does_not_persist_allow",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "name": "sproto-permission-preflight",
+      "exit_code": 0,
+      "reported_counts": {
+        "reported": true,
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 164
+      },
+      "inventory_counts": {
+        "ok": 3,
+        "FAILED": 0,
+        "ignored": 0,
+        "unparsed": 0
+      },
+      "counts_reconciled": true,
+      "log": "logs/sproto-permission-preflight.log",
+      "log_sha256": "a6edfb723d685a611238592ea680d4bc83502c2c01de9e2ed023ce7e41eb58c5",
+      "tests": [
+        {
+          "suite": "sproto",
+          "name": "actions::transfer::tests::only_verified_download_reply_codes_are_permission_evidence",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "sproto",
+          "name": "error::tests::mutation_permission_hints_are_action_scoped_and_never_definite_refusals",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "sproto",
+          "name": "error::tests::oversized_error_code_cannot_alias_a_permission_refusal",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "name": "sproto-profile-preflight",
+      "exit_code": 0,
+      "reported_counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 166
+      },
+      "inventory_counts": {
+        "ok": 1,
+        "FAILED": 0,
+        "ignored": 0,
+        "unparsed": 0
+      },
+      "counts_reconciled": true,
+      "log": "logs/sproto-profile-preflight.log",
+      "log_sha256": "b269bece9e19136696ca507acd43ca20eeffc55609f60a367a4b7de5bd4b8824",
+      "tests": [
+        {
+          "suite": "sproto",
+          "name": "actions::native::profile_notifications::profile_only_changes_require_a_digest_and_preserve_the_notification_bit",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "name": "native-loopback",
+      "exit_code": 0,
+      "reported_counts": {
+        "reported": true,
+        "passed": 66,
+        "failed": 0,
+        "ignored": 0
+      },
+      "inventory_counts": {
+        "ok": 66,
+        "FAILED": 0,
+        "ignored": 0,
+        "unparsed": 0
+      },
+      "counts_reconciled": true,
+      "log": "logs/native-loopback.log",
+      "log_sha256": "c8f75043f7f834f61104f7c0dcedd1541a8122cab6ff0cbcf9efb2273da76390",
+      "tests": [
+        {
+          "suite": "native-loopback",
+          "name": "download_reply_3002",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "download_reply_3008",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "download_reply_3004",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "download_reply_8004",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "download_reply_9005",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "download_reply_a005",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "download_reply_100003002",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "download_setup_Auth_3002_is_generic",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "download_setup_Connect_3002_is_generic",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "upload_reply_3002",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "upload_reply_3004",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "upload_reply_3008",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "upload_reply_8004",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "upload_reply_9003",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "upload_reply_9004",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "upload_reply_9005",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "upload_reply_a003",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "upload_reply_a004",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "upload_reply_a005",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "upload_reply_100003002",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "rename_reply_3002",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "rename_reply_3004",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "rename_reply_3008",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "rename_reply_8004",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "rename_reply_9003",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "rename_reply_9004",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "rename_reply_9005",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "rename_reply_a003",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "rename_reply_a004",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "rename_reply_a005",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "rename_reply_100003002",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "remove_reply_3002",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "remove_reply_3004",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "remove_reply_3008",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "remove_reply_8004",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "remove_reply_9003",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "remove_reply_9004",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "remove_reply_9005",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "remove_reply_a003",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "remove_reply_a004",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "remove_reply_a005",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "remove_reply_100003002",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "mkdir_reply_3002",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "mkdir_reply_3004",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "mkdir_reply_3008",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "mkdir_reply_8004",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "mkdir_reply_9003",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "mkdir_reply_9004",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "mkdir_reply_9005",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "mkdir_reply_a003",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "mkdir_reply_a004",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "mkdir_reply_a005",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "mkdir_reply_100003002",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "profile_only_true_empty_views",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "profile_only_true_other_view",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "profile_false_explicit_digest",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "profile_false_omitted_digest",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "profile_omitted_flag_and_digest",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "profile_flag_two_rejected",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "profile_flag_string_rejected",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "profile_flag_null_rejected",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "profile_changed_without_digest_rejected",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "profile_numeric_digest_rejected",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "profile_changes_missing_rejected",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "profile_changes_scalar_rejected",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "native-loopback",
+          "name": "profile_changes_noninteger_rejected",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "name": "worker-trust-preflight",
+      "exit_code": 0,
+      "reported_counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 0
+      },
+      "inventory_counts": {
+        "ok": 1,
+        "FAILED": 0,
+        "ignored": 0,
+        "unparsed": 0
+      },
+      "counts_reconciled": true,
+      "log": "logs/worker-trust-preflight.log",
+      "log_sha256": "5b8f30511d1f6d71e63ebd2f82e8703f6c115d9d60b7f021217f76d0428a9b92",
+      "tests": [
+        {
+          "suite": "trust_worker",
+          "name": "invalid_trust_rejection_is_delivered_before_worker_exit",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "name": "worker-elf-versions",
+      "exit_code": 0,
+      "reported_counts": {
+        "reported": true,
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0
+      },
+      "inventory_counts": {
+        "ok": 3,
+        "FAILED": 0,
+        "ignored": 0,
+        "unparsed": 0
+      },
+      "counts_reconciled": true,
+      "log": "logs/worker-elf-versions.log",
+      "log_sha256": "e69dc79884a941f83ac0858ad4351c39d050e9205b2290e59f2e0beebaffc188",
+      "tests": [
+        {
+          "suite": "worker-elf-versions",
+          "name": "worker_elf_handshake_v20",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "worker-elf-versions",
+          "name": "worker_elf_handshake_v21",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "worker-elf-versions",
+          "name": "worker_elf_handshake_v22",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "name": "core-history-probe-prepare",
+      "exit_code": 0,
+      "reported_counts": {
+        "reported": false
+      },
+      "inventory_counts": {
+        "ok": 0,
+        "FAILED": 0,
+        "ignored": 0,
+        "unparsed": 0
+      },
+      "counts_reconciled": true,
+      "log": "logs/core-history-probe-prepare.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "tests": []
+    },
+    {
+      "name": "core-history-probe",
+      "exit_code": 0,
+      "reported_counts": {
+        "reported": true,
+        "passed": 5,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 0
+      },
+      "inventory_counts": {
+        "ok": 5,
+        "FAILED": 0,
+        "ignored": 0,
+        "unparsed": 0
+      },
+      "counts_reconciled": true,
+      "log": "logs/core-history-probe.log",
+      "log_sha256": "c6c0ee45435e650d0b55e13d87a12234c1b56b157045a8a339b4cc9fdd300daa",
+      "tests": [
+        {
+          "suite": "issue7_core_history_probe",
+          "name": "first_invalidation_creates_and_advances_authoritative_revision",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "issue7_core_history_probe",
+          "name": "mkdir_confirmed_history_clears_hint_but_retains_original_response_detail",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "issue7_core_history_probe",
+          "name": "mkdir_conflict_history_replaces_hint_and_retains_original_response_detail",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "issue7_core_history_probe",
+          "name": "replace_cleanup_uncertainty_never_replays_and_final_history_keeps_reply_detail",
+          "status": "ok",
+          "reason": null
+        },
+        {
+          "suite": "issue7_core_history_probe",
+          "name": "upload_confirmed_history_clears_hint_but_retains_original_response_detail",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "name": "kernel-setattr-preflight",
+      "exit_code": 0,
+      "reported_counts": {
+        "reported": true,
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 3
+      },
+      "inventory_counts": {
+        "ok": 1,
+        "FAILED": 0,
+        "ignored": 0,
+        "unparsed": 0
+      },
+      "counts_reconciled": true,
+      "log": "logs/kernel-setattr-preflight.log",
+      "log_sha256": "ead04b536066074eb7c3412c8f636d15865fbbfc8e8e591f90de3872b3aabcd5",
+      "tests": [
+        {
+          "suite": "permissions_kernel",
+          "name": "setattr_only_persists_mtime_without_granting_content_writes_or_uploads",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "name": "workspace-all-features",
+      "exit_code": -15,
+      "reported_counts": {
+        "reported": false,
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 0
+      },
+      "inventory_counts": {
+        "ok": 0,
+        "FAILED": 0,
+        "ignored": 0,
+        "unparsed": 0
+      },
+      "counts_reconciled": true,
+      "log": "logs/workspace-all-features.log",
+      "log_sha256": "99c83c8138ed07cd4c02444fed59cf3afb424cfa15c1dc4bd36b713b8e9fcb79",
+      "tests": []
+    }
+  ],
+  "note": "Counts are executions per command; repeated modes are not additive unique coverage.",
+  "unique_tests": [
+    {
+      "suite": "drive_core",
+      "name": "write_permissions::tests::a_new_draft_rechecks_its_parents_create_permission",
+      "observations": [
+        {
+          "command": "core-permission-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "drive_core",
+      "name": "write_permissions::tests::action_classes_are_independent",
+      "observations": [
+        {
+          "command": "core-permission-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "drive_core",
+      "name": "write_permissions::tests::cached_reply_lease_does_not_wait_for_ordinary_metadata_store",
+      "observations": [
+        {
+          "command": "core-permission-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "drive_core",
+      "name": "write_permissions::tests::decisions_survive_restart_and_recheck_preserves_data",
+      "observations": [
+        {
+          "command": "core-permission-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "drive_core",
+      "name": "write_permissions::tests::definite_refusal_preserves_bytes_and_uncertain_is_never_reset",
+      "observations": [
+        {
+          "command": "core-permission-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "drive_core",
+      "name": "write_permissions::tests::denied_namespace_intent_does_not_block_independent_sibling",
+      "observations": [
+        {
+          "command": "core-permission-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "drive_core",
+      "name": "write_permissions::tests::directory_permission_hint_keeps_journal_and_reconciliation_barrier",
+      "observations": [
+        {
+          "command": "core-permission-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "drive_core",
+      "name": "write_permissions::tests::explicit_and_space_limits_override_child_allow",
+      "observations": [
+        {
+          "command": "core-permission-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "drive_core",
+      "name": "write_permissions::tests::first_denial_publication_waits_for_existing_bounded_reply",
+      "observations": [
+        {
+          "command": "core-permission-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "drive_core",
+      "name": "write_permissions::tests::independent_subroot_stops_at_its_own_ancestry_boundary",
+      "observations": [
+        {
+          "command": "core-permission-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "drive_core",
+      "name": "write_permissions::tests::malformed_pending_intent_keeps_the_existing_fail_closed_barrier",
+      "observations": [
+        {
+          "command": "core-permission-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "drive_core",
+      "name": "write_permissions::tests::mutation_permission_hint_preserves_uncertainty_bytes_and_unknown_acl",
+      "observations": [
+        {
+          "command": "core-permission-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "drive_core",
+      "name": "write_permissions::tests::precise_source_wins_over_a_late_observed_success",
+      "observations": [
+        {
+          "command": "core-permission-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "drive_core",
+      "name": "write_permissions::tests::profile_change_expires_all_node_sources_but_preserves_scope_policy_and_intents",
+      "observations": [
+        {
+          "command": "core-permission-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "drive_core",
+      "name": "write_permissions::tests::recheck_releases_only_the_typed_read_refusal_retry_gate",
+      "observations": [
+        {
+          "command": "core-permission-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "drive_core",
+      "name": "write_permissions::tests::recheck_resets_observed_but_never_explicit_read_only",
+      "observations": [
+        {
+          "command": "core-permission-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "drive_core",
+      "name": "write_permissions::tests::remote_overlay_ancestry_is_not_bypassed_by_local_move",
+      "observations": [
+        {
+          "command": "core-permission-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "drive_core",
+      "name": "write_permissions::tests::revision_conflict_does_not_replace_a_user_policy",
+      "observations": [
+        {
+          "command": "core-permission-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "drive_core",
+      "name": "write_permissions::tests::root_denial_does_not_become_a_child_write_policy",
+      "observations": [
+        {
+          "command": "core-permission-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "drive_core",
+      "name": "write_permissions::tests::schema24_migration_preserves_history_dirty_bytes_and_backup",
+      "observations": [
+        {
+          "command": "core-permission-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "drive_core",
+      "name": "write_permissions::tests::traverse_is_distinct_from_list",
+      "observations": [
+        {
+          "command": "core-permission-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "drive_core",
+      "name": "write_permissions::tests::unknown_attempt_does_not_persist_allow",
+      "observations": [
+        {
+          "command": "core-permission-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "drive_runtime",
+      "name": "bridge::download_publication_tests::local_io_and_transport_errors_are_not_native_permission_evidence",
+      "observations": [
+        {
+          "command": "runtime-permission-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "drive_runtime",
+      "name": "bridge::download_publication_tests::native_read_refusal_learns_only_the_requested_identity_and_recheck_releases_retry",
+      "observations": [
+        {
+          "command": "native-read-stale-preflight",
+          "status": "FAILED",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "drive_runtime",
+      "name": "bridge::event_transfer_tests::profile_only_notification_invalidates_observed_acl_without_file_events",
+      "observations": [
+        {
+          "command": "runtime-profile-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "drive_runtime",
+      "name": "bridge::initialization_owner::tests::deferred_page_does_not_turn_transport_permission_or_root_errors_into_rechecks",
+      "observations": [
+        {
+          "command": "runtime-permission-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "drive_runtime",
+      "name": "bridge::upload_tests::definite_permission_refusal_retains_body_allows_sibling_and_rechecks",
+      "observations": [
+        {
+          "command": "runtime-permission-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "drive_runtime",
+      "name": "desktop::preview::tests::unready_permission_and_preview_status_remain_distinct_from_authoritative_empty_state",
+      "observations": [
+        {
+          "command": "runtime-permission-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "drive_runtime",
+      "name": "rpc::tests::protocol_version_mismatch_disconnects_all_waiters",
+      "observations": [
+        {
+          "command": "runtime-version-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "issue7_core_history_probe",
+      "name": "first_invalidation_creates_and_advances_authoritative_revision",
+      "observations": [
+        {
+          "command": "core-history-probe",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "issue7_core_history_probe",
+      "name": "mkdir_confirmed_history_clears_hint_but_retains_original_response_detail",
+      "observations": [
+        {
+          "command": "core-history-probe",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "issue7_core_history_probe",
+      "name": "mkdir_conflict_history_replaces_hint_and_retains_original_response_detail",
+      "observations": [
+        {
+          "command": "core-history-probe",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "issue7_core_history_probe",
+      "name": "replace_cleanup_uncertainty_never_replays_and_final_history_keeps_reply_detail",
+      "observations": [
+        {
+          "command": "core-history-probe",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "issue7_core_history_probe",
+      "name": "upload_confirmed_history_clears_hint_but_retains_original_response_detail",
+      "observations": [
+        {
+          "command": "core-history-probe",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "download_reply_100003002",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "download_reply_3002",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "download_reply_3004",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "download_reply_3008",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "download_reply_8004",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "download_reply_9005",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "download_reply_a005",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "download_setup_Auth_3002_is_generic",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "download_setup_Connect_3002_is_generic",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "mkdir_reply_100003002",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "mkdir_reply_3002",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "mkdir_reply_3004",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "mkdir_reply_3008",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "mkdir_reply_8004",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "mkdir_reply_9003",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "mkdir_reply_9004",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "mkdir_reply_9005",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "mkdir_reply_a003",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "mkdir_reply_a004",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "mkdir_reply_a005",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "profile_changed_without_digest_rejected",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "profile_changes_missing_rejected",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "profile_changes_noninteger_rejected",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "profile_changes_scalar_rejected",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "profile_false_explicit_digest",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "profile_false_omitted_digest",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "profile_flag_null_rejected",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "profile_flag_string_rejected",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "profile_flag_two_rejected",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "profile_numeric_digest_rejected",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "profile_omitted_flag_and_digest",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "profile_only_true_empty_views",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "profile_only_true_other_view",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "remove_reply_100003002",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "remove_reply_3002",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "remove_reply_3004",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "remove_reply_3008",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "remove_reply_8004",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "remove_reply_9003",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "remove_reply_9004",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "remove_reply_9005",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "remove_reply_a003",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "remove_reply_a004",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "remove_reply_a005",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "rename_reply_100003002",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "rename_reply_3002",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "rename_reply_3004",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "rename_reply_3008",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "rename_reply_8004",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "rename_reply_9003",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "rename_reply_9004",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "rename_reply_9005",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "rename_reply_a003",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "rename_reply_a004",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "rename_reply_a005",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "upload_reply_100003002",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "upload_reply_3002",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "upload_reply_3004",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "upload_reply_3008",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "upload_reply_8004",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "upload_reply_9003",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "upload_reply_9004",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "upload_reply_9005",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "upload_reply_a003",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "upload_reply_a004",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "native-loopback",
+      "name": "upload_reply_a005",
+      "observations": [
+        {
+          "command": "native-loopback",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "permissions_kernel",
+      "name": "setattr_only_persists_mtime_without_granting_content_writes_or_uploads",
+      "observations": [
+        {
+          "command": "kernel-setattr-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "sproto",
+      "name": "actions::native::profile_notifications::profile_only_changes_require_a_digest_and_preserve_the_notification_bit",
+      "observations": [
+        {
+          "command": "sproto-profile-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "sproto",
+      "name": "actions::transfer::tests::only_verified_download_reply_codes_are_permission_evidence",
+      "observations": [
+        {
+          "command": "sproto-permission-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "sproto",
+      "name": "error::tests::mutation_permission_hints_are_action_scoped_and_never_definite_refusals",
+      "observations": [
+        {
+          "command": "sproto-permission-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "sproto",
+      "name": "error::tests::oversized_error_code_cannot_alias_a_permission_refusal",
+      "observations": [
+        {
+          "command": "sproto-permission-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "trust_worker",
+      "name": "invalid_trust_rejection_is_delivered_before_worker_exit",
+      "observations": [
+        {
+          "command": "worker-trust-preflight",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "worker-elf-versions",
+      "name": "worker_elf_handshake_v20",
+      "observations": [
+        {
+          "command": "worker-elf-versions",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "worker-elf-versions",
+      "name": "worker_elf_handshake_v21",
+      "observations": [
+        {
+          "command": "worker-elf-versions",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    },
+    {
+      "suite": "worker-elf-versions",
+      "name": "worker_elf_handshake_v22",
+      "observations": [
+        {
+          "command": "worker-elf-versions",
+          "status": "ok",
+          "reason": null
+        }
+      ]
+    }
+  ],
+  "all_reported_counts_reconciled": true
+}

@@ -1,0 +1,7 @@
+{
+  "acceptance_status": "blocked_environment",
+  "pending_candidate": "41365a650eb7d7df696046e21b7671697231f851",
+  "latest_tested_candidate": "4e6aaf7166fd370076adf43a0dad3e6ecdca36d6",
+  "g4_010_test_commands_started": 0,
+  "scope": "G4-006 through G4-010 only; no G5, no older G4 export"
+}

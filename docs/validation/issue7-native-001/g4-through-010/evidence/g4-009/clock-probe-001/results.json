@@ -1,0 +1,106 @@
+{
+  "candidate_commit": "4e6aaf7166fd370076adf43a0dad3e6ecdca36d6",
+  "copied_elf_sha256": "1ab33faacb0397018d144156d5da501cbdeba6f56c03471e5f7c28d99996e53a",
+  "source_elf": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/target/debug/deps/drive_runtime-a3339dac1c16b0f4",
+  "copied_elf": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/clock-probe-001/drive_runtime-a3339dac1c16b0f4",
+  "cases": [
+    {
+      "name": "bridge::download_scheduler_tests::concurrent_foreground_reads_wait_for_shared_retry_without_reopen",
+      "command": [
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/clock-probe-001/drive_runtime-a3339dac1c16b0f4",
+        "--exact",
+        "bridge::download_scheduler_tests::concurrent_foreground_reads_wait_for_shared_retry_without_reopen",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "log": "case-1.log",
+      "log_sha256": "103ae85396d05a8337a5d7dcda268abcd32c684852664fe4720699ef1572fd69",
+      "start": {
+        "realtime_ns": 1793846402040039527,
+        "monotonic_ns": 1051425997965
+      },
+      "end": {
+        "realtime_ns": 1793846404959923353,
+        "monotonic_ns": 1054345882066
+      }
+    },
+    {
+      "name": "bridge::download_scheduler_tests::concurrent_foreground_reads_wait_for_transport_backoff_after_reconnect",
+      "command": [
+        "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-009/clock-probe-001/drive_runtime-a3339dac1c16b0f4",
+        "--exact",
+        "bridge::download_scheduler_tests::concurrent_foreground_reads_wait_for_transport_backoff_after_reconnect",
+        "--nocapture",
+        "--test-threads=1"
+      ],
+      "exit_code": 0,
+      "log": "case-2.log",
+      "log_sha256": "f6a9d51f50f463f59050a42ac8b3afe227646e22cf51ce3f343e448e86c8e861",
+      "start": {
+        "realtime_ns": 1793846404959947828,
+        "monotonic_ns": 1054345906174
+      },
+      "end": {
+        "realtime_ns": 1793846407079016093,
+        "monotonic_ns": 1056464975081
+      }
+    }
+  ],
+  "samples": 797,
+  "clock_read_order": "monotonic_before -> time.time_ns -> monotonic_after; 10ms requested interval",
+  "largest_abs_interval_differences": [
+    {
+      "wall_delta_ns": 10135492,
+      "monotonic_delta_ns": 10124353.5,
+      "delta_difference_ns": 11138.5
+    },
+    {
+      "wall_delta_ns": 10136591,
+      "monotonic_delta_ns": 10147683.0,
+      "delta_difference_ns": -11092.0
+    },
+    {
+      "wall_delta_ns": 10075633,
+      "monotonic_delta_ns": 10082370.5,
+      "delta_difference_ns": -6737.5
+    },
+    {
+      "wall_delta_ns": 10121924,
+      "monotonic_delta_ns": 10115279.0,
+      "delta_difference_ns": 6645.0
+    },
+    {
+      "wall_delta_ns": 10119909,
+      "monotonic_delta_ns": 10113629.0,
+      "delta_difference_ns": 6280.0
+    },
+    {
+      "wall_delta_ns": 10121283,
+      "monotonic_delta_ns": 10127287.0,
+      "delta_difference_ns": -6004.0
+    },
+    {
+      "wall_delta_ns": 10090299,
+      "monotonic_delta_ns": 10095112.0,
+      "delta_difference_ns": -4813.0
+    },
+    {
+      "wall_delta_ns": 10055650,
+      "monotonic_delta_ns": 10060279.0,
+      "delta_difference_ns": -4629.0
+    },
+    {
+      "wall_delta_ns": 10101391,
+      "monotonic_delta_ns": 10096899.5,
+      "delta_difference_ns": 4491.5
+    },
+    {
+      "wall_delta_ns": 10148692,
+      "monotonic_delta_ns": 10144291.5,
+      "delta_difference_ns": 4400.5
+    }
+  ],
+  "max_monotonic_bracket_ns": 37950,
+  "context": "unchanged exact test ELF; main G4 default/unrelated debug commands may be running; no timing threshold modified; not a benchmark"
+}

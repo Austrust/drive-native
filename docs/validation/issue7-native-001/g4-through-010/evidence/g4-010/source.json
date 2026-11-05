@@ -1,0 +1,7 @@
+{
+  "candidate_commit": "41365a650eb7d7df696046e21b7671697231f851",
+  "candidate_archive_sha256": "e0ac9b59fb6111129dece4dc15f10501160a9e9c49462d72ddaadbf742693ec3",
+  "archive_command": "git -C work/fix-7 archive --format=tar --output=../issue7-validation/prepared-g4-010/candidate.tar 41365a650eb7d7df696046e21b7671697231f851",
+  "authorization": "root authorized new 5 retry clock/version cases, original pair and full runtime default parallelism, followed by complete issue7 increment matrix",
+  "cache_policy": "copy completed private g4-009 target by bytes, touch source metadata without changing contents, clean all four product packages before tests"
+}

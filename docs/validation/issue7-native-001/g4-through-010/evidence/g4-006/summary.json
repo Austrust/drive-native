@@ -1,0 +1,83 @@
+{
+  "complete": true,
+  "candidate_commit": "d39a59769e0c0abcde033ae0f74bb2806f218d8a",
+  "source": {
+    "candidate_commit": "d39a59769e0c0abcde033ae0f74bb2806f218d8a",
+    "candidate_archive_sha256": "960f53a9881f173fe070b298260ac6fb93c7e5fe336d2b5d8e440ae184dfc178",
+    "archive_command": "git -C work/fix-7 archive --format=tar --output=../issue7-validation/prepared-g4-006/candidate.tar d39a59769e0c0abcde033ae0f74bb2806f218d8a",
+    "authorization": "root explicitly authorized independent G4-006; no NAS, production data, G5 or publication",
+    "product_tree_clean_before_archive": true
+  },
+  "start": "2026-11-05T01:53:57.424615+00:00",
+  "environment": "WSL2 Ubuntu-24.04; synthetic/local only; no NAS",
+  "target_seed": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-005/target",
+  "harness_sha256": "c49076fb4f3d0ae1e6b853aba85d699b15677df3f7febb2135a4d75c1690617a",
+  "commands": [
+    {
+      "name": "native-read-stale-preflight",
+      "command": [
+        "cargo",
+        "test",
+        "--offline",
+        "--locked",
+        "--no-fail-fast",
+        "-p",
+        "drive-runtime",
+        "--lib",
+        "--all-features",
+        "native_read_refusal_learns_only_the_requested_identity_and_recheck_releases_retry",
+        "--",
+        "--test-threads=1"
+      ],
+      "environment_overrides": {},
+      "kind": "rust",
+      "start": "2026-11-05T01:53:57.435344+00:00",
+      "log": "logs/native-read-stale-preflight.log",
+      "end": "2026-11-05T01:54:39.470390+00:00",
+      "elapsed_seconds": 36.151264089999984,
+      "exit_code": 101,
+      "log_sha256": "7a4e78d4ffa75f8188e109b9a0238d5d4a49236651f59c1ffc98f9e20bbf4b03",
+      "counts": {
+        "reported": true,
+        "passed": 0,
+        "failed": 1,
+        "ignored": 0,
+        "measured": 0,
+        "filtered": 144
+      },
+      "required_tests": {
+        "native_read_refusal_learns_only_the_requested_identity_and_recheck_releases_retry": false
+      },
+      "residual_mounts_after_command": [],
+      "passed": false
+    }
+  ],
+  "index0_not_applicable": {
+    "indexed_plain_continuation_and_seek_do_not_wait_for_store": "Explicitly asserts NSI is enabled; fully exercised by index1 debug/release and attr0 groups.",
+    "indexed_plus_continuation_and_seek_do_not_wait_for_store": "Explicitly asserts NSI is enabled; fully exercised by index1 debug/release and attr0 groups."
+  },
+  "count_note": "Executions are separate; repeated groups are not additive distinct-test coverage.",
+  "nautilus_private_dependency": {
+    "source_prefix": "/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-002/nautilus-private/prefix",
+    "copied_file_sha256": {
+      "usr/lib/x86_64-linux-gnu/libnautilus-extension.so.4": "a401bb6a5d63b404cfc9dcd1d1d2841ea08bdc7a31394b88ca45ef168c96fa7f",
+      "usr/lib/x86_64-linux-gnu/girepository-1.0/Nautilus-4.0.typelib": "9a8baf7aa7b2302947ed5e6ae27afed60ef8d3fe976b93e2604fd89ca1952313",
+      "usr/share/doc/libnautilus-extension4/copyright": "700eb4955652ce41f145333fb73d05ce22c9ab1f2905fb81999a31f71c3e57ff",
+      "usr/share/doc/libnautilus-extension4/changelog.Debian.gz": "01d3629073da74da8f1007deeb2247cd62d7111f5f4dd022d52d40e257a5c6f9",
+      "usr/share/doc/gir1.2-nautilus-4.0/copyright": "700eb4955652ce41f145333fb73d05ce22c9ab1f2905fb81999a31f71c3e57ff",
+      "usr/share/doc/gir1.2-nautilus-4.0/changelog.Debian.gz": "01d3629073da74da8f1007deeb2247cd62d7111f5f4dd022d52d40e257a5c6f9"
+    },
+    "scope": "Ubuntu packages privately extracted, no system installation; initial system-GI failure remains in G4-001/G4-002 originals."
+  },
+  "scope": "single stale-read preflight; coordinator requested no wider matrix on superseded candidate",
+  "acl_screenshots_complete": true,
+  "end": "2026-11-05T01:54:39.475126+00:00",
+  "residual_owned_mounts": [],
+  "changed_source_files": [],
+  "new_source_files": [],
+  "command_counts": {
+    "passed": 0,
+    "failed": 1
+  },
+  "all_commands_passed": false
+}

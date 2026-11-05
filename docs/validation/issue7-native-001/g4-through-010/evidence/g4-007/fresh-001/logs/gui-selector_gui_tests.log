@@ -1,0 +1,12 @@
+test_catalog_personal_first_and_top_level_not_selectable (__main__.SelectorTests.test_catalog_personal_first_and_top_level_not_selectable) ... ok
+test_expansion_uses_selected_view_and_keeps_remote_hint (__main__.SelectorTests.test_expansion_uses_selected_view_and_keeps_remote_hint) ... ok
+test_profile_backup_restore_preserves_original (__main__.SelectorTests.test_profile_backup_restore_preserves_original) ... ok
+test_setup_error_transport_keeps_categories_distinct_without_raw_reason (__main__.SelectorTests.test_setup_error_transport_keeps_categories_distinct_without_raw_reason) ... ok
+test_team_selection_preserves_explicit_user_read_only (__main__.SelectorTests.test_team_selection_preserves_explicit_user_read_only) ... ok
+test_team_selection_saves_team_scope_and_permissions (__main__.SelectorTests.test_team_selection_saves_team_scope_and_permissions) ... ok
+test_wrong_view_response_not_attached (__main__.SelectorTests.test_wrong_view_response_not_attached) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.045s
+
+OK

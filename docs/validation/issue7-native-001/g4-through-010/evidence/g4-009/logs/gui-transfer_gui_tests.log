@@ -1,0 +1,11 @@
+test_empty_payload_is_visible_and_awaits_receipt (__main__.Tests.test_empty_payload_is_visible_and_awaits_receipt) ... ok
+test_full_body_does_not_mean_synchronized (__main__.Tests.test_full_body_does_not_mean_synchronized) ... ok
+test_malformed_settings_and_stale_progress_fail_closed (__main__.Tests.test_malformed_settings_and_stale_progress_fail_closed) ... ok
+test_settings_keep_edits_and_bind_task_version_units (__main__.Tests.test_settings_keep_edits_and_bind_task_version_units) ... ok
+test_task_change_disables_stale_save (__main__.Tests.test_task_change_disables_stale_save) ... ok
+test_uncertain_save_requires_reload_and_service_change_disables (__main__.Tests.test_uncertain_save_requires_reload_and_service_change_disables) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 0.021s
+
+OK

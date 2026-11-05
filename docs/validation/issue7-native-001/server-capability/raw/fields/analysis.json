@@ -1,0 +1,336 @@
+{
+  "sha256": "cfcad81883c49285b34a986eec78dc4702bf8312d4b1d847a07b095fbb93ab3b",
+  "bytes": 8374811,
+  "machine": "x86-64",
+  "has_section_table": false,
+  "dynamic_symbol_count": 10479,
+  "pattern": "DriveAcl10Capability9ToPObject",
+  "functions": [
+    {
+      "name": "_ZNO8DriveAcl10Capability9ToPObjectEv",
+      "address": "0x257450",
+      "size": 63,
+      "disassembly": "function-257450.asm",
+      "references": [
+        {
+          "address": "0x25746c",
+          "instruction": "call 0x256ea0",
+          "references": [
+            "_ZNKR8DriveAcl10Capability9ToPObjectEv"
+          ]
+        },
+        {
+          "address": "0x25748a",
+          "instruction": "call 0x1aac10",
+          "references": [
+            "PLT:__stack_chk_fail"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "_ZNKR8DriveAcl10Capability9ToPObjectEv",
+      "address": "0x256ea0",
+      "size": 1444,
+      "disassembly": "function-256ea0.asm",
+      "references": [
+        {
+          "address": "0x256ece",
+          "instruction": "call 0x1aef20",
+          "references": [
+            "PLT:_ZN7PObjectC1Ev"
+          ]
+        },
+        {
+          "address": "0x256f07",
+          "instruction": "call 0x1b4cc0",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x256f12",
+          "instruction": "call 0x1a9bd0",
+          "references": [
+            "PLT:_ZN7PObjectaSEb"
+          ]
+        },
+        {
+          "address": "0x256f29",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x256f5b",
+          "instruction": "call 0x1b4cc0",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x256f66",
+          "instruction": "call 0x1a9bd0",
+          "references": [
+            "PLT:_ZN7PObjectaSEb"
+          ]
+        },
+        {
+          "address": "0x256f7d",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x256fb4",
+          "instruction": "call 0x1b4cc0",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x256fbf",
+          "instruction": "call 0x1a9bd0",
+          "references": [
+            "PLT:_ZN7PObjectaSEb"
+          ]
+        },
+        {
+          "address": "0x256fd6",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x257012",
+          "instruction": "call 0x1b4cc0",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x25701d",
+          "instruction": "call 0x1a9bd0",
+          "references": [
+            "PLT:_ZN7PObjectaSEb"
+          ]
+        },
+        {
+          "address": "0x257034",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x25706e",
+          "instruction": "call 0x1b4cc0",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x257079",
+          "instruction": "call 0x1a9bd0",
+          "references": [
+            "PLT:_ZN7PObjectaSEb"
+          ]
+        },
+        {
+          "address": "0x257090",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2570c7",
+          "instruction": "call 0x1b4cc0",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x2570d2",
+          "instruction": "call 0x1a9bd0",
+          "references": [
+            "PLT:_ZN7PObjectaSEb"
+          ]
+        },
+        {
+          "address": "0x2570e9",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x257123",
+          "instruction": "call 0x1b4cc0",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x25712e",
+          "instruction": "call 0x1a9bd0",
+          "references": [
+            "PLT:_ZN7PObjectaSEb"
+          ]
+        },
+        {
+          "address": "0x257145",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x257181",
+          "instruction": "call 0x1b4cc0",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x25718c",
+          "instruction": "call 0x1a9bd0",
+          "references": [
+            "PLT:_ZN7PObjectaSEb"
+          ]
+        },
+        {
+          "address": "0x2571a3",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2571dd",
+          "instruction": "call 0x1b4cc0",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x2571e8",
+          "instruction": "call 0x1a9bd0",
+          "references": [
+            "PLT:_ZN7PObjectaSEb"
+          ]
+        },
+        {
+          "address": "0x2571ff",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x257231",
+          "instruction": "call 0x1b4cc0",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x25723c",
+          "instruction": "call 0x1a9bd0",
+          "references": [
+            "PLT:_ZN7PObjectaSEb"
+          ]
+        },
+        {
+          "address": "0x257253",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x257285",
+          "instruction": "call 0x1b4cc0",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x257290",
+          "instruction": "call 0x1a9bd0",
+          "references": [
+            "PLT:_ZN7PObjectaSEb"
+          ]
+        },
+        {
+          "address": "0x2572a7",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2572e8",
+          "instruction": "call 0x1b4cc0",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x2572f3",
+          "instruction": "call 0x1a9bd0",
+          "references": [
+            "PLT:_ZN7PObjectaSEb"
+          ]
+        },
+        {
+          "address": "0x25730a",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x257312",
+          "instruction": "call 0x1b5990",
+          "references": [
+            "PLT:_ZNK8DriveAcl10Capability13ToSharingRoleEv"
+          ]
+        },
+        {
+          "address": "0x257350",
+          "instruction": "call 0x1b4cc0",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x25735b",
+          "instruction": "call 0x1a9bd0",
+          "references": [
+            "PLT:_ZN7PObjectaSEb"
+          ]
+        },
+        {
+          "address": "0x257372",
+          "instruction": "call 0x1a8db0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x257397",
+          "instruction": "call 0x1aac10",
+          "references": [
+            "PLT:__stack_chk_fail"
+          ]
+        }
+      ]
+    }
+  ],
+  "binary_executed": false,
+  "method": "PT_DYNAMIC and GNU/SysV hash; bounded dynamic symbols; RIP references and direct/PLT calls; no execution"
+}

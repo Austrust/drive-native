@@ -1,0 +1,3291 @@
+{
+  "sha256": "e2288b191e8db97673c3468595e3a2d441579d2da365927c1108c000549fdf9c",
+  "bytes": 8052033,
+  "machine": "x86-64",
+  "has_section_table": false,
+  "dynamic_symbol_count": 7522,
+  "pattern": "GetFileCapabilityHandler(6Handle|15CheckParameters)|PathConverterMiddleware21HandleAfterHeaderRead|PathConvertHelper(7Convert|22QueryNodeByPermanentId|9ProcessID|7Process)|Handler7Utility10IsSafePath",
+  "functions": [
+    {
+      "name": "_ZN9synodrive5syncd7helpers17PathConvertHelper7ProcessERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEbR7RequestR8ResponseR7PObject",
+      "address": "0x24cd00",
+      "size": 180,
+      "disassembly": "function-24cd00.asm",
+      "references": [
+        {
+          "address": "0x24cd2c",
+          "instruction": "call 0x552860",
+          "references": [
+            "_ZNK7Request7GetUserEv"
+          ]
+        },
+        {
+          "address": "0x24cd45",
+          "instruction": "call 0x24ca00",
+          "references": [
+            "_ZN9synodrive5syncd7helpers17PathConvertHelper7ProcessERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEbRK8UserInfoR7PObject"
+          ]
+        },
+        {
+          "address": "0x24cd6a",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24cd9a",
+          "instruction": "call 0x553b20",
+          "references": [
+            "_ZN8Response8SetErrorEmmRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24cda3",
+          "instruction": "call 0xead00",
+          "references": [
+            "PLT:__stack_chk_fail"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "_ZN9synodrive5syncd7helpers17PathConvertHelper22QueryNodeByPermanentIdEmRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEbR7PObject",
+      "address": "0x24ab80",
+      "size": 2539,
+      "disassembly": "function-24ab80.asm",
+      "references": [
+        {
+          "address": "0x24abd6",
+          "instruction": "call 0xef320",
+          "references": [
+            "PLT:_ZN2db4NodeC1Ev"
+          ]
+        },
+        {
+          "address": "0x24ac1b",
+          "instruction": "call 0xef260",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE10_M_replaceEmmPKcm"
+          ]
+        },
+        {
+          "address": "0x24ac2a",
+          "instruction": "call 0xea420",
+          "references": [
+            "PLT:_ZN16ViewRouteManager18RouteByPermanentIdEmR13ViewRouteInfo"
+          ]
+        },
+        {
+          "address": "0x24ac48",
+          "instruction": "call 0xedd20",
+          "references": [
+            "PLT:_ZN2db4view9GetViewDBEmRSt10unique_ptrINS_11ViewManagerENS_12ViewDBReturnEE"
+          ]
+        },
+        {
+          "address": "0x24ac6f",
+          "instruction": "call 0xefbb0",
+          "references": [
+            "PLT:_ZN2db11ViewManager22QueryNodeByPermanentIdEmRNS_4NodeEi"
+          ]
+        },
+        {
+          "address": "0x24aca7",
+          "instruction": "call 0xeb880",
+          "references": [
+            "PLT:_ZNK2db4Node7getPathB5cxx11Ev"
+          ]
+        },
+        {
+          "address": "0x24acfe",
+          "instruction": "call 0xefeb0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_appendEPKcm"
+          ]
+        },
+        {
+          "address": "0x24ad13",
+          "instruction": "call 0xeef50",
+          "references": [
+            "PLT:_ZN2db11ViewManager9QueryNodeERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEERNS_4NodeEi"
+          ]
+        },
+        {
+          "address": "0x24ad32",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24ad4a",
+          "instruction": "call 0xea060",
+          "references": [
+            "PLT:_ZN2db11ViewManager9getViewIdEv"
+          ]
+        },
+        {
+          "address": "0x24ad56",
+          "instruction": "lea rsi, [rip + 0x4663db]",
+          "references": [
+            "view_id"
+          ]
+        },
+        {
+          "address": "0x24ad72",
+          "instruction": "call 0xf1030",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24ad7d",
+          "instruction": "call 0xed040",
+          "references": [
+            "PLT:_ZN7PObjectaSEm"
+          ]
+        },
+        {
+          "address": "0x24ada0",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24adac",
+          "instruction": "call 0xece20",
+          "references": [
+            "PLT:_ZNK2db4Node9getNodeIdEv"
+          ]
+        },
+        {
+          "address": "0x24adb1",
+          "instruction": "lea rsi, [rip + 0x466388]",
+          "references": [
+            "node_id"
+          ]
+        },
+        {
+          "address": "0x24adcd",
+          "instruction": "call 0xf1030",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24add8",
+          "instruction": "call 0xed040",
+          "references": [
+            "PLT:_ZN7PObjectaSEm"
+          ]
+        },
+        {
+          "address": "0x24adf4",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24ae00",
+          "instruction": "call 0xecf30",
+          "references": [
+            "PLT:_ZNK2db4Node9getSyncIdEv"
+          ]
+        },
+        {
+          "address": "0x24ae05",
+          "instruction": "lea rsi, [rip + 0x4b2430]",
+          "references": [
+            "sync_id"
+          ]
+        },
+        {
+          "address": "0x24ae21",
+          "instruction": "call 0xf1030",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24ae2c",
+          "instruction": "call 0xed040",
+          "references": [
+            "PLT:_ZN7PObjectaSEm"
+          ]
+        },
+        {
+          "address": "0x24ae48",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24ae57",
+          "instruction": "call 0xede10",
+          "references": [
+            "PLT:_ZNK2db4Node20getPermanentStringIdB5cxx11Ev"
+          ]
+        },
+        {
+          "address": "0x24ae63",
+          "instruction": "lea rsi, [rip + 0x47af40]",
+          "references": [
+            "file_id"
+          ]
+        },
+        {
+          "address": "0x24ae7c",
+          "instruction": "call 0xf1030",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24ae87",
+          "instruction": "call 0xef9c0",
+          "references": [
+            "PLT:_ZN7PObjectaSEONSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24aeaa",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24aec6",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24aed2",
+          "instruction": "call 0xeb880",
+          "references": [
+            "PLT:_ZNK2db4Node7getPathB5cxx11Ev"
+          ]
+        },
+        {
+          "address": "0x24aed7",
+          "instruction": "lea rsi, [rip + 0x492950]",
+          "references": [
+            "path"
+          ]
+        },
+        {
+          "address": "0x24aef7",
+          "instruction": "call 0xf1030",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24af06",
+          "instruction": "call 0xea3d0",
+          "references": [
+            "PLT:_ZN7PObjectaSERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24af22",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24af2e",
+          "instruction": "call 0xeb500",
+          "references": [
+            "PLT:_ZNK2db4Node11getFileTypeEv"
+          ]
+        },
+        {
+          "address": "0x24af38",
+          "instruction": "call 0x65dca0",
+          "references": [
+            "_ZN13HandlerHelper25TranslateFileTypeToStringB5cxx11E17SupportedFileType"
+          ]
+        },
+        {
+          "address": "0x24af3d",
+          "instruction": "lea rsi, [rip + 0x4883d3]",
+          "references": [
+            "file_type"
+          ]
+        },
+        {
+          "address": "0x24af56",
+          "instruction": "call 0xf1030",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24af61",
+          "instruction": "call 0xef9c0",
+          "references": [
+            "PLT:_ZN7PObjectaSEONSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24af7d",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24af99",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24afa5",
+          "instruction": "call 0xefae0",
+          "references": [
+            "PLT:_ZNK2db4Node10getVerTypeEv"
+          ]
+        },
+        {
+          "address": "0x24afad",
+          "instruction": "lea rsi, [rip + 0x474d6e]",
+          "references": [
+            "transient"
+          ]
+        },
+        {
+          "address": "0x24afcd",
+          "instruction": "call 0xf1030",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24afd8",
+          "instruction": "call 0xee220",
+          "references": [
+            "PLT:_ZN7PObjectaSEb"
+          ]
+        },
+        {
+          "address": "0x24aff4",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24b000",
+          "instruction": "lea rax, [rip + 0x466107]",
+          "references": [
+            "sync_task_debug"
+          ]
+        },
+        {
+          "address": "0x24b028",
+          "instruction": "call 0xf02e0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24b04e",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24b079",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24b085",
+          "instruction": "call 0xea1d0",
+          "references": [
+            "PLT:_ZN2db4NodeD1Ev"
+          ]
+        },
+        {
+          "address": "0x24b09d",
+          "instruction": "call 0xed860",
+          "references": [
+            "PLT:_ZN2db12ViewDBReturnclEPNS_11ViewManagerE"
+          ]
+        },
+        {
+          "address": "0x24b0d0",
+          "instruction": "lea rax, [rip + 0x466037]",
+          "references": [
+            "sync_task_debug"
+          ]
+        },
+        {
+          "address": "0x24b0f8",
+          "instruction": "call 0xf02e0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24b121",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24b135",
+          "instruction": "call 0xec090",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x24b166",
+          "instruction": "call 0xf0e50",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x24b184",
+          "instruction": "lea r9, [rip + 0x465f93]",
+          "references": [
+            "path-convert-helper.cpp.o"
+          ]
+        },
+        {
+          "address": "0x24b1b2",
+          "instruction": "call 0xf04a0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x24b1d6",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24b1e0",
+          "instruction": "call 0xec090",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x24b214",
+          "instruction": "call 0xf0e50",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x24b230",
+          "instruction": "lea r9, [rip + 0x465ee7]",
+          "references": [
+            "path-convert-helper.cpp.o"
+          ]
+        },
+        {
+          "address": "0x24b256",
+          "instruction": "call 0xf04a0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x24b289",
+          "instruction": "call 0xea060",
+          "references": [
+            "PLT:_ZN2db11ViewManager9getViewIdEv"
+          ]
+        },
+        {
+          "address": "0x24b28e",
+          "instruction": "lea rsi, [rip + 0x465ea3]",
+          "references": [
+            "view_id"
+          ]
+        },
+        {
+          "address": "0x24b2aa",
+          "instruction": "call 0xf1030",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24b2b5",
+          "instruction": "call 0xed040",
+          "references": [
+            "PLT:_ZN7PObjectaSEm"
+          ]
+        },
+        {
+          "address": "0x24b2d1",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24b2dd",
+          "instruction": "call 0xeb880",
+          "references": [
+            "PLT:_ZNK2db4Node7getPathB5cxx11Ev"
+          ]
+        },
+        {
+          "address": "0x24b2e5",
+          "instruction": "lea rsi, [rip + 0x47ca75]",
+          "references": [
+            "/"
+          ]
+        },
+        {
+          "address": "0x24b2ec",
+          "instruction": "call 0xf0620",
+          "references": [
+            "PLT:_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE7compareEPKc"
+          ]
+        },
+        {
+          "address": "0x24b320",
+          "instruction": "lea rsi, [rip + 0x492507]",
+          "references": [
+            "path"
+          ]
+        },
+        {
+          "address": "0x24b339",
+          "instruction": "call 0xf1030",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24b344",
+          "instruction": "call 0xea3d0",
+          "references": [
+            "PLT:_ZN7PObjectaSERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24b36b",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24b37f",
+          "instruction": "call 0xeb880",
+          "references": [
+            "PLT:_ZNK2db4Node7getPathB5cxx11Ev"
+          ]
+        },
+        {
+          "address": "0x24b3e6",
+          "instruction": "call 0xefeb0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_appendEPKcm"
+          ]
+        },
+        {
+          "address": "0x24b406",
+          "instruction": "call 0xec1e0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x24b429",
+          "instruction": "call 0xeddd0",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x24b441",
+          "instruction": "call 0xead00",
+          "references": [
+            "PLT:__stack_chk_fail"
+          ]
+        },
+        {
+          "address": "0x24b446",
+          "instruction": "lea rdi, [rip + 0x45be50]",
+          "references": [
+            "basic_string::append"
+          ]
+        },
+        {
+          "address": "0x24b44d",
+          "instruction": "call 0xebb20",
+          "references": [
+            "PLT:_ZSt20__throw_length_errorPKc"
+          ]
+        },
+        {
+          "address": "0x24b452",
+          "instruction": "lea rdi, [rip + 0x45be44]",
+          "references": [
+            "basic_string::append"
+          ]
+        },
+        {
+          "address": "0x24b459",
+          "instruction": "call 0xebb20",
+          "references": [
+            "PLT:_ZSt20__throw_length_errorPKc"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "_ZN23PathConverterMiddleware21HandleAfterHeaderReadER7RequestR8Response",
+      "address": "0x287e20",
+      "size": 2537,
+      "disassembly": "function-287e20.asm",
+      "references": [
+        {
+          "address": "0x287e81",
+          "instruction": "call 0xec1e0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x287e90",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x430178]",
+          "references": [
+            "middleware_debuguser info from dsession vanishedUser key not fouUser key not matAuthentication fUser not found (und (login name)found (get user)User is not admiInvalid sudo usesharing service vice unavailable/tmp/cloud-authdInternal error due to IPC failurUser not found(aAuthenticatorMidaction must be invoked from locaauth-by-sharing-No rule to authenticate action, deny by default.bandwidth-contro"
+          ]
+        },
+        {
+          "address": "0x287eb4",
+          "instruction": "call 0xf02e0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x287ecd",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x287ee2",
+          "instruction": "call 0x551e40",
+          "references": [
+            "_ZNK7Request9GetActionB5cxx11Ev"
+          ]
+        },
+        {
+          "address": "0x287f04",
+          "instruction": "call 0xec090",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x287f35",
+          "instruction": "call 0xf0e50",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x287f5b",
+          "instruction": "call 0xec1e0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x287f67",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x4300a1]",
+          "references": [
+            "middleware_debuguser info from dsession vanishedUser key not fouUser key not matAuthentication fUser not found (und (login name)found (get user)User is not admiInvalid sudo usesharing service vice unavailable/tmp/cloud-authdInternal error due to IPC failurUser not found(aAuthenticatorMidaction must be invoked from locaauth-by-sharing-No rule to authenticate action, deny by default.bandwidth-contro"
+          ]
+        },
+        {
+          "address": "0x287f77",
+          "instruction": "lea r9, [rip + 0x430932]",
+          "references": [
+            "path-converter-middleware.cpp.o"
+          ]
+        },
+        {
+          "address": "0x287fb9",
+          "instruction": "call 0xf04a0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x287fd3",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x287fed",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x287ff5",
+          "instruction": "call 0x550d30",
+          "references": [
+            "_ZN7Request9GetHeaderEv"
+          ]
+        },
+        {
+          "address": "0x288025",
+          "instruction": "call 0xeadf0",
+          "references": [
+            "PLT:_ZNK7PObject9hasMemberERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x28803e",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x28806a",
+          "instruction": "call 0xec1e0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x288079",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x42ff8f]",
+          "references": [
+            "middleware_debuguser info from dsession vanishedUser key not fouUser key not matAuthentication fUser not found (und (login name)found (get user)User is not admiInvalid sudo usesharing service vice unavailable/tmp/cloud-authdInternal error due to IPC failurUser not found(aAuthenticatorMidaction must be invoked from locaauth-by-sharing-No rule to authenticate action, deny by default.bandwidth-contro"
+          ]
+        },
+        {
+          "address": "0x28809d",
+          "instruction": "call 0xf02e0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x2880b6",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2880c4",
+          "instruction": "call 0xec090",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x2880cc",
+          "instruction": "call 0xf0e50",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x2880f2",
+          "instruction": "call 0xec1e0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x28810f",
+          "instruction": "lea r9, [rip + 0x43079a]",
+          "references": [
+            "path-converter-middleware.cpp.o"
+          ]
+        },
+        {
+          "address": "0x288116",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x42fef2]",
+          "references": [
+            "middleware_debuguser info from dsession vanishedUser key not fouUser key not matAuthentication fUser not found (und (login name)found (get user)User is not admiInvalid sudo usesharing service vice unavailable/tmp/cloud-authdInternal error due to IPC failurUser not found(aAuthenticatorMidaction must be invoked from locaauth-by-sharing-No rule to authenticate action, deny by default.bandwidth-contro"
+          ]
+        },
+        {
+          "address": "0x288163",
+          "instruction": "call 0xf04a0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x28817b",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2881a2",
+          "instruction": "call 0xeadf0",
+          "references": [
+            "PLT:_ZNK7PObject9hasMemberERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x2881c0",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x288224",
+          "instruction": "call 0xeadf0",
+          "references": [
+            "PLT:_ZNK7PObject9hasMemberERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x288242",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x288254",
+          "instruction": "call 0x551e40",
+          "references": [
+            "_ZNK7Request9GetActionB5cxx11Ev"
+          ]
+        },
+        {
+          "address": "0x28825c",
+          "instruction": "lea rsi, [rip + 0x4260a4]",
+          "references": [
+            "migration_import"
+          ]
+        },
+        {
+          "address": "0x288263",
+          "instruction": "call 0xf0620",
+          "references": [
+            "PLT:_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE7compareEPKc"
+          ]
+        },
+        {
+          "address": "0x28827c",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x288294",
+          "instruction": "call 0x24cdc0",
+          "references": [
+            "_ZN9synodrive5syncd7helpers17PathConvertHelper7ConvertER7RequestR8Response"
+          ]
+        },
+        {
+          "address": "0x2882bf",
+          "instruction": "call 0xec1e0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x2882d0",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x42fd38]",
+          "references": [
+            "middleware_debuguser info from dsession vanishedUser key not fouUser key not matAuthentication fUser not found (und (login name)found (get user)User is not admiInvalid sudo usesharing service vice unavailable/tmp/cloud-authdInternal error due to IPC failurUser not found(aAuthenticatorMidaction must be invoked from locaauth-by-sharing-No rule to authenticate action, deny by default.bandwidth-contro"
+          ]
+        },
+        {
+          "address": "0x2882f6",
+          "instruction": "call 0xf02e0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x288312",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x288330",
+          "instruction": "call 0x5510b0",
+          "references": [
+            "_ZNK7Request10GetAddressB5cxx11Ev"
+          ]
+        },
+        {
+          "address": "0x288343",
+          "instruction": "call 0x552860",
+          "references": [
+            "_ZNK7Request7GetUserEv"
+          ]
+        },
+        {
+          "address": "0x288354",
+          "instruction": "call 0x552860",
+          "references": [
+            "_ZNK7Request7GetUserEv"
+          ]
+        },
+        {
+          "address": "0x28836d",
+          "instruction": "call 0x551e40",
+          "references": [
+            "_ZNK7Request9GetActionB5cxx11Ev"
+          ]
+        },
+        {
+          "address": "0x288372",
+          "instruction": "call 0xec090",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x2883aa",
+          "instruction": "call 0xf0e50",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x2883d3",
+          "instruction": "call 0xec1e0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x2883df",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x42fc29]",
+          "references": [
+            "middleware_debuguser info from dsession vanishedUser key not fouUser key not matAuthentication fUser not found (und (login name)found (get user)User is not admiInvalid sudo usesharing service vice unavailable/tmp/cloud-authdInternal error due to IPC failurUser not found(aAuthenticatorMidaction must be invoked from locaauth-by-sharing-No rule to authenticate action, deny by default.bandwidth-contro"
+          ]
+        },
+        {
+          "address": "0x2883ef",
+          "instruction": "lea r9, [rip + 0x4304ba]",
+          "references": [
+            "path-converter-middleware.cpp.o"
+          ]
+        },
+        {
+          "address": "0x28843e",
+          "instruction": "call 0xf04a0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x288458",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x28847b",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x288495",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2884bb",
+          "instruction": "call 0xec1e0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x2884c7",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x429cc1]",
+          "references": [
+            "case_insensitivepath_before_convFail to get userprofile-helper.cpp.o"
+          ]
+        },
+        {
+          "address": "0x2884fe",
+          "instruction": "call 0xeadf0",
+          "references": [
+            "PLT:_ZNK7PObject9hasMemberERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x288517",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x28852d",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x288559",
+          "instruction": "call 0xec1e0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x288568",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x42faa0]",
+          "references": [
+            "middleware_debuguser info from dsession vanishedUser key not fouUser key not matAuthentication fUser not found (und (login name)found (get user)User is not admiInvalid sudo usesharing service vice unavailable/tmp/cloud-authdInternal error due to IPC failurUser not found(aAuthenticatorMidaction must be invoked from locaauth-by-sharing-No rule to authenticate action, deny by default.bandwidth-contro"
+          ]
+        },
+        {
+          "address": "0x28858c",
+          "instruction": "call 0xf02e0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x2885a5",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2885b3",
+          "instruction": "call 0xec090",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x2885bb",
+          "instruction": "call 0xf0e50",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x2885e1",
+          "instruction": "call 0xec1e0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x2885fe",
+          "instruction": "lea r9, [rip + 0x4302ab]",
+          "references": [
+            "path-converter-middleware.cpp.o"
+          ]
+        },
+        {
+          "address": "0x288605",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x42fa03]",
+          "references": [
+            "middleware_debuguser info from dsession vanishedUser key not fouUser key not matAuthentication fUser not found (und (login name)found (get user)User is not admiInvalid sudo usesharing service vice unavailable/tmp/cloud-authdInternal error due to IPC failurUser not found(aAuthenticatorMidaction must be invoked from locaauth-by-sharing-No rule to authenticate action, deny by default.bandwidth-contro"
+          ]
+        },
+        {
+          "address": "0x288652",
+          "instruction": "call 0xf04a0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x28866e",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2886a8",
+          "instruction": "call 0xeadf0",
+          "references": [
+            "PLT:_ZNK7PObject9hasMemberERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x2886c1",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x2886d7",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x288706",
+          "instruction": "call 0xf1030",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x28870e",
+          "instruction": "lea rsi, [rip + 0x43f64c]",
+          "references": [
+            "/"
+          ]
+        },
+        {
+          "address": "0x288715",
+          "instruction": "call 0xef6b0",
+          "references": [
+            "PLT:_ZN7PObjectaSEPKc"
+          ]
+        },
+        {
+          "address": "0x28872c",
+          "instruction": "call 0xead00",
+          "references": [
+            "PLT:__stack_chk_fail"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "_ZN9synodrive5syncd7helpers17PathConvertHelper9ProcessIDERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEbRK8UserInfoR7PObject",
+      "address": "0x24bc60",
+      "size": 3479,
+      "disassembly": "function-24bc60.asm",
+      "references": [
+        {
+          "address": "0x24bc7e",
+          "instruction": "lea rsi, [rip + 0x46136d]",
+          "references": [
+            "id:"
+          ]
+        },
+        {
+          "address": "0x24bcba",
+          "instruction": "lea rsi, [rip + 0x465afc]",
+          "references": [
+            "link:"
+          ]
+        },
+        {
+          "address": "0x24bcd8",
+          "instruction": "call 0xf0de0",
+          "references": [
+            "PLT:_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE7compareEmmRKS4_"
+          ]
+        },
+        {
+          "address": "0x24bd13",
+          "instruction": "call 0xf0920",
+          "references": [
+            "PLT:_ZNSt8ios_baseC2Ev"
+          ]
+        },
+        {
+          "address": "0x24bd7e",
+          "instruction": "call 0xef0a0",
+          "references": [
+            "PLT:_ZNSt9basic_iosIcSt11char_traitsIcEE4initEPSt15basic_streambufIcS1_E"
+          ]
+        },
+        {
+          "address": "0x24bdc2",
+          "instruction": "call 0xef0a0",
+          "references": [
+            "PLT:_ZNSt9basic_iosIcSt11char_traitsIcEE4initEPSt15basic_streambufIcS1_E"
+          ]
+        },
+        {
+          "address": "0x24be3a",
+          "instruction": "call 0xefd60",
+          "references": [
+            "PLT:_ZNSt6localeC1Ev"
+          ]
+        },
+        {
+          "address": "0x24be8e",
+          "instruction": "call 0xef0a0",
+          "references": [
+            "PLT:_ZNSt9basic_iosIcSt11char_traitsIcEE4initEPSt15basic_streambufIcS1_E"
+          ]
+        },
+        {
+          "address": "0x24beab",
+          "instruction": "lea rsi, [rip + 0x47beaf]",
+          "references": [
+            "/"
+          ]
+        },
+        {
+          "address": "0x24befd",
+          "instruction": "call 0xeb5b0",
+          "references": [
+            "PLT:_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE4findEPKcmm"
+          ]
+        },
+        {
+          "address": "0x24bf86",
+          "instruction": "call 0xef1a0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEaSEOS4_"
+          ]
+        },
+        {
+          "address": "0x24bfa9",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24c043",
+          "instruction": "call 0xef1a0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEaSEOS4_"
+          ]
+        },
+        {
+          "address": "0x24c066",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24c080",
+          "instruction": "call 0xed1e0",
+          "references": [
+            "PLT:_ZSt16__ostream_insertIcSt11char_traitsIcEERSt13basic_ostreamIT_T0_ES6_PKS3_l"
+          ]
+        },
+        {
+          "address": "0x24c08f",
+          "instruction": "call 0xeea50",
+          "references": [
+            "PLT:_ZNSi10_M_extractImEERSiRT_"
+          ]
+        },
+        {
+          "address": "0x24c0b0",
+          "instruction": "call 0x24ab80",
+          "references": [
+            "_ZN9synodrive5syncd7helpers17PathConvertHelper22QueryNodeByPermanentIdEmRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEbR7PObject"
+          ]
+        },
+        {
+          "address": "0x24c0db",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24c0fe",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24c150",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24c16a",
+          "instruction": "call 0xf0890",
+          "references": [
+            "PLT:_ZNSt6localeD1Ev"
+          ]
+        },
+        {
+          "address": "0x24c1f2",
+          "instruction": "call 0xef9d0",
+          "references": [
+            "PLT:_ZNSt8ios_baseD2Ev"
+          ]
+        },
+        {
+          "address": "0x24c1ff",
+          "instruction": "call 0x232790",
+          "references": [
+            "_ZN9synodrive5syncd7helpers17PathConvertHelper6ResultC1E19_SYNC_PROTO_ERR_tag"
+          ]
+        },
+        {
+          "address": "0x24c222",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24c245",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24c27f",
+          "instruction": "call 0xf0de0",
+          "references": [
+            "PLT:_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE7compareEmmRKS4_"
+          ]
+        },
+        {
+          "address": "0x24c293",
+          "instruction": "lea r12, [rip + 0x464e74]",
+          "references": [
+            "sync_task_debug"
+          ]
+        },
+        {
+          "address": "0x24c2ad",
+          "instruction": "call 0xf02e0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24c2da",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24c2e8",
+          "instruction": "call 0xec090",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x24c315",
+          "instruction": "call 0xf0e50",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x24c32d",
+          "instruction": "lea r9, [rip + 0x464dea]",
+          "references": [
+            "path-convert-helper.cpp.o"
+          ]
+        },
+        {
+          "address": "0x24c353",
+          "instruction": "call 0xf04a0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x24c378",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24c37d",
+          "instruction": "lea rsi, [rip + 0x465373]",
+          "references": [
+            "Unsupport path format."
+          ]
+        },
+        {
+          "address": "0x24c3d7",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24c462",
+          "instruction": "call 0x24b570",
+          "references": [
+            "_ZN9synodrive5syncd7helpers17PathConvertHelper24QueryNodeByPermanentLinkERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEER7PObject"
+          ]
+        },
+        {
+          "address": "0x24c491",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24c4ac",
+          "instruction": "call 0xec1e0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x24c4cf",
+          "instruction": "call 0xeddd0",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x24c52c",
+          "instruction": "call 0xec1e0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x24c54f",
+          "instruction": "call 0xeddd0",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x24c570",
+          "instruction": "lea r12, [rip + 0x464b97]",
+          "references": [
+            "sync_task_debug"
+          ]
+        },
+        {
+          "address": "0x24c58a",
+          "instruction": "call 0xf02e0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24c5af",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24c5bc",
+          "instruction": "call 0xec090",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x24c5e6",
+          "instruction": "call 0xf0e50",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x24c600",
+          "instruction": "lea r9, [rip + 0x464b17]",
+          "references": [
+            "path-convert-helper.cpp.o"
+          ]
+        },
+        {
+          "address": "0x24c626",
+          "instruction": "call 0xf04a0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x24c64c",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24c651",
+          "instruction": "lea rsi, [rip + 0x46516b]",
+          "references": [
+            "failed to query node"
+          ]
+        },
+        {
+          "address": "0x24c6a7",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24c6ca",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24c6ed",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24c6f5",
+          "instruction": "call 0xef0c0",
+          "references": [
+            "PLT:_ZNSt7__cxx1118basic_stringstreamIcSt11char_traitsIcESaIcEED1Ev"
+          ]
+        },
+        {
+          "address": "0x24c70c",
+          "instruction": "call 0xec1e0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x24c733",
+          "instruction": "call 0xeddd0",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x24c76f",
+          "instruction": "lea r12, [rip + 0x464998]",
+          "references": [
+            "sync_task_debug"
+          ]
+        },
+        {
+          "address": "0x24c789",
+          "instruction": "call 0xf02e0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24c7b5",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24c7c2",
+          "instruction": "call 0xec090",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x24c7ec",
+          "instruction": "call 0xf0e50",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x24c803",
+          "instruction": "lea r9, [rip + 0x464914]",
+          "references": [
+            "path-convert-helper.cpp.o"
+          ]
+        },
+        {
+          "address": "0x24c826",
+          "instruction": "call 0xf04a0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x24c84b",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24c850",
+          "instruction": "lea rsi, [rip + 0x464a56]",
+          "references": [
+            "Failed to query node"
+          ]
+        },
+        {
+          "address": "0x24c8a6",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24c8cd",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24c8d7",
+          "instruction": "call 0xead00",
+          "references": [
+            "PLT:__stack_chk_fail"
+          ]
+        },
+        {
+          "address": "0x24c8dc",
+          "instruction": "lea rsi, [rip + 0x4649b5]",
+          "references": [
+            "basic_string::substr"
+          ]
+        },
+        {
+          "address": "0x24c8e3",
+          "instruction": "lea rdi, [rip + 0x46492e]",
+          "references": [
+            "%s: __pos (which is %zu) > this->size() (which is %zu)"
+          ]
+        },
+        {
+          "address": "0x24c8ec",
+          "instruction": "call 0xea5e0",
+          "references": [
+            "PLT:_ZSt24__throw_out_of_range_fmtPKcz"
+          ]
+        },
+        {
+          "address": "0x24c8f7",
+          "instruction": "lea rsi, [rip + 0x46499a]",
+          "references": [
+            "basic_string::substr"
+          ]
+        },
+        {
+          "address": "0x24c900",
+          "instruction": "lea rdi, [rip + 0x464911]",
+          "references": [
+            "%s: __pos (which is %zu) > this->size() (which is %zu)"
+          ]
+        },
+        {
+          "address": "0x24c907",
+          "instruction": "call 0xea5e0",
+          "references": [
+            "PLT:_ZSt24__throw_out_of_range_fmtPKcz"
+          ]
+        },
+        {
+          "address": "0x24c90c",
+          "instruction": "lea rsi, [rip + 0x464985]",
+          "references": [
+            "basic_string::substr"
+          ]
+        },
+        {
+          "address": "0x24c913",
+          "instruction": "lea rdi, [rip + 0x4648fe]",
+          "references": [
+            "%s: __pos (which is %zu) > this->size() (which is %zu)"
+          ]
+        },
+        {
+          "address": "0x24c91a",
+          "instruction": "call 0xea5e0",
+          "references": [
+            "PLT:_ZSt24__throw_out_of_range_fmtPKcz"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "_ZN9synodrive5syncd7helpers17PathConvertHelper7ProcessERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEbSA_R7PObject",
+      "address": "0x24dd10",
+      "size": 786,
+      "disassembly": "function-24dd10.asm",
+      "references": [
+        {
+          "address": "0x24dd57",
+          "instruction": "call 0xebc80",
+          "references": [
+            "PLT:_ZN8UserInfoC1Ev"
+          ]
+        },
+        {
+          "address": "0x24dd68",
+          "instruction": "call 0xea8b0",
+          "references": [
+            "PLT:_ZN11UserManager7GetUserERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEER8UserInfoNS_13UserQueryFlagE"
+          ]
+        },
+        {
+          "address": "0x24dd89",
+          "instruction": "call 0x24ca00",
+          "references": [
+            "_ZN9synodrive5syncd7helpers17PathConvertHelper7ProcessERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEbRK8UserInfoR7PObject"
+          ]
+        },
+        {
+          "address": "0x24dda3",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24ddc0",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24dde3",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24de06",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24de81",
+          "instruction": "call 0xf02e0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24dea0",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24deae",
+          "instruction": "call 0xec090",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x24dedb",
+          "instruction": "call 0xf0e50",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x24dee0",
+          "instruction": "lea rsi, [rip + 0x463227]",
+          "references": [
+            "sync_task_debug"
+          ]
+        },
+        {
+          "address": "0x24def7",
+          "instruction": "lea r9, [rip + 0x463220]",
+          "references": [
+            "path-convert-helper.cpp.o"
+          ]
+        },
+        {
+          "address": "0x24df1a",
+          "instruction": "call 0xf04a0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x24df38",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24df5b",
+          "instruction": "call 0xec1e0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x24df67",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x464241]",
+          "references": [
+            "Fail to get userprofile-helper.cpp.o"
+          ]
+        },
+        {
+          "address": "0x24dfe3",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24dfed",
+          "instruction": "call 0xead00",
+          "references": [
+            "PLT:__stack_chk_fail"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "_ZN24GetFileCapabilityHandler6HandleER7RequestR8Response",
+      "address": "0x3561b0",
+      "size": 2542,
+      "disassembly": "function-3561b0.asm",
+      "references": [
+        {
+          "address": "0x356235",
+          "instruction": "call 0xf02e0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x356254",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x356270",
+          "instruction": "call 0x551e40",
+          "references": [
+            "_ZNK7Request9GetActionB5cxx11Ev"
+          ]
+        },
+        {
+          "address": "0x3562a1",
+          "instruction": "call 0xec090",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x3562a9",
+          "instruction": "call 0xf0e50",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x3562d6",
+          "instruction": "lea r9, [rip + 0x36fda3]",
+          "references": [
+            "get-file-capability.cpp.o"
+          ]
+        },
+        {
+          "address": "0x35633e",
+          "instruction": "call 0xf04a0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x35635e",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x356381",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x35638d",
+          "instruction": "call 0x550d30",
+          "references": [
+            "_ZN7Request9GetHeaderEv"
+          ]
+        },
+        {
+          "address": "0x356398",
+          "instruction": "call 0x553b00",
+          "references": [
+            "_ZN8Response9GetHeaderEv"
+          ]
+        },
+        {
+          "address": "0x3563b1",
+          "instruction": "call 0x355dd0",
+          "references": [
+            "_ZN24GetFileCapabilityHandler15CheckParametersER7RequestR8Response"
+          ]
+        },
+        {
+          "address": "0x35641b",
+          "instruction": "call 0xf1030",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x356423",
+          "instruction": "call 0xeca90",
+          "references": [
+            "PLT:_ZNK7PObject8asUInt64Ev"
+          ]
+        },
+        {
+          "address": "0x356446",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x356474",
+          "instruction": "call 0xf1030",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x35648d",
+          "instruction": "call 0xeeef0",
+          "references": [
+            "PLT:_ZNKR7PObject8asStringB5cxx11Ev"
+          ]
+        },
+        {
+          "address": "0x3564a9",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x3564b1",
+          "instruction": "call 0xef320",
+          "references": [
+            "PLT:_ZN2db4NodeC1Ev"
+          ]
+        },
+        {
+          "address": "0x3564d2",
+          "instruction": "call 0xedd20",
+          "references": [
+            "PLT:_ZN2db4view9GetViewDBEmRSt10unique_ptrINS_11ViewManagerENS_12ViewDBReturnEE"
+          ]
+        },
+        {
+          "address": "0x3564f5",
+          "instruction": "call 0xeef50",
+          "references": [
+            "PLT:_ZN2db11ViewManager9QueryNodeERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEERNS_4NodeEi"
+          ]
+        },
+        {
+          "address": "0x35653b",
+          "instruction": "call 0xec1e0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x356554",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x364004]",
+          "references": [
+            "Failed to query node with sharinuser has no privbackup"
+          ]
+        },
+        {
+          "address": "0x356586",
+          "instruction": "call 0x553b20",
+          "references": [
+            "_ZN8Response8SetErrorEmmRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x3565a2",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x3565ee",
+          "instruction": "call 0xf02e0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x35660d",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x35667d",
+          "instruction": "call 0xf02e0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x35669c",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x3566aa",
+          "instruction": "call 0xec090",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x3566b2",
+          "instruction": "call 0xf0e50",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x3566e0",
+          "instruction": "lea r9, [rip + 0x36f999]",
+          "references": [
+            "get-file-capability.cpp.o"
+          ]
+        },
+        {
+          "address": "0x35673d",
+          "instruction": "call 0xf04a0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x35675b",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x356785",
+          "instruction": "call 0xec1e0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE9_M_createERmm"
+          ]
+        },
+        {
+          "address": "0x35679e",
+          "instruction": "movdqa xmm0, xmmword ptr [rip + 0x36311a]",
+          "references": [
+            "Open view DB faisharing_link expsharing_link pask password errorunavailable: mgrunavailable: tokcreate-handler.cpp.o"
+          ]
+        },
+        {
+          "address": "0x3567d0",
+          "instruction": "call 0x553b20",
+          "references": [
+            "_ZN8Response8SetErrorEmmRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x3567f0",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x356814",
+          "instruction": "call 0xecc10",
+          "references": [
+            "PLT:_ZN9synodrive4core14NodeCapabilityC1ERSt10unique_ptrIN2db11ViewManagerENS3_12ViewDBReturnEE"
+          ]
+        },
+        {
+          "address": "0x356834",
+          "instruction": "call 0x22eb90",
+          "references": [
+            "_ZN9synodrive5syncd7helpers26NodeCapabilityParamFactory5BuildER7RequestRKN2db4NodeE"
+          ]
+        },
+        {
+          "address": "0x356850",
+          "instruction": "call 0xeb420",
+          "references": [
+            "PLT:_ZN9synodrive4core14NodeCapability3GetERKNS1_5ParamE"
+          ]
+        },
+        {
+          "address": "0x3568a8",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x3568cb",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x3568ee",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x356911",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x35691d",
+          "instruction": "call 0xecc30",
+          "references": [
+            "PLT:_ZN9synodrive4core14NodeCapabilityD1Ev"
+          ]
+        },
+        {
+          "address": "0x356933",
+          "instruction": "call 0xef020",
+          "references": [
+            "PLT:_ZNO8DriveAcl10Capability9ToPObjectEv"
+          ]
+        },
+        {
+          "address": "0x356981",
+          "instruction": "call 0xf1030",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x35698c",
+          "instruction": "call 0xf0000",
+          "references": [
+            "PLT:_ZN7PObjectaSEOS_"
+          ]
+        },
+        {
+          "address": "0x3569a8",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x3569b4",
+          "instruction": "call 0xef880",
+          "references": [
+            "PLT:_ZN7PObjectD1Ev"
+          ]
+        },
+        {
+          "address": "0x3569c8",
+          "instruction": "call 0xed860",
+          "references": [
+            "PLT:_ZN2db12ViewDBReturnclEPNS_11ViewManagerE"
+          ]
+        },
+        {
+          "address": "0x3569d0",
+          "instruction": "call 0xea1d0",
+          "references": [
+            "PLT:_ZN2db4NodeD1Ev"
+          ]
+        },
+        {
+          "address": "0x3569f7",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x356a26",
+          "instruction": "call 0xf0340",
+          "references": [
+            "PLT:_ZN2db9GetErrMsgEi"
+          ]
+        },
+        {
+          "address": "0x356a3c",
+          "instruction": "call 0xec090",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x356a44",
+          "instruction": "call 0xf0e50",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x356a71",
+          "instruction": "lea r9, [rip + 0x36f608]",
+          "references": [
+            "get-file-capability.cpp.o"
+          ]
+        },
+        {
+          "address": "0x356ad7",
+          "instruction": "call 0xf04a0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x356ae5",
+          "instruction": "call 0xead00",
+          "references": [
+            "PLT:__stack_chk_fail"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "_ZN9synodrive5syncd7helpers17PathConvertHelper7ConvertER7RequestR8Response",
+      "address": "0x24cdc0",
+      "size": 2143,
+      "disassembly": "function-24cdc0.asm",
+      "references": [
+        {
+          "address": "0x24cdcf",
+          "instruction": "lea r12, [rip + 0x464a86]",
+          "references": [
+            "case_insensitive_path"
+          ]
+        },
+        {
+          "address": "0x24cdfb",
+          "instruction": "call 0x550d30",
+          "references": [
+            "_ZN7Request9GetHeaderEv"
+          ]
+        },
+        {
+          "address": "0x24ce14",
+          "instruction": "call 0xeadf0",
+          "references": [
+            "PLT:_ZNK7PObject9hasMemberERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24ce3c",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24ce4a",
+          "instruction": "lea rsi, [rip + 0x4909dd]",
+          "references": [
+            "path"
+          ]
+        },
+        {
+          "address": "0x24ce5f",
+          "instruction": "call 0xf1030",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24ce74",
+          "instruction": "call 0xeeef0",
+          "references": [
+            "PLT:_ZNKR7PObject8asStringB5cxx11Ev"
+          ]
+        },
+        {
+          "address": "0x24ce8f",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24ce9c",
+          "instruction": "call 0xebd60",
+          "references": [
+            "PLT:_ZN7PObjectC1Ev"
+          ]
+        },
+        {
+          "address": "0x24ceb4",
+          "instruction": "call 0x24cd00",
+          "references": [
+            "_ZN9synodrive5syncd7helpers17PathConvertHelper7ProcessERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEbR7RequestR8ResponseR7PObject"
+          ]
+        },
+        {
+          "address": "0x24cec7",
+          "instruction": "call 0xef880",
+          "references": [
+            "PLT:_ZN7PObjectD1Ev"
+          ]
+        },
+        {
+          "address": "0x24cee4",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24cf31",
+          "instruction": "call 0xf1030",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24cf46",
+          "instruction": "call 0xeeef0",
+          "references": [
+            "PLT:_ZNKR7PObject8asStringB5cxx11Ev"
+          ]
+        },
+        {
+          "address": "0x24cf50",
+          "instruction": "lea r15, [rip + 0x4641e1]",
+          "references": [
+            "view_id"
+          ]
+        },
+        {
+          "address": "0x24cf68",
+          "instruction": "call 0xf1030",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24cf88",
+          "instruction": "call 0xf1030",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24cf95",
+          "instruction": "call 0xf0670",
+          "references": [
+            "PLT:_ZN7PObjectaSERKS_"
+          ]
+        },
+        {
+          "address": "0x24cfb2",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24cfcd",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24cfd2",
+          "instruction": "lea rsi, [rip + 0x464167]",
+          "references": [
+            "node_id"
+          ]
+        },
+        {
+          "address": "0x24cfe7",
+          "instruction": "call 0xeadf0",
+          "references": [
+            "PLT:_ZNK7PObject9hasMemberERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24d007",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24d00c",
+          "instruction": "lea rsi, [rip + 0x4b0229]",
+          "references": [
+            "sync_id"
+          ]
+        },
+        {
+          "address": "0x24d021",
+          "instruction": "call 0xeadf0",
+          "references": [
+            "PLT:_ZNK7PObject9hasMemberERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24d041",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24d046",
+          "instruction": "lea rsi, [rip + 0x478d5d]",
+          "references": [
+            "file_id"
+          ]
+        },
+        {
+          "address": "0x24d05b",
+          "instruction": "call 0xeadf0",
+          "references": [
+            "PLT:_ZNK7PObject9hasMemberERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24d07b",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24d080",
+          "instruction": "lea rsi, [rip + 0x472c9b]",
+          "references": [
+            "transient"
+          ]
+        },
+        {
+          "address": "0x24d095",
+          "instruction": "call 0xeadf0",
+          "references": [
+            "PLT:_ZNK7PObject9hasMemberERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24d0b5",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24d0ba",
+          "instruction": "lea rsi, [rip + 0x49076d]",
+          "references": [
+            "path"
+          ]
+        },
+        {
+          "address": "0x24d0cf",
+          "instruction": "call 0xf1030",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24d0d4",
+          "instruction": "lea rsi, [rip + 0x490753]",
+          "references": [
+            "path"
+          ]
+        },
+        {
+          "address": "0x24d0ec",
+          "instruction": "call 0xf1030",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24d0f7",
+          "instruction": "call 0xf0670",
+          "references": [
+            "PLT:_ZN7PObjectaSERKS_"
+          ]
+        },
+        {
+          "address": "0x24d10f",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24d12e",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24d140",
+          "instruction": "lea rsi, [rip + 0x472bdb]",
+          "references": [
+            "transient"
+          ]
+        },
+        {
+          "address": "0x24d155",
+          "instruction": "call 0xeadf0",
+          "references": [
+            "PLT:_ZNK7PObject9hasMemberERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24d174",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24d18c",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24d19c",
+          "instruction": "lea rsi, [rip + 0x472b7f]",
+          "references": [
+            "transient"
+          ]
+        },
+        {
+          "address": "0x24d1b1",
+          "instruction": "call 0xf1030",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24d1b6",
+          "instruction": "lea rsi, [rip + 0x472b65]",
+          "references": [
+            "transient"
+          ]
+        },
+        {
+          "address": "0x24d1d0",
+          "instruction": "call 0xf1030",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24d1dd",
+          "instruction": "call 0xf0670",
+          "references": [
+            "PLT:_ZN7PObjectaSERKS_"
+          ]
+        },
+        {
+          "address": "0x24d1f5",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24d214",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24d220",
+          "instruction": "lea rsi, [rip + 0x478b83]",
+          "references": [
+            "file_id"
+          ]
+        },
+        {
+          "address": "0x24d235",
+          "instruction": "call 0xeadf0",
+          "references": [
+            "PLT:_ZNK7PObject9hasMemberERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24d254",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24d26c",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24d27c",
+          "instruction": "lea rsi, [rip + 0x478b27]",
+          "references": [
+            "file_id"
+          ]
+        },
+        {
+          "address": "0x24d291",
+          "instruction": "call 0xf1030",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24d296",
+          "instruction": "lea rsi, [rip + 0x478b0d]",
+          "references": [
+            "file_id"
+          ]
+        },
+        {
+          "address": "0x24d2b0",
+          "instruction": "call 0xf1030",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24d2bd",
+          "instruction": "call 0xf0670",
+          "references": [
+            "PLT:_ZN7PObjectaSERKS_"
+          ]
+        },
+        {
+          "address": "0x24d2d5",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24d2f4",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24d300",
+          "instruction": "lea rsi, [rip + 0x4aff35]",
+          "references": [
+            "sync_id"
+          ]
+        },
+        {
+          "address": "0x24d315",
+          "instruction": "call 0xeadf0",
+          "references": [
+            "PLT:_ZNK7PObject9hasMemberERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24d334",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24d34c",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24d35c",
+          "instruction": "lea rsi, [rip + 0x4afed9]",
+          "references": [
+            "sync_id"
+          ]
+        },
+        {
+          "address": "0x24d371",
+          "instruction": "call 0xf1030",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24d376",
+          "instruction": "lea rsi, [rip + 0x4afebf]",
+          "references": [
+            "sync_id"
+          ]
+        },
+        {
+          "address": "0x24d390",
+          "instruction": "call 0xf1030",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24d39d",
+          "instruction": "call 0xf0670",
+          "references": [
+            "PLT:_ZN7PObjectaSERKS_"
+          ]
+        },
+        {
+          "address": "0x24d3b5",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24d3d4",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24d3e0",
+          "instruction": "lea rsi, [rip + 0x463d59]",
+          "references": [
+            "node_id"
+          ]
+        },
+        {
+          "address": "0x24d3f5",
+          "instruction": "call 0xeadf0",
+          "references": [
+            "PLT:_ZNK7PObject9hasMemberERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24d414",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24d42c",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24d43c",
+          "instruction": "lea rsi, [rip + 0x463cfd]",
+          "references": [
+            "node_id"
+          ]
+        },
+        {
+          "address": "0x24d451",
+          "instruction": "call 0xf1030",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24d456",
+          "instruction": "lea rsi, [rip + 0x463ce3]",
+          "references": [
+            "node_id"
+          ]
+        },
+        {
+          "address": "0x24d470",
+          "instruction": "call 0xf1030",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24d47d",
+          "instruction": "call 0xf0670",
+          "references": [
+            "PLT:_ZN7PObjectaSERKS_"
+          ]
+        },
+        {
+          "address": "0x24d495",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24d4b4",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24d4be",
+          "instruction": "call 0xead00",
+          "references": [
+            "PLT:__stack_chk_fail"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "_ZN24GetFileCapabilityHandler15CheckParametersER7RequestR8Response",
+      "address": "0x355dd0",
+      "size": 992,
+      "disassembly": "function-355dd0.asm",
+      "references": [
+        {
+          "address": "0x355e0c",
+          "instruction": "call 0x550d30",
+          "references": [
+            "_ZN7Request9GetHeaderEv"
+          ]
+        },
+        {
+          "address": "0x355e4e",
+          "instruction": "call 0xeadf0",
+          "references": [
+            "PLT:_ZNK7PObject9hasMemberERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x355e67",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x355e86",
+          "instruction": "call 0x374e50",
+          "references": [
+            "_ZN7Handler7Utility10IsSafePathERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x355ea9",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x355f0c",
+          "instruction": "call 0xf02e0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x355f25",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x355f33",
+          "instruction": "call 0xec090",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x355f46",
+          "instruction": "call 0xf0e50",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x355f84",
+          "instruction": "lea r9, [rip + 0x3700f5]",
+          "references": [
+            "get-file-capability.cpp.o"
+          ]
+        },
+        {
+          "address": "0x355fc1",
+          "instruction": "call 0xf04a0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x355fd9",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x356010",
+          "instruction": "call 0x553b20",
+          "references": [
+            "_ZN8Response8SetErrorEmmRKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x356026",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x35605e",
+          "instruction": "call 0xf1030",
+          "references": [
+            "PLT:_ZNR7PObjectixERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x356069",
+          "instruction": "call 0xeeef0",
+          "references": [
+            "PLT:_ZNKR7PObject8asStringB5cxx11Ev"
+          ]
+        },
+        {
+          "address": "0x3560ca",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x3560e4",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x356122",
+          "instruction": "call 0xeddd0",
+          "references": [
+            "PLT:memcpy"
+          ]
+        },
+        {
+          "address": "0x356163",
+          "instruction": "call 0xead00",
+          "references": [
+            "PLT:__stack_chk_fail"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "_ZN7Handler7Utility10IsSafePathERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE",
+      "address": "0x374e50",
+      "size": 289,
+      "disassembly": "function-374e50.asm",
+      "references": [
+        {
+          "address": "0x374ea4",
+          "instruction": "lea r13, [rip + 0x34a9d8]",
+          "references": [
+            "."
+          ]
+        },
+        {
+          "address": "0x374eab",
+          "instruction": "lea r14, [rip + 0x350cc9]",
+          "references": [
+            ".."
+          ]
+        },
+        {
+          "address": "0x374eb2",
+          "instruction": "lea r15, [rip + 0x352ea7]",
+          "references": [
+            "\\/"
+          ]
+        },
+        {
+          "address": "0x374ec6",
+          "instruction": "call 0xf0620",
+          "references": [
+            "PLT:_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE7compareEPKc"
+          ]
+        },
+        {
+          "address": "0x374ed5",
+          "instruction": "call 0xf0620",
+          "references": [
+            "PLT:_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE7compareEPKc"
+          ]
+        },
+        {
+          "address": "0x374eeb",
+          "instruction": "call 0xee420",
+          "references": [
+            "PLT:_ZNKSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE13find_first_ofEPKcmm"
+          ]
+        },
+        {
+          "address": "0x374f3a",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x374f60",
+          "instruction": "call 0xead00",
+          "references": [
+            "PLT:__stack_chk_fail"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "_ZN9synodrive5syncd7helpers17PathConvertHelper7ProcessERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEbRK8UserInfoR7PObject",
+      "address": "0x24ca00",
+      "size": 753,
+      "disassembly": "function-24ca00.asm",
+      "references": [
+        {
+          "address": "0x24ca3d",
+          "instruction": "call 0x374e50",
+          "references": [
+            "_ZN7Handler7Utility10IsSafePathERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24ca8d",
+          "instruction": "call 0xf02e0",
+          "references": [
+            "PLT:_ZN6Logger11IsNeedToLogENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE"
+          ]
+        },
+        {
+          "address": "0x24caa6",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24cab4",
+          "instruction": "call 0xec090",
+          "references": [
+            "PLT:pthread_self"
+          ]
+        },
+        {
+          "address": "0x24cac0",
+          "instruction": "call 0xf0e50",
+          "references": [
+            "PLT:getpid"
+          ]
+        },
+        {
+          "address": "0x24cac5",
+          "instruction": "lea rsi, [rip + 0x464642]",
+          "references": [
+            "sync_task_debug"
+          ]
+        },
+        {
+          "address": "0x24cae5",
+          "instruction": "lea r9, [rip + 0x464632]",
+          "references": [
+            "path-convert-helper.cpp.o"
+          ]
+        },
+        {
+          "address": "0x24cb1b",
+          "instruction": "call 0xf04a0",
+          "references": [
+            "PLT:_ZN6Logger6LogMsgENS_5LevelERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEPKcz"
+          ]
+        },
+        {
+          "address": "0x24cb3a",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24cb9a",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24cbd4",
+          "instruction": "call 0x232790",
+          "references": [
+            "_ZN9synodrive5syncd7helpers17PathConvertHelper6ResultC1E19_SYNC_PROTO_ERR_tag"
+          ]
+        },
+        {
+          "address": "0x24cc03",
+          "instruction": "call 0x24bc60",
+          "references": [
+            "_ZN9synodrive5syncd7helpers17PathConvertHelper9ProcessIDERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEbRK8UserInfoR7PObject"
+          ]
+        },
+        {
+          "address": "0x24cc22",
+          "instruction": "call 0xef1a0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEaSEOS4_"
+          ]
+        },
+        {
+          "address": "0x24cc43",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24cc5d",
+          "instruction": "call 0xecbf0",
+          "references": [
+            "PLT:_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEC1EOS4_"
+          ]
+        },
+        {
+          "address": "0x24cc7e",
+          "instruction": "call 0xea4a0",
+          "references": [
+            "PLT:_ZdlPvm"
+          ]
+        },
+        {
+          "address": "0x24cc98",
+          "instruction": "call 0x232790",
+          "references": [
+            "_ZN9synodrive5syncd7helpers17PathConvertHelper6ResultC1E19_SYNC_PROTO_ERR_tag"
+          ]
+        },
+        {
+          "address": "0x24cca0",
+          "instruction": "call 0x24a490",
+          "references": [
+            "_ZN9synodrive5syncd7helpers17PathConvertHelper11ProcessPathERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEbRK8UserInfoR7PObject"
+          ]
+        },
+        {
+          "address": "0x24ccaa",
+          "instruction": "call 0xead00",
+          "references": [
+            "PLT:__stack_chk_fail"
+          ]
+        },
+        {
+          "address": "0x24ccb3",
+          "instruction": "lea rdi, [rip + 0x464b5e]",
+          "references": [
+            "basic_string::at: __n (which is %zu) >= this->size() (which is %zu)"
+          ]
+        },
+        {
+          "address": "0x24ccbc",
+          "instruction": "call 0xea5e0",
+          "references": [
+            "PLT:_ZSt24__throw_out_of_range_fmtPKcz"
+          ]
+        }
+      ]
+    }
+  ],
+  "binary_executed": false,
+  "method": "PT_DYNAMIC and GNU/SysV hash; bounded dynamic symbols; RIP references and direct/PLT calls; no execution"
+}

@@ -1,0 +1,20 @@
+   Compiling tokio v1.54.1
+   Compiling console v0.16.3
+   Compiling clap_derive v4.6.0
+   Compiling rustls v0.23.37
+   Compiling tracing v0.1.44
+   Compiling tracing-subscriber v0.3.23
+   Compiling indicatif v0.18.4
+   Compiling tokio-rustls v0.26.4
+   Compiling clap v4.6.0
+   Compiling sproto v0.1.0 (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/source/crates/sproto)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 24.20s
+     Running unittests src/lib.rs (/home/drive-native-test/.local/state/drive-native-ultra-validation/g4-007/target/debug/deps/sproto-8b5c0e0ddbc32155)
+
+running 3 tests
+test actions::transfer::tests::only_verified_download_reply_codes_are_permission_evidence ... ok
+test error::tests::mutation_permission_hints_are_action_scoped_and_never_definite_refusals ... ok
+test error::tests::oversized_error_code_cannot_alias_a_permission_refusal ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 164 filtered out; finished in 0.00s
+

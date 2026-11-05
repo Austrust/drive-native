@@ -1,0 +1,26 @@
+_ZTV19RenameSourceACLTest 0x79f090
+  address-point-slot -0x10: 0x0 
+  address-point-slot -0x8: 0x7a2718 _ZTI19RenameSourceACLTest
+  address-point-slot +0x0: 0x228760 _ZN19RenameSourceACLTestD2Ev
+  address-point-slot +0x8: 0x228980 _ZN19RenameSourceACLTestD0Ev
+  address-point-slot +0x10: 0x222a20 _ZN7ACLTest4TestER7RequestR8Response
+  address-point-slot +0x18: 0x228130 _ZNK19RenameSourceACLTest5CloneEv
+  address-point-slot +0x20: 0x226670 _ZN14DefaultACLTest11PrepareInfoEv
+  address-point-slot +0x28: 0x222c50 _ZN13RemoveACLTest15PermissionCheckEv
+  address-point-slot +0x30: 0x2239d0 _ZN7ACLTest18HandleCheckFailureEv
+  address-point-slot +0x38: 0x223df0 _ZN7ACLTest17GetUserCapabilityEv
+  address-point-slot +0x40: 0x2232f0 _ZN13RemoveACLTest11HandleErrorEv
+  address-point-slot +0x48: 0x225d50 _ZN19RenameSourceACLTest7GetPathB5cxx11Ev
+_ZTV17RenameDestACLTest 0x79f0f0
+  address-point-slot -0x10: 0x0 
+  address-point-slot -0x8: 0x7a2748 _ZTI17RenameDestACLTest
+  address-point-slot +0x0: 0x2285e0 _ZN17RenameDestACLTestD1Ev
+  address-point-slot +0x8: 0x228830 _ZN17RenameDestACLTestD0Ev
+  address-point-slot +0x10: 0x222a20 _ZN7ACLTest4TestER7RequestR8Response
+  address-point-slot +0x18: 0x228070 _ZNK17RenameDestACLTest5CloneEv
+  address-point-slot +0x20: 0x226670 _ZN14DefaultACLTest11PrepareInfoEv
+  address-point-slot +0x28: 0x223710 _ZN13CreateACLTest15PermissionCheckEv
+  address-point-slot +0x30: 0x2239d0 _ZN7ACLTest18HandleCheckFailureEv
+  address-point-slot +0x38: 0x223df0 _ZN7ACLTest17GetUserCapabilityEv
+  address-point-slot +0x40: 0x223140 _ZN13CreateACLTest11HandleErrorEv
+  address-point-slot +0x48: 0x2261e0 _ZN17RenameDestACLTest7GetPathB5cxx11Ev

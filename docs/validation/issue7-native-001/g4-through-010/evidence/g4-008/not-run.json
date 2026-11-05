@@ -1,0 +1,11 @@
+{
+  "at": "2026-11-05T02:17:41.712771+00:00",
+  "candidate": "99aa587e83fc409883ecd3e0d3f60fe8640b2e06",
+  "started": false,
+  "tests_run": 0,
+  "reason": "new trigger broke v6 downgrade fixture in ca86 fresh workspace; waiting for coordinator fix before full matrix",
+  "queue_pid": 22583,
+  "waiting_children": [
+    22584
+  ]
+}

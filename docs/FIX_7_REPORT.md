@@ -1,13 +1,13 @@
 # Issue #7 逐目录权限实现与验收报告
 
-状态：候选 `bae1ef1` 通过 G4 独立主矩阵及权限补测。真实 NAS ACL 未实测，原生权限来源仍有下述边界。
+状态：增量候选 `41365a6` 已通过作者编译和独立静态复核；最终 G4-010 在准备阶段遭遇宿主空间不足与 WSL I/O/只读故障，尚未执行测试。此前4e6aaf7的父子权限/迁移/FUSE回归通过，但全工作区有2项退避时间断言失败，不能挪用其余通过结果为新候选验收。真实 NAS ACL 未实测；精确写拒绝自动学习与独立 L2 来源仍未闭合，#7保持开放。
 基线是 #5/#2 集成 `ed1fabf`；工作分支 `codex/fix-7`，schema25 固定为权限迁移。
-最终本地交付分支 `codex/fix-all-5-2-7` 保持产品候选 `bae1ef1` 不变，追加报告与证据。
+本地交付分支 `codex/fix-all-5-2-7` 保留全部历史；原交付 `3d35d7b` 后新增 `10c5e6c`、`d39a597`、`ca86a85`、`99aa587`，`4e6aaf7` 补齐旧 schema 夹具，`41365a6` 补上运行中系统时间变化时的下载退避门限。增量原件与边界见[原生反馈记录](validation/issue7-native-001/REPORT.md)。
 规格：项目 `work/plan-5-2-20261104/PLAN-7.md`；接口见 [CONTRACTS.md](CONTRACTS.md)。
 
 ## 行为与来源
 
-逐文件变更见[候选改动清单](validation/fix-all-001/CHANGED_FILES.md)。主要模块为 core `write_permissions.rs`、schema25 与上传/下载调度，
+此前整体实现的逐文件变更见[候选改动清单](validation/fix-all-001/CHANGED_FILES.md)，本轮增量按上方原生反馈记录的 M1–M4 追溯。主要模块为 core `write_permissions.rs`、schema25 与上传/下载调度，
 runtime service/bridge/desktop/setup，FUSE `permissions.rs` 与实际操作入口，以及 GUI permissions/window/wizard/bus。
 
 三层策略区分用户只读、明确服务空间禁止、逐节点逐动作判断。前两者写操作返回 EROFS，
@@ -18,27 +18,32 @@ runtime service/bridge/desktop/setup，FUSE `permissions.rs` 与实际操作入�
 旧 profile `writable=false` 保留为 explicit_read_only/legacy；true 为 follow_remote/legacy。
 新向导明确保存策略与 user 来源，不复制根 writable hint 到子目录。
 策略设置用 task_id 和 revision 比较保存；重新核对不改用户只读选择。已挂载任务重新挂载后完整应用 RO/RW 选项。
+旧任务如果迁移后仍显示“用户设为只读”，需要在“读写设置”中明确选择“按远端目录权限同步”，保存后停止并重新启动该挂载；单击“重新核对”不会替用户改变只读策略。这里说明新代码的操作入口，本轮没有修改现有任务配置或安装新包。
 
 保留 DefaultPermissions，继续让内核承担现有 uid/gid/mode/umask 等 POSIX 预检查。
-unknown/allowed 使用原乐观 mode；混合 action 不能因为单项拒绝统一去掉写位而误拒另一项允许操作。
+unknown/allowed 使用原乐观 mode；文件 WriteContent 与 Setattr 同时拒绝才去掉写位。目录保留原 POSIX 写位，因为目录自身及创建动作全部拒绝仍不能证明每个子项都不可删除/重命名。
 `access()` 因此是乐观可尝试值，不能当作服务器授权证明。精确门禁在各实际操作入口执行。
 entry TTL 恒 0，attr 默认 1000 ms；权限变化没有扩大 TTL。
 
 当前解析的原生 [NodeInfo](../crates/sproto/src/actions/list.rs) 只有身份、版本、类型、尺寸和时间等元数据，未解码逐动作 ACL；同文件的 ShareInfo.writable 是根级 hint，mode 不是 ACL 证据。
-成功确认会产生 observed；精确 typed PermissionDenied 接收契约只接受本次 durable intent 中的 node/action。
-未核实的服务器数字码仍保留既有 uncertain/reconciliation，不能猜成权限拒绝。
-**当前原生 worker 尚无可验证的数字错误码→typed PermissionDenied 映射**，真实拒绝自动学习须外部核实。
+成功确认会产生 observed；精确 typed PermissionDenied 接收契约只接受本次目标。
+增量实现仅在原生 `recv_download` 直接回复边界将已核实的 `0x3002/0x3008` 学为目标 Read 拒绝，返回 EACCES；认证、连接和前置读取不会误入此分类。依据与排除项见[官方客户端静态证据](validation/issue7-native-001/static/REPORT.md)。
+写请求的直接权限相关响应保留数字码和请求类型，历史显示“服务器返回权限相关响应，提交状态待核对”。仍保留 uncertain/cleanup_uncertain，不改成可重发 pending、不猜改名哪端拒绝、不写精确目录 ACL。官方服务端静态调查已证明特定 ACL middleware 在业务处理器前拒绝；但同码也来自 profile 路径过滤，码值不提供精确动作/节点归属，复合写入各阶段也未全部证明。**精确写拒绝自动学习仍未完成。**
 File Station 可选探测未实现且不调用；空间禁止只有测试注入证据，原生 L2 来源与更新接线未实现，当前生产初始化保持 unknown。
-[typed 接收契约](../crates/drive-runtime/src/wire.rs)与 bridge/namespace 消费路径已实现，实际构造拒绝回复的覆盖来自隔离 transport 夹具。
-真实逐目录 ACL 预知不可得，列为外部验收；不把接收端与测试注入描述为原生 ACL 解析已经实现。
+[typed 接收契约](../crates/drive-runtime/src/wire.rs)与 bridge/namespace 消费路径已实现；原生 Read 分类已接线，精确写拒绝的覆盖仍来自隔离 transport 夹具。静态码语义不等于真实 NAS 实测。
+官方服务端提供 `get_file_capability(view_id,path)`，成功响应为 `header.capabilities`，见[服务端静态证据](validation/issue7-native-001/server-static/REPORT.md)。[能力与身份补充证据](validation/issue7-native-001/server-capability/REPORT.md)确认响应不含节点身份/版本，按永久 ID 解析后也另行按路径查询，不能排除路径替换竞态；因此没有把该路径快照持久化为精确节点 ACL。字段名称也不等于当前同步操作的 ACL primitive，新建动作不能从目录 can_write 推导。这里记录的是已发现但尚不具备安全接线条件的来源，不再声称协议没有逐节点能力查询。
+
+同一证据确认有效 Delete 已包括服务端父链 ACL；父目录自身 Delete 不是 delete_child。unlink/rmdir 现在检查父 Traverse 与目标 Delete；rename 检查源父 Traverse、源 RenameSource、目标父 RenameTarget 和覆盖目标 Delete。FUSE 与持久队列使用同一对象边界，父遍历或目标明确拒绝仍阻断。这是对 PLAN-7 操作表中“父目录删除规则”的具体化，不把父自身权限当作对子项的继承规则。
 
 ## 数据保留与恢复
 
 确定拒绝保留本地 body、draft 和 intent；独立兄弟操作继续调度，相关依赖仍被保留意图约束。
 uncertain commit 不回退为可盲目重发的 pending。重连/恢复/重新核对使 observed 回 unknown，
 不撤销用户只读策略；已知读取拒绝与其终态下载重试门禁一并恢复。
+IPC21 另外保留原生 profile_changed：无文件事件也使当前根全部逐节点证据回 unknown，保留 L1/L2 和写意图。旧 fsd/worker 的 IPC20 混用被拒绝，须成对更新。下载开始时捕获权限 revision；期间更新后的迟到结果不重新写入旧 allow/deny，迟到拒绝仅影响该次调用，后续只读尝试可重新判定。
 正文回复和目录续读的有界发布与首次拒绝发布串行化；常规元数据工作仍不阻塞无拒绝的缓存正文回复。
 存在已知拒绝时 NSI 回复回退到当前权威检查。
+下载退避同时检查持久墙钟截止时间和进程内单调门限，前台、后台、新 flight 与重连共用；运行中系统时间前跳不能缩短已发布的退避时长。进程重启按持久剩余时间恢复一次，显式重试/权限重置清除失败记录后释放门限。旧版本 ticket 不读取或覆盖当前版本的门限。这只影响下载，不改变未知写入的核对规则。
 
 本地 mtime 修改按 Setattr 检查，普通写入/截断按 WriteContent 检查。远端 mtime 仍通过整文件上传：
 Setattr 允许、WriteContent 拒绝时，mtime 本地持久化且正文不变，上传保留 pending；元数据专用远端写回未实现。
@@ -48,6 +53,24 @@ GUI 显示用户只读、服务禁止、当前目录权限不足、权限待验�
 历史目标及父目录按当前身份与权限解析；不会直接信任事件时路径。
 
 ## 迁移与阶段证据
+
+本轮的增量验证结果由[原生反馈记录](validation/issue7-native-001/REPORT.md)维护，命令、逐项名称及失败原件见[独立报告](validation/issue7-native-001/g4-through-010/REPORT.md)。最后已执行的候选是4e6aaf7；各组存在重复，不能相加为唯一总数。
+
+| G4-009 / 4e6aaf7 | 通过 | 失败 | 忽略/未运行 |
+|---|---:|---:|---|
+| workspace all-features | 964 | 2 | 42忽略；两项原退避断言失败 |
+| workspace default | 956 | 0 | 37忽略 |
+| FUSE debug INDEX1 / release INDEX1 | 各38 | 0 | 0 |
+| FUSE debug INDEX0 | 36 | 0 | 2项NSI专用不适用 |
+| runtime debug内核 | 1 | 0 | 0 |
+| GUI 18套 | 148 | 0 | 0；另历史标签补测3项通过 |
+| 原生回环 / 实际worker版本 / 历史补测 | 66 / 3 / 5 | 0 | 0 |
+| release INDEX0 / runtime release / attr0 | — | — | 因后续修复暂缓，未计通过 |
+| G4-010 / 41365a6 | 0 | 0 | 准备阶段环境故障，全部测试未开始 |
+
+新父子动作内核用例与权限核心23项在009通过；新增双钟/旧ticket5项及最终完整矩阵尚未在41365a6执行。210k节点的core ignored功能用例、doc-ignore与INDEX0不适用项分别列明，不能用“未跑性能基准”替代其未验证状态。真实NAS与成对安装/重装仍未实测。
+
+以下计数和场景表对应此前冻结 `bae1ef1` 的完整G4，作为历史证据保留，不能当作新候选的通过计数。
 
 [G3 实现记录](validation/fix-all-001/G3_IMPLEMENTATION.md)列出 M1–M5 commits、失败编译原件和冻结命令。
 schema24→25 延续原子迁移、备份、拒绝未来 schema 的保护；新增迁移用例保留 history 与未确认上传内容。

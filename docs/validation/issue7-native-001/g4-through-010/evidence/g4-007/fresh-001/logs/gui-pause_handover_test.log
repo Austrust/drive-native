@@ -1,0 +1,10 @@
+test_directory_symlink_rejected (__main__.PauseIntentTest.test_directory_symlink_rejected) ... ok
+test_existing_unrelated_intent_is_not_overwritten (__main__.PauseIntentTest.test_existing_unrelated_intent_is_not_overwritten) ... ok
+test_fsync_failure_is_not_acknowledged (__main__.PauseIntentTest.test_fsync_failure_is_not_acknowledged) ... ok
+test_overwide_directory_and_owner_mismatch_rejected (__main__.PauseIntentTest.test_overwide_directory_and_owner_mismatch_rejected) ... ok
+test_publish_is_private_and_task_bound (__main__.PauseIntentTest.test_publish_is_private_and_task_bound) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.020s
+
+OK
