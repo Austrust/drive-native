@@ -42,6 +42,7 @@ fn actual_progress_outlives_initial_ipc_budget_and_completes() {
             request.id,
             Response::Notification {
                 changed: false,
+                profile_changed: false,
                 digest: "done".into(),
             },
         );
@@ -76,6 +77,7 @@ fn silence_cancels_and_late_progress_cannot_extend_another_request() {
             old.id,
             Response::Notification {
                 changed: false,
+                profile_changed: false,
                 digest: "old".into(),
             },
         );
@@ -84,6 +86,7 @@ fn silence_cancels_and_late_progress_cannot_extend_another_request() {
             next.id,
             Response::Notification {
                 changed: false,
+                profile_changed: false,
                 digest: "next".into(),
             },
         );

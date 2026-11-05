@@ -1,6 +1,6 @@
 use drive_core::{Batch, Node, native::Scope};
 use serde::{Deserialize, Serialize};
-pub const VERSION: u16 = 20;
+pub const VERSION: u16 = 21;
 // 30 s channel acquisition + 30 s send + 600 s receive idle + 30 s IPC margin.
 pub const NOTIFICATION_IDLE: std::time::Duration = std::time::Duration::from_secs(690);
 // Deliberately no Debug: authentication material must not enter diagnostics.
@@ -123,6 +123,9 @@ pub enum Response {
     Events(Option<Batch>),
     Notification {
         changed: bool,
+        /// Native profile changes can invalidate effective permissions even
+        /// when no file event was published for this view.
+        profile_changed: bool,
         digest: String,
     },
     Content {

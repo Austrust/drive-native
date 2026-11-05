@@ -118,6 +118,8 @@ G3 追加两个 JSON-string IPC：`GetDirectoryPermissions({path})` 返回 `{tas
 
 已核实的逐操作拒绝可经 worker `PermissionDenied{node,action}` 接收；必须匹配本次 durable intent 的目标，保留本地字节并在重新核对前停止该操作。未核实的 NAS 数字错误码不映射为此响应，保留既有 uncertain/reconcile。当前原生协议适配器不产生此 typed 响应，真实 NAS 拒绝分类属于外部未实测边界；隔离夹具覆盖接收行为。
 
+内部 worker IPC21 的 `Notification` 保留原生 `profile_changed`（与当前 view 文件变化 `changed` 分开）。该通知使当前挂载根的全部逐节点来源回 unknown、清除验证时间并递增 revision，即使没有文件事件；不改变用户策略、明确空间禁止或未确认写入意图。普通通知不清权限。属性仍受既定 1000ms 上限约束，须配套更新 fsd/worker，拒绝 IPC20 混用。
+
 ## C4 FUSE 集成点、TTL 与权限门禁
 
 ```rust

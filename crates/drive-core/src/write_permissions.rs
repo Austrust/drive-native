@@ -330,16 +330,25 @@ fn record_db(
     Ok(())
 }
 pub fn reset_observed(store: &Store, root: &str) -> Result<()> {
+    reset_evidence(store, root, true)
+}
+/// A native profile-change notification invalidates all cached per-node
+/// evidence. It is not proof of an allow, a deny, or a whole-space capability.
+/// Keep local policy and any explicit service restriction unchanged.
+pub fn invalidate_remote_permissions(store: &Store, root: &str) -> Result<()> {
+    reset_evidence(store, root, false)
+}
+fn reset_evidence(store: &Store, root: &str, observed_only: bool) -> Result<()> {
     let tx = store.db.unchecked_transaction()?;
     // Clear the terminal retry gate paired with a typed Read refusal as well.
     tx.execute("UPDATE transfers SET state='pending',error=NULL WHERE direction='download' AND state IN ('failed','retry')
       AND json_valid(error) AND json_extract(error,'$.kind')='server_rejected' AND json_extract(error,'$.server_code') IS NULL
-      AND node IN (SELECT node FROM directory_permissions WHERE root=?1 AND action='read' AND state='denied' AND source='observed')",[root])?;
+      AND node IN (SELECT node FROM directory_permissions WHERE root=?1 AND action='read' AND state='denied' AND (?2=0 OR source='observed'))",params![root,observed_only])?;
     tx.execute(
         "UPDATE write_policy SET revision=revision+1,updated_at=unixepoch() WHERE root=?1",
         [root],
     )?;
-    tx.execute("UPDATE directory_permissions SET state='unknown',verified_at=NULL,revision=(SELECT revision FROM write_policy WHERE root=?1) WHERE root=?1 AND source='observed'",[root])?;
+    tx.execute("UPDATE directory_permissions SET state='unknown',verified_at=NULL,revision=(SELECT revision FROM write_policy WHERE root=?1) WHERE root=?1 AND (?2=0 OR source='observed')",params![root,observed_only])?;
     tx.commit()?;
     Ok(())
 }
@@ -606,6 +615,31 @@ mod tests {
         assert!(
             matches!(enforce(&s,"root","A",Action::CreateFile),Err(Error::Io(ref e)) if e.raw_os_error()==Some(libc::EROFS))
         );
+    }
+    #[test]
+    fn profile_change_expires_all_node_sources_but_preserves_scope_policy_and_intents() {
+        let (_d, mut s) = fixture();
+        let op = s.save_local("f", b"unconfirmed content").unwrap();
+        s.mark_upload_started(&op).unwrap();
+        let state = s.upload_job(&op).unwrap().state;
+        record_observed(&s, "root", "f", Action::Read, false).unwrap();
+        inject(&s, "root", "A", Action::CreateDir, Decision::Deny).unwrap();
+        record(&s, "root", "B", Action::List, "allowed", "file_station").unwrap();
+        record_observed(&s, "other-root", "other-node", Action::Read, false).unwrap();
+        set_local_policy(&s, "root", LocalPolicy::ExplicitReadOnly).unwrap();
+        inject_server_capability(&s, "root", ServerCapability::SpaceForbidden).unwrap();
+        let revision = policy(&s, "root").unwrap().write_policy_revision;
+        invalidate_remote_permissions(&s, "root").unwrap();
+        for (node, action) in [("f", Action::Read), ("A", Action::CreateDir), ("B", Action::List)] {
+            assert_eq!(exact(&s, "root", node, action).unwrap(), Decision::Unknown);
+        }
+        assert_eq!(exact(&s, "other-root", "other-node", Action::Read).unwrap(), Decision::Deny);
+        let policy = policy(&s, "root").unwrap();
+        assert_eq!(policy.local_policy, LocalPolicy::ExplicitReadOnly);
+        assert_eq!(policy.server_capability, ServerCapability::SpaceForbidden);
+        assert_eq!(policy.write_policy_revision, revision + 1);
+        assert_eq!(s.upload_job(&op).unwrap().state, state);
+        assert_eq!(s.db.query_row("SELECT count(*) FROM directory_permissions WHERE root='root' AND verified_at IS NOT NULL", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
     }
     #[test]
     fn traverse_is_distinct_from_list() {

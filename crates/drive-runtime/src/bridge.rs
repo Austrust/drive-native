@@ -553,7 +553,19 @@ impl Bridge {
                 crate::wire::NOTIFICATION_IDLE,
             )?;
             digest = match response.body {
-                Response::Notification { digest, changed } => {
+                Response::Notification { digest, changed, profile_changed } => {
+                    if profile_changed {
+                        // Profile/ACL changes need not produce a file event.
+                        // Discard stale evidence, never the user's read-only
+                        // choice or an unresolved mutation's durable intent.
+                        let store = self.store.lock().unwrap();
+                        if let Some(root) = drive_core::write_permissions::filesystem_root(&store)
+                            .map_err(io::Error::other)?
+                        {
+                            drive_core::write_permissions::invalidate_remote_permissions(&store, &root)
+                                .map_err(io::Error::other)?;
+                        }
+                    }
                     changed_notification = changed;
                     digest
                 }

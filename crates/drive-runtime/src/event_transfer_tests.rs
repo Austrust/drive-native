@@ -1,5 +1,59 @@
 use super::*;
 use crate::transport;
+
+#[test]
+fn profile_only_notification_invalidates_observed_acl_without_file_events() {
+    use drive_core::write_permissions::{self as permissions, Action, Decision, LocalPolicy};
+    for profile_changed in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(dir.path()).unwrap();
+        let root = Node {
+            id: "root".into(), parent: None, name: "root".into(),
+            version: "v1".into(), directory: true, metadata: None,
+        };
+        store.install_remote_snapshot(&[root], "1", "server").unwrap();
+        store.ensure_fs_root("root").unwrap();
+        permissions::record_observed(&store, "root", "root", Action::List, false).unwrap();
+        permissions::set_local_policy(&store, "root", LocalPolicy::ExplicitReadOnly).unwrap();
+        let revision = permissions::policy(&store, "root").unwrap().write_policy_revision;
+        let (socket, mut peer) = UnixStream::pair().unwrap();
+        peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let bridge = Bridge::from_connection(
+            Arc::new(drive_core::SharedStore::new(store)),
+            Arc::new(Rpc::new(socket).unwrap()),
+        ).unwrap();
+        let server = std::thread::spawn(move || {
+            let (pull, _) = transport::receive::<Envelope<Command>>(&mut peer).unwrap();
+            assert!(matches!(pull.body, Command::Pull { .. }));
+            transport::send(&mut peer, &Envelope {
+                version: VERSION, id: pull.id, body: Response::Events(None),
+            }, None).unwrap();
+            let (wait, _) = transport::receive::<Envelope<Command>>(&mut peer).unwrap();
+            assert!(matches!(wait.body, Command::Wait { .. }));
+            // Use the actual worker projection: the native bit must survive
+            // even if only another view appears in changed_views.
+            let body = crate::worker::notification_response(7, sproto::actions::native::Notification {
+                changed_views: vec![8], profile_changed, profile_digest: "next".into(),
+            });
+            transport::send(&mut peer, &Envelope {
+                version: VERSION, id: wait.id, body,
+            }, None).unwrap();
+            let (pull, _) = transport::receive::<Envelope<Command>>(&mut peer).unwrap();
+            assert!(matches!(pull.body, Command::Pull { .. }));
+            // Close only after the bridge has applied the notification.
+        });
+        assert!(bridge.event_loop().is_err());
+        server.join().unwrap();
+        let store = bridge.store.lock().unwrap();
+        assert_eq!(permissions::decide(&store, "root", "root", Action::List).unwrap(),
+            if profile_changed { Decision::Unknown } else { Decision::Deny });
+        let policy = permissions::policy(&store, "root").unwrap();
+        assert_eq!(policy.local_policy, LocalPolicy::ExplicitReadOnly);
+        assert_eq!(policy.write_policy_revision, revision + u64::from(profile_changed));
+        assert_eq!(bridge.downloads.load(Ordering::Relaxed), 0);
+    }
+}
+
 #[test]
 fn event_subscription_is_not_blocked_by_pending_hydration() {
     let dir = tempfile::tempdir().unwrap();

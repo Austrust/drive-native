@@ -393,10 +393,7 @@ pub async fn serve(socket: UnixStream) -> io::Result<()> {
                             )
                             .await?;
                             Ok((
-                                Response::Notification {
-                                    changed: n.changed_views.contains(&view),
-                                    digest: n.profile_digest,
-                                },
+                                notification_response(view, n),
                                 None,
                             ))
                         }
@@ -502,6 +499,14 @@ fn initialization_payload(
         format!("{:x}", payload.hash.finalize()),
         payload.file.into(),
     ))
+}
+
+pub(crate) fn notification_response(view: u64, n: sproto::actions::native::Notification) -> Response {
+    Response::Notification {
+        changed: n.changed_views.contains(&view),
+        profile_changed: n.profile_changed,
+        digest: n.profile_digest,
+    }
 }
 
 fn valid_command_descriptor(command: &Command, has_descriptor: bool) -> bool {
