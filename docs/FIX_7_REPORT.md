@@ -1,6 +1,6 @@
 # Issue #7 逐目录权限实现与验收报告
 
-状态：产品冻结 `fefb8ee` 通过独立 G4-013 完整矩阵及补测。根目录权限不再扩展为整盘只读；明确 Read 拒绝后不会自动下载重试，取消最后一个读取需求时会清理其重试意图；upload 直接响应 `0x9003` 且目标为已存在节点时自动学习为 `(node, write_content)=denied(observed)`（可证窄子集，见 [写拒绝学习增量](validation/issue7-native-001/write-learning/REPORT.md)）。G4-013 all-features 985通过/0失败/42忽略，default 975/0/37（相对 G4-012 各 +9 = T1 新增测试）；内核、GUI、210k容量、真实本机worker链和组件数据保留结果见下表。G4-012 的旧计数、旧期望与失败原件保持冻结，013 只声明差异。本轮本地开发版本 `0.1.0~dev20261105.2`；本文记录源码验证，包生成与实际内容检查以同交付的 `REPORT.md` 为准。真实 NAS 只读挂载健康检查已执行，但 `initial_index` 被服务端/网络断连阻塞（.2，build 17892；见[真实 NAS 阻塞报告](validation/real-nas-initial-index-20261105/REPORT.md)）；真实 NAS ACL/0x9003 实际可达性、其余精确写拒绝码与独立 L2 来源仍未闭合，#7 完整验收保持开放，不因 G4-013 合成矩阵关闭。
+状态：产品冻结 `fefb8ee` 通过独立 G4-013 完整矩阵及补测。根目录权限不再扩展为整盘只读；明确 Read 拒绝后不会自动下载重试，取消最后一个读取需求时会清理其重试意图；upload 直接响应 `0x9003` 且目标为已存在节点时自动学习为 `(node, write_content)=denied(observed)`（可证窄子集，见 [写拒绝学习增量](validation/issue7-native-001/write-learning/REPORT.md)）。G4-013 all-features 985通过/0失败/42忽略，default 975/0/37（相对 G4-012 各 +9 = T1 新增测试）；内核、GUI、210k容量、真实本机worker链和组件数据保留结果见下表。G4-012 的旧计数、旧期望与失败原件保持冻结，013 只声明差异。本轮本地开发版本 `0.1.0~dev20261105.2`；本文记录源码验证，包生成与实际内容检查以同交付的 `REPORT.md` 为准。真实 NAS 受限验收已部分通过（个人空间子目录 scope 完整挂载、FUSE mkdir A、独立挂载、S02/S12 写矩阵 6/6 committed+真值；见[T7-RESULT](validation/real-nas-t7-20261105/T7-RESULT.md)），但根 scope `initial_index` 仍阻塞，完整真实 ACL/e2e 未通过、S01/S03–S11 等 blocked；真实 NAS ACL/0x9003 实际可达性、其余精确写拒绝码与独立 L2 来源仍未闭合，#7 完整验收保持开放，不因 G4-013 合成矩阵或 T7 部分通过而关闭。
 基线是 #5/#2 集成 `ed1fabf`；工作分支 `codex/fix-7`，schema25 固定为权限迁移。
 原集成分支 `codex/fix-all-5-2-7` 的历史保留，本轮已将指定的 `codex/fix-7` 快进后继续。原交付 `3d35d7b` 后新增 `10c5e6c`、`d39a597`、`ca86a85`、`99aa587`，`4e6aaf7` 补齐旧 schema 夹具，`41365a6` 补上运行中系统时间变化时的下载退避门限，`2dafd12` 阻止已知读取拒绝被后台重试覆盖，`9c9aaba` 清理取消与权限检查相遇时的早退意图，`fefb8ee` 实现 upload/0x9003 窄子集的提交前 ACL 拒绝自动学习。增量原件与边界见[原生反馈记录](validation/issue7-native-001/REPORT.md)与[G4-013 独立报告](validation/issue7-native-001/g4-final-013/REPORT.md)。
 `9c9aaba` 在权限拒绝早退前重新检查取消和独立下载需求，保留 pin、旧缓存与其他 reader；同时准备上述deb版本及显式离线文档模式。包内的未内置材料指向配套源码归档，不生成未发布提交的GitHub入口。
@@ -82,17 +82,39 @@ GUI 显示用户只读、服务禁止、当前目录权限不足、权限待验�
 
 历史失败完整保留：[G4-006–010](validation/issue7-native-001/g4-through-010/REPORT.md)含首次revision遗漏、旧schema夹具、原退避两项失败及010准备阶段环境中断；新独立报告保留G4-011读取拒绝后后台重试的2项失败。修复没有放宽原断言。当前候选没有重跑G5，旧性能数字不移作新版本实测。
 
-## 真实 NAS 只读挂载健康检查（阻塞，2026-11-05）
+## 真实 NAS 受限验收（部分通过，2026-11-05）
 
-新开发包 `0.1.0~dev20261105.2`（产品行为 `fefb8ee` + assert-only，无初始化代码改动）在真实 NAS（`[redacted-test-host]`、TLS `[redacted-test-tls-name]`、build 17892、非管理员测试账号）做只读挂载健康检查：
+新开发包 `0.1.0~dev20261105.2`（产品行为 `fefb8ee` + assert-only，无初始化代码改动）在真实 NAS（`[redacted-test-host]`、TLS `[redacted-test-tls-name]`、build 17892、非管理员测试账号）完成两轮只读/受限验收。下列 A 轮“只读健康检查”阻塞事实保留，不因 T7 部分通过而删除。
+
+**A. 只读挂载健康检查（阻塞事实，保留）**
 
 - selector 登录与列表正常：team root list 约 0.03s、folders=18；personal root folders=3。
-- fsd `initial_index` **两次均失败**：错误类 `native_transport` / `native_response_timeout`，TLS `UnexpectedEof: peer closed connection without TLS close_notify`；`nodes=0`，无残留挂载。失败在初始化候选接收阶段，未提交。
-- 隔离只读探针（Lead）：`list_dir` 小请求 200/200 通过；`pull_event` cursor=0 常成功（约 516 events，next=2000），紧接 cursor=2000 常被断连；子目录 watermark S0 可进入 enumerate（10s 约 948 目录/8351 节点），但约 1000 次 list 请求内被断连；根 `/` 走 legacy `collect_snapshot_seed`。
-- 归因边界：只证明“长初始化序列中被服务端/网络中断 + 产品无每请求重试/断点续拉 → 初始化无法完成”；**未找到根因**，未证明版本差异、会话限制或协议字段语义；不是 T1 窄子集修复引入的已证回归。项目既有记录（[initialization-owner-20261101](../../../outputs/drive-native/initialization-owner-20261101/REPORT.md)、[development-20261101-3](../../../outputs/drive-native/delivery/development-20261101-3/RELEASE_NOTES.md)、[development-20261101-4](../../../outputs/drive-native/delivery/development-20261101-4/RELEASE_NOTES.md)、[personal-003](../../../work/initialization-pipeline-8/docs/validation/personal-003/REPORT.md)）早已标注真实 NAS 初始化/续扫未完成，本次是既有集成缺口在 #7 候选上的暴露。
-- 后续（待下轮验证，不在本轮改产品代码）：P0 为 `list_dir`/`pull_event` 每请求有限重试 + 断点续拉；P1 根 scope watermark 路径可行性；P2 旧版本/账号/网络对照。
+- fsd `initial_index` **两次均失败**：`native_transport` / `native_response_timeout`，TLS `UnexpectedEof: peer closed connection without TLS close_notify`；`nodes=0`，无残留挂载。
+- 隔离只读探针（Lead）：`list_dir` 小请求 200/200；`pull_event` cursor=0 常成功（约 516 events，next=2000），紧接 cursor=2000 常被断连；子目录 watermark S0 可进入 enumerate（10s 约 948 目录/8351 节点），约 1000 次 list 请求内被断连；根 `/` 走 legacy `collect_snapshot_seed`。
+- 该轮**未找到根因**，仅证明长初始化序列断连 + 产品无每请求重试/断点续拉；不是 T1 窄子集修复引入的已证回归（既有记录：[initialization-owner-20261101](../../../outputs/drive-native/initialization-owner-20261101/REPORT.md)、[development-20261101-3](../../../outputs/drive-native/delivery/development-20261101-3/RELEASE_NOTES.md)、[development-20261101-4](../../../outputs/drive-native/delivery/development-20261101-4/RELEASE_NOTES.md)、[personal-003](../../../work/initialization-pipeline-8/docs/validation/personal-003/REPORT.md)）。
 
-完整证据、已证/未证边界与建议见[真实 NAS initial_index 阻塞报告](validation/real-nas-initial-index-20261105/REPORT.md)。**真实 NAS ACL/e2e 验收因此未完成，Issue #7 保持开放。**
+**B. T7 受限真实 NAS 验收（T3，部分通过）**
+
+| 观测 | 结果 |
+|---|---|
+| 个人空间**子目录 scope 完整挂载** | **成功**：90.7s，`preview_only=false`，catching_up→enumerating→importing，FUSE rw |
+| FUSE `mkdir` 创建 A（批准测试目录） | **成功**；File Station 真值 A：append/write/read/exec/del=true，posix 777，ACL=true |
+| A 独立挂载 M_A（scope=A） | **成功**：1.2s，`preview_only=false`，rw=True |
+| S02（单独挂载 A） | **pass**：A 内 mkdir 异步终态 committed，File Station 真值确认 |
+| S12（补充写矩阵） | **pass**：create/write/truncate/rename/delete **6/6 committed**，server truth 逐项确认 |
+| 清理 | A 已删除并核验：parent listing 中 A=0、`list(A)`=file_not_found；无残留挂载/进程 |
+| 根 scope（ROOT_MF/HOME_ROOT） | **仍阻塞**：ROOT_MF 300s 超时（`initial_index` `native_transport`(6)/`native_response_timeout`(2)，nodes=0）；HOME 仅 preview（555.6s 后 `preview_only=true`，随后 `native_server_rejected` code 8193/0x2001、recovery=needs_attention），非完整初始化 |
+| S01/S03–S11、缺口 2 真实拒绝观测、缺口 3 管理员实验 | **blocked**（根/B/夹具/管理员条件不满足）；缺口 2 的真实 `0x9003` 可达性与 history 落库仍未观测，不能写“已验证” |
+
+统计：Issue #7 的 11 场景 = **pass 1（S02）/ blocked 10**；补充 S12 = pass。没有任何场景以“通过”掩盖阻塞。
+
+**C. 结论与后续**
+
+- 真实 NAS 上**已取得部分证据**（子目录 scope 初始化/挂载/RW 写路径、A 创建/清理、S02/S12 真值），但**根 scope 初始化阻塞**使 root 拒建、同挂载 root/A/B、B 只读与多数场景无法执行；Issue #7 的**完整真实 ACL 验收未通过、保持开放**。
+- 归因同 A 轮：未找到根因，未证明版本/会话/协议字段；T7 写矩阵通过只说明正向路径可用，不关闭缺口 2/3。
+- 后续（待下轮验证，不在本轮改产品代码）：P0 `list_dir`/`pull_event` 每请求重试 + 断点续拉；P1 根 scope watermark 可行性；P2 旧版本/账号/网络对照；补齐 T7 所需的 Drive 可见只读 B 与管理员 ACL 夹具。
+
+证据：[T7-RESULT](validation/real-nas-t7-20261105/T7-RESULT.md)（逐字节复制，SHA256 `1393fa9dec551791da67b10cec055fcd614a95d0f069349b106fae0df569e3bf`）与[复制核验](validation/real-nas-t7-20261105/COPY-VERIFY.md)；外部证据包 `work/issue7-acceptance/evidence/t7-limited-20261105/`（MANIFEST `372e1c82…f53e`，23/23 SHA 通过，不复制入仓）；旧阻塞证据见[真实 NAS initial_index 阻塞报告](validation/real-nas-initial-index-20261105/REPORT.md)。
 
 以下计数和场景表对应此前冻结 `bae1ef1` 的完整G4，作为历史证据保留，不能当作新候选的通过计数。
 
