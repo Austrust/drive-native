@@ -582,6 +582,7 @@ impl Bridge {
         };
         let permission_revision = {
             let mut store = self.store.lock().unwrap();
+            Self::check_download_permission(&store, &node.id)?;
             store.begin_download(&ticket).map_err(|_| libc::EIO)?;
             drive_core::write_permissions::session_revision(&store).map_err(|_| libc::EIO)?
         };
@@ -621,7 +622,7 @@ impl Bridge {
                         } else {
                             drive_core::write_permissions::observe_targets(&store,
                                 &[(node.id.clone(), drive_core::write_permissions::Action::Read)], false)
-                                .and_then(|_| store.fail_download(&ticket, kind, code, failed_at))
+                                .and_then(|_| store.refuse_download(&ticket, failed_at))
                         }
                     } else { store.fail_download(&ticket, kind, code, failed_at) };
                     result.and_then(|_| self.publish_download_retry(&store, &ticket, failed_at, failed_instant))
@@ -747,6 +748,13 @@ impl Bridge {
     pub fn ensure(&self, node: &Node) -> Result<(), i32> {
         self.ensure_cancellable(node, None)
     }
+    fn check_download_permission(store: &drive_core::Store, id: &str) -> Result<(), i32> {
+        if store.download_permission_denied(id).map_err(|_| libc::EIO)? {
+            Err(libc::EACCES)
+        } else {
+            Ok(())
+        }
+    }
     fn retry_ticket_current(store: &drive_core::Store, ticket: &DownloadTicket) -> drive_core::Result<bool> {
         match store.node(&ticket.id) {
             Ok(node) => Ok(node.version == ticket.version),
@@ -812,6 +820,7 @@ impl Bridge {
         };
         let retry_deadline = std::time::Instant::now() + Duration::from_secs(35);
         loop {
+            Self::check_download_permission(&self.store.lock().unwrap(), &node.id)?;
             if self.download_abandoned(node, flight) {
                 self.store
                     .lock()
@@ -892,6 +901,7 @@ impl Bridge {
                 return Err(error);
             };
             while !self.retry_clock_ready(&self.store.lock().unwrap(), &ticket, unix_seconds()).map_err(|_|libc::EIO)? {
+                Self::check_download_permission(&self.store.lock().unwrap(), &node.id)?;
                 if !Self::retry_ticket_current(&self.store.lock().unwrap(), &ticket).map_err(|_|libc::EIO)? {
                     return Err(libc::EAGAIN);
                 }
@@ -930,14 +940,12 @@ impl Bridge {
         if cancel.is_some_and(|c| c.is_cancelled()) {
             return Err(libc::EINTR);
         }
-        if self
-            .store
-            .lock()
-            .unwrap()
-            .open_cached(&node.id)
-            .is_ok_and(|h| h.version() == node.version)
         {
-            return Ok(());
+            let store = self.store.lock().unwrap();
+            Self::check_download_permission(&store, &node.id)?;
+            if store.open_cached(&node.id).is_ok_and(|h| h.version() == node.version) {
+                return Ok(());
+            }
         }
         let ticket = DownloadTicket {
             id: node.id.clone(),

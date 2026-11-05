@@ -26,6 +26,16 @@ pub struct DownloadFailure {
 }
 
 impl Store {
+    /// Unknown remains an attempt; only a current effective refusal stops it.
+    /// This includes retained remote ancestry while a local move is pending.
+    pub fn download_permission_denied(&self, id: &str) -> Result<bool> {
+        use crate::write_permissions::{self as permissions, Action, Decision};
+        match permissions::filesystem_root(self)? {
+            Some(root) => Ok(permissions::decide(self, &root, id, Action::Read)? == Decision::Deny),
+            None => self.is_inaccessible(id),
+        }
+    }
+
     pub fn download_failure(&self, id: &str) -> Result<Option<DownloadFailure>> {
         let raw: Option<String> = self.db.query_row(
             "SELECT t.error FROM transfers t JOIN nodes n ON n.id=t.node AND n.remote_version=t.version
@@ -45,7 +55,8 @@ impl Store {
 
     pub fn download_ready(&self, ticket: &DownloadTicket, now: u64) -> Result<bool> {
         let node = self.node(&ticket.id)?;
-        if node.directory || node.version != ticket.version || self.dirty_draft(&node.id)? {
+        if node.directory || node.version != ticket.version || self.dirty_draft(&node.id)?
+            || self.download_permission_denied(&node.id)? {
             return Ok(false);
         }
         Ok(self
@@ -59,6 +70,7 @@ impl Store {
             || n.version != ticket.version
             || self.dirty_draft(&n.id)?
             || crate::namespace::blocks_upload(&self.db, &n.id)?
+            || self.download_permission_denied(&n.id)?
         {
             return Ok(false);
         }
@@ -70,6 +82,9 @@ impl Store {
         let node = self.node(&ticket.id)?;
         if node.directory || node.version != ticket.version {
             return Err(Error::State("download identity/version changed".into()));
+        }
+        if self.download_permission_denied(&node.id)? {
+            return Err(std::io::Error::from_raw_os_error(libc::EACCES).into());
         }
         let id = self.queue_download(ticket)?;
         self.db
@@ -85,6 +100,23 @@ impl Store {
         server_code: Option<u32>,
         now: u64,
     ) -> Result<()> {
+        self.fail_download_with_retry(ticket, kind, server_code, now, true)
+    }
+
+    /// A verified direct Read refusal has no automatic retry deadline. The
+    /// matching ACL evidence is cleared by an explicit recheck/session reset.
+    pub fn refuse_download(&mut self, ticket: &DownloadTicket, now: u64) -> Result<()> {
+        self.fail_download_with_retry(ticket, DownloadFailureKind::ServerRejected, None, now, false)
+    }
+
+    fn fail_download_with_retry(
+        &mut self,
+        ticket: &DownloadTicket,
+        kind: DownloadFailureKind,
+        server_code: Option<u32>,
+        now: u64,
+        automatic_retry: bool,
+    ) -> Result<()> {
         let node = match self.node(&ticket.id) {
             Ok(n) if n.version == ticket.version && !n.directory => n,
             Ok(_) => return Ok(()),
@@ -94,7 +126,7 @@ impl Store {
         let attempts = self
             .download_failure(&node.id)?
             .map_or(1, |f| f.attempts.saturating_add(1));
-        let retry_at = if attempts < MAX_AUTOMATIC_DOWNLOAD_ATTEMPTS {
+        let retry_at = if automatic_retry && attempts < MAX_AUTOMATIC_DOWNLOAD_ATTEMPTS {
             Some(now.saturating_add(2u64 << (attempts - 1)))
         } else {
             None
@@ -148,7 +180,8 @@ impl Store {
             .collect::<std::result::Result<Vec<_>, _>>()?;
         let mut next = None;
         for id in ids {
-            if self.dirty_draft(&id)? || crate::namespace::blocks_upload(&self.db, &id)? {
+            if self.dirty_draft(&id)? || crate::namespace::blocks_upload(&self.db, &id)?
+                || self.download_permission_denied(&id)? {
                 continue;
             }
             if let Some(at) = self.download_failure(&id)?.and_then(|f| f.retry_at) {

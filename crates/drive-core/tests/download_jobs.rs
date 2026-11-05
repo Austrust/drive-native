@@ -33,6 +33,52 @@ fn fixture() -> (tempfile::TempDir, Store) {
     (d, s)
 }
 #[test]
+fn definite_read_refusal_survives_restart_without_automatic_retry() {
+    use write_permissions::{self as permissions, Action};
+    let (directory, mut store) = fixture();
+    store.ensure_fs_root("root").unwrap();
+    let t = ticket("v1");
+    store.pin("file", true).unwrap();
+    store.begin_download(&t).unwrap();
+    permissions::record_observed(&store, "root", "file", Action::Read, false).unwrap();
+    store.refuse_download(&t, 100).unwrap();
+    let failure = store.download_failure("file").unwrap().unwrap();
+    assert_eq!(failure.attempts, 1);
+    assert_eq!(failure.retry_at, None);
+    drop(store);
+    let mut store = Store::open(directory.path()).unwrap();
+    assert_eq!(store.download_failure("file").unwrap(), Some(failure));
+    assert!(!store.download_ready(&t, u64::MAX).unwrap());
+    assert!(!store.wants_background_download(&t).unwrap());
+    assert_eq!(store.next_download_retry().unwrap(), None);
+    assert!(matches!(store.begin_download(&t), Err(Error::Io(e)) if e.raw_os_error()==Some(libc::EACCES)));
+    // Retrying a transfer alone cannot override effective permission evidence.
+    assert!(store.retry_download("file").unwrap());
+    assert!(!store.download_ready(&t, u64::MAX).unwrap());
+    permissions::reset_observed(&store, "root").unwrap();
+    assert!(store.download_ready(&t, 0).unwrap());
+    assert!(store.wants_background_download(&t).unwrap());
+    store.begin_download(&t).unwrap();
+}
+
+#[test]
+fn revoked_traversal_suppresses_existing_transport_retry_wakes() {
+    use write_permissions::{self as permissions, Action};
+    let (_directory, mut store) = fixture();
+    store.ensure_fs_root("root").unwrap();
+    let t = ticket("v1");
+    store.fail_download(&t, DownloadFailureKind::Transport, None, 100).unwrap();
+    permissions::record_observed(&store, "root", "root", Action::Traverse, false).unwrap();
+    assert!(!store.download_ready(&t, u64::MAX).unwrap());
+    assert!(!store.wants_background_download(&t).unwrap());
+    assert_eq!(store.next_download_retry().unwrap(), None);
+    permissions::reset_observed(&store, "root").unwrap();
+    assert_eq!(store.next_download_retry().unwrap(), Some(102));
+    assert!(!store.download_ready(&t, 101).unwrap());
+    assert!(store.download_ready(&t, 102).unwrap());
+}
+
+#[test]
 fn failure_backoff_survives_restart_and_stops_until_explicit_retry() {
     let (d, mut s) = fixture();
     let t = ticket("v1");

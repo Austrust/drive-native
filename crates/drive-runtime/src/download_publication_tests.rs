@@ -56,12 +56,44 @@ fn native_read_refusal_learns_only_the_requested_identity_and_recheck_releases_r
         }
         assert!(store.open_cached("file").is_err());
         assert_eq!(store.download_failure("file").unwrap().is_some(), !invalidate_inflight);
+        if refused && !invalidate_inflight {
+            assert_eq!(store.download_failure("file").unwrap().unwrap().retry_at, None);
+            assert!(!store.download_ready(&DownloadTicket { id: "file".into(), version: "v1".into() }, u64::MAX).unwrap());
+        }
         if invalidate_inflight {
             assert!(store.download_ready(&DownloadTicket { id: "file".into(), version: "v1".into() }, unix_seconds()).unwrap());
         }
         permissions::invalidate_remote_permissions(&store, "root").unwrap();
         assert_eq!(permissions::decide(&store, "root", "file", Action::Read).unwrap(), Decision::Unknown);
         assert_eq!(store.download_failure("file").unwrap().is_none(), refused);
+    }
+}
+
+#[test]
+fn bridge_respects_read_denial_before_cached_body_or_new_flight() {
+    use drive_core::write_permissions::{self as permissions, Action};
+    for cached in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let mut store = Store::open(directory.path()).unwrap();
+        let root = Node { id:"root".into(), parent:None, name:"root".into(), version:"v1".into(), directory:true, metadata:None };
+        let file = Node { id:"file".into(), parent:Some("root".into()), name:"file".into(), version:"v1".into(), directory:false, metadata:None };
+        store.install_remote_snapshot(&[root, file.clone()], "1", "server").unwrap();
+        store.ensure_fs_root("root").unwrap();
+        store.pin("file", true).unwrap();
+        if cached {
+            store.publish_download(&DownloadTicket { id:"file".into(), version:"v1".into() }, b"cached", &drive_core::sha256(b"cached")).unwrap();
+        }
+        permissions::record_observed(&store, "root", "file", Action::Read, false).unwrap();
+        let bridge = Bridge::offline(Arc::new(drive_core::SharedStore::new(store))).unwrap();
+        assert_eq!(bridge.ensure(&file), Err(libc::EACCES));
+        bridge.refresh_cached();
+        assert!(bridge.flights.lock().unwrap().is_empty());
+        let store = bridge.store.lock().unwrap();
+        assert!(store.download_failure("file").unwrap().is_none());
+        assert_eq!(store.open_cached("file").is_ok(), cached);
+        permissions::reset_observed(&store, "root").unwrap();
+        drop(store);
+        assert_eq!(bridge.ensure(&file), if cached { Ok(()) } else { Err(libc::ENETDOWN) });
     }
 }
 
