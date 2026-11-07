@@ -779,3 +779,41 @@ fn journal_backlog_over_the_limit_forces_a_full_rebuild() {
     assert!(projection.seed("two").unwrap().pinned);
     stop_and_join(&service, task);
 }
+
+/// One public-API write path touches four journal sources at once: `nodes`,
+/// `local_creations`, `namespace_overlay` and `namespace_ops`; removing the
+/// local creation touches `local_unlinks` again.
+#[test]
+fn local_creation_and_removal_flow_into_the_projection() {
+    let (_dir, service) = fixture();
+    let (cache, task) = start(&service, MAX_CACHED_NODES);
+    let mut projection = wait_ready(&cache);
+
+    let created;
+    {
+        let mut store = service.bridge.store.lock().unwrap();
+        created = store
+            .create_local_directory("folder", "newdir", 0o755)
+            .unwrap();
+    }
+    projection = wait_matches(&service, &cache, "local creation", projection.generation());
+    assert!(projection.seed(&created.id).is_some());
+    assert!(projection
+        .children("folder")
+        .iter()
+        .any(|(id, directory)| id == &created.id && *directory));
+
+    {
+        let mut store = service.bridge.store.lock().unwrap();
+        store
+            .unlink_local("folder", "newdir", &created.id, true)
+            .unwrap();
+    }
+    projection = wait_matches(&service, &cache, "local removal", projection.generation());
+    assert!(projection.seed(&created.id).is_none());
+    assert!(!projection
+        .children("folder")
+        .iter()
+        .any(|(id, _)| id == &created.id));
+    stop_and_join(&service, task);
+}
