@@ -607,3 +607,41 @@ fn access_denial_hides_and_restoring_reveals_the_subtree_in_both_queries() {
     assert!(scoped.contains("den1"));
     assert!(scoped.contains("root"));
 }
+
+/// `access_blocked` also follows the overlay remote-parent edge, so a denial can
+/// hide a node that is nowhere below the denied directory in the local tree. A
+/// scoped query rooted at the denied directory cannot see (or later restore)
+/// such rows; the runtime worker therefore rebuilds on ACL journal entries
+/// instead of doing a subtree refresh (queue review R2, security relevant).
+#[test]
+fn overlay_remote_parent_edges_are_out_of_scope_for_a_denied_subtree_refresh() {
+    let (_dir, s) = small_fixture();
+    let ids = |rows: &[StatusSeed]| -> HashSet<String> {
+        rows.iter().map(|row| row.id.clone()).collect()
+    };
+    // `b1` lives under `b`, but its overlay remote parent is the denied `den`.
+    s.db.execute(
+        "INSERT INTO namespace_overlay(node,remote) VALUES('b1','{\"parent\":\"den\"}')",
+        [],
+    )
+    .unwrap();
+
+    // The authoritative scan hides `b1` through the overlay edge.
+    let full = ids(&s.desktop_status_seeds().unwrap());
+    assert!(!full.contains("b1"));
+    // Even a scoped query rooted at `b1`'s local parent hides it...
+    let scoped_parent = ids(&s.desktop_status_seeds_for(&["b".to_owned()]).unwrap());
+    assert!(!scoped_parent.contains("b1"));
+    // ...but a scoped query rooted at the denied directory does not even cover
+    // it: this is the gap a subtree refresh cannot close.
+    let scoped_den = ids(&s.desktop_status_seeds_for(&["den".to_owned()]).unwrap());
+    assert!(!scoped_den.contains("b1"));
+
+    // Restoring the ACL brings `b1` back in the full scan, while the scoped
+    // query rooted at `den` still never mentions it.
+    s.db.execute("DELETE FROM access_denied WHERE node='den'", [])
+        .unwrap();
+    let full = ids(&s.desktop_status_seeds().unwrap());
+    assert!(full.contains("b1"));
+    assert!(!ids(&s.desktop_status_seeds_for(&["den".to_owned()]).unwrap()).contains("b1"));
+}

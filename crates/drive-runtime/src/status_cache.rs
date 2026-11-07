@@ -521,6 +521,15 @@ impl Worker<'_> {
         let mut keys: HashSet<(Option<String>, String)> = HashSet::new();
         let mut subtree_roots: Vec<String> = Vec::new();
         for change in &changes {
+            // `access_blocked` is a view over `access_denied`, `nodes.parent` and
+            // the overlay remote-parent edge. A denial can therefore hide rows
+            // that are nowhere below the named node in the local tree (nodes
+            // whose overlay remote parent is the denied node), so a scoped
+            // re-read of the named subtree would leak them. Rebuild instead; ACL
+            // changes are rare.
+            if change.source == "access_denied" {
+                return Ok(Some(Batch::Rebuild(watermark.cursor)));
+            }
             if let Some(id) = &change.old_node {
                 ids.insert(id.clone());
             }
@@ -534,7 +543,7 @@ impl Worker<'_> {
                 keys.insert((change.new_parent.clone(), name.clone()));
             }
             if change.scope == ChangeScope::SubtreeAndAncestors
-                && self.subtree_needs_refresh(change)
+                && subtree_needs_refresh(&self.rows, &self.children, change)
             {
                 // A namespace-root location (`parent IS NULL`) would make the
                 // scoped query take its full-scan fallback; never do that inside
@@ -600,7 +609,10 @@ impl Worker<'_> {
             }
         }
         for id in walked {
-            if !visible.contains(&id) {
+            // A row that another change on the same page already refreshed (for
+            // example a descendant that moved out of the walked directory) must
+            // keep that newer state; dropping it here would hide a visible row.
+            if !visible.contains(&id) && !seen.contains(&id) {
                 updates.push((id, None));
             }
         }
@@ -613,38 +625,6 @@ impl Worker<'_> {
             next,
             has_more,
         }))
-    }
-
-    /// Subtree-scoped invalidations whose descendants' visibility can change and
-    /// therefore cannot be repaired by refreshing the named node alone.
-    ///
-    /// Seed rows are row-local; the inherited part is the `access_blocked`
-    /// filter (it walks `nodes.parent` and the overlay remote-parent edges). A
-    /// denial, an overlay relocation/removal or a directory move can hide or
-    /// reveal the whole subtree below the named node.
-    fn subtree_needs_refresh(&self, change: &StatusChange) -> bool {
-        match change.source.as_str() {
-            "access_denied" => true,
-            // Overlay edits can only hide descendants when the overlay node
-            // already has projected children; plain file overlays are row-local.
-            "namespace_overlay" => change
-                .new_node
-                .as_ref()
-                .or(change.old_node.as_ref())
-                .is_some_and(|id| self.children.contains_key(id)),
-            // A move changes the inherited `access_blocked` chain below the
-            // moved directory. Inserts/deletes and renames do not.
-            "nodes" => {
-                change.old_node.is_some()
-                    && change.new_node.is_some()
-                    && change.old_parent != change.new_parent
-                    && change
-                        .new_node
-                        .as_ref()
-                        .is_some_and(|id| self.children.contains_key(id))
-            }
-            _ => false,
-        }
     }
 
     /// Rebuilds the working projection from a fresh committed scan. The previous
@@ -790,6 +770,47 @@ impl Worker<'_> {
         }
         self.idle_wait = (self.idle_wait * 2).min(IDLE_WAIT_MAX);
         self.idle_wait
+    }
+}
+
+/// Subtree-scoped invalidations whose descendants' visibility can change and
+/// therefore cannot be repaired by refreshing the named node alone.
+///
+/// Seed rows are row-local; the inherited part is the `access_blocked` filter
+/// (it walks `nodes.parent` and the overlay remote-parent edges). An overlay
+/// relocation/removal or a directory move can hide or reveal the whole subtree
+/// below the named node. ACL edits are not handled here: `access_denied` can
+/// hide rows outside the named node's local subtree through the overlay
+/// remote-parent edge, so `read_batch` rebuilds for them instead.
+///
+/// A node that is currently absent from the projection may be hidden by that
+/// inherited chain. When it becomes visible again (a move out of an overlay-
+/// denied position, or an overlay edit that points it back at a visible parent)
+/// its descendants were never projected, so the refresh must cover the whole
+/// subtree even though no child edge exists yet. Refreshing only the named row
+/// would leave those descendant rows missing until the next full rebuild (#8
+/// H1). A move of a hidden node is therefore treated like a directory move.
+fn subtree_needs_refresh(
+    rows: &HashMap<String, StatusSeed>,
+    children: &HashMap<String, Children>,
+    change: &StatusChange,
+) -> bool {
+    let Some(node) = change.new_node.as_ref().or(change.old_node.as_ref()) else {
+        return false;
+    };
+    let was_hidden = !rows.contains_key(node);
+    let was_visible_directory = children.contains_key(node);
+    match change.source.as_str() {
+        "namespace_overlay" => was_visible_directory || (was_hidden && change.new_node.is_some()),
+        // A move changes the inherited `access_blocked` chain below the moved
+        // node. Inserts/deletes and renames do not.
+        "nodes" => {
+            change.old_node.is_some()
+                && change.new_node.is_some()
+                && change.old_parent != change.new_parent
+                && (was_visible_directory || was_hidden)
+        }
+        _ => false,
     }
 }
 

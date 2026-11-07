@@ -545,7 +545,6 @@ fn projection_startup_delta_and_rebuild_costs() {
     // Readers must stay fast while the worker clones a large projection: sample
     // `snapshot()` around a burst of commits that trigger publication.
     let mut worst_snapshot = Duration::ZERO;
-    let mut generation = projection.generation();
     {
         let mut store = service.bridge.store.lock().unwrap();
         for index in 0..8 {
@@ -559,11 +558,11 @@ fn projection_startup_delta_and_rebuild_costs() {
         let started = Instant::now();
         let _ = cache.snapshot();
         worst_snapshot = worst_snapshot.max(started.elapsed());
-        if let Some(published) = cache.snapshot() {
-            if published.generation() > generation {
-                generation = published.generation();
-                break;
-            }
+        if cache
+            .snapshot()
+            .is_some_and(|published| published.generation() > projection.generation())
+        {
+            break;
         }
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -817,3 +816,193 @@ fn local_creation_and_removal_flow_into_the_projection() {
         .any(|(id, _)| id == &created.id));
     stop_and_join(&service, task);
 }
+
+/// Regression for issue #8 H1: a directory hidden by the inherited
+/// `access_blocked` chain has no projected children, so "already has children"
+/// alone misses the moment it becomes visible again. The invalidation trigger
+/// must treat a previously hidden node as a subtree refresh; otherwise its
+/// descendants are never re-projected and stay missing until a full rebuild,
+/// while the directory's aggregate status is silently wrong.
+#[test]
+fn hidden_to_visible_subtree_invalidations_are_recognized() {
+    use super::{build_children, subtree_needs_refresh};
+    use drive_core::status_changes::{ChangeScope, StatusChange};
+    use std::collections::HashMap;
+
+    fn seed(id: &str, parent: Option<&str>, directory: bool) -> StatusSeed {
+        StatusSeed {
+            id: id.into(),
+            parent: parent.map(str::to_owned),
+            directory,
+            pinned: false,
+            overlay: false,
+            detailed: false,
+        }
+    }
+
+    fn change(
+        source: &str,
+        old_node: Option<&str>,
+        new_node: Option<&str>,
+        old_parent: Option<&str>,
+        new_parent: Option<&str>,
+    ) -> StatusChange {
+        StatusChange {
+            sequence: 1,
+            source: source.into(),
+            operation: "UPDATE".into(),
+            scope: ChangeScope::SubtreeAndAncestors,
+            old_node: old_node.map(str::to_owned),
+            new_node: new_node.map(str::to_owned),
+            old_parent: old_parent.map(str::to_owned),
+            new_parent: new_parent.map(str::to_owned),
+            old_name: old_node.map(str::to_owned),
+            new_name: new_node.map(str::to_owned),
+            bytes: 1,
+        }
+    }
+
+    // `D` is denied, so hidden `p` (a directory below it) and every descendant
+    // of `p` are absent from the projection; only the visible part is projected.
+    let mut rows: HashMap<String, StatusSeed> = HashMap::new();
+    rows.insert("root".into(), seed("root", None, true));
+    rows.insert("d".into(), seed("d", Some("root"), true));
+    rows.insert("f".into(), seed("f", Some("d"), false));
+    let children = build_children(&rows);
+
+    // (a) overlay edit that points hidden `p` back at the visible parent `d`.
+    let overlay_reveal = change(
+        "namespace_overlay",
+        Some("p"),
+        Some("p"),
+        Some("d"),
+        Some("d"),
+    );
+    assert!(
+        subtree_needs_refresh(&rows, &children, &overlay_reveal),
+        "an overlay edit that reveals a hidden directory must refresh its subtree"
+    );
+
+    // (b) move of the hidden directory out of the denied subtree.
+    let move_reveal = change("nodes", Some("p"), Some("p"), Some("D"), Some("d"));
+    assert!(
+        subtree_needs_refresh(&rows, &children, &move_reveal),
+        "moving a hidden directory into visibility must refresh its subtree"
+    );
+
+    // ACL edits are deliberately NOT subtree refreshes: `access_denied` can hide
+    // rows outside the named node's local subtree through the overlay
+    // remote-parent edge, so `read_batch` rebuilds for them instead.
+    let acl_hide = change(
+        "access_denied",
+        Some("D"),
+        Some("D"),
+        Some("root"),
+        Some("root"),
+    );
+    assert!(!subtree_needs_refresh(&rows, &children, &acl_hide));
+
+    // Controls: row-local writes must not widen into a subtree query.
+    let visible_file_move = change("nodes", Some("f"), Some("f"), Some("d"), Some("root"));
+    assert!(!subtree_needs_refresh(
+        &rows,
+        &children,
+        &visible_file_move
+    ));
+    let visible_file_overlay = change(
+        "namespace_overlay",
+        Some("f"),
+        Some("f"),
+        Some("d"),
+        Some("d"),
+    );
+    assert!(!subtree_needs_refresh(
+        &rows,
+        &children,
+        &visible_file_overlay
+    ));
+    let rename = change("nodes", Some("d"), Some("d"), Some("root"), Some("root"));
+    assert!(!subtree_needs_refresh(&rows, &children, &rename));
+    let insert = change("nodes", None, Some("new"), Some("d"), Some("d"));
+    assert!(!subtree_needs_refresh(&rows, &children, &insert));
+
+    // A visible directory still widens on a move.
+    let visible_dir_move = change("nodes", Some("d"), Some("d"), Some("root"), Some("top"));
+    assert!(subtree_needs_refresh(&rows, &children, &visible_dir_move));
+}
+
+/// Regression for queue review R1: the subtree walk's "remove rows that the
+/// scoped re-read no longer returns" pass must not overwrite a row that another
+/// change on the same journal page already refreshed. A directory move together
+/// with a descendant move out of that directory is the minimal case.
+#[test]
+fn descendant_moved_out_of_a_moved_directory_stays_visible() {
+    let (_dir, service) = fixture();
+    // Seed one directory with one child through the committed remote path.
+    {
+        let mut store = service.bridge.store.lock().unwrap();
+        store
+            .receive(&drive_core::Batch {
+                from: "1".into(),
+                to: "2".into(),
+                events: vec![
+                    drive_core::Event {
+                        id: "e1".into(),
+                        change: drive_core::Change::Upsert(node("d1", Some("root"), true)),
+                    },
+                    drive_core::Event {
+                        id: "e2".into(),
+                        change: drive_core::Change::Upsert(node("x", Some("d1"), false)),
+                    },
+                ],
+            })
+            .unwrap();
+        store.drain().unwrap();
+    }
+    let (cache, task) = start(&service, MAX_CACHED_NODES);
+    let projection = wait_ready(&cache);
+    assert_eq!(projection.seed("x").unwrap().parent.as_deref(), Some("d1"));
+
+    // Both writes land on one page: the directory move first (its subtree walk
+    // collects the old child and would mark it removed), then the child's own
+    // move out of that directory.
+    {
+        let mut store = service.bridge.store.lock().unwrap();
+        store
+            .receive(&drive_core::Batch {
+                from: "2".into(),
+                to: "3".into(),
+                events: vec![
+                    drive_core::Event {
+                        id: "e3".into(),
+                        change: drive_core::Change::Upsert(node("d1", Some("folder"), true)),
+                    },
+                    drive_core::Event {
+                        id: "e4".into(),
+                        change: drive_core::Change::Upsert(node("x", Some("root"), false)),
+                    },
+                ],
+            })
+            .unwrap();
+        store.drain().unwrap();
+    }
+    let projection = wait_matches(
+        &service,
+        &cache,
+        "directory move with a descendant move",
+        projection.generation(),
+    );
+    let x = projection
+        .seed("x")
+        .expect("a descendant moved out on the same page must stay visible");
+    assert_eq!(
+        x.parent.as_deref(),
+        Some("root"),
+        "the descendant keeps the newer location from the same page"
+    );
+    assert!(projection.children("root").iter().any(|(id, _)| id == "x"));
+    assert!(!projection.children("d1").iter().any(|(id, _)| id == "x"));
+    assert_eq!(projection_rows(&projection), full_rows(&service));
+    stop_and_join(&service, task);
+}
+
