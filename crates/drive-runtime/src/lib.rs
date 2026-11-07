@@ -9,6 +9,7 @@ pub mod initialization_metrics;
 pub mod mount_registry;
 pub mod rpc;
 pub mod service;
+mod status_cache;
 pub mod transport;
 mod wait_activity;
 pub mod wire;

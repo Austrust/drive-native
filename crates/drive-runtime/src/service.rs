@@ -205,6 +205,8 @@ pub struct Control {
 pub struct Service {
     pub profile: Profile,
     pub bridge: Arc<Bridge>,
+    /// Committed desktop status projection published off the global lock.
+    status_cache: std::sync::OnceLock<Arc<crate::status_cache::StatusCache>>,
     pub control: Mutex<Control>,
     changed: Condvar,
     pub stop: AtomicBool,
@@ -224,12 +226,14 @@ pub struct Tasks {
     supervisor: std::thread::JoinHandle<()>,
     uploads: std::thread::JoinHandle<()>,
     cache: std::thread::JoinHandle<()>,
+    status: std::thread::JoinHandle<()>,
 }
 impl Tasks {
     pub fn join(self) {
         let _ = self.supervisor.join();
         let _ = self.uploads.join();
         let _ = self.cache.join();
+        let _ = self.status.join();
     }
 }
 /// How often the cache worker wakes when nothing notifies it.
@@ -288,6 +292,7 @@ impl Service {
         Ok(Arc::new(Self {
             profile,
             bridge,
+            status_cache: std::sync::OnceLock::new(),
             control: Mutex::new(Control {
                 state: if paused {
                     ConnectionState::Paused
@@ -453,11 +458,23 @@ impl Service {
         let a = self.clone();
         let b = self.clone();
         let c = self.clone();
+        let (status_cache, status_task) = crate::status_cache::StatusCache::start(self.clone());
+        let _ = self.status_cache.set(status_cache);
         Tasks {
             supervisor: std::thread::spawn(move || a.supervise()),
             uploads: std::thread::spawn(move || b.bridge.upload_loop(&b.stop)),
             cache: std::thread::spawn(move || c.cache_loop()),
+            status: status_task,
         }
+    }
+    /// Latest committed desktop status projection, if the cache is ready.
+    ///
+    /// Callers must treat `None` as "use the authoritative SQLite path"; the
+    /// projection is only published after a complete committed read.
+    pub(crate) fn status_projection(
+        &self,
+    ) -> Option<Arc<crate::status_cache::StatusProjection>> {
+        self.status_cache.get().and_then(|cache| cache.snapshot())
     }
     pub fn cache_policy_changed(&self) {
         self.cache_policy_dirty.store(true, Ordering::Release);
