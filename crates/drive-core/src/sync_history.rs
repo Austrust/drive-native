@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_RETENTION_DAYS: u32 = 30;
 pub const DEFAULT_RETENTION_RECORDS: u32 = 10_000;
+const MAX_RETENTION_DAYS: u32 = 3_650;
+const MAX_RETENTION_RECORDS: u32 = 1_000_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SyncHistoryRecord {
@@ -298,6 +300,17 @@ pub(crate) fn record_abandoned_upload(
     Ok(())
 }
 
+/// Missing, unparsable, or out-of-range persisted settings are treated as absent
+/// so a read-only query cannot fail on a corrupt metadata row; the defaults apply.
+fn retention_value(db: &Connection, key: &str, maximum: u32) -> Result<Option<u32>> {
+    let value: Option<String> = db
+        .query_row("SELECT value FROM metadata WHERE key=?1", [key], |r| r.get(0))
+        .optional()?;
+    Ok(value
+        .and_then(|value| value.parse::<u32>().ok())
+        .filter(|value| (1..=maximum).contains(value)))
+}
+
 fn prune(db: &Connection, at: i64) -> Result<usize> {
     let removed = db.execute("DELETE FROM sync_history WHERE completed_at < ?1-86400*(SELECT CAST(value AS INTEGER) FROM metadata WHERE key='sync_history_days')", [at])?;
     Ok(removed + db.execute("DELETE FROM sync_history WHERE id IN (SELECT id FROM sync_history ORDER BY seq DESC LIMIT -1 OFFSET (SELECT CAST(value AS INTEGER) FROM metadata WHERE key='sync_history_records'))", [])?)
@@ -375,8 +388,22 @@ impl Store {
         tx.commit()?;
         Ok(removed)
     }
+    /// Read-only view of the persisted retention. The GUI shows these limits and
+    /// must still work when the metadata rows are missing or damaged.
+    pub fn sync_history_retention(&self) -> Result<(u32, u32)> {
+        Ok((
+            retention_value(&self.db, "sync_history_days", MAX_RETENTION_DAYS)?
+                .unwrap_or(DEFAULT_RETENTION_DAYS),
+            retention_value(&self.db, "sync_history_records", MAX_RETENTION_RECORDS)?
+                .unwrap_or(DEFAULT_RETENTION_RECORDS),
+        ))
+    }
+    /// Metadata-only change: pruning history never deletes files, drafts, cached
+    /// bodies, or queued operations. Callers must still bind requests to a task.
     pub fn set_sync_history_retention(&mut self, days: u32, records: u32) -> Result<()> {
-        if days==0 || days>3650 || records==0 || records>1_000_000 { return Err(invalid()); }
+        if days == 0 || days > MAX_RETENTION_DAYS || records == 0 || records > MAX_RETENTION_RECORDS {
+            return Err(invalid());
+        }
         let tx=self.db.transaction()?;
         tx.execute("UPDATE metadata SET value=?1 WHERE key='sync_history_days'", [days.to_string()])?;
         tx.execute("UPDATE metadata SET value=?1 WHERE key='sync_history_records'", [records.to_string()])?;
@@ -569,6 +596,35 @@ mod tests {
         assert!(serde_json::from_str::<ClearHistory>(r#"{"mode":"all","days":30}"#).is_err());
         assert!(serde_json::from_str::<ClearHistory>(r#"{"mode":"all","unexpected":true}"#).is_err());
         assert!(serde_json::from_str::<ClearHistory>(r#"{"mode":"oops"}"#).is_err());
+    }
+
+    #[test]
+    fn retention_reads_defaults_rejects_invalid_settings_and_only_affects_metadata_history() {
+        let (_dir,mut store)=fixture();
+        assert_eq!(store.sync_history_retention().unwrap(),(DEFAULT_RETENTION_DAYS,DEFAULT_RETENTION_RECORDS));
+        let op=store.save_local("file",b"private unsent body").unwrap();
+        let bytes=store.open_cached("file").unwrap().size().unwrap();
+        store.set_sync_history_retention(7,1).unwrap();
+        assert_eq!(store.sync_history_retention().unwrap(),(7,1));
+        add(&mut store,"keep","failed");
+        assert_eq!(rows(&store).len(),1);
+        for (days,records) in [(0,1),(3_651,1),(1,0),(1,1_000_001)] {
+            assert!(store.set_sync_history_retention(days,records).is_err());
+        }
+        assert_eq!(store.sync_history_retention().unwrap(),(7,1));
+        // Missing, corrupt, or out-of-range rows fall back to the defaults instead
+        // of turning a read-only settings query into a hard failure.
+        store.db.execute_batch("UPDATE metadata SET value='corrupt' WHERE key='sync_history_days';
+          DELETE FROM metadata WHERE key='sync_history_records';").unwrap();
+        assert_eq!(store.sync_history_retention().unwrap(),(DEFAULT_RETENTION_DAYS,DEFAULT_RETENTION_RECORDS));
+        store.db.execute_batch("UPDATE metadata SET value='0' WHERE key='sync_history_days';
+          INSERT INTO metadata(key,value) VALUES('sync_history_records','999999999');").unwrap();
+        assert_eq!(store.sync_history_retention().unwrap(),(DEFAULT_RETENTION_DAYS,DEFAULT_RETENTION_RECORDS));
+        // Retention and pruning are metadata-only: unsent content and queued
+        // upload operations survive both the setting change and the prune.
+        assert_eq!(store.open_cached("file").unwrap().size().unwrap(),bytes);
+        assert_eq!(store.upload_job(&op).unwrap().state,"pending");
+        assert_eq!(rows(&store).len(),1);
     }
 
     #[test]

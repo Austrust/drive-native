@@ -366,12 +366,35 @@ pub fn overview(service: &Service) -> io::Result<String> {
         let c = service.control.lock().unwrap();
         (c.state, c.error, c.revision)
     };
+    let active_transfers = service.bridge.transfer_entries().len();
+    let initialization = service.bridge.initialization.snapshot();
     let store = service.bridge.store.lock().unwrap();
     let pending = store.pending_operations().map_err(|_| other())?
         + store.pending_namespace_operations().map_err(|_| other())?;
     let preview_only = preview::active(&store, &service.profile.scope.file_id)?;
     let permission = drive_core::write_permissions::policy(&store, &service.profile.scope.file_id).map_err(|_|other())?;
     let writable = drive_core::write_permissions::mount_writable(&store, &service.profile.scope.file_id).map_err(|_|other())?;
+    let queue_health = store.queue_health().map_err(|_| other())?;
+    let issue_count = store.sync_issue_count(&service.profile.scope.file_id).ok();
+    let cache = store.cache_availability().map_err(|_| other())?;
+    let uncertain = queue_health.namespace_uncertain + queue_health.upload_uncertain;
+    let sync_state = if error.is_some()
+        || state == crate::service::ConnectionState::NeedsAttention
+    {
+        "needs_attention"
+    } else if state == crate::service::ConnectionState::Paused {
+        "paused"
+    } else if active_transfers > 0 {
+        "transferring"
+    } else if initialization.active
+        && initialization.phase != crate::initialization::Phase::Waiting
+    {
+        "checking"
+    } else if pending > 0 || uncertain > 0 {
+        "pending"
+    } else {
+        "idle"
+    };
     let background = service.bridge.background_failure();
     let background_error = background.as_ref().map(|failure| failure.message);
     let background_error_kind = background.as_ref().map(|failure| failure.source.as_str());
@@ -389,14 +412,17 @@ pub fn overview(service: &Service) -> io::Result<String> {
         "skipped_symlinks":store.skipped_symlink_count().map_err(|_|other())?,
         "skipped_permission_directories":store.inaccessible_count().map_err(|_|other())?,
         "pending_operations":pending,"revision":revision,"local_revision":store.local_revision(),
-        "queue_health":store.queue_health().map_err(|_|other())?,
+        "queue_health":queue_health,
         "downloads_started":service.bridge.downloads.load(Ordering::Relaxed),
         "download_errors":store.download_failure_count().map_err(|_|other())?,
         "download_diagnostics":{"failures_seen":service.bridge.download_failures_seen.load(Ordering::Relaxed),
             "last_failure":service.bridge.last_download_failure.lock().unwrap().as_ref().map(|(kind,code)|serde_json::json!({"kind":kind,"server_code":code}))},
         "connection_diagnostics":service.diagnostics.snapshot(),
+        "sync_state":sync_state,"active_transfers":active_transfers,"issue_count":issue_count,
+        "cache_availability":{"state":cache.state,"total":cache.total,"offline":cache.offline,"pinned":cache.pinned},
+        "version":{"build":env!("CARGO_PKG_VERSION"),"state_schema":drive_core::STATE_SCHEMA_VERSION,"ipc":crate::wire::VERSION},
         "shutdown":service.shutdown_diagnostics.snapshot(),
-        "initialization":service.bridge.initialization.snapshot(),
+        "initialization":initialization,
         "host":service.profile.host,"username":service.profile.username,"scope_path":service.profile.scope.path}).to_string())
 }
 
@@ -444,6 +470,52 @@ pub fn clear_sync_history(service: &Service, body: &str) -> io::Result<String> {
     Ok(serde_json::json!({"removed":removed}).to_string())
 }
 
+/// Retention IPC is metadata-only: it never deletes files, drafts, cached
+/// bodies, or queued operations. A busy Store still answers immediately.
+pub fn get_sync_history_retention(service: &Service) -> io::Result<String> {
+    let Ok(store) = service.bridge.store.try_lock() else {
+        return Ok(serde_json::json!({"error":"busy"}).to_string());
+    };
+    let (days, records) = store.sync_history_retention().map_err(|_| other())?;
+    Ok(serde_json::json!({"schema":1,"task_id":service.profile.task_id,
+        "days":days,"records":records}).to_string())
+}
+
+pub fn set_sync_history_retention(service: &Service, body: &str) -> io::Result<String> {
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Request {
+        schema: u8,
+        task_id: String,
+        days: u32,
+        records: u32,
+    }
+    let request: Request = history_request(body)?;
+    if request.schema != 1 || request.task_id != service.profile.task_id {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "wrong task or retention settings version",
+        ));
+    }
+    let Ok(mut store) = service.bridge.store.try_lock() else {
+        return Ok(serde_json::json!({"error":"busy"}).to_string());
+    };
+    store
+        .set_sync_history_retention(request.days, request.records)
+        .map_err(|_| other())?;
+    Ok(serde_json::json!({"saved":true,"days":request.days,
+        "records":request.records}).to_string())
+}
+
+/// Slot identifier of the D-Bus instance serving this mount. Legacy
+/// single-mount installations have none; the GUI falls back to its own source
+/// slot in both cases.
+fn mount_slot() -> Option<String> {
+    std::env::var("DRIVE_NATIVE_INSTANCE")
+        .ok()
+        .filter(|slot| !slot.is_empty())
+}
+
 /// Resolve identity now, not the event's obsolete pathname. This function only
 /// reads metadata and cached bodies; it never touches FUSE or the network.
 pub fn resolve_history_target(service: &Service, body: &str) -> io::Result<String> {
@@ -463,7 +535,8 @@ pub fn resolve_history_target(service: &Service, body: &str) -> io::Result<Strin
     };
     let record = store.sync_history_record(request.id).map_err(|_| other())?;
     let mut response = serde_json::json!({"path":null,"exists":false,"mount_online":online,
-        "reason":"not_found","parent_path":null,"offline_available":false,"node":null});
+        "reason":"not_found","parent_path":null,"offline_available":false,"cached":false,
+        "mount_slot":mount_slot(),"suggested_action":null,"node":null});
     let Some(record) = record else { return Ok(response.to_string()); };
     if record.mount != service.profile.scope.file_id { return Ok(response.to_string()); }
     let Some(id) = record.node else { return Ok(response.to_string()); };
@@ -490,18 +563,29 @@ pub fn resolve_history_target(service: &Service, body: &str) -> io::Result<Strin
         }
         Err(_) => { response["reason"]="unavailable".into(); return Ok(response.to_string()); }
     };
-    if !mounted { response["reason"]="unavailable".into(); return Ok(response.to_string()); }
-    let Some(path) = history_current_path(&store,service,&id)? else {
-        response["reason"]="unavailable".into(); return Ok(response.to_string());
-    };
-    let cached = node.directory || store.open_dirty_draft(&id).map_err(|_| other())?.is_some()
+    let cached = node.directory
+        || store.open_dirty_draft(&id).map_err(|_| other())?.is_some()
         || store.open_cached(&id).is_ok();
-    response["offline_available"]=cached.into();
-    response["exists"]=true.into();
+    response["offline_available"] = cached.into();
+    response["cached"] = cached.into();
+    response["exists"] = true.into();
+    // Unmounted history still reports Store-level existence and cache state so
+    // the GUI can offer a mount action. Paths stay null: they live in the mount.
+    if !mounted {
+        response["reason"] = "unavailable".into();
+        response["suggested_action"] = "start_mount".into();
+        return Ok(response.to_string());
+    }
+    let Some(path) = history_current_path(&store, service, &id)? else {
+        response["reason"] = "unavailable".into();
+        return Ok(response.to_string());
+    };
     if cached || online {
-        response["path"]=path.into();
+        response["path"] = path.into();
         response["reason"] = if cached { serde_json::Value::Null } else { "online_only".into() };
-    } else { response["reason"]="offline".into(); }
+    } else {
+        response["reason"] = "offline".into();
+    }
     Ok(response.to_string())
 }
 
@@ -790,6 +874,14 @@ impl Desktop {
     async fn clear_sync_history(&self, body: String) -> zbus::fdo::Result<String> {
         let s=self.0.clone();
         local(move || clear_sync_history(&s,&body)).await
+    }
+    async fn get_sync_history_retention(&self) -> zbus::fdo::Result<String> {
+        let s = self.0.clone();
+        local(move || get_sync_history_retention(&s)).await
+    }
+    async fn set_sync_history_retention(&self, body: String) -> zbus::fdo::Result<String> {
+        let s = self.0.clone();
+        local(move || set_sync_history_retention(&s, &body)).await
     }
     async fn get_trust_settings(&self) -> zbus::fdo::Result<String> {
         let s = self.0.clone();

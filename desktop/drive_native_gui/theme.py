@@ -57,3 +57,61 @@ def apply_window_theme(window):
         QLabel#message{padding:12px;border-radius:8px;background:palette(alternate-base);}
     """
     window.setStyleSheet(stylesheet.replace("MUTED_COLOR", muted))
+
+
+# Semantic status kinds shared by the tray icon and the main window.  Keeping
+# the colours here stops each widget from hard-coding its own hex values and
+# lets the mapping follow the active light/dark palette.
+STATUS_KINDS = ("idle", "syncing", "paused", "attention", "unknown")
+STATUS_COLORS = {
+    "light": {"idle": "#27966f", "syncing": "#4c78c5", "paused": "#748094",
+              "attention": "#c14c58", "unknown": "#626d7c"},
+    "dark": {"idle": "#5fd3a8", "syncing": "#8fb4f5", "paused": "#a8b2c2",
+             "attention": "#ff929c", "unknown": "#b5bfce"},
+}
+STATUS_ICONS = {"idle": "\u2713", "syncing": "\u00b7", "paused": "\u2016",
+                "attention": "!", "unknown": "?"}
+CONNECTION_KINDS = {
+    "online": "idle", "connecting": "syncing", "paused": "paused",
+    "locked": "attention", "needs_attention": "attention",
+    "offline": "paused", "stopping": "paused",
+}
+FILE_STATUS_KINDS = {
+    "local_complete": "idle", "pinned_complete": "idle",
+    "pending_upload": "syncing", "downloading": "syncing",
+    "updating": "syncing", "pinning": "syncing",
+    "download_retry": "syncing", "update_retry": "syncing",
+    "online_only": "unknown", "initializing": "unknown",
+    "conflict": "attention", "download_failed": "attention",
+    "update_failed": "attention", "deleted": "paused",
+}
+
+
+def is_dark_palette(palette=None):
+    if palette is None:
+        return False
+    return palette.color(QPalette.Window).lightness() < 128
+
+
+def status_color(kind, *, dark=None, palette=None):
+    """Return the hex colour for a semantic status kind."""
+    if dark is None:
+        dark = is_dark_palette(palette)
+    table = STATUS_COLORS["dark" if dark else "light"]
+    return table.get(kind, table["unknown"])
+
+
+def status_icon(kind):
+    """Return the glyph for a semantic status kind (no Qt instance required)."""
+    return STATUS_ICONS.get(kind, STATUS_ICONS["unknown"])
+
+
+def status_kind(source):
+    """Map a backend connection value, file status or semantic state to a kind."""
+    if source in STATUS_KINDS:
+        return source
+    if source in CONNECTION_KINDS:
+        return CONNECTION_KINDS[source]
+    if source in FILE_STATUS_KINDS:
+        return FILE_STATUS_KINDS[source]
+    return "unknown"

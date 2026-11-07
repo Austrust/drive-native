@@ -172,6 +172,7 @@ class ProgressTests(unittest.TestCase):
             try:
                 window.show(); app.processEvents(); window.refresh_timer.stop()
                 window.overview = {'connection': 'online', 'mounted': True}
+                window.connection_value.setText('已连接')
                 window.open_folder.setEnabled(True)
                 window.pause.setEnabled(True)
                 window.up.setEnabled(True)
@@ -186,7 +187,10 @@ class ProgressTests(unittest.TestCase):
                     self.assertTrue(window.pause.isEnabled())
                     self.assertTrue(window.up.isEnabled())
                     self.assertTrue(window.overview['mounted'])
-                    self.assertIn('枚举', window.connection_value.text())
+                    # Progress is visible, but it owns the progress area only; the
+                    # confirmed connection card must stay untouched (DEF-01).
+                    self.assertIn('枚举', window.progress_label.text())
+                    self.assertEqual(window.connection_value.text(), '已连接')
                 # A progress response cannot override a confirmed paused state.
                 window.overview['connection'] = 'paused'
                 window.connection_value.setText('已暂停')
@@ -215,7 +219,10 @@ class ProgressTests(unittest.TestCase):
                 with patch.object(window, 'start_service') as start:
                     window.initial_overview(None, 'org.freedesktop.DBus.Error.NoReply')
                     start.assert_not_called()
-                self.assertIn('枚举', window.connection_value.text())
+                # Live progress is shown without a successful overview, in the
+                # progress area rather than by overwriting the connection card.
+                self.assertIn('枚举', window.progress_label.text())
+                self.assertEqual(window.connection_value.text(), '尚未启动')
                 self.assertFalse(window.overview)
                 self.assertFalse(window.open_folder.isEnabled())
                 self.assertFalse(window.pause.isEnabled())

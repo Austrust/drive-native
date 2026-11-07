@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 from PySide6.QtCore import QObject, Signal, QCoreApplication, QEvent, Qt
+from PySide6.QtGui import QShortcut
 from PySide6.QtWidgets import QApplication, QMainWindow
 from drive_native_gui.manager import MountManager
 from drive_native_gui.window import MainWindow
@@ -417,6 +418,225 @@ class UnifiedTests(unittest.TestCase):
         text = shutdown_text({'phase': 'draining_filesystem', 'stage_elapsed_ms': 31000, 'overdue': True})
         self.assertIn('31 秒', text); self.assertIn('尚未确认停止', text)
         self.assertNotIn('31 秒', shutdown_text({'phase': 'complete', 'stage_elapsed_ms': True}))
+
+    def test_gui_settings_storage_defaults_owner_only_and_corrupt_fallback(self):
+        path = config.gui_settings_path()
+        # Constructing the window only reads global settings; it never writes at startup.
+        self.assertFalse(path.exists())
+        self.assertEqual(config.load_gui_settings(), config.default_gui_settings())
+        path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+        path.write_text('{not json', encoding='utf-8')
+        self.assertEqual(config.load_gui_settings(), config.default_gui_settings())
+        config.save_gui_settings({'schema': 1, 'notifications': {'problems': False, 'success': True}})
+        self.assertEqual(path.stat().st_mode & 0o077, 0)
+        text = path.read_text(encoding='utf-8')
+        self.assertNotIn('password', text)
+        self.assertEqual(json.loads(text),
+                         {'schema': 1, 'notifications': {'problems': False, 'success': True}})
+        self.assertEqual(config.load_gui_settings(),
+                         {'schema': 1, 'notifications': {'problems': False, 'success': True}})
+
+    def test_global_settings_page_persists_toggles_and_updates_the_notification_center(self):
+        page = self.window.settings_page
+        self.assertIs(self.window.stack.widget(1), page)
+        self.assertTrue(self.window.problems_check.isChecked())
+        self.assertIn('默认关闭', self.window.success_check.text())
+        self.assertFalse(self.window.success_check.isChecked())
+        self.assertFalse(self.window.success_timer.isActive())
+        self.assertTrue(self.window.open_history_button.accessibleName())
+        self.window.success_check.setChecked(True)
+        self.window.problems_check.setChecked(False)
+        self.assertEqual(config.load_gui_settings(),
+                         {'schema': 1, 'notifications': {'problems': False, 'success': True}})
+        self.assertTrue(self.window.success_timer.isActive())
+        self.assertFalse(self.window.notifications.enabled['problems'])
+        self.assertTrue(self.window.notifications.enabled['success'])
+        self.assertTrue(config.gui_settings_path().is_file())
+        self.window.open_history_button.click()
+        self.assertIs(self.window.stack.currentWidget(), self.window.all_page)
+        self.assertIs(self.window.all_tabs.currentWidget(), self.window.history_page)
+        # A damaged file degrades to defaults instead of blocking the next window.
+        config.gui_settings_path().write_text('{broken', encoding='utf-8')
+        self.assertEqual(config.load_gui_settings(), config.default_gui_settings())
+
+    def test_all_mounts_table_shows_activity_and_problem_columns(self):
+        headers = [self.window.table.headerItem().text(column) for column in range(6)]
+        self.assertEqual(headers, ['挂载名称', '状态', '同步活动', '问题', '远端目录', '本地位置'])
+        self.assertEqual(self.window.items[A].text(2), '—')
+        method, callback = self.window.buses[A].waiting.pop(0)
+        self.assertEqual(method, 'GetOverview')
+        callback({'task_id': 'task-' + A, 'connection': 'online', 'mounted': True,
+                  'pending_operations': 2, 'download_errors': 1,
+                  'queue_health': {'namespace_uncertain': 0, 'upload_uncertain': 0}}, None)
+        self.assertEqual(self.window.items[A].text(2), '2 项待同步')
+        self.assertEqual(self.window.items[A].text(3), '1 项待处理')
+        self.complete_overview(B)
+        self.assertEqual(self.window.items[B].text(2), '无')
+        self.assertEqual(self.window.items[B].text(3), '无')
+        # Unavailable status falls back to placeholders, never to invented values.
+        self.window.refresh_status(A)
+        method, callback = self.window.buses[A].waiting.pop(0)
+        self.assertEqual(method, 'GetOverview')
+        callback(None, 'service_unavailable')
+        self.assertEqual(self.window.items[A].text(2), '—')
+        self.assertEqual(self.window.items[A].text(3), '—')
+
+    def test_mount_row_menu_exposes_management_stop_and_history(self):
+        self.complete_overview(A)
+        menu = self.window.mount_menu(A)
+        self.assertEqual([action.text() for action in menu.actions()],
+                         ['打开管理', '打开文件夹', '暂停同步', '停止此挂载并卸载…', '同步历史'])
+        self.window.overviews[A]['connection'] = 'paused'
+        paused_menu = self.window.mount_menu(A)
+        actions = {action.text(): action for action in paused_menu.actions()}
+        self.assertIn('恢复同步', actions)
+        with patch.object(self.window, 'stop_task') as stop:
+            actions['停止此挂载并卸载…'].trigger()
+        stop.assert_called_once_with(A)
+        actions['同步历史'].trigger()
+        self.assertIs(self.window.stack.currentWidget(), self.window.pages[A])
+        self.assertIs(self.window.pages[A].tabs.currentWidget(), self.window.pages[A].history_page)
+
+    def test_stop_confirmation_distinguishes_pause_from_unmount(self):
+        from PySide6.QtWidgets import QMessageBox
+        self.complete_overview(A)
+        with patch.object(QMessageBox, 'question', return_value=QMessageBox.Cancel) as question:
+            self.assertFalse(self.window.stop_task(A))
+        text = question.call_args.args[2]
+        self.assertIn('暂停同步（保留挂载）', text)
+        self.assertIn('停止并卸载（结束挂载和服务）', text)
+        self.assertIn('不会删除缓存、草稿或远端文件', text)
+        self.assertIn('不会强制结束进程', text)
+        self.assertNotIn('StopMount', self.window.buses[A].calls)
+        self.assertIn('已取消停止', self.window.message.text())
+
+    def test_stop_task_reports_real_shutdown_stage_and_never_forces_kill(self):
+        from PySide6.QtWidgets import QMessageBox
+        self.complete_overview(A)
+        with patch.object(QMessageBox, 'question', return_value=QMessageBox.Yes):
+            self.assertTrue(self.window.stop_task(A))
+        self.assertIn('StopMount', self.window.buses[A].calls)
+        self.assertIn(A, self.window.stop_pending)
+        self.assertIn('正在正常停止', self.window.message.text())
+        self.assertIn('不会强制结束', self.window.message.text())
+        watcher = self.window.shutdown_watchers[A]
+        watcher.value = {'phase': 'detaching_mount', 'stage_elapsed_ms': 2000}
+        watcher.mounted = True
+        self.window.poll_stop_tasks()
+        self.assertIn('正在卸载目录', self.window.items[A].text(1))
+        watcher.value = {'phase': 'complete'}
+        watcher.mounted = False
+        self.window.poll_stop_tasks()
+        self.assertNotIn(A, self.window.stop_pending)
+        self.assertFalse(self.window.stop_timer.isActive())
+        self.assertIn('已停止并卸载', self.window.message.text())
+        for bus in self.window.buses.values():
+            self.assertNotIn('Terminate', bus.calls)
+            self.assertNotIn('Kill', bus.calls)
+
+    def test_page_stop_button_starts_one_confirmed_stop_and_restores_its_button(self):
+        from PySide6.QtWidgets import QMessageBox
+        self.complete_overview(A)
+        self.window.activate_task(A)
+        page = self.window.pages[A]
+        with patch.object(QMessageBox, 'question', return_value=QMessageBox.Yes) as question:
+            page.stop_and_unmount()
+        # The page confirmed once; the manager must not ask a second time.
+        question.assert_called_once()
+        self.assertIn('StopMount', self.window.buses[A].calls)
+        self.assertIn(A, self.window.stop_pending)
+        self.assertFalse(page.stop_mount.isEnabled())
+        self.assertIn('正在停止并卸载', page.stop_mount.text())
+        self.window.shutdown_watchers[A].value = {'phase': 'complete'}
+        self.window.shutdown_watchers[A].mounted = False
+        self.window.poll_stop_tasks()
+        self.assertTrue(page.stop_mount.isEnabled())
+        self.assertEqual(page.stop_mount.text(), '停止此挂载并卸载…')
+        self.assertIn('已停止并卸载', page.banner.text())
+
+    def test_stop_timeout_and_failure_explain_blocking_reason_without_force_kill(self):
+        from PySide6.QtWidgets import QMessageBox
+        self.complete_overview(A)
+        self.complete_overview(B)
+        with patch.object(QMessageBox, 'question', return_value=QMessageBox.Yes):
+            self.assertTrue(self.window.stop_task(B))
+        self.window.stop_pending[B]['deadline'] = time.monotonic() - 1
+        self.window.poll_stop_tasks()
+        self.assertNotIn(B, self.window.stop_pending)
+        timeout = self.window.message.text()
+        self.assertIn('超时', timeout)
+        self.assertIn('不会强制结束后台', timeout)
+        with patch.object(QMessageBox, 'question', return_value=QMessageBox.Yes):
+            self.assertTrue(self.window.stop_task(A))
+        self.window.shutdown_watchers[A].value = {'phase': 'failed'}
+        self.window.shutdown_watchers[A].mounted = True
+        self.window.poll_stop_tasks()
+        self.assertNotIn(A, self.window.stop_pending)
+        failure = self.window.message.text()
+        self.assertIn('停止未确认', failure)
+        self.assertIn('不会强制结束后台', failure)
+        for bus in self.window.buses.values():
+            self.assertNotIn('Terminate', bus.calls)
+
+    def test_tray_menu_offers_stop_unmount_for_each_mount(self):
+        self.window.tray.rebuild_menu()
+        submenus = [action.menu() for action in self.window.tray.menu.actions() if action.menu() is not None]
+        labels = [action.text() for menu in submenus for action in menu.actions()]
+        self.assertIn('停止此挂载并卸载…', labels)
+        with patch.object(self.window, 'stop_task') as stop:
+            for menu in submenus:
+                for action in menu.actions():
+                    if action.text() == '停止此挂载并卸载…':
+                        action.trigger()
+        stop.assert_any_call(A)
+        stop.assert_any_call(B)
+
+    def test_notification_click_reopens_the_mount_and_missing_tray_stays_silent(self):
+        method, callback = self.window.buses[A].waiting.pop(0)
+        self.assertEqual(method, 'GetOverview')
+        with patch.object(self.window.tray, 'available', return_value=True), \
+                patch.object(self.window.tray, 'show_message') as show:
+            callback({'task_id': 'task-' + A, 'connection': 'locked', 'mounted': True}, None)
+        show.assert_called_once()
+        self.assertIn('需要登录', show.call_args.args[0])
+        self.assertEqual(self.window.notifications.last_target, A)
+        self.window.hide()
+        # Qt's tray messageClicked has no payload: the center remembers the target mount.
+        self.window.tray.icon.messageClicked.emit()
+        self.assertTrue(self.window.isVisible())
+        self.assertIs(self.window.stack.currentWidget(), self.window.pages[A])
+        with patch.object(self.window.tray, 'available', return_value=False), \
+                patch.object(self.window.tray, 'show_message') as silent:
+            self.window.notifications.observe_overview('other', 'Other', {'connection': 'locked'})
+        silent.assert_not_called()
+
+    def test_keyboard_shortcuts_switch_tabs_and_navigation_enter_opens_mounts(self):
+        self.window.activate_task(A)
+        self.assertEqual(self.window.activate_tab(1), 'mount')
+        self.assertEqual(self.window.pages[A].tabs.currentIndex(), 0)
+        self.window.shortcuts[1].activated.emit()
+        self.assertEqual(self.window.pages[A].tabs.currentIndex(), 1)
+        self.assertEqual(self.window.activate_tab(3), 'mount')
+        self.assertEqual(self.window.pages[A].tabs.currentIndex(), 2)
+        self.window.activate('')
+        self.assertEqual(self.window.activate_tab(1), 'overview')
+        self.assertIs(self.window.all_tabs.currentWidget(), self.window.all_tabs.widget(0))
+        self.assertEqual(self.window.activate_tab(3), 'history')
+        self.assertIs(self.window.all_tabs.currentWidget(), self.window.history_page)
+        self.window.show_settings()
+        self.assertEqual(self.window.activate_tab(2), 'settings')
+        self.assertIs(self.window.stack.currentWidget(), self.window.settings_page)
+        keys = {shortcut.key().toString() for shortcut in self.window.findChildren(QShortcut)}
+        for key in ('Ctrl+1', 'Ctrl+5', 'Ctrl+,', 'F6'):
+            self.assertIn(key, keys)
+        self.window.activate_task(A)
+        self.assertIs(self.window.page_focus_target(), self.window.pages[A].tabs)
+        self.window.activate('')
+        self.assertIs(self.window.page_focus_target(), self.window.all_tabs)
+        self.window.show_settings()
+        self.assertIs(self.window.page_focus_target(), self.window.problems_check)
+        self.window.open_navigation_item(self.window.nav_items[('task', B)])
+        self.assertIs(self.window.stack.currentWidget(), self.window.pages[B])
 
 
 if __name__ == '__main__': unittest.main()

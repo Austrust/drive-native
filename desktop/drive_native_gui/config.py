@@ -8,6 +8,12 @@ import re
 import fcntl
 from contextlib import contextmanager
 
+GUI_SETTINGS_SCHEMA = 1
+
+
+def default_gui_settings():
+    return {"schema": GUI_SETTINGS_SCHEMA, "notifications": {"problems": True, "success": False}}
+
 
 def config_path(instance=None):
     base = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config")))
@@ -69,6 +75,80 @@ def _save_profile(profile, instance=None):
             os.close(directory)
     finally:
         os.unlink(temporary)
+    return path
+
+
+def gui_settings_path():
+    # GUI settings live beside the profiles, never inside a task profile.
+    return config_path("").parent / "gui-settings.json"
+
+
+def _normalize_gui_settings(settings):
+    result = default_gui_settings()
+    if not isinstance(settings, dict) or settings.get("schema") != GUI_SETTINGS_SCHEMA:
+        raise ValueError("设置格式不正确")
+    notifications = settings.get("notifications")
+    if not isinstance(notifications, dict):
+        raise ValueError("设置格式不正确")
+    for key in ("problems", "success"):
+        value = notifications.get(key)
+        if type(value) is not bool:
+            raise ValueError("设置格式不正确")
+        result["notifications"][key] = value
+    return result
+
+
+def load_gui_settings():
+    try:
+        fd = os.open(gui_settings_path(), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return default_gui_settings()
+    try:
+        with os.fdopen(fd, "r", encoding="utf-8") as stream:
+            info = os.fstat(stream.fileno())
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.getuid()
+                or info.st_mode & 0o077
+                or info.st_size > 65536
+            ):
+                raise ValueError("设置文件权限或大小不正确")
+            return _normalize_gui_settings(json.loads(stream.read(65537)))
+    except (OSError, ValueError, UnicodeDecodeError):
+        # A damaged or foreign settings file must never block the GUI.
+        return default_gui_settings()
+
+
+def save_gui_settings(settings):
+    normalized = _normalize_gui_settings(settings)
+    path = gui_settings_path()
+    parent = path.parent
+    parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+    if (
+        parent.is_symlink()
+        or parent.stat().st_uid != os.getuid()
+        or parent.stat().st_mode & 0o077
+    ):
+        raise ValueError("配置目录必须由当前用户私有")
+    if path.is_symlink():
+        raise ValueError("设置文件不能是符号链接")
+    fd, temporary = tempfile.mkstemp(prefix=".gui-settings-", dir=parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(normalized, stream, ensure_ascii=False, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        directory = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
     return path
 
 

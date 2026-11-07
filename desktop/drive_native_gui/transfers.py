@@ -1,6 +1,7 @@
 """Live local transfer progress and task-scoped payload bandwidth settings."""
 
 import json
+from pathlib import Path
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QDialog,
@@ -31,6 +32,86 @@ def size_text(value):
         if value < 1024 or unit == "TiB":
             return f"{value:.1f} {unit}" if unit != "B" else f"{value:.0f} B"
         value /= 1024
+
+
+def transfer_row(entry):
+    """Normalize one GetTransfers entry for any transfer view.
+
+    A missing progress snapshot is a real state ("waiting for the network") and
+    stays visible. A *present but unreadable* progress snapshot is not evidence
+    of current work, so it is dropped instead of rendered as bogus bytes.
+    """
+    path = entry.get("path") if isinstance(entry, dict) else None
+    if not isinstance(path, str) or not path:
+        path = "文件路径暂不可用"
+    progress = entry.get("progress") if isinstance(entry, dict) else None
+    if not isinstance(progress, dict) or not progress:
+        return {
+            "path": path,
+            "direction": "—",
+            "phase": "等待传输",
+            "progress_text": "等待网络",
+            "speed": "—",
+            "percent": None,
+        }
+    done = progress.get("bytes")
+    total = progress.get("total")
+    if type(done) is not int or type(total) is not int or done < 0 or total < done:
+        return None
+    elapsed = max(1, entry.get("elapsed_ms", 1)) / 1000
+    return {
+        "path": path,
+        "direction": "下载" if progress.get("direction") == "download" else "上传",
+        "phase": PHASES.get(progress.get("phase"), "等待状态"),
+        "progress_text": f"{size_text(done)} / {size_text(total)}",
+        "speed": size_text(done / elapsed) + "/s" if done else "—",
+        "percent": int(done * 1000 / total) if total else 0,
+    }
+
+
+def transfer_rows(entries):
+    """Return normalized rows, skipping entries with unreadable progress."""
+    rows = []
+    for entry in entries if isinstance(entries, list) else []:
+        row = transfer_row(entry)
+        if row is not None:
+            rows.append(row)
+    return rows
+
+
+def transfer_dialog_summary(entries):
+    """Summary line for the dedicated transfer dialog (existing wording)."""
+    return (f"当前 {len(entries)} 项正文传输"
+            if entries else "当前没有正在传输的正文。待处理操作和冲突请查看主界面。")
+
+
+def transfer_overview_summary(entries):
+    """One-line in-flight summary for the main overview page.
+
+    Upload and download counts come from the validated rows; the total keeps
+    every entry, so a temporarily unreadable entry is not silently erased.
+    """
+    if not isinstance(entries, list) or not entries:
+        return "当前没有正在传输的文件"
+    rows = transfer_rows(entries)
+    uploads = sum(row["direction"] == "上传" for row in rows)
+    downloads = sum(row["direction"] == "下载" for row in rows)
+    total = len(entries)
+    if uploads and downloads:
+        prefix = f"正在传输 {total} 项（上传 {uploads} 项 · 下载 {downloads} 项）"
+    elif uploads:
+        prefix = f"正在上传 {total} 项"
+    elif downloads:
+        prefix = f"正在下载 {total} 项"
+    else:
+        prefix = f"正在传输 {total} 项"
+    names = [Path(row["path"]).name or row["path"] for row in rows]
+    if names:
+        shown = "、".join(names[:3])
+        if len(names) > 3:
+            shown += "…"
+        prefix += f"（{shown}）"
+    return prefix
 
 
 class TransfersDialog(QDialog):
@@ -217,36 +298,23 @@ class TransfersDialog(QDialog):
         self.table.setEnabled(True)
         self.table.clear()
         entries = data.get("entries", [])
-        self.summary.setText(
-            f"当前 {len(entries)} 项正文传输"
-            if entries
-            else "当前没有正在传输的正文。待处理操作和冲突请查看主界面。"
-        )
-        for entry in entries:
-            p = entry.get("progress")
-            path = entry.get("path") or "文件路径暂不可用"
-            if not p:
-                row = QTreeWidgetItem([path, "—", "等待网络", "等待传输", "—"])
-                self.table.addTopLevelItem(row)
-                continue
-            done, total = p["bytes"], p["total"]
-            if type(done) is not int or type(total) is not int or done < 0 or total < done:
-                continue
-            elapsed = max(1, entry.get("elapsed_ms", 1)) / 1000
-            speed = size_text(done / elapsed) + "/s" if done else "—"
-            row = QTreeWidgetItem(
+        self.summary.setText(transfer_dialog_summary(entries))
+        for row in transfer_rows(entries):
+            item = QTreeWidgetItem(
                 [
-                    path,
-                    "下载" if p["direction"] == "download" else "上传",
-                    "",
-                    PHASES.get(p["phase"], "等待状态"),
-                    speed,
+                    row["path"],
+                    row["direction"],
+                    "" if row["percent"] is not None else row["progress_text"],
+                    row["phase"],
+                    row["speed"],
                 ]
             )
-            row.setToolTip(0, path)
-            self.table.addTopLevelItem(row)
+            item.setToolTip(0, row["path"])
+            self.table.addTopLevelItem(item)
+            if row["percent"] is None:
+                continue
             progress = QProgressBar()
             progress.setRange(0, 1000)
-            progress.setValue(int(done * 1000 / total) if total else 0)
-            progress.setFormat(f"{size_text(done)} / {size_text(total)}")
-            self.table.setItemWidget(row, 2, progress)
+            progress.setValue(row["percent"])
+            progress.setFormat(row["progress_text"])
+            self.table.setItemWidget(item, 2, progress)

@@ -174,5 +174,67 @@ class UpgradeTest(unittest.TestCase):
         self.assertEqual(self.results, [])
 
 
+    def test_stage_progress_is_conservative_and_additive(self):
+        stages = []
+        self.upgrade.stage_changed.connect(stages.append)
+        self.upgrade.begin()
+        self.assertEqual(stages, ["pausing"])
+        self.bus.calls[0][1](None, None)
+        self.assertEqual(stages, ["pausing", "persisting_pause", "stopping", "waiting_exit"])
+        self.assertEqual(self.bus.calls[1][0], "StopMount")
+
+    def test_version_mismatch_blocks_confirmation(self):
+        received = self.confirmation()
+        received({"task_id": "synthetic", "connection": "paused", "mounted": True,
+                  "version": {"build": "0.1.0", "state_schema": 25, "ipc": 21}}, None)
+        self.assertTrue(self.results[0])
+        self.assertIn("版本", self.results[0])
+        self.assertEqual(self.upgrade.stage, "failed")
+
+    def test_missing_version_does_not_block_confirmation(self):
+        received = self.confirmation()
+        self.upgrade._verify_installed_owner = lambda owner, callback: callback(owner, True)
+        received({"task_id": "synthetic", "connection": "paused", "mounted": True}, None)
+        self.assertEqual(self.results, [None])
+        self.assertIsNone(self.upgrade.version)
+
+    def test_optional_backend_stage_is_displayed_before_completion(self):
+        received = self.confirmation()
+        self.upgrade._verify_installed_owner = lambda owner, callback: callback(owner, True)
+        stages = []
+        self.upgrade.stage_changed.connect(stages.append)
+        received({"task_id": "synthetic", "connection": "paused", "mounted": True,
+                  "upgrade_stage": "waiting_exit",
+                  "version": {"build": "dev", "state_schema": 26, "ipc": 21}}, None)
+        self.assertTrue(self.upgrade.stage_supported)
+        self.assertIn("waiting_exit", stages)
+        self.assertEqual(self.results, [None])
+
+    def test_version_and_upgrade_helpers_fail_closed(self):
+        from drive_native_gui.upgrade import (
+            available_upgrades, normalize_version, stage_text, version_state, version_summary,
+        )
+        self.assertEqual(normalize_version({"build": "0.2", "state_schema": 26, "ipc": 21}),
+                         {"build": "0.2", "state_schema": 26, "ipc": 21})
+        self.assertIsNone(normalize_version(None))
+        self.assertIsNone(normalize_version({"build": "", "state_schema": 0, "ipc": None}))
+        self.assertEqual(normalize_version({"state_schema": 77}),
+                         {"build": None, "state_schema": 77, "ipc": None})
+        self.assertEqual(version_state(None), "missing")
+        self.assertEqual(version_state({"state_schema": 26, "ipc": 21}), "ok")
+        self.assertEqual(version_state({"state_schema": 25, "ipc": 21}), "mismatch")
+        self.assertEqual(version_summary({"build": "dev", "state_schema": 26, "ipc": 21}),
+                         "dev · 状态库 v26 · IPC v21")
+        self.assertEqual(stage_text("waiting_exit"), "正在等待旧后台退出")
+        self.assertEqual(stage_text("invented"), "")
+
+        class U:
+            def __init__(self, available):
+                self.available = available
+
+        self.assertEqual(available_upgrades([U(True), U(False), None]), [0])
+        self.assertEqual(available_upgrades({"a": U(True), "b": U(False)}), ["a"])
+
+
 if __name__ == "__main__":
     unittest.main()
