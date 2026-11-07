@@ -17,7 +17,11 @@ pub(super) struct StatusTree {
 }
 impl StatusTree {
     pub fn load(store: &Store, roots: &[String]) -> io::Result<Self> {
-        let rows = store.desktop_status_seeds().map_err(io::Error::other)?;
+        // Only the requested roots' subtree plus their ancestor chain is read; a
+        // full-namespace read would dominate every status batch on large profiles.
+        let rows = store
+            .desktop_status_seeds_for(roots)
+            .map_err(io::Error::other)?;
         let mut children: HashMap<String, Vec<(String, bool)>> = HashMap::new();
         for n in &rows {
             if let Some(p) = &n.parent {
