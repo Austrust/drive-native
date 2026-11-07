@@ -24,6 +24,16 @@ REASONS = {
 }
 
 
+def reason_label(row, fallback="需要检查"):
+    """Row description; additive reconcile fields are ignored when absent/invalid."""
+    text = REASONS.get(row.get("reason"), fallback)
+    attempts = row.get("reconcile_attempts")
+    if (row.get("reason") == "commit_uncertain" and row.get("reconcile_exhausted") is True
+            and type(attempts) is int and 0 <= attempts < 1 << 32):
+        text += f"。已自动只读核对 {attempts} 次仍未确认，自动重试已暂停"
+    return text
+
+
 class IssuesDialog(QDialog):
     resolved = Signal()
     pause_intent = Signal()
@@ -168,7 +178,7 @@ class IssuesDialog(QDialog):
         self.table.blockSignals(True)
         self.table.clear()
         for row in sorted(self.rows.values(), key=lambda r: r["path"].casefold()):
-            item = QTreeWidgetItem([row["path"], REASONS.get(row["reason"], "需要检查")])
+            item = QTreeWidgetItem([row["path"], reason_label(row)])
             item.setData(0, Qt.UserRole, row)
             self.table.addTopLevelItem(item)
             if row["id"] == selected:
@@ -212,7 +222,7 @@ class IssuesDialog(QDialog):
         else:
             self.explanation.setText(
                 "本地修改将成为同目录下的新文件，并在联网后上传。原文件保留远端版本；远端已删除时不会恢复原路径。"
-                if row.get("can_keep_both") else REASONS.get(row["reason"], "需要进一步核对") + "。" + next_step(row)
+                if row.get("can_keep_both") else reason_label(row, "需要进一步核对") + "。" + next_step(row)
             )
 
     def selected_row(self):

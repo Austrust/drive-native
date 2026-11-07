@@ -121,6 +121,70 @@ pub(crate) fn upload_remove_barrier(
 fn os(code: i32) -> Error {
     Error::Io(std::io::Error::from_raw_os_error(code))
 }
+/// A local creation that has never acquired a server identity. Deleting it
+/// needs no native remove: no server object can be acknowledged for it.
+pub(crate) fn creation_unbound(db: &rusqlite::Connection, node: &str) -> Result<bool> {
+    Ok(db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM local_creations c JOIN nodes n ON n.id=c.node WHERE c.node=?1 AND n.directory=0) AND NOT EXISTS(SELECT 1 FROM remote_aliases WHERE node=?1)",
+        [node],
+        |r| r.get(0),
+    )?)
+}
+pub(crate) fn has_uncertain_upload(db: &rusqlite::Connection, node: &str) -> Result<bool> {
+    Ok(db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM operations WHERE kind='upload' AND node=?1 AND state='uncertain')",
+        [node],
+        |r| r.get(0),
+    )?)
+}
+/// Retire an unconfirmed creation. The caller owns the transaction and has
+/// already established that the path was deleted locally and that the creation
+/// never acquired a server identity. The uncertain upload becomes superseded
+/// (never replayed) and history keeps the permission evidence plus the reason
+/// automatic reconciliation stopped. Content/blob cleanup follows the existing
+/// `commit_kept_both` retirement template. Contract §1.2 asks for
+/// `remote_version=NULL, dirty_generation=NULL`, but both columns are NOT NULL;
+/// they keep their current values instead and are semantically equivalent here
+/// (the row is already a tombstone and no upload can ever read it again).
+pub(crate) fn retire_creation_tx(
+    tx: &rusqlite::Connection,
+    operation: &str,
+    node: &str,
+) -> Result<()> {
+    let attempts: i64 = tx.query_row(
+        "SELECT reconcile_attempts FROM operations WHERE id=?1 AND kind='upload'",
+        [operation],
+        |r| r.get(0),
+    )?;
+    tx.execute(
+        "UPDATE operations SET state='superseded' WHERE id=?1 AND state='uncertain'",
+        [operation],
+    )?;
+    // The operation trigger above writes a cancelled history row; recording the
+    // abandoned outcome afterwards replaces it with the explanatory failure.
+    crate::sync_history::record_abandoned_upload(
+        tx,
+        &format!("upload:{operation}"),
+        node,
+        u32::try_from(attempts).unwrap_or(u32::MAX),
+    )?;
+    tx.execute("DELETE FROM local_creations WHERE node=?1", [node])?;
+    tx.execute("UPDATE namespace_ops SET state='superseded' WHERE node=?1 AND kind='remove' AND state IN ('pending','cleanup_pending','uncertain','cleanup_uncertain')", [node])?;
+    tx.execute("DELETE FROM namespace_overlay WHERE node=?1", [node])?;
+    tx.execute(
+        "INSERT OR REPLACE INTO local_unlinks(node,confirmed) VALUES(?1,1)",
+        [node],
+    )?;
+    tx.execute(
+        "UPDATE nodes SET deleted=1,blob=NULL,local_version=NULL,base_version=NULL,dirty_blob=NULL,conflict=0 WHERE id=?1",
+        [node],
+    )?;
+    tx.execute("DELETE FROM drafts WHERE node=?1", [node])?;
+    tx.execute("DELETE FROM transfers WHERE node=?1", [node])?;
+    tx.execute("DELETE FROM upload_paths WHERE operation=?1", [operation])?;
+    tx.execute("DELETE FROM upload_origins WHERE operation=?1", [operation])?;
+    Ok(())
+}
 impl Store {
     pub fn locally_unlinked(&self, id: &str) -> Result<bool> {
         is_unlinked(&self.db, id)
@@ -153,6 +217,38 @@ impl Store {
             return Err(os(libc::ENOTEMPTY));
         }
         let unsubmitted: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM local_creations c JOIN nodes n ON n.id=c.node WHERE c.node=?1 AND n.directory=0) AND NOT EXISTS(SELECT 1 FROM operations WHERE node=?1 AND state IN ('inflight','uncertain','committed','conflict'))", [&node.id], |r| r.get(0))?;
+        // An unconfirmed creation has no server identity to remove. When the
+        // user deletes it locally, retire the uncertain upload instead of
+        // queueing a native remove that could never be acknowledged (and would
+        // keep mark_remove_started permanently EBUSY).
+        let retire = if unsubmitted
+            || !creation_unbound(&self.db, &node.id)?
+            || !has_uncertain_upload(&self.db, &node.id)?
+        {
+            None
+        } else {
+            self.db
+                .query_row(
+                    "SELECT id FROM operations WHERE kind='upload' AND node=?1 AND state='uncertain' ORDER BY rowid LIMIT 1",
+                    [&node.id],
+                    |r| r.get::<_, String>(0),
+                )
+                .optional()?
+        };
+        if let Some(operation) = retire {
+            let tx = self.db.transaction()?;
+            tx.execute(
+                "INSERT INTO local_unlinks(node,confirmed) VALUES(?1,1)",
+                [&node.id],
+            )?;
+            tx.execute(
+                "UPDATE operations SET state='superseded' WHERE node=?1 AND state='pending'",
+                [&node.id],
+            )?;
+            retire_creation_tx(&tx, &operation, &node.id)?;
+            tx.commit()?;
+            return Ok(());
+        }
         let job = RemoveJob {
             operation: uuid::Uuid::new_v4().to_string(),
             path: crate::namespace::node_path(&self.db, &node.id)?,

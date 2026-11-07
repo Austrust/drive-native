@@ -1,5 +1,20 @@
 use super::*;
 impl Bridge {
+    /// Namespace failures describe unresolved durable intents. They are cleared
+    /// only when this journal drains; an upload success cannot clear them.
+    pub(crate) fn clear_namespace_failure_if_drained(&self) -> io::Result<()> {
+        let drained = self
+            .store
+            .lock()
+            .unwrap()
+            .pending_namespace_operations()
+            .map_err(io::Error::other)?
+            == 0;
+        if drained {
+            self.clear_failure(crate::background::BackgroundSource::NamespaceUnconfirmed);
+        }
+        Ok(())
+    }
     /// Process the durable sequence. An uncertain head is queried, never resent.
     pub fn rename_pending(&self) -> io::Result<usize> {
         let _mutation = self.recovery_gate.read().unwrap();
@@ -156,6 +171,7 @@ impl Bridge {
                 .next_namespace_operation()
                 .map_err(io::Error::other)?;
             let Some(selected) = selected else {
+                self.clear_namespace_failure_if_drained()?;
                 return Ok(done);
             };
             let outcome = match selected.kind.as_str() {
@@ -185,8 +201,7 @@ impl Bridge {
                     {
                         return Err(error);
                     }
-                    *self.last_error.lock().unwrap() =
-                        Some("namespace commit result not confirmed; local intent retained".into());
+                    self.note_failure(crate::background::BackgroundSource::NamespaceUnconfirmed);
                     // The read-only reconciliation failed, but unrelated native
                     // operations can still use the connected worker.
                     0
@@ -211,11 +226,14 @@ impl Bridge {
                 }
                 let next = store.next_namespace_operation().map_err(io::Error::other)?;
                 if next.is_none_or(|next| next.operation == selected.operation) {
+                    drop(store);
+                    self.clear_namespace_failure_if_drained()?;
                     return Ok(done);
                 }
             }
         }
         self.signal_upload();
+        self.clear_namespace_failure_if_drained()?;
         Ok(done)
     }
     fn remove_pending(&self) -> io::Result<usize> {

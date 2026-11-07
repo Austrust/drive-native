@@ -780,3 +780,16 @@ fn shutdown_diagnostics_remain_available_while_store_and_control_are_held() {
     assert_eq!(data["shutdown"]["phase"], "checkpointing_local");
     assert_eq!(data["mounted"], false);
 }
+
+#[test]
+fn overview_background_failure_fields_are_additive_and_null_when_healthy() {
+    let (_dir, service) = fixture();
+    let overview: serde_json::Value =
+        serde_json::from_str(&desktop::overview(&service).unwrap()).unwrap();
+    assert_eq!(overview["schema"].as_u64().unwrap(), 1);
+    assert!(overview["background_error"].is_null());
+    assert!(overview["background_error_kind"].is_null());
+    assert!(overview["background_error_since_ms"].is_null());
+    assert!(overview["upload_block"].is_null());
+    assert!(overview["pending_operations"].is_number());
+}

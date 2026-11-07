@@ -85,7 +85,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let local=s.bridge.store.lock().unwrap().local_revision();
                 let downloads=s.bridge.downloads.load(Ordering::Relaxed);
                 let active=s.bridge.active_downloads();
-                let error=s.bridge.last_error.lock().unwrap().clone();
+                let error=s.bridge.last_error();
                 (control,local,downloads,active.len(),error,s.bridge.transfer_revision())
             }).await?;
             if last.as_ref()!=Some(&current) {

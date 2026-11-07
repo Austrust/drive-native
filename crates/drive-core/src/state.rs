@@ -150,7 +150,25 @@ impl Drop for ReadHandle {
 }
 
 /// Version of the durable state contract, including journal semantics.
-pub const STATE_SCHEMA_VERSION: i64 = 25;
+pub const STATE_SCHEMA_VERSION: i64 = 26;
+
+/// Automatic read-only reconciliation attempts allowed for one uncertain
+/// upload. The budget is durable so a restart cannot restart an unbounded
+/// retry loop; a user-requested recheck resets it deliberately.
+pub const MAX_UPLOAD_RECONCILE_ATTEMPTS: u32 = 5;
+
+/// Backoff before the next automatic read-only reconciliation pass. The fifth
+/// attempt is not scheduled: the operation keeps its uncertain state but the
+/// queue stops selecting it until the budget is reset.
+fn upload_reconcile_delay(attempts: u32) -> i64 {
+    match attempts {
+        0 | 1 => 10,
+        2 => 30,
+        3 => 120,
+        4 => 300,
+        _ => 0,
+    }
+}
 
 impl Store {
     /// One store per account + sync root. Independent accounts never share event IDs or cursors.
@@ -201,7 +219,9 @@ impl Store {
             CREATE INDEX IF NOT EXISTS nodes_parent_name_live ON nodes(parent,name,deleted);
             CREATE TABLE IF NOT EXISTS operations (
                 id TEXT PRIMARY KEY, node TEXT NOT NULL, kind TEXT NOT NULL, base TEXT NOT NULL,
-                blob TEXT, generation INTEGER NOT NULL, state TEXT NOT NULL DEFAULT 'pending');
+                blob TEXT, generation INTEGER NOT NULL, state TEXT NOT NULL DEFAULT 'pending',
+                reconcile_attempts INTEGER NOT NULL DEFAULT 0,
+                reconcile_at INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS transfers (
                 id TEXT PRIMARY KEY, node TEXT NOT NULL, version TEXT NOT NULL,
                 direction TEXT NOT NULL, state TEXT NOT NULL, error TEXT,
@@ -247,6 +267,29 @@ impl Store {
             db.execute_batch(
                 "ALTER TABLE namespace_ops ADD COLUMN kind TEXT NOT NULL DEFAULT 'rename';",
             )?;
+        }
+        // Schema 25 predates the durable upload reconciliation budget. Add the
+        // columns in place; existing operations start with no attempt recorded.
+        let operation_columns = {
+            let mut q = db.prepare("PRAGMA table_info(operations)")?;
+            q.query_map([], |r| r.get::<_, String>(1))?
+                .collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        for (name, definition) in [
+            (
+                "reconcile_attempts",
+                "reconcile_attempts INTEGER NOT NULL DEFAULT 0",
+            ),
+            ("reconcile_at", "reconcile_at INTEGER NOT NULL DEFAULT 0"),
+        ] {
+            if !operation_columns
+                .iter()
+                .any(|column| column.as_str() == name)
+            {
+                db.execute_batch(&format!(
+                    "ALTER TABLE operations ADD COLUMN {definition};"
+                ))?;
+            }
         }
         crate::initialization_store::migrate(&db)?;
         crate::preview::migrate(&db)?;
@@ -1240,6 +1283,108 @@ impl Store {
             tx.execute_batch("DROP TABLE recovery_ids;")?;
             Ok(())
         })
+    }
+
+    /// Uncertain uploads that may take one more read-only reconciliation pass.
+    /// Exhausted rows stay uncertain for safety but are not selected again.
+    pub fn upload_reconcile_operations(&self, now: i64) -> Result<Vec<String>> {
+        let mut q = self.db.prepare(
+            "SELECT id FROM operations WHERE kind='upload' AND node NOT IN (SELECT id FROM access_blocked) AND state='uncertain' AND reconcile_attempts < ?1 AND reconcile_at <= ?2 ORDER BY rowid",
+        )?;
+        Ok(q.query_map(params![i64::from(MAX_UPLOAD_RECONCILE_ATTEMPTS), now], |r| {
+            r.get::<_, String>(0)
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
+    pub fn upload_reconcile_due(&self, now: i64) -> Result<bool> {
+        Ok(self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM operations WHERE kind='upload' AND node NOT IN (SELECT id FROM access_blocked) AND state='uncertain' AND reconcile_attempts < ?1 AND reconcile_at <= ?2)",
+            params![i64::from(MAX_UPLOAD_RECONCILE_ATTEMPTS), now],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// Record one automatic read-only reconciliation attempt. The operation
+    /// must still be uncertain; an already committed or superseded operation is
+    /// never rewritten. History detail is updated in the same transaction.
+    pub fn note_upload_reconcile_attempt(&mut self, operation: &str, now: i64) -> Result<u32> {
+        let tx = self.db.transaction()?;
+        let (state, attempts): (String, i64) = tx.query_row(
+            "SELECT state,reconcile_attempts FROM operations WHERE id=?1 AND kind='upload'",
+            [operation],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        if state != "uncertain" {
+            return Err(Error::State(
+                "upload reconcile requires an uncertain operation".into(),
+            ));
+        }
+        let attempts = u32::try_from(attempts.saturating_add(1)).unwrap_or(u32::MAX);
+        tx.execute(
+            "UPDATE operations SET reconcile_attempts=?2, reconcile_at=?3 WHERE id=?1 AND state='uncertain'",
+            params![
+                operation,
+                i64::from(attempts),
+                now.saturating_add(upload_reconcile_delay(attempts))
+            ],
+        )?;
+        crate::sync_history::note_reconcile_attempt(
+            &tx,
+            &format!("upload:{operation}"),
+            attempts,
+        )?;
+        tx.commit()?;
+        Ok(attempts)
+    }
+
+    /// A user-requested recheck grants every uncertain upload a fresh budget.
+    /// The operation state is untouched: this never turns uncertain into pending.
+    pub fn reset_upload_reconcile_budget(&mut self) -> Result<usize> {
+        Ok(self.db.execute(
+            "UPDATE operations SET reconcile_attempts=0, reconcile_at=0 WHERE kind='upload' AND state='uncertain'",
+            [],
+        )?)
+    }
+
+    /// Local unlink tombstones a node; operation-side retirement uses this to
+    /// decide whether a user-authorized deletion already happened.
+    pub fn is_locally_deleted(&self, node: &str) -> Result<bool> {
+        Ok(self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM nodes WHERE id=?1 AND deleted=1)",
+            [node],
+            |r| r.get(0),
+        )?)
+    }
+
+    /// Retire an unconfirmed creation whose local path the user already deleted.
+    /// The caller must own the deletion decision; this only accepts an uncertain
+    /// upload of an unbound creation and returns false otherwise, leaving state
+    /// untouched. The uncertain result is never replayed and no terminal state
+    /// value is invented: the operation becomes superseded with explanatory
+    /// history.
+    pub fn retire_unconfirmed_creation(&mut self, operation: &str) -> Result<bool> {
+        let row: Option<(String, String)> = self
+            .db
+            .query_row(
+                "SELECT node,state FROM operations WHERE id=?1 AND kind='upload'",
+                [operation],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        let Some((node, state)) = row else {
+            return Ok(false);
+        };
+        if state != "uncertain" || !self.is_locally_deleted(&node)? {
+            return Ok(false);
+        }
+        if !crate::removals::creation_unbound(&self.db, &node)? {
+            return Ok(false);
+        }
+        let tx = self.db.transaction()?;
+        crate::removals::retire_creation_tx(&tx, operation, &node)?;
+        tx.commit()?;
+        Ok(true)
     }
 
     pub fn pending_operations(&self) -> Result<i64> {

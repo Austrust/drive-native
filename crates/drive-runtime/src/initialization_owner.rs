@@ -120,7 +120,7 @@ impl Bridge {
         });
         let old = std::mem::replace(&mut *self.connection.lock().unwrap(), rpc);
         old.close();
-        *self.last_error.lock().unwrap() = None;
+        self.clear_all_failures();
         Ok(())
     }
 

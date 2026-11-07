@@ -1,3 +1,4 @@
+pub mod background;
 pub mod bridge;
 mod connection_diagnostics;
 mod download_retry_clock;

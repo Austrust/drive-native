@@ -1264,3 +1264,479 @@ mod namespace_schedule_tests;
 
 #[path = "timestamp_upload_tests.rs"]
 mod timestamp_upload_tests;
+
+use std::sync::atomic::AtomicUsize;
+
+fn budget_upload_server(mut b: UnixStream, requests: Arc<AtomicUsize>, approve_reconcile: bool) {
+    handshake(&mut b);
+    loop {
+        let (req, fd) = match crate::transport::receive::<Envelope<Command>>(&mut b) {
+            Ok(request) => request,
+            Err(_) => return,
+        };
+        assert!(fd.is_some());
+        let position = requests.fetch_add(1, Ordering::SeqCst);
+        let Command::Upload {
+            mut node,
+            mtime,
+            reconcile,
+            ..
+        } = req.body
+        else {
+            panic!("expected upload");
+        };
+        assert_eq!(reconcile, position > 0);
+        let response = if position == 0 {
+            Response::MutationPermissionUncertain { code: 0x9004 }
+        } else if approve_reconcile {
+            node.version = "v2".into();
+            node.metadata.as_mut().unwrap().mtime = u64::from(mtime.unwrap());
+            Response::Committed { node }
+        } else {
+            Response::MutationPermissionUncertain { code: 0x9004 }
+        };
+        crate::transport::send(
+            &mut b,
+            &Envelope {
+                version: VERSION,
+                id: req.id,
+                body: response,
+            },
+            None,
+        )
+        .unwrap();
+    }
+}
+
+fn permission_uncertain_creation_server(mut b: UnixStream) {
+    use drive_core::{directories::DirectoryOrigin, upload_origin::UploadOrigin};
+    handshake(&mut b);
+    let (req, fd) = crate::transport::receive::<Envelope<Command>>(&mut b).unwrap();
+    assert!(fd.is_none());
+    let Command::PrepareUpload {
+        node,
+        parent,
+        path,
+        sha256,
+        cursor: _,
+    } = req.body
+    else {
+        panic!("expected read-only preparation")
+    };
+    assert_eq!(parent.id, "1");
+    assert_eq!(path, "/lab/New.txt");
+    let origin = UploadOrigin {
+        schema: 1,
+        node: node.id,
+        parent_file: "1".into(),
+        path,
+        sha256,
+        boundary: DirectoryOrigin {
+            cursor: "native-v1:10".into(),
+            committer: "a".repeat(64),
+            restore: "fixture".into(),
+        },
+    };
+    crate::transport::send(
+        &mut b,
+        &Envelope {
+            version: VERSION,
+            id: req.id,
+            body: Response::UploadPrepared { origin },
+        },
+        None,
+    )
+    .unwrap();
+    let (req, fd) = crate::transport::receive::<Envelope<Command>>(&mut b).unwrap();
+    assert!(fd.is_some());
+    let Command::Upload { reconcile, .. } = req.body else {
+        panic!("expected creation upload")
+    };
+    assert!(!reconcile);
+    crate::transport::send(
+        &mut b,
+        &Envelope {
+            version: VERSION,
+            id: req.id,
+            body: Response::MutationPermissionUncertain { code: 0x9004 },
+        },
+        None,
+    )
+    .unwrap();
+    assert!(crate::transport::receive::<Envelope<Command>>(&mut b).is_err());
+}
+
+fn uncertain_local_creation(store: &Arc<drive_core::SharedStore>) -> (String, String) {
+    let mut s = store.lock().unwrap();
+    for old in s.upload_operations("pending").unwrap() {
+        s.mark_upload_started(&old).unwrap();
+        s.confirm_upload(&old, "v2").unwrap();
+    }
+    let node = s.create_local_file("1", "New.txt", 0o644).unwrap();
+    let op = s.save_local(&node.id, b"new creation").unwrap();
+    s.creation_saved(&node.id).unwrap();
+    (node.id, op)
+}
+
+fn uncertain_upload_operation(store: &Arc<drive_core::SharedStore>) -> String {
+    let mut operations = store.lock().unwrap().upload_operations("uncertain").unwrap();
+    assert_eq!(operations.len(), 1);
+    operations.pop().unwrap()
+}
+
+#[test]
+fn permission_uncertain_upload_reconcile_budget_is_bounded_and_never_replays() {
+    let (a, b) = UnixStream::pair().unwrap();
+    let requests = Arc::new(AtomicUsize::new(0));
+    let peer = requests.clone();
+    let server = std::thread::spawn(move || budget_upload_server(b, peer, false));
+    let (_dir, store, bridge) = fixture(a);
+    let operation = {
+        let mut operations = store.lock().unwrap().upload_operations("pending").unwrap();
+        assert_eq!(operations.len(), 1);
+        operations.pop().unwrap()
+    };
+    bridge.run_upload_cycle();
+    assert_eq!(requests.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        store.lock().unwrap().upload_operations("uncertain").unwrap(),
+        vec![operation.clone()]
+    );
+    assert_eq!(
+        bridge.upload_block.lock().unwrap().as_deref(),
+        Some("permission_commit_uncertain")
+    );
+    bridge.run_upload_cycle();
+    assert_eq!(requests.load(Ordering::SeqCst), 2);
+    {
+        let mut s = store.lock().unwrap();
+        for attempt in 2..=drive_core::MAX_UPLOAD_RECONCILE_ATTEMPTS {
+            assert_eq!(
+                s.note_upload_reconcile_attempt(&operation, 0).unwrap(),
+                attempt
+            );
+        }
+        assert!(!s.upload_reconcile_due(unix_seconds() as i64).unwrap());
+        let history = s
+            .sync_history(&drive_core::sync_history::HistoryQuery::default())
+            .unwrap();
+        let entry = history
+            .records
+            .iter()
+            .find(|record| record.error_kind.as_deref() == Some("permission_commit_uncertain"))
+            .unwrap();
+        assert_eq!(entry.result, "pending");
+        assert_eq!(
+            entry.detail.as_ref().unwrap()["reconcile_attempts"]
+                .as_u64()
+                .unwrap(),
+            u64::from(drive_core::MAX_UPLOAD_RECONCILE_ATTEMPTS)
+        );
+    }
+    bridge.run_upload_cycle();
+    assert_eq!(requests.load(Ordering::SeqCst), 2);
+    assert!(bridge.background_failure().is_none());
+    bridge.disconnect();
+    server.join().unwrap();
+}
+
+#[test]
+fn deleted_creation_after_budget_exhaustion_retires_without_replay() {
+    let (a, b) = UnixStream::pair().unwrap();
+    let server = std::thread::spawn(move || permission_uncertain_creation_server(b));
+    let (_dir, store, bridge) = fixture(a);
+    let (node_id, operation) = uncertain_local_creation(&store);
+    assert_eq!(bridge.upload_pending(false).unwrap(), 0);
+    {
+        let mut s = store.lock().unwrap();
+        for attempt in 1..=drive_core::MAX_UPLOAD_RECONCILE_ATTEMPTS {
+            assert_eq!(
+                s.note_upload_reconcile_attempt(&operation, 0).unwrap(),
+                attempt
+            );
+        }
+        s.unlink_local("1", "New.txt", &node_id, false).unwrap();
+        assert_eq!(s.pending_operations().unwrap(), 0);
+        assert_eq!(s.pending_namespace_operations().unwrap(), 0);
+        assert!(s.upload_operations("uncertain").unwrap().is_empty());
+        let history = s
+            .sync_history(&drive_core::sync_history::HistoryQuery::default())
+            .unwrap();
+        let entry = history
+            .records
+            .iter()
+            .find(|record| {
+                record.error_kind.as_deref() == Some("permission_commit_uncertain")
+                    && record.result == "failed"
+            })
+            .unwrap();
+        let detail = entry.detail.as_ref().unwrap();
+        assert_eq!(detail["abandoned"], "local_deleted");
+        assert_eq!(detail["reconcile_attempts"].as_u64().unwrap(), 5);
+    }
+    assert_eq!(bridge.upload_pending(true).unwrap(), 0);
+    assert_eq!(bridge.upload_pending(false).unwrap(), 0);
+    assert!(bridge.background_failure().is_none());
+    bridge.disconnect();
+    server.join().unwrap();
+}
+
+#[test]
+fn deleted_creation_before_budget_exhaustion_retires_without_replay() {
+    let (a, b) = UnixStream::pair().unwrap();
+    let server = std::thread::spawn(move || permission_uncertain_creation_server(b));
+    let (_dir, store, bridge) = fixture(a);
+    let (node_id, _operation) = uncertain_local_creation(&store);
+    assert_eq!(bridge.upload_pending(false).unwrap(), 0);
+    {
+        let mut s = store.lock().unwrap();
+        s.unlink_local("1", "New.txt", &node_id, false).unwrap();
+        assert_eq!(s.pending_operations().unwrap(), 0);
+        assert_eq!(s.pending_namespace_operations().unwrap(), 0);
+        let history = s
+            .sync_history(&drive_core::sync_history::HistoryQuery::default())
+            .unwrap();
+        let entry = history
+            .records
+            .iter()
+            .find(|record| {
+                record.error_kind.as_deref() == Some("permission_commit_uncertain")
+                    && record.result == "failed"
+            })
+            .unwrap();
+        assert_eq!(
+            entry.detail.as_ref().unwrap()["reconcile_attempts"]
+                .as_u64()
+                .unwrap(),
+            0
+        );
+    }
+    assert_eq!(bridge.upload_pending(true).unwrap(), 0);
+    assert_eq!(bridge.upload_pending(false).unwrap(), 0);
+    assert!(bridge.background_failure().is_none());
+    bridge.disconnect();
+    server.join().unwrap();
+}
+
+#[test]
+fn permission_uncertain_reconcile_never_learns_an_acl_denial_or_background_failure() {
+    let (a, b) = UnixStream::pair().unwrap();
+    let requests = Arc::new(AtomicUsize::new(0));
+    let peer = requests.clone();
+    let server = std::thread::spawn(move || budget_upload_server(b, peer, false));
+    let (_dir, store, bridge) = fixture(a);
+    bridge.run_upload_cycle();
+    assert_eq!(requests.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        bridge.upload_block.lock().unwrap().as_deref(),
+        Some("permission_commit_uncertain")
+    );
+    assert!(bridge.background_failure().is_none());
+    bridge.run_upload_cycle();
+    assert_eq!(requests.load(Ordering::SeqCst), 2);
+    assert!(bridge.background_failure().is_none());
+    {
+        let s = store.lock().unwrap();
+        assert_eq!(
+            drive_core::write_permissions::decide(
+                &s,
+                "1",
+                "2",
+                drive_core::write_permissions::Action::WriteContent,
+            )
+            .unwrap(),
+            drive_core::write_permissions::Decision::Unknown
+        );
+        let history = s
+            .sync_history(&drive_core::sync_history::HistoryQuery::default())
+            .unwrap();
+        assert!(history
+            .records
+            .iter()
+            .any(|record| record.error_kind.as_deref() == Some("permission_commit_uncertain")));
+        assert!(!history
+            .records
+            .iter()
+            .any(|record| record.error_kind.as_deref() == Some("permission_denied")));
+    }
+    bridge.disconnect();
+    server.join().unwrap();
+}
+
+#[test]
+fn user_recheck_resets_the_upload_reconcile_budget() {
+    let (a, b) = UnixStream::pair().unwrap();
+    let requests = Arc::new(AtomicUsize::new(0));
+    let peer = requests.clone();
+    let server = std::thread::spawn(move || budget_upload_server(b, peer, true));
+    let (_dir, store, bridge) = fixture(a);
+    bridge.run_upload_cycle();
+    assert_eq!(requests.load(Ordering::SeqCst), 1);
+    let operation = uncertain_upload_operation(&store);
+    {
+        let mut s = store.lock().unwrap();
+        for attempt in 1..=drive_core::MAX_UPLOAD_RECONCILE_ATTEMPTS {
+            assert_eq!(
+                s.note_upload_reconcile_attempt(&operation, 0).unwrap(),
+                attempt
+            );
+        }
+        assert!(!s.upload_reconcile_due(unix_seconds() as i64).unwrap());
+    }
+    bridge.run_upload_cycle();
+    assert_eq!(requests.load(Ordering::SeqCst), 1);
+    {
+        let mut s = store.lock().unwrap();
+        bridge.handle_recheck_request(&mut *s);
+        assert!(s.upload_reconcile_due(unix_seconds() as i64).unwrap());
+    }
+    bridge.run_upload_cycle();
+    assert_eq!(requests.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        store.lock().unwrap().status("2").unwrap(),
+        Status::LocalComplete
+    );
+    bridge.disconnect();
+    server.join().unwrap();
+}
+
+fn mark_upload_uncertain(store: &Arc<drive_core::SharedStore>) -> String {
+    let mut s = store.lock().unwrap();
+    let mut operations = s.upload_operations("pending").unwrap();
+    assert_eq!(operations.len(), 1);
+    let operation = operations.pop().unwrap();
+    s.mark_upload_started(&operation).unwrap();
+    s.mark_upload_uncertain(&operation).unwrap();
+    operation
+}
+
+fn reconcile_attempts_history(store: &Arc<drive_core::SharedStore>) -> u64 {
+    let s = store.lock().unwrap();
+    let history = s
+        .sync_history(&drive_core::sync_history::HistoryQuery::default())
+        .unwrap();
+    let entry = history
+        .records
+        .iter()
+        .find(|record| {
+            record
+                .detail
+                .as_ref()
+                .is_some_and(|detail| detail.get("reconcile_attempts").is_some())
+        })
+        .unwrap();
+    entry.detail.as_ref().unwrap()["reconcile_attempts"]
+        .as_u64()
+        .unwrap()
+}
+
+#[test]
+fn reconcile_uncertain_replies_consume_the_budget_and_stop_without_background_error() {
+    let (a, mut b) = UnixStream::pair().unwrap();
+    b.set_read_timeout(Some(Duration::from_secs(8))).unwrap();
+    let requests = Arc::new(AtomicUsize::new(0));
+    let peer = requests.clone();
+    let server = std::thread::spawn(move || {
+        handshake(&mut b);
+        while let Ok((request, fd)) = crate::transport::receive::<Envelope<Command>>(&mut b) {
+            assert!(fd.is_some());
+            peer.fetch_add(1, Ordering::SeqCst);
+            let Command::Upload { reconcile, .. } = request.body else {
+                panic!("expected upload");
+            };
+            assert!(reconcile);
+            crate::transport::send(
+                &mut b,
+                &Envelope {
+                    version: VERSION,
+                    id: request.id,
+                    body: Response::Uncertain,
+                },
+                None,
+            )
+            .unwrap();
+        }
+    });
+    let (_dir, store, bridge) = fixture(a);
+    let operation = mark_upload_uncertain(&store);
+    bridge.run_upload_cycle();
+    assert_eq!(requests.load(Ordering::SeqCst), 1);
+    // One observation arms the backoff: an immediate pass must not send a
+    // second reconciliation request before the delay elapses.
+    bridge.run_upload_cycle();
+    assert_eq!(requests.load(Ordering::SeqCst), 1);
+    assert_eq!(reconcile_attempts_history(&store), 1);
+    assert_eq!(store.lock().unwrap().pending_operations().unwrap(), 1);
+    {
+        let mut s = store.lock().unwrap();
+        for attempt in 2..=drive_core::MAX_UPLOAD_RECONCILE_ATTEMPTS {
+            assert_eq!(
+                s.note_upload_reconcile_attempt(&operation, 0).unwrap(),
+                attempt
+            );
+        }
+        assert!(!s.upload_reconcile_due(unix_seconds() as i64).unwrap());
+    }
+    assert_eq!(
+        reconcile_attempts_history(&store),
+        u64::from(drive_core::MAX_UPLOAD_RECONCILE_ATTEMPTS)
+    );
+    bridge.run_upload_cycle();
+    assert_eq!(requests.load(Ordering::SeqCst), 1);
+    assert_eq!(store.lock().unwrap().pending_operations().unwrap(), 1);
+    assert!(bridge.last_error().is_none());
+    assert!(bridge.upload_block.lock().unwrap().is_none());
+    assert!(bridge.background_failure().is_none());
+    bridge.disconnect();
+    server.join().unwrap();
+}
+
+#[test]
+fn transport_loss_during_reconcile_does_not_consume_the_budget() {
+    let (a, mut b) = UnixStream::pair().unwrap();
+    b.set_read_timeout(Some(Duration::from_secs(8))).unwrap();
+    let requests = Arc::new(AtomicUsize::new(0));
+    let peer = requests.clone();
+    let server = std::thread::spawn(move || {
+        handshake(&mut b);
+        let (request, fd) = crate::transport::receive::<Envelope<Command>>(&mut b).unwrap();
+        assert!(fd.is_some());
+        peer.fetch_add(1, Ordering::SeqCst);
+        crate::transport::send(
+            &mut b,
+            &Envelope {
+                version: VERSION,
+                id: request.id,
+                body: Response::Uncertain,
+            },
+            None,
+        )
+        .unwrap();
+        let (_request, fd) = crate::transport::receive::<Envelope<Command>>(&mut b).unwrap();
+        assert!(fd.is_some());
+        peer.fetch_add(1, Ordering::SeqCst);
+        // Drop the transport without answering. The client observes a
+        // transient transport error and must not spend the bounded budget.
+    });
+    let (_dir, store, bridge) = fixture(a);
+    let operation = mark_upload_uncertain(&store);
+    bridge.run_upload_cycle();
+    assert_eq!(requests.load(Ordering::SeqCst), 1);
+    {
+        let mut s = store.lock().unwrap();
+        assert_eq!(s.note_upload_reconcile_attempt(&operation, 0).unwrap(), 2);
+        assert!(s.upload_reconcile_due(unix_seconds() as i64).unwrap());
+    }
+    bridge.run_upload_cycle();
+    assert_eq!(requests.load(Ordering::SeqCst), 2);
+    assert_eq!(reconcile_attempts_history(&store), 2);
+    assert_eq!(store.lock().unwrap().pending_operations().unwrap(), 1);
+    // The transport loss escalates like every other unknown commit: the queue
+    // pass reports it, and the next cycle that actually runs will clear it.
+    assert_eq!(
+        bridge.background_failure().unwrap().source,
+        BackgroundSource::UploadQueueStopped
+    );
+    bridge.disconnect();
+    server.join().unwrap();
+}
