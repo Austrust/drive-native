@@ -26,6 +26,39 @@ pub struct KeptBoth {
     pub copy: Node,
     pub path: String,
 }
+
+/// Candidate identity query behind [`Store::sync_issues`].
+///
+/// The previous shape evaluated three correlated `EXISTS` subqueries for every
+/// node row: that forced a full `nodes` scan and, without a `node` index on
+/// `operations`/`namespace_ops`, a full scan of both tables per candidate row
+/// (issue #16). Expressing each issue source as its own `UNION` arm lets the
+/// planner start from the small partial indexes (conflict/pinned flags,
+/// unfinished operation states) and paginate the combined set.
+///
+/// The unfinished operation arms use `INDEXED BY` so the plan does not depend
+/// on statistics the store deliberately does not maintain: the partial indexes
+/// hold only in-flight rows, while the plain `node` indexes would scan every
+/// finished operation. The redundant `state NOT IN (...)` terms make the
+/// partial predicates visible to the planner.
+const ISSUE_CANDIDATES: &str = "
+    SELECT id FROM (
+        SELECT id FROM nodes WHERE conflict=1
+        UNION
+        SELECT n.id FROM nodes n JOIN drafts d ON d.node=n.id
+         WHERE d.dirty=1 AND (d.base!=n.remote_version OR n.deleted=1)
+           AND NOT EXISTS(SELECT 1 FROM local_unlinks WHERE node=n.id)
+        UNION
+        SELECT o.node FROM operations o INDEXED BY operations_unfinished
+         WHERE o.state='uncertain' AND o.state NOT IN ('committed','superseded')
+           AND EXISTS(SELECT 1 FROM nodes n WHERE n.id=o.node)
+        UNION
+        SELECT o.node FROM namespace_ops o INDEXED BY namespace_unfinished
+         WHERE o.state IN ('uncertain','cleanup_uncertain','conflict')
+           AND o.state NOT IN ('committed','superseded')
+           AND EXISTS(SELECT 1 FROM nodes n WHERE n.id=o.node)
+    )
+    WHERE id>?1 ORDER BY id LIMIT 257";
 impl Store {
     // Conflict history includes tombstones hidden from ordinary filesystem lookup.
     // This accessor is local to the issue service and never makes deleted paths live.
@@ -206,7 +239,7 @@ impl Store {
             return Err(Error::State("invalid issue cursor".into()));
         }
         let ids = {
-            let mut q = self.db.prepare("SELECT id FROM nodes n WHERE id>?1 AND (conflict=1 OR EXISTS(SELECT 1 FROM drafts d WHERE d.node=n.id AND d.dirty=1 AND (d.base!=n.remote_version OR n.deleted=1) AND NOT EXISTS(SELECT 1 FROM local_unlinks WHERE node=n.id)) OR EXISTS(SELECT 1 FROM operations WHERE node=n.id AND state='uncertain') OR EXISTS(SELECT 1 FROM namespace_ops WHERE node=n.id AND state IN ('uncertain','cleanup_uncertain','conflict'))) ORDER BY id LIMIT 257")?;
+            let mut q = self.db.prepare(ISSUE_CANDIDATES)?;
             q.query_map([after], |r| r.get::<_, String>(0))?
                 .collect::<std::result::Result<Vec<_>, _>>()?
         };
