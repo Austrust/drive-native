@@ -4,6 +4,7 @@ use crate::{Store, status_changes::StatusCursor};
 use std::{
     fmt,
     ops::{Deref, DerefMut},
+    path::PathBuf,
     sync::{
         Arc, LockResult, Mutex, MutexGuard, PoisonError, TryLockError, TryLockResult,
         RwLock, RwLockReadGuard, RwLockWriteGuard,
@@ -60,6 +61,9 @@ pub struct SharedStore {
     projection_word: AtomicU64,
     permission_denials: AtomicBool,
     permission_publication: RwLock<()>,
+    // Captured before the Store moves behind the mutex so read-only handles can
+    // be opened beside a live writer without acquiring either lock.
+    root: PathBuf,
 }
 
 /// A short metadata publication lease. It never holds SQLite/Store; callers
@@ -111,6 +115,7 @@ impl CommitNotifications {
 }
 impl SharedStore {
     pub fn new(store: Store) -> Self {
+        let root = store.root().to_owned();
         let permission_denials = crate::write_permissions::has_denials(&store).unwrap_or(true);
         let boundary = boundary(&store).ok();
         let unverified = boundary.is_none();
@@ -135,7 +140,13 @@ impl SharedStore {
             projection_word: AtomicU64::new(if unverified { 1 } else { 0 }),
             permission_denials: AtomicBool::new(permission_denials),
             permission_publication: RwLock::new(()),
+            root,
         }
+    }
+    /// The state directory this handle owns. Answered from the captured path;
+    /// it never acquires the Store or projection lock.
+    pub fn root(&self) -> PathBuf {
+        self.root.clone()
     }
     pub fn change_state(&self) -> CommitState {
         state(self.signal.state.load(Ordering::Acquire))

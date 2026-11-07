@@ -1,4 +1,4 @@
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 #[path = "sync_history.rs"]
@@ -109,7 +109,8 @@ pub struct Store {
     pub(crate) handles: Arc<Mutex<HashMap<String, (String, usize)>>>,
     pub(crate) namespace_runtime: Mutex<crate::namespace_schedule::NamespaceRuntime>,
     // Fields drop in order: close SQLite before releasing writer ownership.
-    _writer_lock: WriterLock,
+    // Read-only handles own no lock and therefore carry None.
+    _writer_lock: Option<WriterLock>,
 }
 
 /// A handle retains its immutable version even if a newer blob is published.
@@ -315,12 +316,60 @@ impl Store {
         // epoch keep the durable schema and external readers unchanged.
         crate::status_changes::install(&db)?;
         Ok(Self {
-            _writer_lock: writer_lock,
+            _writer_lock: Some(writer_lock),
             db,
             root,
             handles: Arc::new(Mutex::new(HashMap::new())),
             namespace_runtime: Mutex::new(Default::default()),
         })
+    }
+    /// Second handle for read-only work next to a live writer. Unlike
+    /// [`Store::open`] this takes no `writer.lock`, creates no files and never
+    /// migrates: it only opens the existing database read-only and observes
+    /// committed WAL snapshots, so callers can drop it and fall back to the
+    /// serialized `SharedStore` boundary at any time. It fails when the state
+    /// database is missing, does not match this build's schema or is not in WAL
+    /// mode; those cases keep the one-writer contract intact.
+    pub fn open_read_only(root: &Path) -> Result<Self> {
+        let root = root.to_owned();
+        let database = root.join("state.sqlite");
+        if !database.is_file() {
+            return Err(Error::State("state database does not exist".into()));
+        }
+        let db = Connection::open_with_flags(
+            &database,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        // Same wait budget as the writer: WAL readers rarely contend, and a
+        // bounded wait keeps one slow checkpoint from surfacing as an I/O error.
+        db.busy_timeout(std::time::Duration::from_secs(5))?;
+        let version: i64 = db.pragma_query_value(None, "user_version", |r| r.get(0))?;
+        if version > STATE_SCHEMA_VERSION {
+            return Err(Error::State("database is newer than this build".into()));
+        }
+        if version != STATE_SCHEMA_VERSION {
+            return Err(Error::State(
+                "state database is not at the current schema; reopen it with Store::open".into(),
+            ));
+        }
+        let mode: String = db.pragma_query_value(None, "journal_mode", |r| r.get(0))?;
+        if !mode.eq_ignore_ascii_case("wal") {
+            return Err(Error::State("state database is not in WAL mode".into()));
+        }
+        // Defence in depth for a connection whose file flags were bypassed:
+        // every accidental write is rejected before it can touch the database.
+        db.pragma_update(None, "query_only", true)?;
+        Ok(Self {
+            _writer_lock: None,
+            db,
+            root,
+            handles: Arc::new(Mutex::new(HashMap::new())),
+            namespace_runtime: Mutex::new(Default::default()),
+        })
+    }
+    /// The state directory, including `state.sqlite` and `blobs`.
+    pub fn root(&self) -> &Path {
+        &self.root
     }
     pub fn cursor(&self) -> Result<String> {
         Ok(self.db.query_row(
