@@ -229,49 +229,71 @@ fn entry(
     memo.insert(id.to_owned(), state.clone());
     Ok(state)
 }
+/// Private read-only handle for desktop projections. Opening it neither takes
+/// the global `SharedStore` mutex nor `writer.lock`, so a long read (or the
+/// writer's own transaction) cannot stall FUSE and D-Bus replies. `None` keeps
+/// the historical serialized path available as a fail-safe.
+fn read_only(service: &Service) -> Option<Store> {
+    Store::open_read_only(&service.bridge.store.root()).ok()
+}
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
 pub fn states(service: &Service, paths: Vec<String>) -> io::Result<String> {
     if paths.len() > 256 {
         return Err(io::Error::other("at most 256 paths per batch"));
     }
     let active = service.bridge.active_downloads().into_iter().collect();
-    let store = service.bridge.store.lock().unwrap();
-    if preview::active(&store, &service.profile.scope.file_id)? {
-        return preview::states(
-            &store,
-            &service.profile.scope.file_id,
-            &service.profile.mount,
-            paths,
-        );
+    let ro = read_only(service);
+    states_with(service, paths, &active, ro.as_ref())
+}
+fn states_with(
+    service: &Service,
+    paths: Vec<String>,
+    active: &HashSet<String>,
+    read_only: Option<&Store>,
+) -> io::Result<String> {
+    // The whole projection is a pure read. Try it on a private read-only
+    // snapshot first; any unexpected failure falls back to the serialized
+    // writer path so error and initialization semantics stay unchanged.
+    if let Some(store) = read_only {
+        if let Ok(response) = states_off_lock(store, service, paths.clone(), active) {
+            return Ok(response);
+        }
     }
-    store
-        .ensure_fs_root(&service.profile.scope.file_id)
-        .map_err(|_| other())?;
-    let resolved: Vec<_> = paths
-        .into_iter()
-        .map(|path| {
-            let node = resolve(
-                &store,
-                &service.profile.scope.file_id,
-                &service.profile.mount,
-                &path,
-            );
-            (path, node)
-        })
-        .collect();
-    let mut tree = if resolved
-        .iter()
-        .any(|(_, n)| n.as_ref().is_ok_and(|n| n.directory))
-    {
-        Some(status_tree::StatusTree::load(
-            &store,
-            &resolved
-                .iter()
-                .filter_map(|(_, n)| n.as_ref().ok().map(|n| n.id.clone()))
-                .collect::<Vec<_>>(),
-        )?)
-    } else {
-        None
-    };
+    states_locked(service, paths, active)
+}
+fn states_off_lock(
+    store: &Store,
+    service: &Service,
+    paths: Vec<String>,
+    active: &HashSet<String>,
+) -> io::Result<String> {
+    let root = &service.profile.scope.file_id;
+    if preview::active(store, root)? {
+        return preview::states(store, root, &service.profile.mount, paths);
+    }
+    store.ensure_fs_root(root).map_err(|_| other())?;
+    let resolved = resolve_all(store, service, paths);
+    let mut tree = load_tree(store, &resolved)?;
+    Ok(render_states(resolved, active, Some(store), &mut tree))
+}
+fn states_locked(
+    service: &Service,
+    paths: Vec<String>,
+    active: &HashSet<String>,
+) -> io::Result<String> {
+    let root = &service.profile.scope.file_id;
+    let store = service.bridge.store.lock().unwrap();
+    if preview::active(&store, root)? {
+        return preview::states(&store, root, &service.profile.mount, paths);
+    }
+    store.ensure_fs_root(root).map_err(|_| other())?;
+    let resolved = resolve_all(&store, service, paths);
+    let mut tree = load_tree(&store, &resolved)?;
     // Folder aggregation is CPU-only after capture. Release the writer's mutex
     // before walking the tree, so FUSE and overview requests can make progress.
     let guard = if tree.is_some() {
@@ -280,18 +302,60 @@ pub fn states(service: &Service, paths: Vec<String>) -> io::Result<String> {
     } else {
         Some(store)
     };
+    Ok(render_states(resolved, active, guard.as_deref(), &mut tree))
+}
+fn resolve_all(
+    store: &Store,
+    service: &Service,
+    paths: Vec<String>,
+) -> Vec<(String, io::Result<Node>)> {
+    paths
+        .into_iter()
+        .map(|path| {
+            let node = resolve(
+                store,
+                &service.profile.scope.file_id,
+                &service.profile.mount,
+                &path,
+            );
+            (path, node)
+        })
+        .collect()
+}
+fn load_tree(
+    store: &Store,
+    resolved: &[(String, io::Result<Node>)],
+) -> io::Result<Option<status_tree::StatusTree>> {
+    if !resolved
+        .iter()
+        .any(|(_, n)| n.as_ref().is_ok_and(|n| n.directory))
+    {
+        return Ok(None);
+    }
+    let roots = resolved
+        .iter()
+        .filter_map(|(_, n)| n.as_ref().ok().map(|n| n.id.clone()))
+        .collect::<Vec<_>>();
+    Ok(Some(status_tree::StatusTree::load(store, &roots)?))
+}
+fn render_states(
+    resolved: Vec<(String, io::Result<Node>)>,
+    active: &HashSet<String>,
+    store: Option<&Store>,
+    tree: &mut Option<status_tree::StatusTree>,
+) -> String {
     let mut memo = HashMap::new();
     let mut out = Vec::new();
     for (path, node) in resolved {
         let result = node.and_then(|node| {
             entry(
-                guard.as_deref(),
+                store,
                 &node.id,
                 node.directory,
-                &active,
+                active,
                 &mut memo,
                 &mut HashSet::new(),
-                &mut tree,
+                tree,
                 0,
             )
         });
@@ -308,7 +372,7 @@ pub fn states(service: &Service, paths: Vec<String>) -> io::Result<String> {
             },
         });
     }
-    Ok(serde_json::json!({"schema":1,"entries":out}).to_string())
+    serde_json::json!({"schema":1,"entries":out}).to_string()
 }
 pub fn transfers(service: &Service) -> io::Result<String> {
     let entries = service.bridge.transfer_entries();
@@ -672,11 +736,39 @@ pub fn retry_downloads(service: &Service, path: &str) -> io::Result<String> {
     Ok(serde_json::json!({"schema":1,"reset_downloads":count}).to_string())
 }
 pub fn issues(service: &Service, after: &str) -> io::Result<String> {
-    let store = service.bridge.store.lock().unwrap();
+    let ro = read_only(service);
+    issues_with(service, after, ro.as_ref())
+}
+fn issues_with(service: &Service, after: &str, read_only: Option<&Store>) -> io::Result<String> {
+    // `sync_issues` is the slowest desktop query on large stores. Run the page
+    // on a private read-only snapshot so paging the issue center never holds
+    // the global writer mutex that FUSE/GetStates need; a failed open or query
+    // falls back to the historical locked path.
+    if let Some(store) = read_only {
+        if let Ok(response) = issues_on(store, service, after) {
+            return Ok(response);
+        }
+    }
+    issues_locked(service, after)
+}
+fn issues_on(store: &Store, service: &Service, after: &str) -> io::Result<String> {
     let page = store
         .sync_issues(&service.profile.scope.file_id, after)
         .map_err(io::Error::other)?;
-    Ok(serde_json::json!({"schema":1,"entries":page.entries,"next":page.next}).to_string())
+    Ok(issues_json(page))
+}
+fn issues_locked(service: &Service, after: &str) -> io::Result<String> {
+    let page = service
+        .bridge
+        .store
+        .lock()
+        .unwrap()
+        .sync_issues(&service.profile.scope.file_id, after)
+        .map_err(io::Error::other)?;
+    Ok(issues_json(page))
+}
+fn issues_json(page: drive_core::conflicts::IssuePage) -> String {
+    serde_json::json!({"schema":1,"entries":page.entries,"next":page.next}).to_string()
 }
 pub fn keep_both(service: &Service, id: &str, token: &str, name: &str) -> io::Result<String> {
     let result =
@@ -726,7 +818,21 @@ pub fn set_trust_settings(service: &Service, body: &str) -> io::Result<String> {
     trust_settings(service)
 }
 pub fn cache_settings(service: &Service) -> io::Result<String> {
-    let usage = service.bridge.cache_usage()?;
+    let ro = read_only(service);
+    cache_settings_with(service, ro.as_ref())
+}
+fn cache_settings_with(service: &Service, read_only: Option<&Store>) -> io::Result<String> {
+    // Usage accounting may scan every cached candidate; keep that read off the
+    // global writer mutex too. A read-only handle sees the committed database
+    // but not this process's open handles, so fall back when it cannot read.
+    let usage = read_only.and_then(|store| {
+        let active = service.bridge.active_downloads().into_iter().collect();
+        store.cache_usage(unix_now(), &active).ok()
+    });
+    let usage = match usage {
+        Some(usage) => usage,
+        None => service.bridge.cache_usage()?,
+    };
     let state = service.control.lock().unwrap().state;
     Ok(serde_json::json!({"schema":1,"task_id":service.profile.task_id,"usage":usage,"connection":state,"error":*service.bridge.cache_error.lock().unwrap(),"recent_download_seconds":drive_core::cache_policy::RECENT_DOWNLOAD_SECONDS}).to_string())
 }
@@ -911,4 +1017,155 @@ impl Desktop {
         emitter: &zbus::object_server::SignalEmitter<'_>,
         revision: u64,
     ) -> zbus::Result<()>;
+}
+
+#[cfg(test)]
+mod readpath_tests {
+    //! The private read-only handle must be interchangeable with the serialized
+    //! writer path: identical JSON, and `None` exercises the exact branch taken
+    //! when `Store::open_read_only` fails.
+    use super::*;
+    use drive_core::{Node, NodeMetadata, native::Scope};
+    use std::path::PathBuf;
+
+    fn node(id: &str, parent: Option<&str>, directory: bool) -> Node {
+        Node {
+            id: id.into(),
+            parent: parent.map(str::to_owned),
+            name: id.into(),
+            version: "v1".into(),
+            directory,
+            metadata: Some(NodeMetadata {
+                size: 3,
+                mtime: 1,
+                mode: if directory { 0o755 } else { 0o644 },
+            }),
+        }
+    }
+    fn profile() -> crate::service::Profile {
+        crate::service::Profile {
+            schema: 1,
+            task_id: "9f6b8a52-5f4c-4c5e-9d0a-2c1b3d4e5f60".into(),
+            host: "example.invalid".into(),
+            tls_name: "example.invalid".into(),
+            trusted_ca_pem: Vec::new(),
+            username: "test".into(),
+            device_id: "1f6b8a52-5f4c-4c5e-9d0a-2c1b3d4e5f61".into(),
+            scope: Scope {
+                view_id: 1,
+                node_id: 1,
+                file_id: "root".into(),
+                path: "/test".into(),
+            },
+            mount: PathBuf::from("/tmp/drive-native-readpath-mount"),
+            writable: false,
+            local_policy: None,
+            writable_source: None,
+        }
+    }
+    fn fixture() -> (tempfile::TempDir, Arc<Service>) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(dir.path()).unwrap();
+        store
+            .install_remote_snapshot(
+                &[
+                    node("root", None, true),
+                    node("folder", Some("root"), true),
+                    node("one", Some("folder"), false),
+                ],
+                "1",
+                "server",
+            )
+            .unwrap();
+        store.ensure_fs_root("root").unwrap();
+        (
+            dir,
+            Service::new(profile(), store, PathBuf::from("/nonexistent-worker")).unwrap(),
+        )
+    }
+    fn active(service: &Service) -> HashSet<String> {
+        service.bridge.active_downloads().into_iter().collect()
+    }
+
+    #[test]
+    fn read_only_handle_opens_next_to_the_live_writer_and_rejects_writes() {
+        let (_dir, service) = fixture();
+        let mut ro = read_only(&service).expect("read-only handle must open next to the writer");
+        assert_eq!(ro.root(), service.bridge.store.root().as_path());
+        assert!(ro.cache_limit().is_ok());
+        // Read-only means writes are rejected instead of racing the writer.
+        assert!(ro.set_cache_limit(1024).is_err());
+    }
+
+    #[test]
+    fn fallback_states_path_matches_the_locked_projection() {
+        let (_dir, service) = fixture();
+        let paths = vec![
+            "folder".to_string(),
+            "folder/one".to_string(),
+            "missing".to_string(),
+        ];
+        let active = active(&service);
+        let locked = states_locked(&service, paths.clone(), &active).unwrap();
+        // `None` is the exact branch taken when the read-only handle cannot open.
+        let fallback = states_with(&service, paths.clone(), &active, None).unwrap();
+        assert_eq!(locked, fallback);
+        let ro = read_only(&service).expect("read-only handle");
+        let off_lock = states_with(&service, paths.clone(), &active, Some(&ro)).unwrap();
+        assert_eq!(locked, off_lock);
+        let value: serde_json::Value = serde_json::from_str(&off_lock).unwrap();
+        assert_eq!(value["schema"], 1);
+        assert_eq!(value["entries"].as_array().unwrap().len(), 3);
+        assert_eq!(value["entries"][2]["error"], "path_or_local_state_unavailable");
+        // File-only batches have no StatusTree; `entry` then reads status/pins
+        // straight from the handle argument, so compare that branch as well.
+        let files = vec!["folder/one".to_string(), "missing".to_string()];
+        let locked_files = states_locked(&service, files.clone(), &active).unwrap();
+        let off_lock_files = states_with(&service, files.clone(), &active, Some(&ro)).unwrap();
+        assert_eq!(locked_files, off_lock_files);
+        let file_value: serde_json::Value = serde_json::from_str(&off_lock_files).unwrap();
+        assert_eq!(file_value["entries"][0]["id"], "one");
+        assert_eq!(file_value["entries"][0]["directory"], false);
+    }
+
+    #[test]
+    fn fallback_issues_path_matches_the_locked_page() {
+        let (_dir, service) = fixture();
+        assert_eq!(
+            issues_locked(&service, "").unwrap(),
+            issues_with(&service, "", None).unwrap()
+        );
+        let ro = read_only(&service).expect("read-only handle");
+        assert_eq!(
+            issues_locked(&service, "").unwrap(),
+            issues_with(&service, "", Some(&ro)).unwrap()
+        );
+        let value: serde_json::Value =
+            serde_json::from_str(&issues_with(&service, "", Some(&ro)).unwrap()).unwrap();
+        assert_eq!(value["schema"], 1);
+        assert!(value["entries"].is_array());
+        assert!(value.get("next").is_some());
+        // A rejected cursor keeps the same error on both paths.
+        let cursor = "x".repeat(8193);
+        assert!(issues_with(&service, &cursor, None).is_err());
+        assert!(issues_with(&service, &cursor, Some(&ro)).is_err());
+    }
+
+    #[test]
+    fn read_only_cache_usage_matches_the_locked_projection() {
+        let (_dir, service) = fixture();
+        let ro = read_only(&service).expect("read-only handle");
+        let off_lock: serde_json::Value =
+            serde_json::from_str(&cache_settings_with(&service, Some(&ro)).unwrap()).unwrap();
+        let locked: serde_json::Value =
+            serde_json::from_str(&cache_settings_with(&service, None).unwrap()).unwrap();
+        assert_eq!(off_lock["schema"], 1);
+        assert_eq!(off_lock["task_id"], service.profile.task_id);
+        // No open handles exist in this fixture, so usage must agree exactly.
+        assert_eq!(off_lock["usage"], locked["usage"]);
+        assert_eq!(
+            off_lock["recent_download_seconds"],
+            drive_core::cache_policy::RECENT_DOWNLOAD_SECONDS
+        );
+    }
 }

@@ -793,3 +793,109 @@ fn overview_background_failure_fields_are_additive_and_null_when_healthy() {
     assert!(overview["upload_block"].is_null());
     assert!(overview["pending_operations"].is_number());
 }
+
+#[test]
+fn desktop_reads_do_not_wait_for_the_global_store_lock() {
+    // Issue #15/#16: GetIssues/GetStates/GetCacheSettings must not queue behind
+    // the global SharedStore mutex that FUSE and downloads hold. A writer here
+    // holds the whole lock; the desktop projections must still answer.
+    let (_dir, service) = fixture();
+    let held = service.bridge.store.lock().unwrap();
+    let (send, receive) = std::sync::mpsc::channel();
+    let reader = service.clone();
+    let thread = std::thread::spawn(move || {
+        let _ = send.send((
+            desktop::states(
+                &reader,
+                vec!["folder".to_string(), "folder/one".to_string()],
+            ),
+            desktop::issues(&reader, ""),
+            desktop::cache_settings(&reader),
+        ));
+    });
+    let result = receive.recv_timeout(std::time::Duration::from_secs(10));
+    drop(held);
+    if result.is_ok() {
+        thread.join().unwrap();
+    }
+    let (states, issues, settings) =
+        result.expect("desktop reads waited on the global Store lock");
+    let states: serde_json::Value = serde_json::from_str(&states.unwrap()).unwrap();
+    assert_eq!(states["schema"], 1);
+    assert_eq!(states["entries"].as_array().unwrap().len(), 2);
+    let issues: serde_json::Value = serde_json::from_str(&issues.unwrap()).unwrap();
+    assert_eq!(issues["schema"], 1);
+    assert!(issues["entries"].is_array());
+    let settings: serde_json::Value = serde_json::from_str(&settings.unwrap()).unwrap();
+    assert_eq!(settings["schema"], 1);
+    assert_eq!(settings["task_id"], service.profile.task_id);
+}
+
+#[test]
+fn desktop_reads_keep_their_json_contract_without_the_global_lock() {
+    let (_dir, service) = fixture();
+    let states: serde_json::Value =
+        serde_json::from_str(&desktop::states(&service, vec!["folder".into()]).unwrap()).unwrap();
+    assert_eq!(states["schema"], 1);
+    let entry = &states["entries"][0];
+    assert_eq!(entry["path"], "folder");
+    for key in ["id", "directory", "status", "pinned", "offline_available"] {
+        assert!(entry.get(key).is_some(), "state entry lost `{key}`");
+    }
+    let missing: serde_json::Value = serde_json::from_str(
+        &desktop::states(&service, vec!["absent".into()]).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(missing["entries"][0]["error"], "path_or_local_state_unavailable");
+    assert!(desktop::states(&service, vec!["folder".to_string(); 257]).is_err());
+    let issues: serde_json::Value = serde_json::from_str(&desktop::issues(&service, "").unwrap()).unwrap();
+    assert_eq!(issues["schema"], 1);
+    assert!(issues["entries"].is_array());
+    assert!(issues.get("next").is_some());
+    let settings: serde_json::Value =
+        serde_json::from_str(&desktop::cache_settings(&service).unwrap()).unwrap();
+    assert_eq!(settings["schema"], 1);
+    assert_eq!(settings["task_id"], service.profile.task_id);
+    for key in [
+        "limit_bytes",
+        "content_bytes",
+        "reclaimable_bytes",
+        "protected_bytes",
+        "over_target_bytes",
+    ] {
+        assert!(settings["usage"].get(key).is_some(), "cache usage lost `{key}`");
+    }
+    assert!(settings.get("connection").is_some());
+    assert!(settings.get("error").is_some());
+    assert!(settings.get("recent_download_seconds").is_some());
+}
+
+#[test]
+fn states_falls_back_to_the_writer_when_the_root_inode_is_missing() {
+    // A read-only handle cannot insert fs_inodes(ino=1); the projection must
+    // fall back to the serialized writer path instead of failing GetStates.
+    let d = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(d.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    let mut store = Store::open(d.path()).unwrap();
+    store
+        .install_remote_snapshot(
+            &[
+                node("root", None, true),
+                node("folder", Some("root"), true),
+                node("one", Some("folder"), false),
+            ],
+            "1",
+            "server",
+        )
+        .unwrap();
+    let service = Service::new(profile(), store, PathBuf::from("/nonexistent-worker")).unwrap();
+    let first: serde_json::Value =
+        serde_json::from_str(&desktop::states(&service, vec!["folder".into()]).unwrap()).unwrap();
+    assert_eq!(first["schema"], 1);
+    assert_eq!(first["entries"][0]["id"], "folder");
+    // The fallback initialised the root inode, so the next read can stay
+    // entirely off the global lock and must produce the same projection.
+    let second: serde_json::Value =
+        serde_json::from_str(&desktop::states(&service, vec!["folder".into()]).unwrap()).unwrap();
+    assert_eq!(first, second);
+}
