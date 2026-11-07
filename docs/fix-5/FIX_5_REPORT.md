@@ -2,9 +2,9 @@
 
 - 日期：2026-11-08
 - 分支：`codex/fix-5`（基线 `367e33d`，即 codex/fix-7 系列最新稳定集成点）
-- 提交：`94f738d perf(core): cut namespace index build cost on large trees (#5)`、`144d73d fix(core): keep body-size precedence in the lean namespace projection (#5)`
+- 提交：`94f738d perf(core): cut namespace index build cost on large trees (#5)`、`144d73d fix(core): keep body-size precedence in the lean namespace projection (#5)`，报告 `b3b0883`/`f3ea9a3`
 - 远端验证机：`workstation202611`（Ubuntu Server 24.04.5，kernel 6.8.0-147-generic，i9-14900K 24C/32T，125 GiB RAM，rustc/cargo 1.99.1）；本机只存放源码，编译/测试/基准全部在远端执行
-- 状态：代码与基准完成；Rust 全量验证与 GUI 验证见 §6；**未 push、未开 PR、未评论 issue**
+- 状态：代码与基准完成；Rust 全量验证与 GUI 验证见 §5；**未 push、未开 PR、未评论 issue**
 
 ## 1. 摘要
 
@@ -126,6 +126,7 @@ entry TTL 恒 0；attr TTL 默认 1000 ms（`DRIVE_NATIVE_FS_TTL_MS` 可调，�
 
 ## 6. 未测项与边界
 
+- issue #5 的 8 项功能验收（rename/delete/权限/未上传编辑/搜索结果路径等）沿用 `docs/validation/fix-all-001/g4/REPORT.md` 的既有独立验证（本分支基线 `367e33d` 包含对应修复）；本轮只新增/重跑扫描正确性（audit 全 0、hydration 0）与 FUSE 元数据行为，未重跑真实 NAS 与桌面交互矩阵。
 - 未接触真实 Synology NAS、未读取任何凭据、未在真实用户文件上执行写操作；real 树仅使用元数据 manifest 在夹具上重建布局。
 - 未在真实 Mint/Cinnamon 面板、Nemo/Nautilus 鼠标交互、HiDPI/主题下实测（这些属于桌面功能，需真机）。
 - `.7` 基线未能纳入配对：`c6f0a80`（dev20261102.7 源码）没有 `NotifyHub`/`publication`/NSI 等 API，仓库夹具无法直接编译进 .7；本报告以 `.9`（`d555944`）作为更保守的旧基线。issue 原描述中的「.7 对比」由 .9 对比替代，不宣称已覆盖 .7。
@@ -168,5 +169,6 @@ pwsh -File work/fix-5/remote/verify/run-verify.ps1 -Stage rust
 - `work/fix-5/logs/final-*.log`（FSearch/audit 原始输出）
 - `work/fix-5/run/final-evidence.tar.gz`（远端证据包原件）
 - `work/fix-5/verify/logs/<RunId>/{rust-stages.tsv,rust-run.log,rust-summary.txt,rust-kernel-*.log}`（Rust 验证）
+- `work/fix-5/verify/logs/20261108-kernel-evidence/`（FUSE 内核阶段重试日志、两树 flake 对照、continuation 独立重跑、README 记录）
 - `work/fix-5/remote/`（`bench.py`、`scan.c`、`build-fixture.sh`、`build-fsearch.sh`、`build_manifest.py`、`verify/`）
 - 远端 `~/dn-fix5/logs/`（FSearch 构建、夹具构建、基准日志）
