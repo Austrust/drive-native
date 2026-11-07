@@ -464,3 +464,146 @@ fn namespace_root_scoped_seed_falls_back_to_the_full_scan() {
         fallback.len()
     );
 }
+
+fn full_row(full: &[StatusSeed], id: &str) -> SeedTuple {
+    let seed = full
+        .iter()
+        .find(|seed| seed.id == id)
+        .unwrap_or_else(|| panic!("missing full seed {id}"));
+    tuple(seed)
+}
+
+#[test]
+fn single_seed_matches_the_full_projection_for_visible_and_hidden_nodes() {
+    let (_dir, s) = small_fixture();
+    let full = s.desktop_status_seeds().unwrap();
+    for seed in &full {
+        let single = s
+            .desktop_status_seed(&seed.id)
+            .unwrap()
+            .expect("visible node has a single seed");
+        assert_eq!(tuple(&single), tuple(seed), "node {}", seed.id);
+    }
+    // Access-denied ancestor, deleted node, local-creation shadow and a missing
+    // identity all have to look exactly like their absence from the full scan.
+    // (`gone_child` is *not* hidden: the filter is per-row, so a live child of a
+    // deleted directory is still projected by the authoritative query.)
+    for hidden in ["den", "den1", "gone", "shadowed", "missing"] {
+        assert!(
+            s.desktop_status_seed(hidden).unwrap().is_none(),
+            "{hidden} must stay hidden"
+        );
+    }
+    assert_eq!(
+        s.desktop_status_seed("gone_child")
+            .unwrap()
+            .map(|seed| tuple(&seed)),
+        Some(full_row(&full, "gone_child"))
+    );
+    assert_eq!(
+        s.desktop_status_seed("local_shadow").unwrap().map(|seed| tuple(&seed)),
+        Some(full_row(&full, "local_shadow"))
+    );
+}
+
+/// Recomputes the visible rows at a location the way the incremental cache does:
+/// enumerate every live id there, then re-read each node's seed. This is the
+/// composition that replaces a location-level seed query.
+fn visible_at(s: &Store, parent: Option<&str>, name: &str) -> Vec<SeedTuple> {
+    let mut rows: Vec<SeedTuple> = s
+        .desktop_status_ids_at(parent, name)
+        .unwrap()
+        .iter()
+        .filter_map(|id| {
+            s.desktop_status_seed(id)
+                .unwrap()
+                .map(|seed| tuple(&seed))
+        })
+        .collect();
+    rows.sort();
+    rows
+}
+
+#[test]
+fn ids_at_and_point_seeds_reproduce_the_visible_rows_at_a_location() {
+    let (_dir, s) = small_fixture();
+    let full = s.desktop_status_seeds().unwrap();
+    assert_eq!(
+        visible_at(&s, Some("a"), "shadowed"),
+        vec![full_row(&full, "local_shadow")]
+    );
+    assert_eq!(
+        visible_at(&s, None, "root"),
+        vec![full_row(&full, "root")]
+    );
+    assert_eq!(visible_at(&s, Some("a"), "a1"), vec![full_row(&full, "a1")]);
+    assert!(visible_at(&s, Some("a"), "missing").is_empty());
+    // Removing the shadow reveals the remote node at the same location; the
+    // local node row itself is still live until its commit removes it.
+    s.db.execute("DELETE FROM local_creations WHERE node='local_shadow'", [])
+        .unwrap();
+    let mut expected = vec![
+        full_row(&full, "local_shadow"),
+        (
+            "shadowed".to_owned(),
+            Some("a".to_owned()),
+            false,
+            false,
+            false,
+            false,
+        ),
+    ];
+    expected.sort();
+    assert_eq!(visible_at(&s, Some("a"), "shadowed"), expected);
+}
+
+#[test]
+fn ids_at_lists_every_live_node_at_a_location() {
+    let (_dir, s) = small_fixture();
+    let mut shadowed = s.desktop_status_ids_at(Some("a"), "shadowed").unwrap();
+    shadowed.sort();
+    assert_eq!(shadowed, vec!["local_shadow".to_owned(), "shadowed".to_owned()]);
+    assert_eq!(
+        s.desktop_status_ids_at(None, "root").unwrap(),
+        vec!["root".to_owned()]
+    );
+    assert!(s
+        .desktop_status_ids_at(Some("a"), "missing")
+        .unwrap()
+        .is_empty());
+    // Deleted nodes never come back even though `ids_at` skips visibility.
+    assert!(s.desktop_status_ids_at(None, "gone").unwrap().is_empty());
+}
+
+/// ACL visibility is inherited: denying a directory hides its descendants from
+/// both the authoritative full scan and the scoped query, and restoring it
+/// brings those rows back. The runtime worker's subtree refresh relies on
+/// exactly this query behaviour.
+#[test]
+fn access_denial_hides_and_restoring_reveals_the_subtree_in_both_queries() {
+    let (_dir, s) = small_fixture();
+    let ids = |rows: &[StatusSeed]| -> HashSet<String> {
+        rows.iter().map(|row| row.id.clone()).collect()
+    };
+
+    // `den` is denied by the fixture; `den1` is hidden only by inheritance.
+    let full = ids(&s.desktop_status_seeds().unwrap());
+    assert!(!full.contains("den"));
+    assert!(!full.contains("den1"));
+    let scoped = ids(&s.desktop_status_seeds_for(&["den".to_owned()]).unwrap());
+    assert!(!scoped.contains("den"));
+    assert!(!scoped.contains("den1"));
+    // The ancestor chain is still returned, so `StatusTree::inherited` has rows.
+    assert!(scoped.contains("root"));
+
+    // Restoring visibility shows both rows again in both queries.
+    s.db.execute("DELETE FROM access_denied WHERE node='den'", [])
+        .unwrap();
+    let full = ids(&s.desktop_status_seeds().unwrap());
+    assert!(full.contains("den"));
+    assert!(full.contains("den1"));
+    let scoped = ids(&s.desktop_status_seeds_for(&["den".to_owned()]).unwrap());
+    assert!(scoped.contains("den"));
+    assert!(scoped.contains("den1"));
+    assert!(scoped.contains("root"));
+}

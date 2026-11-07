@@ -47,21 +47,66 @@ impl Store {
         }
         self.collect_seeds(&scoped_seed_sql(), &[&roots])
     }
+    /// One seed row for `id`, or `None` when the node is missing, deleted,
+    /// access-denied or shadowed by a local creation at the same name.
+    ///
+    /// This is the incremental-refresh counterpart of [`Self::desktop_status_seeds`]:
+    /// callers re-read only the nodes named by a committed journal change.
+    pub fn desktop_status_seed(&self, id: &str) -> Result<Option<StatusSeed>> {
+        let mut q = self.db.prepare(&format!(
+            "SELECT {SEED_COLUMNS} FROM nodes n WHERE n.id=?1 AND {SEED_FILTERS}"
+        ))?;
+        let mut rows = q.query_map([id], seed_from_row)?;
+        match rows.next() {
+            Some(row) => Ok(Some(row?)),
+            None => Ok(None),
+        }
+    }
+    /// Ids of every live node at exactly `(parent, name)`, without the
+    /// visibility rules.
+    ///
+    /// Shadowing is a property of the location, not of a node: inserting or
+    /// removing a `local_creations` row hides or reveals every node stored at
+    /// the same parent/name. Turning a location change into point reads means
+    /// first enumerating every node there (`None` = namespace root) and then
+    /// re-reading each node with [`Self::desktop_status_seed`]: the shadowed
+    /// remote row is not returned by any visible seed query, but it still has to
+    /// be revisited so a stale projection row can be removed.
+    pub fn desktop_status_ids_at(&self, parent: Option<&str>, name: &str) -> Result<Vec<String>> {
+        let sql = match parent {
+            Some(_) => "SELECT n.id FROM nodes n WHERE n.parent=?1 AND n.name=?2 AND n.deleted=0",
+            None => "SELECT n.id FROM nodes n WHERE n.parent IS NULL AND n.name=?1 AND n.deleted=0",
+        };
+        let mut q = self.db.prepare(sql)?;
+        let params: &[&str] = match parent {
+            Some(parent) => &[parent, name],
+            None => &[name],
+        };
+        Ok(q.query_map(rusqlite::params_from_iter(params.iter().copied()), |r| {
+            r.get(0)
+        })?
+        .collect::<std::result::Result<Vec<_>, _>>()?)
+    }
     fn collect_seeds(&self, sql: &str, params: &[&str]) -> Result<Vec<StatusSeed>> {
         let mut q = self.db.prepare(sql)?;
         Ok(q
-            .query_map(rusqlite::params_from_iter(params.iter().copied()), |r| {
-                Ok(StatusSeed {
-                    id: r.get(0)?,
-                    parent: r.get(1)?,
-                    directory: r.get(2)?,
-                    pinned: r.get(3)?,
-                    overlay: r.get(4)?,
-                    detailed: r.get(5)?,
-                })
-            })?
+            .query_map(
+                rusqlite::params_from_iter(params.iter().copied()),
+                seed_from_row,
+            )?
             .collect::<std::result::Result<Vec<_>, _>>()?)
     }
+}
+
+fn seed_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StatusSeed> {
+    Ok(StatusSeed {
+        id: row.get(0)?,
+        parent: row.get(1)?,
+        directory: row.get(2)?,
+        pinned: row.get(3)?,
+        overlay: row.get(4)?,
+        detailed: row.get(5)?,
+    })
 }
 
 /// Scoped seed SQL, kept separate so tests can inspect its query plan.
