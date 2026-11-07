@@ -1,10 +1,45 @@
 //! Local soft content budget. Never creates server mutations or deletes dirty/open drafts.
-use crate::{Error, Result, Status, Store};
+use crate::{Error, Result, Store};
 use rusqlite::OptionalExtension;
 use serde::Serialize;
 use std::collections::HashSet;
 pub const RECENT_DOWNLOAD_SECONDS: u64 = 60;
 pub const MAX_CACHE_LIMIT: u64 = 1024 * 1024 * 1024 * 1024 * 1024;
+/// Candidate discovery with every structural protection evaluated once as a
+/// set instead of once per cached row. The previous correlated `NOT EXISTS`
+/// forms rescanned `nodes` for each candidate (GB-scale page reads); the
+/// protection sets here are scanned once and reused. Only handle, recency and
+/// filesystem checks stay in Rust because they are not stored in SQL.
+const CACHE_CANDIDATES_SQL: &str = concat!(
+    "WITH RECURSIVE ",
+    // Pinned nodes protect their whole subtree (is_pinned walks ancestors).
+    "pinned(id) AS (SELECT id FROM nodes WHERE pinned=1 UNION SELECT n.id FROM pinned p CROSS JOIN nodes n ON n.parent=p.id), ",
+    // Namespace overlay blocks upload for its whole subtree (blocks_upload).
+    "upload_blocked(id) AS (SELECT node FROM namespace_overlay UNION SELECT n.id FROM upload_blocked b CROSS JOIN nodes n ON n.parent=b.id), ",
+    // Unapplied engine namespace intents resolve through remote aliases.
+    "engine_pending(node) AS (SELECT COALESCE(a.node,i.node) FROM engine_bridge_intents i LEFT JOIN remote_aliases a ON a.remote=i.node WHERE i.phase!='applied'), ",
+    "ops_node(node) AS (SELECT DISTINCT node FROM operations WHERE node IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict')), ",
+    "local_node(node) AS (SELECT node FROM local_creations), ",
+    // Operations and pending namespace replacements protect a shared blob.
+    "protected_blobs(blob) AS (SELECT DISTINCT blob FROM operations WHERE blob IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict') UNION SELECT json_extract(body,'$.blob') FROM namespace_ops WHERE kind='replace' AND state NOT IN ('committed','superseded') AND json_extract(body,'$.blob') IS NOT NULL), ",
+    // A blob referenced by any other node (or by any dirty blob) is shared.
+    "shared_blobs(blob) AS (SELECT blob FROM nodes WHERE blob IS NOT NULL GROUP BY blob HAVING COUNT(*)>1 UNION SELECT dirty_blob FROM nodes WHERE dirty_blob IS NOT NULL) ",
+    "SELECT n.id,n.blob,COALESCE(p.at,0) FROM nodes n ",
+    "LEFT JOIN cache_access a ON a.node=n.id ",
+    "LEFT JOIN cache_published p ON p.node=n.id ",
+    "WHERE n.directory=0 AND n.deleted=0 AND n.blob IS NOT NULL AND n.dirty_blob IS NULL ",
+    "AND n.conflict=0 AND n.local_version=n.remote_version ",
+    "AND NOT EXISTS(SELECT 1 FROM drafts d WHERE d.node=n.id AND d.dirty=1) ",
+    "AND n.id NOT IN (SELECT id FROM access_blocked) ",
+    "AND n.id NOT IN (SELECT id FROM pinned) ",
+    "AND n.id NOT IN (SELECT id FROM upload_blocked) ",
+    "AND n.id NOT IN (SELECT node FROM engine_pending WHERE node IS NOT NULL) ",
+    "AND n.id NOT IN (SELECT node FROM ops_node) ",
+    "AND n.id NOT IN (SELECT node FROM local_node) ",
+    "AND n.blob NOT IN (SELECT blob FROM protected_blobs) ",
+    "AND n.blob NOT IN (SELECT blob FROM shared_blobs) ",
+    "ORDER BY COALESCE(a.seq,0),n.id",
+);
 #[derive(Clone, Debug, Serialize)]
 pub struct CacheUsage {
     pub limit_bytes: u64,
@@ -95,6 +130,52 @@ impl Store {
         Ok(self.db.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE node=?1 AND state IN ('pending','inflight','uncertain','conflict')) OR EXISTS(SELECT 1 FROM local_creations WHERE node=?1)",[id],|r|r.get(0))?)
     }
     fn cache_candidates(&self, now: u64, active: &HashSet<String>) -> Result<Vec<(String, u64)>> {
+        let mut q = self.db.prepare(CACHE_CANDIDATES_SQL)?;
+        let rows = q
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, i64>(2)?,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let mut result = Vec::new();
+        for (id, blob, published) in rows {
+            if active.contains(&id) {
+                continue;
+            }
+            {
+                // Answer for open handles; every other `cache_is_protected`
+                // clause is already enforced by the SQL above.
+                let handles = self.handles.lock().unwrap();
+                if handles.contains_key(&blob) || handles.values().any(|(node, _)| node == &id) {
+                    continue;
+                }
+            }
+            if published > 0 && now.saturating_sub(published as u64) < RECENT_DOWNLOAD_SECONDS {
+                continue;
+            }
+            let path = self.root.join("blobs").join(&blob);
+            if !path.is_file() {
+                return Err(Error::State("referenced content missing on disk".into()));
+            }
+            let metadata = std::fs::symlink_metadata(&path)?;
+            if !metadata.is_file() {
+                return Err(Error::State("invalid cache content file".into()));
+            }
+            result.push((id, metadata.len()));
+        }
+        Ok(result)
+    }
+    /// Pre-rewrite per-candidate implementation, kept only so tests can prove
+    /// the set-based query selects exactly the same candidates.
+    #[cfg(test)]
+    fn cache_candidates_legacy(
+        &self,
+        now: u64,
+        active: &HashSet<String>,
+    ) -> Result<Vec<(String, u64)>> {
         let mut q=self.db.prepare("SELECT n.id,n.blob,COALESCE(p.at,0) FROM nodes n LEFT JOIN cache_access a ON a.node=n.id LEFT JOIN cache_published p ON p.node=n.id WHERE n.id NOT IN (SELECT id FROM access_blocked) AND n.directory=0 AND n.deleted=0 AND n.blob IS NOT NULL AND n.dirty_blob IS NULL AND n.conflict=0 AND n.local_version=n.remote_version AND NOT EXISTS(SELECT 1 FROM nodes other WHERE other.id!=n.id AND (other.blob=n.blob OR other.dirty_blob=n.blob)) AND NOT EXISTS(SELECT 1 FROM operations o WHERE o.blob=n.blob AND o.state IN ('pending','inflight','uncertain','conflict')) AND NOT EXISTS(SELECT 1 FROM namespace_ops o WHERE o.kind='replace' AND o.state NOT IN ('committed','superseded') AND json_extract(o.body,'$.blob')=n.blob) ORDER BY COALESCE(a.seq,0),n.id")?;
         let rows = q
             .query_map([], |r| {
@@ -114,7 +195,7 @@ impl Store {
             {
                 continue;
             }
-            if self.status(&id)? != Status::LocalComplete {
+            if self.status(&id)? != crate::Status::LocalComplete {
                 continue;
             }
             let metadata = std::fs::symlink_metadata(self.root.join("blobs").join(&blob))?;
@@ -226,3 +307,7 @@ impl Store {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "cache_policy_tests.rs"]
+mod tests;
