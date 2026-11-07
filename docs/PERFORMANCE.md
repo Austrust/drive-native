@@ -49,3 +49,11 @@ python3 scripts/watch_mounts.py --state-dir /path/to/isolated-test-state
 两个目录状态请求流加一个普通状态请求流，同时作用于大团队与个人大子树，共 48 次请求，全部成功。锁外聚合前后，个人 GetOverview 最长响应从 2.361 s 降至 0.931 s，团队从 0.904 s 降至 0.288 s。个人 GetStates 最长仍为 2.336 s：批量索引和汇总仍有遍历成本，不能宣称已实现增量图标算法。状态快照只核对本批相关子树的详细缓存/冲突信息，损坏缓存按路径返回错误，不扩大为整批失败。
 
 锁外聚合最终包再次验证：团队约 2.10 MB PDF 首次 0.245 s / 再次 0.119 s，个人子树约 2.01 MB PDF 首次 0.289 s / 再次 0.180 s，内容一致。包内 fsd SHA-256 3082a758f32b7c0ecfda5058e2dc629b8d41172dacafdd798ca613c0aaf61678，worker 中断 2.067 s 恢复、无探测错误，缓存读取 19 ms 且内容一致。
+
+## 本地 DB 热点与增量状态投影（2026-11-07）
+
+issue [#15](https://github.com/Austrust/drive-native/issues/15)、[#16](https://github.com/Austrust/drive-native/issues/16)、[#8](https://github.com/Austrust/drive-native/issues/8) 的修复把 schema 升到 v27（5 个新索引 + 只读 SQLite 句柄），重写四个查询热点（`sync_issues` 四支 UNION、`downloads_needed` 三支索引化、`desktop_status_seeds_for` 子树裁剪、`cache_candidates` 集合式 SQL），桌面 GetStates/GetIssues/GetCacheSettings 走只读句柄，并新增运行时增量状态投影缓存（`crates/drive-runtime/src/status_cache.rs`）。
+
+294k 节点合成夹具（release）：`cache_usage` 7.08 s / 13.54 GB → 13.3 ms / 41.2 MB；`sync_issues` 首页 18.7 s / 811 MB → 21.6 ms / 9.56 MB（无问题 27.7 s → 0.16 ms）；`downloads_needed` 120 ms / 70.9 MB → 8.1 ms / 6.45 MB；单目录 scoped seeds 0.69–5.25 ms。210k 节点 #8 验收（合成夹具 + 进程内 FUSE，安静窗口）：GetStates p95 469 ms → 309 ms，48 路混合超时 47 → 0（max 19.7 s → 2.9 s），持锁 2000 ms 时 GetStates 480 → 322 ms。schema v27 升级在 release 294k 上 0.33–8.1 s（中位 5.22 s）、临时盘 +143 MB。
+
+**边界**：无真实 NAS / 真机 GUI / Mint 端到端；rchar 为进程级读数；namespace 根 `GetStates` 仍 O(节点)；`GetOverview`/`GetTransfers`/`GetDirectory`/`GetInitialization` 仍持全局 Store 锁；`status_index` 聚合树未接入。详见 [ISSUES_20261107.md](ISSUES_20261107.md)。

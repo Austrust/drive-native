@@ -1,6 +1,10 @@
 # 增量目录状态：纯聚合核心与后续接口
 
-2026-10-31。基于[事务变化日志](STATUS_CHANGE_JOURNAL.md)、[提交投影](STATUS_PROJECTION.md)，已实现纯聚合与纯树拥有者；设计依据为 [P1 §C](P1_ARCHITECTURE.md) 和现有 [desktop::entry](../crates/drive-runtime/src/desktop.rs) 状态规则。代码为本项目实现，不包含服务器数据或官方客户端代码。**运行中的 desktop 查询未切换，后台重建、瞬态运行接入及性能验收尚未完成。**
+2026-10-31。基于[事务变化日志](STATUS_CHANGE_JOURNAL.md)、[提交投影](STATUS_PROJECTION.md)，已实现纯聚合与纯树拥有者；设计依据为 [P1 §C](P1_ARCHITECTURE.md) 和现有 [desktop::entry](../crates/drive-runtime/src/desktop.rs) 状态规则。代码为本项目实现，不包含服务器数据或官方客户端代码。
+
+> 2026-11-07 运行接入现状：issue #8 新增了独立的运行时增量投影缓存 [status_cache.rs](../crates/drive-runtime/src/status_cache.rs)（内存 `StatusSeed` rows + children，独占 `take_notifications`、journal 增量、250 ms 节流发布），并通过 `load_with_projection` 接入 desktop `GetStates`（投影未就绪/缺行回退权威 scoped 读）。**它不是本页描述的 `status_index::IndexOwner` 树**：聚合 Summary 树、availability/transient 内容核验、ACL 生命周期订阅仍未接入 desktop。修复与验收数字见 [ISSUES_20261107.md](ISSUES_20261107.md)。
+
+**本页描述的聚合 Summary 树仍未切换进 desktop；GetStates 现由上面的 status_cache 投影承担，聚合树/瞬态运行接入及对应性能验收尚未完成。**
 
 ## 本批已经实现的接口
 
