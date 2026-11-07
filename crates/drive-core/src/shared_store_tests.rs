@@ -452,3 +452,57 @@ fn real_draft_io_failure_after_dirty_commit_still_wakes() {
     assert_eq!(n.state().revision, before + 1);
     assert!(shared.lock().unwrap().dirty_draft("a").unwrap());
 }
+
+#[test]
+fn open_handle_count_reads_the_shared_handle_map_without_the_store_lock() {
+    let (_dir, shared, _) = fixture();
+    assert_eq!(shared.open_handle_count(), 0);
+    {
+        let mut handles = shared.handles.lock().unwrap();
+        handles.insert("blob-a".into(), ("a".into(), 1));
+        handles.insert("blob-b".into(), ("root".into(), 2));
+    }
+    assert_eq!(shared.open_handle_count(), 3);
+    shared.handles.lock().unwrap().get_mut("blob-a").unwrap().1 = 2;
+    assert_eq!(shared.open_handle_count(), 4);
+    {
+        let mut handles = shared.handles.lock().unwrap();
+        handles.remove("blob-a");
+        handles.remove("blob-b");
+    }
+    // Holding the writer's Store lock must not block the count: it only
+    // touches the shared handle map, which is what off-lock readers need.
+    let guard = shared.lock().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::scope(|scope| {
+        scope.spawn(|| tx.send(shared.open_handle_count()).unwrap());
+        assert_eq!(
+            rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap(),
+            0
+        );
+    });
+    drop(guard);
+}
+
+#[test]
+fn open_handle_count_follows_a_real_cached_read_handle() {
+    let (_dir, shared, _) = fixture();
+    let bytes = b"cached";
+    shared
+        .lock()
+        .unwrap()
+        .publish_download(
+            &crate::DownloadTicket {
+                id: "a".into(),
+                version: "1".into(),
+            },
+            bytes,
+            &crate::sha256(bytes),
+        )
+        .unwrap();
+    assert_eq!(shared.open_handle_count(), 0);
+    let handle = shared.lock().unwrap().open_cached("a").unwrap();
+    assert_eq!(shared.open_handle_count(), 1);
+    drop(handle);
+    assert_eq!(shared.open_handle_count(), 0);
+}

@@ -2,6 +2,7 @@
 //! The notification is a wakeup, never an atom/delta or a publication receipt.
 use crate::{Store, status_changes::StatusCursor};
 use std::{
+    collections::HashMap,
     fmt,
     ops::{Deref, DerefMut},
     path::PathBuf,
@@ -64,6 +65,9 @@ pub struct SharedStore {
     // Captured before the Store moves behind the mutex so read-only handles can
     // be opened beside a live writer without acquiring either lock.
     root: PathBuf,
+    // Shared with the writer's Store: off-lock readers must see the same open
+    // handle set the writer protects in `cache_usage`.
+    handles: Arc<Mutex<HashMap<String, (String, usize)>>>,
 }
 
 /// A short metadata publication lease. It never holds SQLite/Store; callers
@@ -116,6 +120,9 @@ impl CommitNotifications {
 impl SharedStore {
     pub fn new(store: Store) -> Self {
         let root = store.root().to_owned();
+        // Cloned before the Store moves into the mutex: read-only readers need
+        // the same handle map to answer cache protection without a Store lock.
+        let handles = store.handles.clone();
         let permission_denials = crate::write_permissions::has_denials(&store).unwrap_or(true);
         let boundary = boundary(&store).ok();
         let unverified = boundary.is_none();
@@ -141,12 +148,24 @@ impl SharedStore {
             permission_denials: AtomicBool::new(permission_denials),
             permission_publication: RwLock::new(()),
             root,
+            handles,
         }
     }
     /// The state directory this handle owns. Answered from the captured path;
     /// it never acquires the Store or projection lock.
     pub fn root(&self) -> PathBuf {
         self.root.clone()
+    }
+    /// Number of open cached/draft handles recorded by the writer (the sum of
+    /// all reference counts). Answered from the shared handle map alone; it
+    /// never acquires the Store or projection lock.
+    pub fn open_handle_count(&self) -> usize {
+        self.handles
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .values()
+            .map(|(_, references)| *references)
+            .sum()
     }
     pub fn change_state(&self) -> CommitState {
         state(self.signal.state.load(Ordering::Acquire))
