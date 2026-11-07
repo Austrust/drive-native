@@ -14,7 +14,7 @@ use std::{
         Arc, Condvar, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 pub struct WorkerProcess {
     pub rpc: Arc<Rpc>,
@@ -90,10 +90,21 @@ enum UploadPass {
     Gated,
     Ran(usize),
 }
-/// Result of one upload cycle: `ran` is false when every pass was gated.
+/// Result of one upload cycle: `ran` is false when every pass was gated and
+/// `confirmed` counts the operations the server confirmed in this cycle.
 struct CycleOutcome {
     ran: bool,
+    confirmed: usize,
 }
+/// Idle poll interval of the upload worker. Signals and due retry deadlines
+/// wake the worker earlier.
+const UPLOAD_WAIT_INTERVAL: Duration = Duration::from_secs(1);
+/// Upper bound on how long a hydration refresh may be deferred while uploads
+/// keep progressing. `refresh_cached()` enumerates durable download intent
+/// (pinned, stale, retryable) via `downloads_needed()`, so running it after
+/// every confirmed upload made each write pay that scan. Deferring it keeps
+/// the intent durable and bounds its worst-case latency.
+const UPLOAD_REFRESH_MAX_INTERVAL: Duration = Duration::from_secs(5);
 pub struct Bridge {
     pub store: Arc<drive_core::SharedStore>,
     recovery_gate: std::sync::RwLock<()>,
@@ -111,6 +122,9 @@ pub struct Bridge {
     pub last_download_failure: Mutex<Option<(DownloadFailureKind, Option<u32>)>>,
     upload_signal: (Mutex<bool>, Condvar),
     recheck_requested: AtomicBool,
+    /// Test-only observation of how many hydration refreshes ran.
+    #[cfg(test)]
+    refresh_runs: AtomicUsize,
     failure: Mutex<Option<BackgroundFailure>>,
     /// Last concrete reason a pending upload could not start. Unlike
     /// `failure` this is resolved state, cleared as soon as the queue is
@@ -294,6 +308,8 @@ impl Bridge {
             last_download_failure: Mutex::new(None),
             upload_signal: (Mutex::new(false), Condvar::new()),
             recheck_requested: AtomicBool::new(false),
+            #[cfg(test)]
+            refresh_runs: AtomicUsize::new(0),
             failure: Mutex::new(None),
             upload_block: Mutex::new(None),
             cache_error: Mutex::new(None),
@@ -517,6 +533,8 @@ impl Bridge {
         Ok(true)
     }
     pub fn refresh_cached(&self) {
+        #[cfg(test)]
+        self.refresh_runs.fetch_add(1, Ordering::Relaxed);
         let tickets = match self.store.lock().unwrap().downloads_needed() {
             Ok(t) => t,
             Err(_) => return,
@@ -1239,27 +1257,65 @@ impl Bridge {
         }
     }
     /// Run one cycle and record/clear only the transient failures it observed.
-    fn run_upload_cycle(&self) {
+    fn run_upload_cycle(&self) -> CycleOutcome {
         match self.upload_cycle() {
-            Ok(outcome) if outcome.ran => {
-                self.clear_failure(BackgroundSource::UploadQueueStopped);
+            Ok(outcome) => {
+                if outcome.ran {
+                    self.clear_failure(BackgroundSource::UploadQueueStopped);
+                }
+                outcome
             }
-            Ok(_) => {}
             Err(error) if error.kind() != io::ErrorKind::NotConnected => {
                 self.note_failure(BackgroundSource::UploadQueueStopped);
+                CycleOutcome {
+                    ran: false,
+                    confirmed: 0,
+                }
             }
-            Err(_) => {}
+            Err(_) => CycleOutcome {
+                ran: false,
+                confirmed: 0,
+            },
         }
     }
     pub fn upload_loop(&self, stop: &std::sync::atomic::AtomicBool) {
+        self.upload_loop_with(stop, UPLOAD_WAIT_INTERVAL, UPLOAD_REFRESH_MAX_INTERVAL);
+    }
+    /// Upload worker loop.
+    ///
+    /// A signal (pin/retry/recheck, remote event batch, snapshot install) or a
+    /// due retry deadline wakes the loop immediately instead of waiting for the
+    /// idle poll, and a cycle that confirmed uploads runs the next cycle
+    /// back-to-back: operations appended by the previous cycle are drained
+    /// instead of sitting until the next 1s poll.
+    ///
+    /// Hydration refreshes are charged against upload progress, because
+    /// `refresh_cached()` enumerates durable download intent. A wake that
+    /// produced no upload work refreshes immediately (pins, retries, events and
+    /// startup must never wait for the poll), while a productive cycle only
+    /// marks the refresh pending and runs it on the next idle tick or after
+    /// `refresh_max_interval`. Deferral therefore never drops pinned, stale or
+    /// retryable download intent; it only avoids paying the enumeration once per
+    /// uploaded operation.
+    fn upload_loop_with(
+        &self,
+        stop: &std::sync::atomic::AtomicBool,
+        wait_interval: Duration,
+        refresh_max_interval: Duration,
+    ) {
         self.signal_upload();
+        let mut refresh_pending = false;
+        let mut pending_since = Instant::now();
+        // Set once a cycle confirmed an upload: the next iteration runs it
+        // back-to-back without waiting for a wake or the poll timeout.
+        let mut drain = false;
         while !stop.load(Ordering::Acquire) {
             let mut wake = self.upload_signal.0.lock().unwrap();
-            if !*wake && !stop.load(Ordering::Acquire) {
+            if !*wake && !drain && !stop.load(Ordering::Acquire) {
                 wake = self
                     .upload_signal
                     .1
-                    .wait_timeout(wake, Duration::from_secs(1))
+                    .wait_timeout(wake, wait_interval)
                     .unwrap()
                     .0;
             }
@@ -1269,6 +1325,10 @@ impl Bridge {
             let signaled = *wake;
             *wake = false;
             drop(wake);
+            // A back-to-back cycle is not a fresh signal: it may only refresh
+            // when a retry deadline is due or the deferred interval elapsed.
+            let auto = drain;
+            drain = false;
             // Download deadlines, bounded namespace observation deadlines and
             // the uncertain-upload reconciliation budget. Namespace intent
             // remains durable; its backoff is local to this process. This check
@@ -1288,7 +1348,13 @@ impl Bridge {
                         .upload_reconcile_due(unix_seconds() as i64)
                         .unwrap_or(false)
             };
-            if !signaled && !retry_due {
+            if !signaled && !retry_due && !auto {
+                // Idle poll: settle a deferred hydration refresh now that the
+                // queue is quiet, without competing with upload progress.
+                if refresh_pending && self.connection().is_connected() {
+                    refresh_pending = false;
+                    self.refresh_cached();
+                }
                 continue;
             }
             if !self.connection().is_connected() {
@@ -1296,8 +1362,27 @@ impl Bridge {
             }
             // A gated cycle observed nothing; it must not clear a failure that
             // this cycle never re-verified.
-            self.run_upload_cycle();
+            let outcome = self.run_upload_cycle();
+            if outcome.confirmed > 0 {
+                if !refresh_pending {
+                    refresh_pending = true;
+                    pending_since = Instant::now();
+                }
+                drain = true;
+                // Retry deadlines and the deferred-hydration cap still refresh
+                // while uploads drain.
+                if !retry_due && pending_since.elapsed() < refresh_max_interval {
+                    continue;
+                }
+            } else if auto && !retry_due {
+                // The back-to-back cycle found no more upload work. Leave the
+                // deferred refresh to the idle tick instead of paying it here.
+                continue;
+            }
+            refresh_pending = false;
             // Pin actions must not wait for a remote event to wake hydration.
+            // A wake that produced no upload work is evidence the queue is
+            // idle, so refresh without waiting for the poll timeout.
             if self.connection().is_connected() {
                 self.refresh_cached();
             }
@@ -1314,14 +1399,17 @@ impl Bridge {
     /// then submit pending uploads. `ran` is false when every pass was gated.
     fn upload_cycle(&self) -> io::Result<CycleOutcome> {
         let mut ran = false;
-        if matches!(self.upload_pending_pass(true)?, UploadPass::Ran(_)) {
+        let mut confirmed = 0;
+        if let UploadPass::Ran(count) = self.upload_pending_pass(true)? {
             ran = true;
+            confirmed += count;
         }
         self.namespace_pending()?;
-        if matches!(self.upload_pending_pass(false)?, UploadPass::Ran(_)) {
+        if let UploadPass::Ran(count) = self.upload_pending_pass(false)? {
             ran = true;
+            confirmed += count;
         }
-        Ok(CycleOutcome { ran })
+        Ok(CycleOutcome { ran, confirmed })
     }
     /// Pass body shared by `upload_pending` and one `upload_cycle` step.
     fn upload_pending_pass(&self, reconcile: bool) -> io::Result<UploadPass> {
@@ -1633,6 +1721,10 @@ mod upload_tests;
 #[cfg(test)]
 #[path = "background_error_tests.rs"]
 mod background_error_tests;
+
+#[cfg(test)]
+#[path = "loop_tests.rs"]
+mod loop_tests;
 
 #[cfg(test)]
 #[path = "download_publication_tests.rs"]

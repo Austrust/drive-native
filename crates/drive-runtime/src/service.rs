@@ -15,8 +15,10 @@ use std::{
         Arc, Condvar, Mutex,
         atomic::{AtomicBool, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
+#[cfg(test)]
+use std::sync::atomic::AtomicUsize;
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -206,6 +208,12 @@ pub struct Service {
     pub control: Mutex<Control>,
     changed: Condvar,
     pub stop: AtomicBool,
+    /// Set by `cache_policy_changed()` so a policy edit runs a trim even when
+    /// it did not change `local_revision` (the cache limit lives in metadata).
+    cache_policy_dirty: AtomicBool,
+    /// Test-only observation of how many trim passes ran.
+    #[cfg(test)]
+    cache_trim_runs: AtomicUsize,
     pub mounted: AtomicBool,
     pub shutdown_diagnostics: crate::shutdown::Diagnostics,
     // Keep the matching worker inode alive across atomic package replacement.
@@ -224,6 +232,27 @@ impl Tasks {
         let _ = self.cache.join();
     }
 }
+/// How often the cache worker wakes when nothing notifies it.
+const CACHE_LOOP_INTERVAL: Duration = Duration::from_secs(15);
+/// Minimum spacing between trim passes that are only triggered by a new local
+/// revision. Every write bumps the revision, so trimming per revision would
+/// re-run `cache_candidates()` after each operation; the policy/limit changes
+/// and over-limit pressure paths bypass this debounce.
+const CACHE_TRIM_MIN_INTERVAL: Duration = Duration::from_secs(60);
+
+#[derive(Default)]
+struct CacheLoopState {
+    last_revision: Option<u64>,
+    last_limit: Option<u64>,
+    last_trim: Option<Instant>,
+    pressure: bool,
+}
+
+enum CacheTick {
+    Skipped,
+    Ran(Option<&'static str>),
+}
+
 impl Service {
     pub fn new(profile: Profile, store: Store, worker: PathBuf) -> io::Result<Arc<Self>> {
         Self::new_with_trust_sync(
@@ -279,6 +308,9 @@ impl Service {
             }),
             changed: Condvar::new(),
             stop: AtomicBool::new(false),
+            cache_policy_dirty: AtomicBool::new(false),
+            #[cfg(test)]
+            cache_trim_runs: AtomicUsize::new(0),
             mounted: AtomicBool::new(false),
             shutdown_diagnostics: crate::shutdown::Diagnostics::default(),
             worker_image,
@@ -428,53 +460,34 @@ impl Service {
         }
     }
     pub fn cache_policy_changed(&self) {
+        self.cache_policy_dirty.store(true, Ordering::Release);
         self.control.lock().unwrap().revision += 1;
         self.changed.notify_all();
     }
     fn cache_loop(&self) {
-        let mut last_revision = None;
-        let mut pressure = false;
+        self.cache_loop_with(CACHE_LOOP_INTERVAL);
+    }
+    fn cache_loop_with(&self, interval: Duration) {
+        let mut state = CacheLoopState::default();
         loop {
             let control = self.control.lock().unwrap();
             if self.stop.load(Ordering::Acquire) {
                 return;
             }
-            let control = self
-                .changed
-                .wait_timeout(control, Duration::from_secs(15))
-                .unwrap()
-                .0;
+            let control = self.changed.wait_timeout(control, interval).unwrap().0;
             if self.stop.load(Ordering::Acquire) {
                 return;
             }
             let online = control.state == ConnectionState::Online;
+            drop(control);
             if !online {
                 continue;
             }
-            let (policy, revision) = {
-                let st = self.bridge.store.lock().unwrap();
-                (st.cache_limit(), st.local_revision())
+            let outcome = self.cache_tick(&mut state);
+            let error = match outcome {
+                CacheTick::Skipped => continue,
+                CacheTick::Ran(error) => error.map(str::to_owned),
             };
-            if matches!(policy, Ok(0)) {
-                last_revision = None;
-                pressure = false;
-                continue;
-            }
-            if policy.is_ok() && !pressure && last_revision == Some(revision) {
-                continue;
-            }
-            let error = match policy {
-                Ok(_) => match self.bridge.maintain_cache() {
-                    Ok(result) => {
-                        last_revision = Some(result.revision);
-                        pressure = result.usage.over_target_bytes > 0;
-                        None
-                    }
-                    Err(_) => Some("cache_maintenance_failed".to_owned()),
-                },
-                Err(_) => Some("cache_maintenance_failed".to_owned()),
-            };
-            drop(control);
             let changed = {
                 let mut current = self.bridge.cache_error.lock().unwrap();
                 let changed = *current != error;
@@ -484,6 +497,51 @@ impl Service {
             if changed {
                 self.control.lock().unwrap().revision += 1;
             }
+        }
+    }
+    /// One cache decision. Trimming is skipped unless the policy changed, the
+    /// limit changed, the cache is over target, or a new local revision arrived
+    /// outside the debounce window. `cache_policy_changed()` must take effect
+    /// immediately, so it is never debounced.
+    fn cache_tick(&self, state: &mut CacheLoopState) -> CacheTick {
+        let policy_dirty = self.cache_policy_dirty.swap(false, Ordering::AcqRel);
+        let now = Instant::now();
+        let (policy, revision) = {
+            let st = self.bridge.store.lock().unwrap();
+            (st.cache_limit(), st.local_revision())
+        };
+        let limit = match policy {
+            Ok(0) => {
+                state.last_revision = None;
+                state.last_limit = Some(0);
+                state.pressure = false;
+                return CacheTick::Skipped;
+            }
+            Ok(limit) => limit,
+            Err(_) => {
+                state.last_limit = None;
+                return CacheTick::Ran(Some("cache_maintenance_failed"));
+            }
+        };
+        let limit_changed = state.last_limit != Some(limit);
+        let revision_changed = state.last_revision != Some(revision);
+        let debounced = state
+            .last_trim
+            .is_some_and(|last| now.duration_since(last) < CACHE_TRIM_MIN_INTERVAL);
+        if !policy_dirty && !limit_changed && !state.pressure && !(revision_changed && !debounced) {
+            return CacheTick::Skipped;
+        }
+        #[cfg(test)]
+        self.cache_trim_runs.fetch_add(1, Ordering::Relaxed);
+        match self.bridge.maintain_cache() {
+            Ok(result) => {
+                state.last_revision = Some(result.revision);
+                state.last_limit = Some(limit);
+                state.pressure = result.usage.over_target_bytes > 0;
+                state.last_trim = Some(now);
+                CacheTick::Ran(None)
+            }
+            Err(_) => CacheTick::Ran(Some("cache_maintenance_failed")),
         }
     }
     fn interrupt(&self, c: &mut Control) {
@@ -892,3 +950,7 @@ impl Service {
 #[cfg(test)]
 #[path = "trust_service_tests.rs"]
 mod trust_service_tests;
+
+#[cfg(test)]
+#[path = "cache_loop_tests.rs"]
+mod cache_loop_tests;
