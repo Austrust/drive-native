@@ -465,6 +465,132 @@ fn bench_directories(
     samples
 }
 
+/// End-to-end enumeration through a real FUSE mount (`CacheFilesystem::readdir`),
+/// which is what a client (GUI/Explorer/Finder) triggers. The Store-level
+/// `dir2000` scenario above measures `Store::directory_snapshot_measured`, the
+/// authoritative call this path falls back to on a namespace-index miss; the
+/// recorded p0 baseline (1.04 s p95 for 2000 entries) was measured through the
+/// mounted client, so this scenario is the directly comparable one.
+struct FuseBench {
+    entries: usize,
+    cold_ms: f64,
+    warm: Samples,
+    read_cold_ms: f64,
+    read_warm: Samples,
+}
+
+fn fuse_mount(service: &Arc<Service>) -> Option<(tempfile::TempDir, fuser::BackgroundSession)> {
+    if env::var("LAT_FUSE").map(|value| value == "0").unwrap_or(false) {
+        return None;
+    }
+    let mount = match tempfile::tempdir() {
+        Ok(mount) => mount,
+        Err(error) => {
+            println!("#8 NOTE fuse_mount_failed error={error}");
+            return None;
+        }
+    };
+    let filesystem = match drive_fs::CacheFilesystem::new(
+        service.bridge.store.clone(),
+        "root",
+        unsafe { libc::geteuid() },
+        unsafe { libc::getegid() },
+    ) {
+        Ok(filesystem) => filesystem,
+        Err(error) => {
+            println!("#8 NOTE fuse_mount_failed error={error}");
+            return None;
+        }
+    };
+    let session = match fuser::spawn_mount2(
+        filesystem,
+        mount.path(),
+        &[fuser::MountOption::FSName("drive-native-issue8".into())],
+    ) {
+        Ok(session) => session,
+        Err(error) => {
+            println!("#8 NOTE fuse_spawn_failed error={error}");
+            return None;
+        }
+    };
+    Some((mount, session))
+}
+
+fn bench_fuse(mount: &std::path::Path, iters: usize, timeout_ms: u64) -> Option<FuseBench> {
+    let directory = mount.join("d000");
+    let started = Instant::now();
+    let entries = match std::fs::read_dir(&directory) {
+        Ok(entries) => entries.collect::<std::io::Result<Vec<_>>>().ok()?.len(),
+        Err(error) => {
+            println!("#8 NOTE fuse_readdir_failed error={error}");
+            return None;
+        }
+    };
+    let cold_ms = started.elapsed().as_secs_f64() * 1000.0;
+    let mut warm = Samples::default();
+    for i in 0..iters {
+        let started = Instant::now();
+        let count = std::fs::read_dir(&directory)
+            .ok()
+            .and_then(|entries| entries.collect::<std::io::Result<Vec<_>>>().ok())
+            .map(|entries| entries.len());
+        let us = started.elapsed().as_micros() as u64;
+        let error = match count {
+            Some(count) if count == entries => None,
+            Some(count) => Some(format!("entries {count} != {entries}")),
+            None => Some("readdir failed".to_string()),
+        };
+        warm.record(us, error.is_some(), timeout_ms);
+        println!(
+            "#8 OP scenario=fuse_dir2000 i={i} us={us} err={}",
+            error.as_deref().unwrap_or("-")
+        );
+    }
+    warm.report("fuse_dir2000", timeout_ms);
+
+    let file = mount.join("d000").join("f00000");
+    let started = Instant::now();
+    let bytes = std::fs::read(&file).ok()?;
+    let read_cold_ms = started.elapsed().as_secs_f64() * 1000.0;
+    if bytes.len() != CACHED_BYTES {
+        println!(
+            "#8 NOTE fuse_read1m_size actual={} expected={}",
+            bytes.len(),
+            CACHED_BYTES
+        );
+    }
+    let mut read_warm = Samples::default();
+    for i in 0..iters.min(64) {
+        let started = Instant::now();
+        let ok = std::fs::read(&file)
+            .map(|bytes| bytes.len() == CACHED_BYTES)
+            .unwrap_or(false);
+        let us = started.elapsed().as_micros() as u64;
+        read_warm.record(us, !ok, timeout_ms);
+        println!(
+            "#8 OP scenario=fuse_read1m i={i} us={us} err={}",
+            if ok { "-" } else { "size" }
+        );
+    }
+    read_warm.report("fuse_read1m", timeout_ms);
+    println!(
+        "#8 FUSE {}",
+        serde_json::json!({
+            "entries": entries,
+            "cold_ms": cold_ms,
+            "read_cold_ms": read_cold_ms,
+            "read_bytes": CACHED_BYTES,
+        })
+    );
+    Some(FuseBench {
+        entries,
+        cold_ms,
+        warm,
+        read_cold_ms,
+        read_warm,
+    })
+}
+
 fn read_cached(service: &Service) -> Option<String> {
     let mut handle = match {
         let guard = service.bridge.store.lock().unwrap();
@@ -484,6 +610,46 @@ fn read_cached(service: &Service) -> Option<String> {
         }
         Err(error) => Some(error.to_string()),
     }
+}
+
+/// Pure GetStates concurrency probe: `threads` callers hammer the same root
+/// status request for `seconds`. This isolates the "16 concurrent GetStates"
+/// component of the classic mixed load from the directory/read callers, so the
+/// classic p95 can be attributed to either the query cost itself (memory
+/// bandwidth) or to serialized fallbacks on the Store mutex.
+fn bench_states_concurrent(
+    service: &Arc<Service>,
+    threads: usize,
+    seconds: u64,
+    timeout_ms: u64,
+) -> Samples {
+    let deadline = Instant::now() + Duration::from_secs(seconds);
+    let (tx, rx) = mpsc::channel::<(u64, bool)>();
+    let mut handles = Vec::new();
+    for _ in 0..threads {
+        let service = service.clone();
+        let tx = tx.clone();
+        handles.push(thread::spawn(move || {
+            while Instant::now() < deadline {
+                let started = Instant::now();
+                let result = desktop::states(&service, vec![".".to_string()]);
+                let us = started.elapsed().as_micros() as u64;
+                if tx.send((us, result.is_err())).is_err() {
+                    break;
+                }
+            }
+        }));
+    }
+    drop(tx);
+    let mut samples = Samples::default();
+    for (us, failed) in rx {
+        samples.record(us, failed, timeout_ms);
+    }
+    for handle in handles {
+        handle.join().ok();
+    }
+    samples.report("states_conc16", timeout_ms);
+    samples
 }
 
 fn mixed_load(
@@ -789,6 +955,13 @@ fn status_latency_210k() {
     let batch_paths: Vec<String> = (0..45).map(|i| format!("d{i:03}")).collect();
     let states_batch = bench_states(&service, "states_batch45", batch_paths, batch_iters, timeout_ms);
     let dir2000 = bench_directories(&service, &facts, dir_iters, timeout_ms);
+    let fuse = fuse_mount(&service).and_then(|(mount, session)| {
+        let bench = bench_fuse(mount.path(), dir_iters.min(60), timeout_ms);
+        drop(session);
+        drop(mount);
+        bench
+    });
+    let states_conc = bench_states_concurrent(&service, 16, mix_seconds, timeout_ms);
     let mixed = mixed_load(&service, &facts, mix_seconds, timeout_ms, "mix", false);
     let classic = mixed_load(&service, &facts, mix_seconds, timeout_ms, "classic", true);
     let (probes, lock_post) = lock_hold_scenario(&service, lock_ms, 10, timeout_ms);
@@ -824,6 +997,13 @@ fn status_latency_210k() {
             "states_dir2000_p95_ms": states_dir.p95_ms(),
             "states_batch45_p95_ms": states_batch.p95_ms(),
             "dir2000_p95_ms": dir2000.p95_ms(),
+            "fuse_dir_entries": fuse.as_ref().map(|fuse| fuse.entries),
+            "fuse_dir_cold_ms": fuse.as_ref().map(|fuse| fuse.cold_ms),
+            "fuse_dir2000_p95_ms": fuse.as_ref().map(|fuse| fuse.warm.p95_ms()),
+            "fuse_read1m_cold_ms": fuse.as_ref().map(|fuse| fuse.read_cold_ms),
+            "fuse_read1m_p95_ms": fuse.as_ref().map(|fuse| fuse.read_warm.p95_ms()),
+            "states_conc16_p95_ms": states_conc.p95_ms(),
+            "states_conc16_ops": states_conc.us.len(),
             "mixed_timeouts": mixed_all.timeouts,
             "mixed_ops": mixed_all.us.len(),
             "mixed_p95_ms": mixed_all.p95_ms(),
@@ -849,6 +1029,18 @@ fn status_latency_210k() {
         SLO_DIR_P95_MS,
         verdict(dir2000.p95_ms() <= SLO_DIR_P95_MS)
     );
+    match &fuse {
+        Some(fuse) => println!(
+            "#8 SLO name=dir2000_fuse_p95_ms observed={:.3} limit={:.0} verdict={}",
+            fuse.warm.p95_ms(),
+            SLO_DIR_P95_MS,
+            verdict(fuse.warm.p95_ms() <= SLO_DIR_P95_MS)
+        ),
+        None => println!("#8 NOTE fuse_dir2000 skipped (mount unavailable; set LAT_FUSE=0 to skip explicitly)"),
+    }
+    println!(
+        "#8 NOTE dir2000_definition store-level scenario calls Store::directory_snapshot_measured under SharedStore::lock (the authoritative path drive-fs readdir falls back to on a namespace-index miss); fuse_dir2000 iterates a real CacheFilesystem mount, matching the p0 issue-#8 baseline measurement (1.04 s p95)"
+    );
     println!(
         "#8 SLO name=mixed_timeouts observed={} limit={} verdict={}",
         mixed_all.timeouts,
@@ -873,8 +1065,9 @@ fn status_latency_210k() {
         probes[2].completed_while_locked
     );
     println!(
-        "#8 NOTE classic_mixed_states_p95_ms observed={:.3} baseline_p95_ms=9302.908 (classic mix = 16 dir + 16 root GetStates + 16 cached reads, mirrors docs/validation/p0-mixed-48-001)",
-        classic_states.p95_ms()
+        "#8 NOTE classic_mixed_states_p95_ms observed={:.3} baseline_p95_ms=9302.908 (classic mix = 16 dir + 16 root GetStates + 16 cached reads, mirrors docs/validation/p0-mixed-48-001); pure 16-way GetStates p95 (no dir/read callers) = {:.3}ms",
+        classic_states.p95_ms(),
+        states_conc.p95_ms()
     );
     println!(
         "#8 NOTE mix_states_p95_ms observed={:.3} (acceptance mix also runs overview, which still takes the global Store mutex on both trees)",
