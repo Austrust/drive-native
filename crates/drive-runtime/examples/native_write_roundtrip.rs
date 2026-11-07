@@ -304,7 +304,7 @@ async fn wait_status(
         if Instant::now() > deadline {
             return Err(format!(
                 "status deadline: wanted {wanted:?}, got {status:?}; runtime {:?}",
-                bridge.last_error.lock().unwrap()
+                bridge.last_error()
             )
             .into());
         }

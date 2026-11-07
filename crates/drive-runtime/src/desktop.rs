@@ -372,8 +372,14 @@ pub fn overview(service: &Service) -> io::Result<String> {
     let preview_only = preview::active(&store, &service.profile.scope.file_id)?;
     let permission = drive_core::write_permissions::policy(&store, &service.profile.scope.file_id).map_err(|_|other())?;
     let writable = drive_core::write_permissions::mount_writable(&store, &service.profile.scope.file_id).map_err(|_|other())?;
+    let background = service.bridge.background_failure();
+    let background_error = background.as_ref().map(|failure| failure.message);
+    let background_error_kind = background.as_ref().map(|failure| failure.source.as_str());
+    let background_error_since_ms = background.as_ref().map(|failure| failure.since_ms);
     Ok(serde_json::json!({"schema":1,"task_id":service.profile.task_id,"mount":service.profile.mount,
-        "connection":state,"error":error,"background_error":*service.bridge.last_error.lock().unwrap(),
+        "connection":state,"error":error,"background_error":background_error,
+        "background_error_kind":background_error_kind,
+        "background_error_since_ms":background_error_since_ms,
         "upload_block":*service.bridge.upload_block.lock().unwrap(),
         "recovery_actions":{"recheck_issues":true},
         "mounted":service.mounted.load(Ordering::Acquire),"writable":writable && !preview_only,

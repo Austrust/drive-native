@@ -255,6 +255,49 @@ pub(crate) fn record_permission_response(db: &Connection, key: &str, node: &str,
     Ok(())
 }
 
+/// Record how many automatic read-only reconciliation passes an uncertain
+/// upload has used. Only updates an existing row: the first submission already
+/// created it, and this must never fabricate a history row for other work.
+pub(crate) fn note_reconcile_attempt(db: &Connection, key: &str, attempts: u32) -> Result<()> {
+    db.execute(
+        "UPDATE sync_history SET detail=json_patch(COALESCE(detail,'{}'), json_object('reconcile_attempts', ?2)) WHERE operation_key=?1",
+        params![key, i64::from(attempts)],
+    )?;
+    Ok(())
+}
+
+/// A locally deleted, never confirmed creation stops being retried. History
+/// keeps the permission evidence and explains why the queue gave up; the
+/// operation type/result stays failure-shaped so the GUI can surface it.
+pub(crate) fn record_abandoned_upload(
+    db: &Connection,
+    key: &str,
+    node: &str,
+    attempts: u32,
+) -> Result<()> {
+    record(
+        db,
+        key,
+        node,
+        "upload",
+        "failed",
+        Some("permission_commit_uncertain"),
+    )?;
+    let detail = serde_json::json!({
+        "abandoned": "local_deleted",
+        "reconcile_attempts": attempts,
+    });
+    db.execute(
+        "UPDATE sync_history SET error_summary=?2, detail=json_patch(COALESCE(detail,'{}'), ?3) WHERE operation_key=?1",
+        params![
+            key,
+            "本地文件已删除；服务器创建结果未确认，已停止自动重试",
+            detail.to_string()
+        ],
+    )?;
+    Ok(())
+}
+
 fn prune(db: &Connection, at: i64) -> Result<usize> {
     let removed = db.execute("DELETE FROM sync_history WHERE completed_at < ?1-86400*(SELECT CAST(value AS INTEGER) FROM metadata WHERE key='sync_history_days')", [at])?;
     Ok(removed + db.execute("DELETE FROM sync_history WHERE id IN (SELECT id FROM sync_history ORDER BY seq DESC LIMIT -1 OFFSET (SELECT CAST(value AS INTEGER) FROM metadata WHERE key='sync_history_records'))", [])?)

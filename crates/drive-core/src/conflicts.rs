@@ -12,6 +12,8 @@ pub struct SyncIssue {
     pub can_keep_both: bool,
     pub can_keep_directory: bool,
     pub token: String,
+    pub reconcile_attempts: u32,
+    pub reconcile_exhausted: bool,
 }
 #[derive(Debug, Serialize)]
 pub struct IssuePage {
@@ -90,6 +92,17 @@ impl Store {
         if !uncertain && !conflict {
             return Ok(None);
         }
+        // The durable upload reconciliation budget is surfaced so the GUI can
+        // explain that automatic retries paused instead of implying a live wait.
+        let reconcile_attempts: u32 = self
+            .db
+            .query_row(
+                "SELECT COALESCE(MAX(reconcile_attempts),0) FROM operations WHERE kind='upload' AND node=?1 AND state IN ('inflight','uncertain')",
+                [id],
+                |r| r.get::<_, i64>(0),
+            )
+            .map(|attempts| u32::try_from(attempts).unwrap_or(u32::MAX))?;
+        let reconcile_exhausted = reconcile_attempts >= crate::MAX_UPLOAD_RECONCILE_ATTEMPTS;
         let namespace = crate::namespace::blocks_upload(&self.db, id)?;
         let local_creation: bool = self.db.query_row(
             "SELECT EXISTS(SELECT 1 FROM local_creations WHERE node=?1)",
@@ -168,6 +181,8 @@ impl Store {
             local_creation,
             bound_identity,
             &directory_plan,
+            reconcile_attempts,
+            reconcile_exhausted,
         ))?);
         Ok(Some(SyncIssue {
             id: id.into(),
@@ -179,6 +194,8 @@ impl Store {
                 "content_conflict" | "remote_deleted" | "creation_conflict"
             ),
             can_keep_directory: directory_plan.is_some(),
+            reconcile_attempts,
+            reconcile_exhausted,
             token,
         }))
     }

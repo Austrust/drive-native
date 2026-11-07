@@ -206,5 +206,50 @@ class RecoveryTests(unittest.TestCase):
                 QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
 
+    def test_exhausted_commit_uncertain_keeps_recheck_and_blocks_resolution(self):
+        self.populate(dict(self.row, reconcile_attempts=5, reconcile_exhausted=True))
+        item = self.dialog.table.topLevelItem(0)
+        self.assertIn("已自动只读核对 5 次仍未确认", item.text(1))
+        self.assertIn("自动重试已暂停", item.text(1))
+        self.assertIn(NEXT_STEPS["commit_uncertain"], self.dialog.explanation.text())
+        self.assertTrue(self.dialog.recheck.isEnabled())
+        self.assertFalse(self.dialog.keep.isEnabled())
+        self.dialog.keep_both()
+        self.dialog.request_recheck()
+        self.assertEqual(sum(c[0] == "RecheckIssues" for c in self.bus.calls), 1)
+        self.bus.respond("RecheckIssues", {"schema": 1, "accepted": True, "paused_preserved": True, "message_code": "queued"})
+        self.assertFalse(any(c[0] in ("KeepBoth", "KeepDirectoryBoth", "Resume", "ReleaseSpace") for c in self.bus.calls))
+        self.assertIn("file", self.dialog.rows)
+
+    def test_exhausted_fields_never_invent_a_state_or_action(self):
+        for extra in ({"reconcile_exhausted": True, "reconcile_attempts": None},
+                      {"reconcile_exhausted": "true", "reconcile_attempts": 5},
+                      {"reconcile_exhausted": True, "reconcile_attempts": -1},
+                      {"reconcile_exhausted": True, "reconcile_attempts": True},
+                      {"reconcile_exhausted": False, "reconcile_attempts": 5}):
+            self.populate(dict(self.row, **extra))
+            self.assertEqual(self.dialog.table.topLevelItem(0).text(1), "服务器执行结果尚未确认")
+        self.assertFalse(self.dialog.keep.isEnabled())
+        self.assertFalse(any(c[0] in ("KeepBoth", "KeepDirectoryBoth") for c in self.bus.calls))
+
+    def test_diagnostic_includes_reconcile_budget_without_identity(self):
+        self.populate(dict(self.row, reconcile_attempts=5, reconcile_exhausted=True))
+        self.dialog.copy_diagnostic(); value = QApplication.clipboard().text()
+        data = json.loads(value)
+        self.assertEqual(data["reconcile_attempts"], 5)
+        self.assertTrue(data["reconcile_exhausted"])
+        for text in ("private-token", "gone", "synthetic-mount", "synthetic-task"):
+            self.assertNotIn(text, value)
+
+    def test_diagnostic_ignores_invalid_reconcile_fields(self):
+        for extra in ({"reconcile_exhausted": "yes", "reconcile_attempts": True},
+                      {"reconcile_exhausted": None, "reconcile_attempts": -1},
+                      {"reconcile_exhausted": 1, "reconcile_attempts": 1 << 32}):
+            self.populate(dict(self.row, **extra))
+            data = json.loads(diagnostic_text(self.dialog.overview, self.dialog.selected_row()))
+            self.assertNotIn("reconcile_exhausted", data)
+            self.assertNotIn("reconcile_attempts", data)
+
+
 if __name__ == "__main__":
     unittest.main()

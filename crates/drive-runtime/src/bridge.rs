@@ -1,3 +1,4 @@
+use crate::background::{BackgroundFailure, BackgroundSource};
 use crate::{rpc::Rpc, wire::*};
 #[cfg(test)]
 use drive_core::Store;
@@ -83,6 +84,16 @@ struct Flight {
     done: Mutex<Option<Result<(), i32>>>,
     changed: Condvar,
 }
+/// Outcome of one upload pass. `Gated` means the pass returned before it
+/// inspected the queue, so it is not evidence that the queue recovered.
+enum UploadPass {
+    Gated,
+    Ran(usize),
+}
+/// Result of one upload cycle: `ran` is false when every pass was gated.
+struct CycleOutcome {
+    ran: bool,
+}
 pub struct Bridge {
     pub store: Arc<drive_core::SharedStore>,
     recovery_gate: std::sync::RwLock<()>,
@@ -100,9 +111,9 @@ pub struct Bridge {
     pub last_download_failure: Mutex<Option<(DownloadFailureKind, Option<u32>)>>,
     upload_signal: (Mutex<bool>, Condvar),
     recheck_requested: AtomicBool,
-    pub last_error: Mutex<Option<String>>,
+    failure: Mutex<Option<BackgroundFailure>>,
     /// Last concrete reason a pending upload could not start. Unlike
-    /// `last_error` this is resolved state, cleared as soon as the queue is
+    /// `failure` this is resolved state, cleared as soon as the queue is
     /// startable again, so it can name the blocking path/operation.
     pub upload_block: Mutex<Option<String>>,
     pub cache_error: Mutex<Option<String>>,
@@ -149,7 +160,7 @@ impl Bridge {
         };
         let old = std::mem::replace(&mut *self.connection.lock().unwrap(), rpc);
         old.close();
-        *self.last_error.lock().unwrap() = None;
+        self.clear_all_failures();
         if !blocked {
             self.signal_upload();
         }
@@ -283,7 +294,7 @@ impl Bridge {
             last_download_failure: Mutex::new(None),
             upload_signal: (Mutex::new(false), Condvar::new()),
             recheck_requested: AtomicBool::new(false),
-            last_error: Mutex::new(None),
+            failure: Mutex::new(None),
             upload_block: Mutex::new(None),
             cache_error: Mutex::new(None),
             initialization: Arc::new(crate::initialization::Tracker::default()),
@@ -628,9 +639,7 @@ impl Bridge {
                     result.and_then(|_| self.publish_download_retry(&store, &ticket, failed_at, failed_instant))
                 };
                 if persisted.is_err() {
-                    *self.last_error.lock().unwrap() = Some(
-                        "cannot persist download failure; local state needs inspection".into(),
-                    );
+                    self.note_failure(BackgroundSource::DownloadPublication);
                 }
                 Err(errno)
             }
@@ -1181,6 +1190,67 @@ impl Bridge {
         self.signal_upload();
         fresh
     }
+    /// Last background failure message, for callers that only render text.
+    pub fn last_error(&self) -> Option<String> {
+        self.failure
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|failure| failure.message.to_string())
+    }
+    pub fn background_failure(&self) -> Option<BackgroundFailure> {
+        self.failure.lock().unwrap().clone()
+    }
+    fn note_failure(&self, source: BackgroundSource) {
+        let mut failure = self.failure.lock().unwrap();
+        let since_ms = failure
+            .as_ref()
+            .filter(|current| current.source == source)
+            .map(|current| current.since_ms)
+            .unwrap_or_else(crate::background::now_ms);
+        *failure = Some(BackgroundFailure {
+            source,
+            message: source.message(),
+            since_ms,
+        });
+    }
+    fn clear_failure(&self, source: BackgroundSource) {
+        let mut failure = self.failure.lock().unwrap();
+        if failure
+            .as_ref()
+            .is_some_and(|current| current.source == source)
+        {
+            *failure = None;
+        }
+    }
+    pub fn clear_all_failures(&self) {
+        *self.failure.lock().unwrap() = None;
+    }
+    /// Consume a user-requested recheck while the caller holds the Store.
+    fn handle_recheck_request(&self, store: &mut drive_core::Store) {
+        store.request_namespace_recheck();
+        if drive_core::write_permissions::reset_session(store).is_err() {
+            self.note_failure(BackgroundSource::PermissionRecheck);
+        } else {
+            // Re-arm the bounded read-only reconciliation for uncertain
+            // uploads; operation states are untouched.
+            let _ = store.reset_upload_reconcile_budget();
+            self.clear_failure(BackgroundSource::PermissionRecheck);
+        }
+    }
+    /// Run one cycle and record/clear only the transient failures it observed.
+    fn run_upload_cycle(&self) {
+        match self.upload_cycle() {
+            Ok(outcome) if outcome.ran => {
+                self.clear_failure(BackgroundSource::UploadQueueStopped);
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() != io::ErrorKind::NotConnected => {
+                self.note_failure(BackgroundSource::UploadQueueStopped);
+            }
+            Err(_) => {}
+        }
+    }
     pub fn upload_loop(&self, stop: &std::sync::atomic::AtomicBool) {
         self.signal_upload();
         while !stop.load(Ordering::Acquire) {
@@ -1199,14 +1269,14 @@ impl Bridge {
             let signaled = *wake;
             *wake = false;
             drop(wake);
-            // Download deadlines and bounded namespace observation deadlines
-            // only. Namespace intent remains durable; its backoff is local to
-            // this process. This check does not enumerate the NAS.
+            // Download deadlines, bounded namespace observation deadlines and
+            // the uncertain-upload reconciliation budget. Namespace intent
+            // remains durable; its backoff is local to this process. This check
+            // does not enumerate the NAS.
             let retry_due = {
-                let store = self.store.lock().unwrap();
+                let mut store = self.store.lock().unwrap();
                 if self.recheck_requested.swap(false, Ordering::AcqRel) {
-                    store.request_namespace_recheck();
-                    if drive_core::write_permissions::reset_session(&store).is_err(){*self.last_error.lock().unwrap()=Some("permission recheck unavailable".into());}
+                    self.handle_recheck_request(&mut store);
                 }
                 store
                     .next_download_retry()
@@ -1214,6 +1284,9 @@ impl Bridge {
                     .flatten()
                     .is_some_and(|at| at <= unix_seconds())
                     || store.namespace_recovery_due().unwrap_or(false)
+                    || store
+                        .upload_reconcile_due(unix_seconds() as i64)
+                        .unwrap_or(false)
             };
             if !signaled && !retry_due {
                 continue;
@@ -1221,16 +1294,9 @@ impl Bridge {
             if !self.connection().is_connected() {
                 continue;
             }
-            if let Err(error) = self
-                .upload_pending(true)
-                .and_then(|_| self.namespace_pending())
-                .and_then(|_| self.upload_pending(false))
-            {
-                if error.kind() != io::ErrorKind::NotConnected {
-                    *self.last_error.lock().unwrap() =
-                        Some("upload stopped; local snapshots retained".into());
-                }
-            }
+            // A gated cycle observed nothing; it must not clear a failure that
+            // this cycle never re-verified.
+            self.run_upload_cycle();
             // Pin actions must not wait for a remote event to wake hydration.
             if self.connection().is_connected() {
                 self.refresh_cached();
@@ -1239,9 +1305,29 @@ impl Bridge {
     }
     /// Reconciliation sends only read queries. Unknown outcomes never re-upload.
     pub fn upload_pending(&self, reconcile: bool) -> io::Result<usize> {
+        match self.upload_pending_pass(reconcile)? {
+            UploadPass::Gated => Ok(0),
+            UploadPass::Ran(confirmed) => Ok(confirmed),
+        }
+    }
+    /// One queue cycle: reconcile uncertain commits, drain namespace intents,
+    /// then submit pending uploads. `ran` is false when every pass was gated.
+    fn upload_cycle(&self) -> io::Result<CycleOutcome> {
+        let mut ran = false;
+        if matches!(self.upload_pending_pass(true)?, UploadPass::Ran(_)) {
+            ran = true;
+        }
+        self.namespace_pending()?;
+        if matches!(self.upload_pending_pass(false)?, UploadPass::Ran(_)) {
+            ran = true;
+        }
+        Ok(CycleOutcome { ran })
+    }
+    /// Pass body shared by `upload_pending` and one `upload_cycle` step.
+    fn upload_pending_pass(&self, reconcile: bool) -> io::Result<UploadPass> {
         let _mutation = self.recovery_gate.read().unwrap();
         if self.session_pending.load(Ordering::Acquire) {
-            return Ok(0);
+            return Ok(UploadPass::Gated);
         }
         // A restored process has a fresh in-memory lock. Only the durable gate
         // prevents it from reconciling or submitting against an incomplete tree.
@@ -1253,7 +1339,7 @@ impl Bridge {
             .initialization_writeback_blocked()
             .map_err(io::Error::other)?
         {
-            return Ok(0);
+            return Ok(UploadPass::Gated);
         }
         use sha2::Digest;
         use std::io::{Read, Seek, SeekFrom};
@@ -1264,12 +1350,18 @@ impl Bridge {
                 "worker offline; queue retained",
             ));
         }
-        let operations = self
-            .store
-            .lock()
-            .unwrap()
-            .upload_operations(if reconcile { "uncertain" } else { "pending" })
-            .map_err(io::Error::other)?;
+        let operations = {
+            let store = self.store.lock().unwrap();
+            if reconcile {
+                store
+                    .upload_reconcile_operations(unix_seconds() as i64)
+                    .map_err(io::Error::other)?
+            } else {
+                store
+                    .upload_operations("pending")
+                    .map_err(io::Error::other)?
+            }
+        };
         let mut confirmed = 0;
         let mut blocked: Option<String> = None;
         for op in operations {
@@ -1402,6 +1494,7 @@ impl Bridge {
                     fresh.mtime,
                 )
             };
+            let node_id = node.id.clone();
             let outcome = rpc.call_with_descriptor(
                 Command::Upload {
                     origin,
@@ -1421,6 +1514,9 @@ impl Bridge {
                         if let Err(e) = s.validate_upload_mtime(&op, &node) {
                             if !reconcile {
                                 s.mark_upload_uncertain(&op).map_err(io::Error::other)?;
+                            } else {
+                                s.note_upload_reconcile_attempt(&op, unix_seconds() as i64)
+                                    .map_err(io::Error::other)?;
                             }
                             return Err(io::Error::other(e));
                         }
@@ -1433,6 +1529,9 @@ impl Bridge {
                         if let Err(e) = s.validate_upload_mtime(&op, &node) {
                             if !reconcile {
                                 s.mark_upload_uncertain(&op).map_err(io::Error::other)?;
+                            } else {
+                                s.note_upload_reconcile_attempt(&op, unix_seconds() as i64)
+                                    .map_err(io::Error::other)?;
                             }
                             return Err(io::Error::other(e));
                         }
@@ -1441,26 +1540,80 @@ impl Bridge {
                         drive_core::write_permissions::observe_targets(&s,&permission_targets,true).map_err(io::Error::other)?;
                         confirmed += 1;
                     }
-                    Response::PermissionDenied{node,action} if !reconcile => {
-                        drive_core::write_permissions::refuse_operation(&s,&op,false,&permission_targets,&node,action).map_err(io::Error::other)?;
-                        blocked=Some("permission_denied".into());
+                    Response::PermissionDenied{node,action} => {
+                        if !reconcile {
+                            drive_core::write_permissions::refuse_operation(&s,&op,false,&permission_targets,&node,action).map_err(io::Error::other)?;
+                            blocked=Some("permission_denied".into());
+                        } else {
+                            // The server still has not acted. A read-only
+                            // reconciliation spends one bounded attempt and
+                            // writes no denial or ACL evidence.
+                            s.note_upload_reconcile_attempt(&op, unix_seconds() as i64)
+                                .map_err(io::Error::other)?;
+                            if s.is_locally_deleted(&node).map_err(io::Error::other)? {
+                                s.retire_unconfirmed_creation(&op).map_err(io::Error::other)?;
+                            }
+                        }
                     }
-                    Response::MutationPermissionUncertain { code } if !reconcile => {
-                        drive_core::write_permissions::mutation_permission_uncertain(&s,&op,false,code).map_err(io::Error::other)?;
-                        blocked=Some("permission_commit_uncertain".into());
+                    Response::MutationPermissionUncertain { code } => {
+                        if !reconcile {
+                            drive_core::write_permissions::mutation_permission_uncertain(&s,&op,false,code).map_err(io::Error::other)?;
+                            blocked=Some("permission_commit_uncertain".into());
+                        } else {
+                            s.note_upload_reconcile_attempt(&op, unix_seconds() as i64)
+                                .map_err(io::Error::other)?;
+                            if s.is_locally_deleted(&node_id).map_err(io::Error::other)? {
+                                s.retire_unconfirmed_creation(&op).map_err(io::Error::other)?;
+                            }
+                        }
                     }
                     Response::Conflict => {
-                        s.conflict_upload(&op).map_err(io::Error::other)?;
+                        if !reconcile {
+                            s.conflict_upload(&op).map_err(io::Error::other)?;
+                        } else if s
+                            .is_locally_deleted(&node_id)
+                            .map_err(io::Error::other)?
+                        {
+                            // The local creation is gone. Spend one bounded
+                            // attempt and retire the intent instead of
+                            // parking the operation behind a conflict that
+                            // can never be resolved.
+                            s.note_upload_reconcile_attempt(&op, unix_seconds() as i64)
+                                .map_err(io::Error::other)?;
+                            s.retire_unconfirmed_creation(&op).map_err(io::Error::other)?;
+                        } else {
+                            s.conflict_upload(&op).map_err(io::Error::other)?;
+                        }
                     }
                     _ => {
                         if !reconcile {
                             s.mark_upload_uncertain(&op).map_err(io::Error::other)?;
+                        } else {
+                            // The server replied, but not with a confirmation.
+                            // This is still an unconfirmed observation, so it
+                            // spends one bounded attempt and never fabricates
+                            // a terminal state. A locally deleted creation is
+                            // retired instead of waiting for more replies.
+                            s.note_upload_reconcile_attempt(&op, unix_seconds() as i64)
+                                .map_err(io::Error::other)?;
+                            if s
+                                .is_locally_deleted(&node_id)
+                                .map_err(io::Error::other)?
+                            {
+                                s.retire_unconfirmed_creation(&op).map_err(io::Error::other)?;
+                            }
                         }
                     }
                 },
-                Err(_) => {
+                Err(error) => {
                     if !reconcile {
                         s.mark_upload_uncertain(&op).map_err(io::Error::other)?;
+                    } else if !transient_reconcile_error(&error) {
+                        // Transport loss does not spend the visible retry
+                        // budget; reconnect recovery keeps the original
+                        // bounded allowance intact.
+                        s.note_upload_reconcile_attempt(&op, unix_seconds() as i64)
+                            .map_err(io::Error::other)?;
                     }
                     return Err(io::Error::other("commit unknown; reconciliation required"));
                 }
@@ -1469,13 +1622,17 @@ impl Bridge {
         if !reconcile {
             *self.upload_block.lock().unwrap() = blocked;
         }
-        Ok(confirmed)
+        Ok(UploadPass::Ran(confirmed))
     }
 }
 
 #[cfg(test)]
 #[path = "upload_tests.rs"]
 mod upload_tests;
+
+#[cfg(test)]
+#[path = "background_error_tests.rs"]
+mod background_error_tests;
 
 #[cfg(test)]
 #[path = "download_publication_tests.rs"]
@@ -1561,6 +1718,22 @@ fn unix_seconds() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+/// Transport loss during a read-only reconciliation attempt is not evidence
+/// that the server rejected the change. It must not spend the bounded retry
+/// budget that the user can see.
+fn transient_reconcile_error(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::NotConnected
+            | io::ErrorKind::TimedOut
+            | io::ErrorKind::Interrupted
+            | io::ErrorKind::BrokenPipe
+            | io::ErrorKind::ConnectionAborted
+            | io::ErrorKind::ConnectionReset
+            | io::ErrorKind::UnexpectedEof
+    )
 }
 
 #[cfg(test)]

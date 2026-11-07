@@ -235,3 +235,109 @@ fn v6_migration_preserves_queued_move_and_inflight_becomes_uncertain() {
             ))
     }));
 }
+#[test]
+fn deleting_uncertain_unbound_creation_retires_upload_without_native_remove() {
+    let (dir, mut s) = fixture();
+    let n = s.create_local_file("1", "new", 0o600).unwrap();
+    s.creation_saved(&n.id).unwrap();
+    let op = s.upload_operations("pending").unwrap().remove(0);
+    s.mark_upload_started(&op).unwrap();
+    s.mark_upload_uncertain(&op).unwrap();
+    assert!(s.upload_reconcile_due(0).unwrap());
+    // Before the fix this queued a native remove that could never start: the
+    // uncertain upload kept mark_remove_started EBUSY forever.
+    s.unlink_local("1", "new", &n.id, false).unwrap();
+    assert!(s.next_remove().unwrap().is_none());
+    assert_eq!(s.pending_operations().unwrap(), 0);
+    assert_eq!(s.pending_namespace_operations().unwrap(), 0);
+    assert!(s.upload_operations("pending").unwrap().is_empty());
+    assert!(s.upload_operations("uncertain").unwrap().is_empty());
+    assert_eq!(s.upload_job(&op).unwrap().state, "superseded");
+    assert_eq!(s.status(&n.id).unwrap(), Status::Deleted);
+    let page = s
+        .sync_history(&drive_core::sync_history::HistoryQuery::default())
+        .unwrap();
+    let row = page
+        .records
+        .iter()
+        .find(|r| r.node.as_deref() == Some(n.id.as_str()) && r.action == "upload")
+        .unwrap();
+    assert_eq!(row.result, "failed");
+    assert_eq!(
+        row.error_kind.as_deref(),
+        Some("permission_commit_uncertain")
+    );
+    assert!(row
+        .error_summary
+        .as_deref()
+        .unwrap()
+        .contains("本地文件已删除"));
+    let detail = row.detail.as_ref().unwrap();
+    assert_eq!(detail["abandoned"].as_str(), Some("local_deleted"));
+    assert_eq!(detail["reconcile_attempts"].as_u64(), Some(0));
+    drop(s);
+    let s = Store::open(dir.path()).unwrap();
+    assert_eq!(s.pending_operations().unwrap(), 0);
+    assert_eq!(s.pending_namespace_operations().unwrap(), 0);
+    assert!(s.next_remove().unwrap().is_none());
+}
+#[test]
+fn deleting_uncertain_creation_after_budget_attempts_records_them() {
+    let (_d, mut s) = fixture();
+    let n = s.create_local_file("1", "new", 0o600).unwrap();
+    s.creation_saved(&n.id).unwrap();
+    let op = s.upload_operations("pending").unwrap().remove(0);
+    s.mark_upload_started(&op).unwrap();
+    s.mark_upload_uncertain(&op).unwrap();
+    assert_eq!(
+        s.note_upload_reconcile_attempt(&op, 1_700_000_000).unwrap(),
+        1
+    );
+    assert_eq!(
+        s.note_upload_reconcile_attempt(&op, 1_700_000_001).unwrap(),
+        2
+    );
+    assert!(!s.upload_reconcile_due(1_700_000_002).unwrap());
+    s.unlink_local("1", "new", &n.id, false).unwrap();
+    assert_eq!(s.pending_operations().unwrap(), 0);
+    assert!(s.next_remove().unwrap().is_none());
+    assert_eq!(s.upload_job(&op).unwrap().state, "superseded");
+    let page = s
+        .sync_history(&drive_core::sync_history::HistoryQuery::default())
+        .unwrap();
+    let row = page
+        .records
+        .iter()
+        .find(|r| r.node.as_deref() == Some(n.id.as_str()) && r.action == "upload")
+        .unwrap();
+    let detail = row.detail.as_ref().unwrap();
+    assert_eq!(detail["abandoned"].as_str(), Some("local_deleted"));
+    assert_eq!(detail["reconcile_attempts"].as_u64(), Some(2));
+}
+#[test]
+fn deleting_inflight_upload_does_not_retire_unconfirmed_creation() {
+    let (_d, mut s) = fixture();
+    let n = s.create_local_file("1", "new", 0o600).unwrap();
+    s.creation_saved(&n.id).unwrap();
+    let op = s.upload_operations("pending").unwrap().remove(0);
+    s.mark_upload_started(&op).unwrap();
+    s.unlink_local("1", "new", &n.id, false).unwrap();
+    assert_eq!(s.upload_job(&op).unwrap().state, "inflight");
+    assert!(s.next_remove().unwrap().is_some());
+    assert!(s.lookup("1", "new").is_err());
+}
+#[test]
+fn retire_entry_requires_uncertain_creation_and_local_deletion() {
+    let (_d, mut s) = fixture();
+    let n = s.create_local_file("1", "new", 0o600).unwrap();
+    s.creation_saved(&n.id).unwrap();
+    let op = s.upload_operations("pending").unwrap().remove(0);
+    s.mark_upload_started(&op).unwrap();
+    s.mark_upload_uncertain(&op).unwrap();
+    // Not deleted yet: retirement must refuse.
+    assert!(!s.retire_unconfirmed_creation(&op).unwrap());
+    s.unlink_local("1", "new", &n.id, false).unwrap();
+    // The delete path already retired it; a second retirement is a no-op.
+    assert!(!s.retire_unconfirmed_creation(&op).unwrap());
+    assert_eq!(s.pending_operations().unwrap(), 0);
+}

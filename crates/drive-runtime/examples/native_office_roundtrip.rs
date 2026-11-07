@@ -31,7 +31,7 @@ async fn wait(
         if Instant::now() > deadline {
             return Err(format!(
                 "rename/save deadline: {status:?}; {:?}",
-                bridge.last_error.lock().unwrap()
+                bridge.last_error()
             )
             .into());
         }
@@ -371,7 +371,7 @@ async fn wait_queue(
             return Err(format!(
                 "replacement deadline: {:?}; {:?}",
                 s.next_replace()?,
-                bridge.last_error.lock().unwrap()
+                bridge.last_error()
             )
             .into());
         }

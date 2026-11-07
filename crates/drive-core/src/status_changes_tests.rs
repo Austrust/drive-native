@@ -454,7 +454,7 @@ fn related_status_tables_emit_and_download_error_clearing_is_not_lost() {
         INSERT INTO transfers VALUES('t','a','v1','download','failed','{}');
         UPDATE transfers SET state='pending',error=NULL WHERE id='t';
         INSERT INTO local_unlinks VALUES('a',0);
-        INSERT INTO operations VALUES('o','a','upload','v1',NULL,1,'pending');
+        INSERT INTO operations(id,node,kind,base,blob,generation,state) VALUES('o','a','upload','v1',NULL,1,'pending');
         UPDATE operations SET state='uncertain' WHERE id='o';
         INSERT OR REPLACE INTO node_metadata VALUES('a',1,1,420);
         INSERT INTO local_modes VALUES('a',384);
@@ -767,7 +767,11 @@ fn schema_inventory_requires_an_explicit_decision_for_new_tables_and_columns() {
     );
     for &(table, _, columns, _) in SOURCES {
         let ignored: &[&str] = match table {
-            "transfers" | "operations" => &["id"],
+            // Reconcile bookkeeping is local retry scheduling, not an externally
+            // visible status change, so the journal deliberately omits both
+            // columns (schema 26; see the operations SOURCES mapping).
+            "operations" => &["id", "reconcile_attempts", "reconcile_at"],
+            "transfers" => &["id"],
             "namespace_ops" => &["seq", "id"],
             "engine_bridge_intents" => &["key", "body", "baseline"],
             _ => &[],

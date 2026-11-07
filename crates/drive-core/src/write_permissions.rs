@@ -851,7 +851,7 @@ mod tests {
         .unwrap();
         drop(db);
         let s = Store::open(d.path()).unwrap();
-        assert_eq!(crate::STATE_SCHEMA_VERSION, 25);
+        assert_eq!(crate::STATE_SCHEMA_VERSION, 26);
         assert_eq!(
             s.sync_history(&crate::sync_history::HistoryQuery::default())
                 .unwrap()
@@ -867,7 +867,7 @@ mod tests {
                 p.file_name()
                     .unwrap()
                     .to_string_lossy()
-                    .starts_with("state-before-v25-")
+                    .starts_with("state-before-v26-")
             })
             .unwrap();
         let db = Connection::open(backup).unwrap();
@@ -875,6 +875,67 @@ mod tests {
             db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
             24
+        );
+        assert_eq!(
+            db.query_row("PRAGMA integrity_check", [], |r| r.get::<_, String>(0))
+                .unwrap(),
+            "ok"
+        );
+    }
+    #[test]
+    fn schema25_migration_adds_reconcile_budget_columns_and_keeps_uncertain_upload() {
+        let (d, mut s) = fixture();
+        let op = s.save_local("f", b"retained").unwrap();
+        s.mark_upload_started(&op).unwrap();
+        s.mark_upload_uncertain(&op).unwrap();
+        let history = s
+            .sync_history(&crate::sync_history::HistoryQuery::default())
+            .unwrap()
+            .records
+            .len();
+        drop(s);
+        let db = Connection::open(d.path().join("state.sqlite")).unwrap();
+        db.execute_batch(
+            "ALTER TABLE operations DROP COLUMN reconcile_attempts;ALTER TABLE operations DROP COLUMN reconcile_at;PRAGMA user_version=25;",
+        )
+        .unwrap();
+        drop(db);
+        let s = Store::open(d.path()).unwrap();
+        assert_eq!(crate::STATE_SCHEMA_VERSION, 26);
+        let (attempts, at): (i64, i64) = s
+            .db
+            .query_row(
+                "SELECT reconcile_attempts,reconcile_at FROM operations WHERE id=?1",
+                [&op],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((attempts, at), (0, 0));
+        assert_eq!(s.upload_operations("uncertain").unwrap(), vec![op.clone()]);
+        assert_eq!(s.pending_operations().unwrap(), 1);
+        assert!(s.upload_reconcile_due(0).unwrap());
+        assert_eq!(
+            s.sync_history(&crate::sync_history::HistoryQuery::default())
+                .unwrap()
+                .records
+                .len(),
+            history
+        );
+        let backup = std::fs::read_dir(d.path())
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .find(|p| {
+                p.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("state-before-v26-")
+            })
+            .unwrap();
+        let db = Connection::open(backup).unwrap();
+        assert_eq!(
+            db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            25
         );
         assert_eq!(
             db.query_row("PRAGMA integrity_check", [], |r| r.get::<_, String>(0))

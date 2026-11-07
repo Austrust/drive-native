@@ -10,6 +10,7 @@
 - [conflict_gui_live.py](conflict_gui_live.py)
 - [conflict_gui_tests.py](conflict_gui_tests.py)
 - [issue_recovery_gui_tests.py](issue_recovery_gui_tests.py)：可执行恢复、上传阻塞、异步父目录定位、旧后台兼容和诊断脱敏；由冲突套件自动包含。
+- [background_banner_tests.py](background_banner_tests.py)：后台故障横幅随 `background_error` 存在/清空显示与隐藏；`error` 优先级、`upload_block` 独立、未知 additive 字段容错。
 - [gui_unit_tests.py](gui_unit_tests.py)
 - [initialization_gui_tests.py](initialization_gui_tests.py)：阶段与真实计数、正常等待、Overview悬挂时独立刷新且不触发目录查询。
 - [hidden_dialog_tests.py](hidden_dialog_tests.py)：隐藏设置页的重连、在途分页和已排队定时器回归。

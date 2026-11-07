@@ -383,7 +383,7 @@ fn populated_or_damaged_authoritative_state_is_never_cold_preview() {
         "UPDATE metadata SET value='native-v1:7' WHERE key='committed_cursor'",
         "INSERT INTO fs_inodes(ino,node) VALUES(1,'missing-authoritative-root')",
         "INSERT INTO drafts VALUES('missing','token','base',1,0,1)",
-        "INSERT INTO operations VALUES('op','missing','upload','base',NULL,1,'uncertain')",
+        "INSERT INTO operations(id,node,kind,base,blob,generation,state) VALUES('op','missing','upload','base',NULL,1,'uncertain')",
     ] {
         let (_temp, store, _binding, _run) = setup();
         store.db.execute_batch(sql).unwrap();
