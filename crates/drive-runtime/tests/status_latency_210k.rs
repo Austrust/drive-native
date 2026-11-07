@@ -31,10 +31,24 @@
 //!
 //! Env: LAT_ITERS (default 120), LAT_BATCH_ITERS (24), LAT_DIR_ITERS (120),
 //!      LAT_MIX_SECONDS (15), LAT_LOCK_MS (2000), LAT_TIMEOUT_MS (15000),
-//!      LAT_KEEP (keep the fixture directory).
+//!      LAT_KEEP (keep the fixture directory), LAT_FIXTURE_DIR (reuse a
+//!      persistent fixture), LAT_FUSE=0 (skip the FUSE mount scenario).
 //!
-//! Everything above 48 threads / iterations is deterministic so baseline and
-//! candidate trees can be compared with the same command.
+//! #8 status-cache runs (merged tree with the committed status projection):
+//!      LAT_SERVICE=start starts the runtime tasks (required for the projection
+//!      worker), LAT_WARM=1 polls GetStates until three consecutive calls are
+//!      below LAT_WARM_MS (default 400 ms: the warm 210k render is ~307 ms,
+//!      so a 50 ms threshold can never be met) or LAT_WARM_TIMEOUT_MS (60 s), and
+//!      reports `#8 WARM` with the cold first-call latency and time-to-warm.
+//!      The projection accessor is `pub(crate)`, so warm state is inferred from
+//!      latency (an authoritative 210k-node scan cannot answer below ~400 ms).
+//!      Without LAT_SERVICE=start the test measures the pure scoped-query path,
+//!      which is the before column for the pre-cache trees.
+//!
+//! Both `before` (b991858/4a0f0a9, no status cache) and `after` (67bf943 with
+//! the cache) columns use the same fixture and the same command; only the
+//! LAT_SERVICE/LAT_WARM pair differs. `analysis/#8-acceptance.md` records the
+//! exact invocations and the loadavg of every run.
 
 use drive_core::{sha256, DownloadTicket, Node, NodeMetadata, Store};
 use drive_runtime::{
@@ -137,6 +151,12 @@ impl Samples {
                 "max_ms": Self::ms(*sorted.last().unwrap_or(&0)),
             })
         );
+    }
+
+    fn p50_ms(&self) -> f64 {
+        let mut sorted = self.us.clone();
+        sorted.sort_unstable();
+        Self::ms(percentile(&sorted, 0.50))
     }
 
     fn p95_ms(&self) -> f64 {
@@ -771,6 +791,10 @@ fn mixed_load(
         all.timeouts += kind_samples.timeouts;
     }
     all.report(&format!("{tag}_all"), timeout_ms);
+    // Keep the aggregate in the returned map: the METRICS line and the SLO
+    // verdicts read `{tag}_all` from it, so a missing entry would silently
+    // report zero timeouts (and a zero p95) instead of the real values.
+    samples.insert(format!("{tag}_all"), all);
     samples
 }
 
@@ -893,6 +917,66 @@ fn load_avg1() -> Option<f64> {
         .ok()
 }
 
+/// Observation of the committed-status-projection warm-up on the #8 cache tree.
+///
+/// The projection accessor is `pub(crate)`, so an integration test cannot ask
+/// the service whether a snapshot is published. Instead this times GetStates
+/// calls: three consecutive calls below `threshold_ms` cannot be served by the
+/// authoritative 210k-node scoped query, so they mean "projection published".
+struct WarmResult {
+    cold_ms: f64,
+    ready: bool,
+    ready_ms: Option<f64>,
+    calls: usize,
+    warm_p50_ms: f64,
+    warm_p95_ms: f64,
+}
+
+fn warm_status_projection(
+    service: &Arc<Service>,
+    timeout_ms: u64,
+    threshold_ms: f64,
+) -> WarmResult {
+    let first = Instant::now();
+    let mut cold_ms = None;
+    let mut warm = Samples::default();
+    let mut calls = 0usize;
+    let mut consecutive = 0usize;
+    let mut ready_at = None;
+    loop {
+        let started = Instant::now();
+        let result = desktop::states(service, vec![".".to_string()]);
+        let us = started.elapsed().as_micros() as u64;
+        let ms = Samples::ms(us);
+        calls += 1;
+        if cold_ms.is_none() {
+            cold_ms = Some(ms);
+        }
+        if result.is_ok() && ms <= threshold_ms {
+            warm.us.push(us);
+            consecutive += 1;
+        } else {
+            consecutive = 0;
+        }
+        if consecutive >= 3 {
+            ready_at = Some(first.elapsed().as_secs_f64() * 1_000.0);
+            break;
+        }
+        if first.elapsed() >= Duration::from_millis(timeout_ms) {
+            break;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    WarmResult {
+        cold_ms: cold_ms.unwrap_or(0.0),
+        ready: ready_at.is_some(),
+        ready_ms: ready_at,
+        calls,
+        warm_p50_ms: warm.p50_ms(),
+        warm_p95_ms: warm.p95_ms(),
+    }
+}
+
 fn verdict(passed: bool) -> &'static str {
     if passed {
         "PASS"
@@ -910,6 +994,18 @@ fn status_latency_210k() {
     let mix_seconds = env_u64("LAT_MIX_SECONDS", 15);
     let lock_ms = env_u64("LAT_LOCK_MS", 2_000);
     let timeout_ms = env_u64("LAT_TIMEOUT_MS", 15_000);
+    let service_started = matches!(
+        env::var("LAT_SERVICE").as_deref(),
+        Ok("start") | Ok("1") | Ok("true")
+    );
+    let warm_threshold_ms = env::var("LAT_WARM_MS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        // A warm 210k-node GetStates render is ~307 ms on this 32-core host,
+        // so a 50 ms threshold can never be met. The default marks the point
+        // where latency has settled at the warm-path level, not a 50 ms SLO.
+        .unwrap_or(400.0);
+    let warm_timeout_ms = env_u64("LAT_WARM_TIMEOUT_MS", 60_000);
     println!(
         "#8 ENV {}",
         serde_json::json!({
@@ -920,6 +1016,10 @@ fn status_latency_210k() {
             "lock_ms": lock_ms,
             "timeout_ms": timeout_ms,
             "threads": MIX_THREADS,
+            "service": if service_started { "start" } else { "new" },
+            "warm": env_flag("LAT_WARM"),
+            "warm_threshold_ms": warm_threshold_ms,
+            "warm_timeout_ms": warm_timeout_ms,
             "loadavg_start": load_avg1(),
         })
     );
@@ -937,6 +1037,61 @@ fn status_latency_210k() {
         PathBuf::from("/nonexistent-worker"),
     )
     .expect("service");
+    let tasks = if service_started {
+        let tasks = service.start();
+        println!(
+            "#8 NOTE service_started=1 (runtime background tasks running; on a #8 cache tree this starts the committed status projection worker)"
+        );
+        Some(tasks)
+    } else {
+        None
+    };
+    let cold_states_ms = if service_started {
+        let started = Instant::now();
+        let _ = black_box(desktop::states(&service, vec![".".to_string()]));
+        Some(started.elapsed().as_secs_f64() * 1_000.0)
+    } else {
+        None
+    };
+    let cold_lock = if service_started {
+        // #8 wants both a warm-cache and a cold-cache answer for "responsive
+        // while the writer lock is held"; this probe runs right after
+        // `Service::start`, before the projection worker publishes its first
+        // snapshot (the cold state for a cache tree).
+        let (probes, _) = lock_hold_scenario(&service, lock_ms, 0, timeout_ms);
+        Some(probes)
+    } else {
+        None
+    };
+    let warm = if service_started && env_flag("LAT_WARM") {
+        let warm = warm_status_projection(&service, warm_timeout_ms, warm_threshold_ms);
+        println!(
+            "#8 WARM {}",
+            serde_json::json!({
+                "cold_ms": cold_states_ms,
+                "probe_cold_ms": warm.cold_ms,
+                "ready": warm.ready,
+                "ready_ms": warm.ready_ms,
+                "calls": warm.calls,
+                "warm_p50_ms": warm.warm_p50_ms,
+                "warm_p95_ms": warm.warm_p95_ms,
+                "threshold_ms": warm_threshold_ms,
+                "timeout_ms": warm_timeout_ms,
+            })
+        );
+        Some(warm)
+    } else {
+        if service_started {
+            thread::sleep(Duration::from_millis(env_u64("LAT_SETTLE_MS", 250)));
+        }
+        None
+    };
+    if let Some(probes) = &cold_lock {
+        println!(
+            "#8 NOTE lock_hold_cold states={}ms issues={}ms overview={}ms (immediately after Service::start, before the first projection publication)",
+            probes[0].ms, probes[1].ms, probes[2].ms
+        );
+    }
 
     let states_root = bench_states(
         &service,
@@ -1014,6 +1169,18 @@ fn status_latency_210k() {
             "loadavg_end": load_avg1(),
             "lock_ms": lock_ms,
             "lock_post_p95_ms": lock_post.p95_ms(),
+            "service_started": service_started,
+            "cold_states_ms": cold_states_ms,
+            "lock_cold_states_ms": cold_lock.as_ref().map(|probes| probes[0].ms),
+            "lock_cold_states_completed": cold_lock
+                .as_ref()
+                .map(|probes| probes[0].completed_while_locked),
+            "lock_cold_issues_ms": cold_lock.as_ref().map(|probes| probes[1].ms),
+            "projection_ready": warm.as_ref().map(|warm| warm.ready),
+            "projection_ready_ms": warm.as_ref().and_then(|warm| warm.ready_ms),
+            "projection_warm_p95_ms": warm.as_ref().map(|warm| warm.warm_p95_ms),
+            "projection_warm_calls": warm.as_ref().map(|warm| warm.calls),
+            "projection_warm_threshold_ms": warm.as_ref().map(|_| warm_threshold_ms),
         })
     );
 
@@ -1073,6 +1240,15 @@ fn status_latency_210k() {
         "#8 NOTE mix_states_p95_ms observed={:.3} (acceptance mix also runs overview, which still takes the global Store mutex on both trees)",
         mix_states.p95_ms()
     );
+    if let Some(tasks) = tasks {
+        // Background tasks must be stopped before the fixture/store is dropped;
+        // joining a stuck service thread would hang the capacity test, so the
+        // stop flag is set and the handles are detached after a short grace.
+        service.shutdown();
+        thread::sleep(Duration::from_millis(250));
+        drop(tasks);
+        println!("#8 NOTE service_shutdown=1 (stop flag set; handles detached)");
+    }
     if env_flag("LAT_KEEP") {
         println!("#8 KEEP fixture_dir={}", dir.display());
         if let Some(temp) = temp {
