@@ -899,3 +899,63 @@ fn states_falls_back_to_the_writer_when_the_root_inode_is_missing() {
         serde_json::from_str(&desktop::states(&service, vec!["folder".into()]).unwrap()).unwrap();
     assert_eq!(first, second);
 }
+
+#[test]
+fn cache_settings_fall_back_to_the_writer_while_a_local_handle_protects_content() {
+    // The read-only handle owns a private handle table, so projecting cache
+    // usage there would call an open file reclaimable while the writer protects
+    // it. With nothing open the off-lock projection must answer; with a handle
+    // open it must come from the serialized writer projection instead.
+    let (_dir, service) = fixture();
+    let body: u64 = b"candidate-body".len() as u64;
+    {
+        let mut store = service.bridge.store.lock().unwrap();
+        let op = store.save_local("two", b"candidate-body").unwrap();
+        store.mark_upload_started(&op).unwrap();
+        store.confirm_upload(&op, "v1").unwrap();
+    }
+    let off_lock_usage = || -> serde_json::Value {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let read_only = Store::open_read_only(&service.bridge.store.root()).unwrap();
+        serde_json::to_value(
+            read_only
+                .cache_usage(now, &std::collections::HashSet::new())
+                .unwrap(),
+        )
+        .unwrap()
+    };
+    let reported_usage = || -> serde_json::Value {
+        serde_json::from_str::<serde_json::Value>(&desktop::cache_settings(&service).unwrap())
+            .unwrap()["usage"]
+            .clone()
+    };
+    let writer_usage = || -> serde_json::Value {
+        serde_json::to_value(service.bridge.cache_usage().unwrap()).unwrap()
+    };
+    // The uncoupled read-only projection is the regression: it cannot see the
+    // handle below, so it calls the protected body reclaimable.
+    assert_eq!(off_lock_usage()["reclaimable_bytes"], body);
+    assert_eq!(off_lock_usage()["protected_bytes"], 0);
+    assert_eq!(service.bridge.store.open_handle_count(), 0);
+    let handle = service
+        .bridge
+        .store
+        .lock()
+        .unwrap()
+        .open_cached("two")
+        .unwrap();
+    assert_eq!(service.bridge.store.open_handle_count(), 1);
+    let protected = reported_usage();
+    assert_eq!(protected, writer_usage());
+    assert_eq!(protected["reclaimable_bytes"], 0);
+    assert_eq!(protected["protected_bytes"], body);
+    drop(handle);
+    assert_eq!(service.bridge.store.open_handle_count(), 0);
+    let closed = reported_usage();
+    assert_eq!(closed, writer_usage());
+    assert_eq!(closed["reclaimable_bytes"], body);
+    assert_eq!(closed["protected_bytes"], 0);
+}

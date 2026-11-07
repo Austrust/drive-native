@@ -825,10 +825,16 @@ fn cache_settings_with(service: &Service, read_only: Option<&Store>) -> io::Resu
     // Usage accounting may scan every cached candidate; keep that read off the
     // global writer mutex too. A read-only handle sees the committed database
     // but not this process's open handles, so fall back when it cannot read.
-    let usage = read_only.and_then(|store| {
-        let active = service.bridge.active_downloads().into_iter().collect();
-        store.cache_usage(unix_now(), &active).ok()
-    });
+    // It also cannot see files or drafts the writer has open, and those must not
+    // be reported as reclaimable while the trimmer protects them. Only project
+    // off-lock when nothing is open so protected/reclaimable stays identical to
+    // the serialized projection.
+    let usage = read_only
+        .filter(|_| service.bridge.store.open_handle_count() == 0)
+        .and_then(|store| {
+            let active = service.bridge.active_downloads().into_iter().collect();
+            store.cache_usage(unix_now(), &active).ok()
+        });
     let usage = match usage {
         Some(usage) => usage,
         None => service.bridge.cache_usage()?,
