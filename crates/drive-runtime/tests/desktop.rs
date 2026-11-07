@@ -959,3 +959,96 @@ fn cache_settings_fall_back_to_the_writer_while_a_local_handle_protects_content(
     assert_eq!(closed["reclaimable_bytes"], body);
     assert_eq!(closed["protected_bytes"], 0);
 }
+
+fn assert_states_semantically_equal(actual: &serde_json::Value, expected: &serde_json::Value) {
+    assert_eq!(actual["schema"], expected["schema"]);
+    let actual_entries = actual["entries"].as_array().unwrap();
+    let expected_entries = expected["entries"].as_array().unwrap();
+    assert_eq!(actual_entries.len(), expected_entries.len());
+    for (actual, expected) in actual_entries.iter().zip(expected_entries) {
+        assert_eq!(actual["path"], expected["path"]);
+        match (actual.get("error"), expected.get("error")) {
+            (Some(actual), Some(expected)) => assert_eq!(actual, expected),
+            (None, None) => {
+                for key in ["id", "directory", "status", "pinned", "offline_available"] {
+                    assert_eq!(
+                        actual[key], expected[key],
+                        "state entry `{key}` diverged: {actual} vs {expected}"
+                    );
+                }
+                assert_eq!(
+                    actual.get("sync_error"),
+                    expected.get("sync_error"),
+                    "state entry sync_error diverged: {actual} vs {expected}"
+                );
+            }
+            (actual, expected) => {
+                panic!("state entry availability diverged: {actual:?} vs {expected:?}")
+            }
+        }
+    }
+}
+
+#[test]
+fn states_json_stays_stable_while_a_started_service_builds_the_projection() {
+    // `Service::status_projection` is crate-private, so this integration crate
+    // cannot poll readiness directly (the ready-projection assertions live in
+    // desktop.rs unit tests). What must hold here is the public contract: every
+    // GetStates read keeps the legacy per-entry result while the background cache
+    // loop publishes projections. Entries are compared semantically rather than
+    // as one JSON string because sibling enumeration order is not part of the
+    // GetStates contract (and the cache branch sorts projection children).
+    let (_dir, service) = fixture();
+    let batches = vec![
+        vec![".".to_string()],
+        vec![
+            ".".to_string(),
+            "folder".to_string(),
+            "folder/one".to_string(),
+            "folder/two".to_string(),
+        ],
+        vec![
+            "missing".to_string(),
+            "folder/missing".to_string(),
+            "/tmp/outside-drive-native-mount".to_string(),
+        ],
+        vec!["folder".to_string(); 257],
+    ];
+    let legacy: Vec<_> = batches
+        .iter()
+        .map(|paths| desktop::states(&service, paths.clone()))
+        .collect();
+    // The 257-path batch must stay a batch-size error on both paths, and the
+    // missing/outside paths must keep their entry-level errors.
+    assert!(legacy.last().unwrap().is_err());
+    let tasks = service.start();
+    // The skeleton cache republishes on every commit notification and on its 1s
+    // timeout; a 3s window covers several publish cycles without a fixed sleep.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while std::time::Instant::now() < deadline {
+        for (paths, expected) in batches.iter().zip(&legacy) {
+            match (desktop::states(&service, paths.clone()), expected) {
+                (Ok(actual), Ok(expected)) => {
+                    let actual: serde_json::Value = serde_json::from_str(&actual).unwrap();
+                    let expected: serde_json::Value = serde_json::from_str(expected).unwrap();
+                    assert_states_semantically_equal(&actual, &expected);
+                }
+                (Err(actual), Err(expected)) => {
+                    assert_eq!(actual.to_string(), expected.to_string())
+                }
+                (actual, expected) => {
+                    panic!("states liveness diverged while publishing: {actual:?} vs {expected:?}")
+                }
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+    let started = std::time::Instant::now();
+    service.shutdown();
+    tasks.join();
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(2),
+        "service stop+join exceeded 2s: {:?}",
+        started.elapsed()
+    );
+}

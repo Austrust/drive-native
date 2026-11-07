@@ -1,6 +1,7 @@
 //! Versioned local desktop API. Paths resolve against persistent metadata;
 //! querying an icon never opens a FUSE file or performs a NAS request.
 use crate::service::Service;
+use crate::status_cache::StatusProjection;
 use drive_core::{Node, Status, Store};
 #[path = "desktop_preview.rs"]
 mod preview;
@@ -91,7 +92,7 @@ fn entry(
     active: &HashSet<String>,
     memo: &mut HashMap<String, EntryState>,
     visiting: &mut HashSet<String>,
-    tree: &mut Option<status_tree::StatusTree>,
+    tree: &mut Option<status_tree::StatusTree<'_>>,
     depth: usize,
 ) -> io::Result<EntryState> {
     if let Some(state) = memo.get(id) {
@@ -278,7 +279,13 @@ fn states_off_lock(
     }
     store.ensure_fs_root(root).map_err(|_| other())?;
     let resolved = resolve_all(store, service, paths);
-    let mut tree = load_tree(store, &resolved)?;
+    // A ready projection answers folder aggregation without another scoped SQL
+    // read; unready (None) keeps the authoritative scoped read.
+    let projection = service.status_projection();
+    let mut tree = match projection.as_deref() {
+        Some(projection) => load_tree_with_projection(store, projection, &resolved)?,
+        None => load_tree(store, &resolved)?,
+    };
     Ok(render_states(resolved, active, Some(store), &mut tree))
 }
 fn states_locked(
@@ -325,24 +332,59 @@ fn resolve_all(
 fn load_tree(
     store: &Store,
     resolved: &[(String, io::Result<Node>)],
-) -> io::Result<Option<status_tree::StatusTree>> {
+) -> io::Result<Option<status_tree::StatusTree<'static>>> {
+    let Some(roots) = tree_roots(resolved) else {
+        return Ok(None);
+    };
+    Ok(Some(status_tree::StatusTree::load(store, &roots)?))
+}
+/// Root ids of a batch whose directories need tree aggregation; `None` keeps the
+/// historical shortcut for batches that only resolve files.
+fn tree_roots(resolved: &[(String, io::Result<Node>)]) -> Option<Vec<String>> {
     if !resolved
         .iter()
         .any(|(_, n)| n.as_ref().is_ok_and(|n| n.directory))
     {
-        return Ok(None);
+        return None;
     }
-    let roots = resolved
-        .iter()
-        .filter_map(|(_, n)| n.as_ref().ok().map(|n| n.id.clone()))
-        .collect::<Vec<_>>();
-    Ok(Some(status_tree::StatusTree::load(store, &roots)?))
+    Some(
+        resolved
+            .iter()
+            .filter_map(|(_, n)| n.as_ref().ok().map(|n| n.id.clone()))
+            .collect(),
+    )
+}
+/// Counts batches served by the committed projection. Test-only evidence that
+/// the wiring actually prefers it; never compiled into the production library.
+#[cfg(test)]
+static PROJECTION_TREE_LOADS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+/// Prefer the committed projection (issue #8): it answers the batch without a
+/// scoped SQLite read. A projection that cannot describe every resolved root
+/// (stale snapshot, missing ancestor, disabled cache) falls back to the
+/// authoritative scoped read instead of returning a truncated tree.
+fn load_tree_with_projection<'p>(
+    store: &Store,
+    projection: &'p StatusProjection,
+    resolved: &[(String, io::Result<Node>)],
+) -> io::Result<Option<status_tree::StatusTree<'p>>> {
+    let Some(roots) = tree_roots(resolved) else {
+        return Ok(None);
+    };
+    match status_tree::StatusTree::load_with_projection(store, projection, &roots) {
+        Ok(tree) => {
+            #[cfg(test)]
+            PROJECTION_TREE_LOADS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Ok(Some(tree))
+        }
+        Err(_) => load_tree(store, resolved),
+    }
 }
 fn render_states(
     resolved: Vec<(String, io::Result<Node>)>,
     active: &HashSet<String>,
     store: Option<&Store>,
-    tree: &mut Option<status_tree::StatusTree>,
+    tree: &mut Option<status_tree::StatusTree<'_>>,
 ) -> String {
     let mut memo = HashMap::new();
     let mut out = Vec::new();
@@ -1173,5 +1215,332 @@ mod readpath_tests {
             off_lock["recent_download_seconds"],
             drive_core::cache_policy::RECENT_DOWNLOAD_SECONDS
         );
+    }
+
+    // ---- issue #8: status projection batches ---------------------------------
+    fn store_fixture() -> (tempfile::TempDir, Store) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(dir.path()).unwrap();
+        store
+            .install_remote_snapshot(
+                &[
+                    node("root", None, true),
+                    node("folderA", Some("root"), true),
+                    node("subA", Some("folderA"), true),
+                    node("oneA", Some("folderA"), false),
+                    node("deep", Some("subA"), false),
+                    node("folderB", Some("root"), true),
+                    node("twoB", Some("folderB"), false),
+                ],
+                "1",
+                "server",
+            )
+            .unwrap();
+        store.ensure_fs_root("root").unwrap();
+        store.pin("oneA", true).unwrap();
+        (dir, store)
+    }
+    fn visited(tree: &super::status_tree::StatusTree<'_>, roots: &[String]) -> Vec<String> {
+        let mut seen: Vec<String> = Vec::new();
+        let mut pending = roots.to_vec();
+        while let Some(id) = pending.pop() {
+            if seen.contains(&id) {
+                continue;
+            }
+            seen.push(id.clone());
+            pending.extend(tree.children(&id).into_iter().map(|(child, _)| child));
+        }
+        // Row order depends on which SQL read produced the seeds; the batch only
+        // promises the same membership.
+        seen.sort();
+        seen
+    }
+    fn children_sorted(
+        tree: &super::status_tree::StatusTree<'_>,
+        id: &str,
+    ) -> Vec<(String, bool)> {
+        let mut children = tree.children(id);
+        children.sort();
+        children
+    }
+    /// Comparable shape of a detail row without requiring `DownloadFailure: PartialEq`.
+    fn detail_shape(
+        tree: &super::status_tree::StatusTree<'_>,
+        id: &str,
+    ) -> Option<Result<(String, bool, bool), ()>> {
+        tree.detail(id).map(|detail| {
+            detail.map(|(status, offline, failure)| {
+                (format!("{status:?}"), offline, failure.is_some())
+            })
+        })
+    }
+
+    #[test]
+    fn projected_tree_matches_the_scoped_tree() {
+        let (_dir, store) = store_fixture();
+        let projection = StatusProjection::from_rows(store.desktop_status_seeds().unwrap(), 3);
+        for roots in [
+            vec!["root".to_string()],
+            vec!["folderA".to_string()],
+            vec!["subA".to_string()],
+            vec!["folderA".to_string(), "folderB".to_string()],
+            vec!["oneA".to_string()],
+        ] {
+            let mut scoped = super::status_tree::StatusTree::load(&store, &roots).unwrap();
+            let mut projected =
+                super::status_tree::StatusTree::load_with_projection(&store, &projection, &roots)
+                    .unwrap();
+            let ids = visited(&scoped, &roots);
+            assert_eq!(ids, visited(&projected, &roots));
+            for id in ids {
+                assert_eq!(
+                    children_sorted(&scoped, &id),
+                    children_sorted(&projected, &id),
+                    "children of {id}"
+                );
+                assert_eq!(
+                    scoped.flags(&id).ok(),
+                    projected.flags(&id).ok(),
+                    "flags of {id}"
+                );
+                assert_eq!(
+                    detail_shape(&scoped, &id),
+                    detail_shape(&projected, &id),
+                    "detail of {id}"
+                );
+            }
+        }
+        // A projection that cannot describe a root (or an ancestor of it) must be
+        // rejected so callers fall back instead of reporting a shrunken tree.
+        let without_folder_a: Vec<_> = store
+            .desktop_status_seeds()
+            .unwrap()
+            .into_iter()
+            .filter(|row| row.id != "folderA")
+            .collect();
+        let partial = StatusProjection::from_rows(without_folder_a, 1);
+        assert!(
+            super::status_tree::StatusTree::load_with_projection(
+                &store,
+                &partial,
+                &["subA".to_string()]
+            )
+            .is_err()
+        );
+        assert!(
+            super::status_tree::StatusTree::load_with_projection(
+                &store,
+                &projection,
+                &["missing".to_string()]
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn projected_states_json_matches_the_scoped_render() {
+        let (_dir, service) = fixture();
+        let store = service.bridge.store.lock().unwrap();
+        let projection = StatusProjection::from_rows(store.desktop_status_seeds().unwrap(), 2);
+        let active = active(&service);
+        let paths = vec![
+            ".".to_string(),
+            "folder".to_string(),
+            "folder/one".to_string(),
+            "missing".to_string(),
+        ];
+        let resolved = resolve_all(&store, &service, paths.clone());
+        let mut scoped = load_tree(&store, &resolved).unwrap();
+        let scoped_json = render_states(resolved, &active, Some(&store), &mut scoped);
+        let resolved = resolve_all(&store, &service, paths);
+        let mut projected = load_tree_with_projection(&store, &projection, &resolved).unwrap();
+        let projected_json = render_states(resolved, &active, Some(&store), &mut projected);
+        assert_eq!(scoped_json, projected_json);
+        // File-only batches build no tree on either path.
+        let files = vec!["folder/one".to_string(), "missing".to_string()];
+        let resolved_files = resolve_all(&store, &service, files.clone());
+        let mut scoped_files = load_tree(&store, &resolved_files).unwrap();
+        let scoped_files_json =
+            render_states(resolved_files, &active, Some(&store), &mut scoped_files);
+        let resolved_files = resolve_all(&store, &service, files);
+        let mut projected_files =
+            load_tree_with_projection(&store, &projection, &resolved_files).unwrap();
+        let projected_files_json =
+            render_states(resolved_files, &active, Some(&store), &mut projected_files);
+        assert_eq!(scoped_files_json, projected_files_json);
+        assert!(scoped_files.is_none() && projected_files.is_none());
+    }
+
+    #[test]
+    fn stale_projection_falls_back_to_the_scoped_read() {
+        let (_dir, service) = fixture();
+        let stale = {
+            let store = service.bridge.store.lock().unwrap();
+            StatusProjection::from_rows(store.desktop_status_seeds().unwrap(), 1)
+        };
+        {
+            let mut store = service.bridge.store.lock().unwrap();
+            store
+                .install_remote_snapshot(
+                    &[
+                        node("root", None, true),
+                        node("folder", Some("root"), true),
+                        node("lateDir", Some("folder"), true),
+                    ],
+                    "2",
+                    "server",
+                )
+                .unwrap();
+        }
+        let ro = read_only(&service).unwrap();
+        let resolved = resolve_all(&ro, &service, vec!["folder/lateDir".to_string()]);
+        assert!(
+            super::status_tree::StatusTree::load_with_projection(
+                &ro,
+                &stale,
+                &["lateDir".to_string()]
+            )
+            .is_err(),
+            "a projection that predates the root must be rejected"
+        );
+        let mut fallback = load_tree_with_projection(&ro, &stale, &resolved)
+            .unwrap()
+            .expect("fallback tree");
+        let mut scoped = load_tree(&ro, &resolved).unwrap().expect("scoped tree");
+        for id in ["lateDir"] {
+            assert_eq!(fallback.flags(id).ok(), scoped.flags(id).ok());
+            assert_eq!(fallback.children(id), scoped.children(id));
+            assert_eq!(detail_shape(&fallback, id), detail_shape(&scoped, id));
+        }
+    }
+
+    #[test]
+    fn ready_projection_serves_states_while_the_store_lock_is_held() {
+        let (_dir, service) = fixture();
+        let paths = vec![
+            ".".to_string(),
+            "folder".to_string(),
+            "folder/one".to_string(),
+        ];
+        let legacy = states(&service, paths.clone()).unwrap();
+        let tasks = service.clone().start();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while service.status_projection().is_none() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "status projection did not become ready within 10s"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let with_projection = states(&service, paths.clone()).unwrap();
+        assert_eq!(legacy, with_projection);
+        // A ready projection must answer a directory batch without the writer mutex.
+        let held = service.bridge.store.lock().unwrap();
+        let probe = service.clone();
+        let probe_paths = paths.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            let _ = tx.send(states(&probe, probe_paths));
+        });
+        let response = rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("GetStates waited on the global Store lock");
+        drop(held);
+        thread.join().unwrap();
+        assert_eq!(with_projection, response.unwrap());
+        assert!(
+            PROJECTION_TREE_LOADS.load(std::sync::atomic::Ordering::Relaxed) > 0,
+            "states kept falling back to the scoped read while a projection was ready"
+        );
+        let started = std::time::Instant::now();
+        service.shutdown();
+        tasks.join();
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "service stop+join exceeded 2s: {:?}",
+            started.elapsed()
+        );
+    }
+
+    /// Timing contrast for the issue #8 report. A GetStates batch on a large tree
+    /// pays the scoped seed read once on the legacy path; the published projection
+    /// answers from memory. Run with `--nocapture` to see the `PROJECTION_TIMING`
+    /// line (debug build; use it as relative evidence, not a release benchmark).
+    #[test]
+    fn projection_avoids_the_scoped_seed_read_on_a_large_tree() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(dir.path()).unwrap();
+        let mut nodes = vec![node("root", None, true)];
+        for folder in 0..100 {
+            let folder_id = format!("dir{folder:03}");
+            nodes.push(node(&folder_id, Some("root"), true));
+            for file in 0..200 {
+                let file_id = format!("file{folder:03}-{file:03}");
+                nodes.push(node(&file_id, Some(&folder_id), false));
+            }
+        }
+        let node_count = nodes.len();
+        store.install_remote_snapshot(&nodes, "1", "server").unwrap();
+        store.ensure_fs_root("root").unwrap();
+        let service =
+            Service::new(profile(), store, PathBuf::from("/nonexistent-worker")).unwrap();
+        let ro = read_only(&service).expect("read-only handle");
+        let rows = {
+            let store = service.bridge.store.lock().unwrap();
+            store.desktop_status_seeds().unwrap()
+        };
+        let seed_rows = rows.len();
+        let projection = StatusProjection::from_rows(rows, 1);
+        let roots = vec!["root".to_string()];
+        let started = std::time::Instant::now();
+        let scoped = super::status_tree::StatusTree::load(&ro, &roots).unwrap();
+        let scoped_load_ms = started.elapsed().as_millis();
+        let started = std::time::Instant::now();
+        let projected =
+            super::status_tree::StatusTree::load_with_projection(&ro, &projection, &roots).unwrap();
+        let projected_load_ms = started.elapsed().as_millis();
+        let ids = visited(&scoped, &roots);
+        assert_eq!(ids, visited(&projected, &roots));
+        for id in &ids {
+            assert_eq!(
+                children_sorted(&scoped, id),
+                children_sorted(&projected, id),
+                "children of {id}"
+            );
+        }
+        let paths = vec![".".to_string()];
+        let started = std::time::Instant::now();
+        let legacy = states(&service, paths.clone()).unwrap();
+        let legacy_ms = started.elapsed().as_millis();
+        let tasks = service.clone().start();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while service.status_projection().is_none() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "status projection did not become ready within 10s"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let started = std::time::Instant::now();
+        let cached = states(&service, paths.clone()).unwrap();
+        let cached_ms = started.elapsed().as_millis();
+        assert_eq!(legacy, cached);
+        // The writer mutex is held for the whole request here; a projection-served
+        // batch must stay bounded instead of queueing behind the writer.
+        let held = service.bridge.store.lock().unwrap();
+        let started = std::time::Instant::now();
+        let held_json = states(&service, paths.clone()).unwrap();
+        let held_lock_ms = started.elapsed().as_millis();
+        drop(held);
+        assert_eq!(legacy, held_json);
+        assert!(held_lock_ms < 5_000, "held-lock batch took {held_lock_ms}ms");
+        eprintln!(
+            "PROJECTION_TIMING nodes={node_count} seed_rows={seed_rows} \
+             scoped_load_ms={scoped_load_ms} projected_load_ms={projected_load_ms} \
+             legacy_states_ms={legacy_ms} cached_states_ms={cached_ms} \
+             cached_states_with_writer_lock_held_ms={held_lock_ms}"
+        );
+        service.shutdown();
+        tasks.join();
     }
 }

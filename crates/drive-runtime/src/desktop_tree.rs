@@ -1,4 +1,5 @@
 //! Reuse one bulk metadata read per status batch instead of N recursive SQL walks.
+use crate::status_cache::StatusProjection;
 use drive_core::{desktop_status::StatusSeed, Store};
 use std::{
     collections::{HashMap, HashSet},
@@ -9,20 +10,55 @@ type Detail = (
     bool,
     Option<drive_core::download_jobs::DownloadFailure>,
 );
-pub(super) struct StatusTree {
+type Children = HashMap<String, Vec<(String, bool)>>;
+/// Where the seed rows of one batch come from.
+enum Backing<'p> {
+    /// Authoritative scoped read of the requested subtrees and ancestor chains.
+    Loaded {
+        rows: HashMap<String, StatusSeed>,
+        children: Children,
+    },
+    /// Committed in-memory projection (issue #8). Only borrowed for the duration
+    /// of the request; `wanted` is the subtree visited by this batch.
+    Projected {
+        projection: &'p StatusProjection,
+        wanted: HashSet<String>,
+    },
+}
+pub(super) struct StatusTree<'p> {
     details: HashMap<String, Result<Detail, ()>>,
-    rows: HashMap<String, StatusSeed>,
-    children: HashMap<String, Vec<(String, bool)>>,
+    backing: Backing<'p>,
     inherited: HashMap<String, (bool, bool)>,
 }
-impl StatusTree {
+/// Desktop status detail for one seed. Both backings share this so a projected
+/// batch reports exactly what the authoritative scoped batch reports.
+fn detail_for(store: &Store, seed: &StatusSeed) -> io::Result<Detail> {
+    let own = store.status(&seed.id).map_err(io::Error::other)?;
+    let offline = !seed.directory
+        && (store
+            .open_dirty_draft(&seed.id)
+            .map_err(io::Error::other)?
+            .is_some()
+            || store.open_cached(&seed.id).is_ok());
+    let failure = if seed.directory
+        || matches!(
+            own,
+            drive_core::Status::Conflict | drive_core::Status::PendingUpload
+        ) {
+        None
+    } else {
+        store.download_failure(&seed.id).map_err(io::Error::other)?
+    };
+    Ok((own, offline, failure))
+}
+impl<'p> StatusTree<'p> {
     pub fn load(store: &Store, roots: &[String]) -> io::Result<Self> {
         // Only the requested roots' subtree plus their ancestor chain is read; a
         // full-namespace read would dominate every status batch on large profiles.
         let rows = store
             .desktop_status_seeds_for(roots)
             .map_err(io::Error::other)?;
-        let mut children: HashMap<String, Vec<(String, bool)>> = HashMap::new();
+        let mut children: Children = HashMap::new();
         for n in &rows {
             if let Some(p) = &n.parent {
                 children
@@ -42,33 +78,81 @@ impl StatusTree {
         }
         let mut details = HashMap::new();
         for n in rows.iter().filter(|n| n.detailed && wanted.contains(&n.id)) {
-            let detail = (|| -> io::Result<Detail> {
-                let own = store.status(&n.id).map_err(io::Error::other)?;
-                let offline = !n.directory
-                    && (store
-                        .open_dirty_draft(&n.id)
-                        .map_err(io::Error::other)?
-                        .is_some()
-                        || store.open_cached(&n.id).is_ok());
-                let failure = if n.directory
-                    || matches!(
-                        own,
-                        drive_core::Status::Conflict | drive_core::Status::PendingUpload
-                    ) {
-                    None
-                } else {
-                    store.download_failure(&n.id).map_err(io::Error::other)?
-                };
-                Ok((own, offline, failure))
-            })();
-            details.insert(n.id.clone(), detail.map_err(|_| ()));
+            details.insert(n.id.clone(), detail_for(store, n).map_err(|_| ()));
         }
         Ok(Self {
             details,
-            rows: rows.into_iter().map(|n| (n.id.clone(), n)).collect(),
-            children,
+            backing: Backing::Loaded {
+                rows: rows.into_iter().map(|n| (n.id.clone(), n)).collect(),
+                children,
+            },
             inherited: HashMap::new(),
         })
+    }
+    /// Same batch semantics as [`Self::load`], answered from the committed
+    /// projection without a scoped SQLite read. A root (or any link of its
+    /// ancestor chain) missing from the projection is an error so the caller can
+    /// fall back to the authoritative scoped read instead of reporting a silently
+    /// truncated tree.
+    pub(super) fn load_with_projection(
+        store: &Store,
+        projection: &'p StatusProjection,
+        roots: &[String],
+    ) -> io::Result<Self> {
+        let mut wanted = HashSet::new();
+        let mut pending = roots.to_vec();
+        while let Some(id) = pending.pop() {
+            if wanted.insert(id.clone()) {
+                pending.extend(projection.children(&id).iter().map(|(id, _)| id.clone()));
+            }
+        }
+        for root in roots {
+            let mut cursor = Some(root.as_str());
+            let mut hops = 0usize;
+            while let Some(id) = cursor {
+                hops += 1;
+                if hops > 128 {
+                    return Err(io::Error::other("status ancestry cycle"));
+                }
+                let seed = projection
+                    .seed(id)
+                    .ok_or_else(|| io::Error::other("status identity absent"))?;
+                cursor = seed.parent.as_deref();
+            }
+        }
+        let mut details = HashMap::new();
+        for id in &wanted {
+            let seed = projection
+                .seed(id)
+                .ok_or_else(|| io::Error::other("status identity absent"))?;
+            if seed.detailed {
+                details.insert(id.clone(), detail_for(store, seed).map_err(|_| ()));
+            }
+        }
+        Ok(Self {
+            details,
+            backing: Backing::Projected { projection, wanted },
+            inherited: HashMap::new(),
+        })
+    }
+    fn seed(&self, id: &str) -> Option<&StatusSeed> {
+        match &self.backing {
+            Backing::Loaded { rows, .. } => rows.get(id),
+            Backing::Projected { projection, .. } => projection.seed(id),
+        }
+    }
+    fn batch_children(&self, id: &str) -> Vec<(String, bool)> {
+        match &self.backing {
+            Backing::Loaded { children, .. } => children.get(id).cloned().unwrap_or_default(),
+            // A projected batch only walks children inside this batch's subtree,
+            // mirroring the scoped read which never returns sibling branches.
+            Backing::Projected { projection, wanted } => projection
+                .children(id)
+                .iter()
+                .filter(|(child, _)| wanted.contains(child))
+                .cloned()
+                .collect(),
+        }
     }
     fn inherited(&mut self, id: &str, seen: &mut HashSet<String>) -> io::Result<(bool, bool)> {
         if let Some(v) = self.inherited.get(id) {
@@ -78,8 +162,8 @@ impl StatusTree {
             return Err(io::Error::other("status ancestry cycle"));
         }
         let n = self
-            .rows
-            .get(id)
+            .seed(id)
+            .cloned()
             .ok_or_else(|| io::Error::other("status identity absent"))?;
         let (parent, pin, overlay) = (n.parent.clone(), n.pinned, n.overlay);
         let (a, b) = match parent {
@@ -92,12 +176,16 @@ impl StatusTree {
     }
     pub fn flags(&mut self, id: &str) -> io::Result<(bool, bool, bool)> {
         let (pin, overlay) = self.inherited(id, &mut HashSet::new())?;
-        Ok((pin, self.rows.get(id).unwrap().detailed, overlay))
+        let detailed = self
+            .seed(id)
+            .ok_or_else(|| io::Error::other("status identity absent"))?
+            .detailed;
+        Ok((pin, detailed, overlay))
     }
     pub fn detail(&self, id: &str) -> Option<Result<Detail, ()>> {
         self.details.get(id).cloned()
     }
     pub fn children(&self, id: &str) -> Vec<(String, bool)> {
-        self.children.get(id).cloned().unwrap_or_default()
+        self.batch_children(id)
     }
 }
