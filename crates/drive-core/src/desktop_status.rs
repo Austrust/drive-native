@@ -26,11 +26,25 @@ impl Store {
     /// The tree walk is put first with CROSS JOIN so SQLite uses the recursive
     /// frontier as the outer loop (see docs/CANDIDATE_QUERY_ORDER.md) and the
     /// (parent,name,deleted) index serves each downward step.
+    ///
+    /// A namespace root (`parent IS NULL`) in `roots` means the scoped walk would
+    /// cover the whole database one index lookup at a time. That costs several
+    /// times the linear scan on a large namespace, so those batches use the full
+    /// projection instead; the returned row set is the same because the scoped
+    /// set is then the entire namespace.
     pub fn desktop_status_seeds_for(&self, roots: &[String]) -> Result<Vec<StatusSeed>> {
         if roots.is_empty() {
             return Ok(Vec::new());
         }
         let roots = serde_json::to_string(roots)?;
+        let namespace_root: bool = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM nodes WHERE parent IS NULL AND id IN (SELECT value FROM json_each(?1)))",
+            [&roots],
+            |row| row.get(0),
+        )?;
+        if namespace_root {
+            return self.desktop_status_seeds();
+        }
         self.collect_seeds(&scoped_seed_sql(), &[&roots])
     }
     fn collect_seeds(&self, sql: &str, params: &[&str]) -> Result<Vec<StatusSeed>> {

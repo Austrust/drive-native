@@ -368,3 +368,99 @@ fn scoped_seed_read_volume_is_bounded() {
         println!("  {line}");
     }
 }
+
+/// Single-root namespace slightly above the reported production size (~294k
+/// nodes): the shape where walking the whole tree by index lookups loses to the
+/// linear full scan.
+#[cfg(target_os = "linux")]
+fn whole_tree_fixture() -> (tempfile::TempDir, Store) {
+    let dir = tempfile::tempdir().unwrap();
+    drop(Store::open(dir.path()).unwrap());
+    {
+        let db = rusqlite::Connection::open(dir.path().join("state.sqlite")).unwrap();
+        db.execute_batch(
+            r#"BEGIN;
+            INSERT INTO nodes(id,parent,name,remote_version,directory) VALUES('root',NULL,'root','v',1);
+            WITH RECURSIVE i(x) AS (SELECT 0 UNION ALL SELECT x+1 FROM i WHERE x<99)
+              INSERT INTO nodes(id,parent,name,remote_version,directory)
+                SELECT 'd'||x,'root','d'||x,'v',1 FROM i;
+            WITH RECURSIVE k(y) AS (SELECT 0 UNION ALL SELECT y+1 FROM k WHERE y<293899)
+              INSERT INTO nodes(id,parent,name,remote_version,directory,local_version,blob)
+                SELECT 'f'||y,'d'||(y/2939),'f'||y,'v',0,
+                       CASE WHEN (y%2939)<4 THEN 'v' END,
+                       CASE WHEN (y%2939)<4 THEN 'b'||y END FROM k;
+            UPDATE nodes SET pinned=1 WHERE id='d0';
+            INSERT INTO namespace_overlay(node,remote) VALUES('d1','{}');
+            INSERT INTO access_denied(node) VALUES('d2');
+            INSERT INTO drafts(node,token,base,generation,checkpoint,dirty) VALUES('f0','tok','v',1,0,1);
+            INSERT INTO transfers(id,node,version,direction,state) VALUES('tr','f4','v','download','pending');
+            COMMIT;"#,
+        )
+        .unwrap();
+        db.execute_batch("ANALYZE;").unwrap();
+    }
+    let s = Store::open(dir.path()).unwrap();
+    (dir, s)
+}
+
+/// A namespace root in `roots` must fall back to the full scan: the scoped walk
+/// visits the whole tree one index lookup at a time and loses badly on 294k
+/// nodes, while the row set is the same either way.
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "read-volume evidence; run explicitly on the remote Linux builder"]
+fn namespace_root_scoped_seed_falls_back_to_the_full_scan() {
+    let (_dir, s) = whole_tree_fixture();
+    let roots = vec!["root".to_owned()];
+    let roots_json = serde_json::to_string(&roots).unwrap();
+
+    // The scoped walk alone, i.e. what the fallback avoids on this shape.
+    let before = io_rchar();
+    let direct_started = std::time::Instant::now();
+    let mut q = s.db.prepare(&scoped_seed_sql()).unwrap();
+    let direct_rows = q
+        .query_map([&roots_json], |_| Ok(()))
+        .unwrap()
+        .count();
+    let direct_elapsed = direct_started.elapsed();
+    drop(q);
+    let direct_read = io_rchar() - before;
+
+    let before_full = io_rchar();
+    let full_started = std::time::Instant::now();
+    let full = s.desktop_status_seeds().unwrap();
+    let full_elapsed = full_started.elapsed();
+    let full_read = io_rchar() - before_full;
+
+    let before_fallback = io_rchar();
+    let fallback_started = std::time::Instant::now();
+    let fallback = s.desktop_status_seeds_for(&roots).unwrap();
+    let fallback_elapsed = fallback_started.elapsed();
+    let fallback_read = io_rchar() - before_fallback;
+
+    assert_eq!(tuples(&fallback), tuples(&full));
+    // The fixture has 294,001 raw nodes; the access-denied subtree hides rows
+    // from both queries, so compare against the visible count.
+    assert!(full.len() >= 290_000, "fixture too small: {}", full.len());
+    assert!(direct_rows >= 290_000, "scoped root walk missed nodes: {direct_rows}");
+    assert!(
+        fallback_read <= full_read + 1_048_576,
+        "fallback read {fallback_read} bytes vs full {full_read} bytes"
+    );
+    assert!(
+        fallback_read < direct_read,
+        "fallback read {fallback_read} bytes vs direct scoped walk {direct_read} bytes"
+    );
+
+    println!(
+        "ROOT-SCOPED(direct, pre-fallback): rows={direct_rows} elapsed={direct_elapsed:?} rchar={direct_read} bytes"
+    );
+    println!(
+        "FULL: rows={} elapsed={full_elapsed:?} rchar={full_read} bytes",
+        full.len()
+    );
+    println!(
+        "ROOT-SCOPED(fallback): rows={} elapsed={fallback_elapsed:?} rchar={fallback_read} bytes",
+        fallback.len()
+    );
+}
