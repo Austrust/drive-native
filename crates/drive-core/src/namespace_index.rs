@@ -556,6 +556,42 @@ mod tests {
     }
 
     #[test]
+    fn lean_tree_clean_blob_size_uses_posix_precedence() {
+        // Same precedence on the lean path: no local override row exists, so
+        // the lean projection is used and it must still stat the body file
+        // instead of trusting a stale node_metadata size.
+        let (_path, mut store) = fixture();
+        store.publish_download(&DownloadTicket { id: "file".into(), version: "1".into() },
+            b"abc", &crate::sha256(b"abc")).unwrap();
+        store.db.execute("UPDATE node_metadata SET size=999 WHERE node='file'", []).unwrap();
+        let inode = ino_for(&store, "file").unwrap();
+        let index = build(&store).unwrap();
+        assert!(!index.is_degraded());
+        let entry = index.entry_by_ino(inode).unwrap();
+        assert_record(&entry, &store.posix_record_by_inode(inode).unwrap());
+        assert_eq!((entry.size, entry.mode, entry.blocks), (3, 0o644, 1));
+    }
+
+    #[test]
+    fn lean_tree_missing_blob_is_a_lean_attribute_miss() {
+        // A body that cannot be stat'ed is a cache miss for that row, exactly
+        // like the general projection's failed `finish`; the directory block is
+        // still published so enumeration keeps the name.
+        let (_path, mut store) = fixture();
+        store.publish_download(&DownloadTicket { id: "file".into(), version: "1".into() },
+            b"abc", &crate::sha256(b"abc")).unwrap();
+        let blob: String = store.db.query_row("SELECT blob FROM nodes WHERE id='file'", [],
+            |row| row.get(0)).unwrap();
+        std::fs::remove_file(store.root.join("blobs").join(blob)).unwrap();
+        let inode = ino_for(&store, "file").unwrap();
+        let parent = ino_for(&store, "A").unwrap();
+        let index = build(&store).unwrap();
+        assert!(index.is_partial());
+        assert!(index.entry_by_ino(inode).is_none());
+        assert_eq!(index.dir_block(parent).unwrap().entries[2].ino, inode);
+    }
+
+    #[test]
     fn acl_overlay_edges_and_revocation_are_not_bypassed() {
         let (_path, store) = fixture();
         let index = build(&store).unwrap();

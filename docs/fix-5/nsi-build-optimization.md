@@ -30,7 +30,7 @@ G5 基线（裸机）dense 319,679 条目 / 56,073 目录构建 1.04 s、real ma
 
 - **快速路径**（6 个全空，G5 三棵树都满足）：一条 10 列 SQL
 
-  `SELECT n.id,n.directory,m.size,m.mtime,m.mode,n.blob,n.dirty_blob IS NOT NULL,i.ino,n.name,n.parent FROM nodes n LEFT JOIN node_metadata m ON m.node=n.id LEFT JOIN fs_inodes i ON i.node=n.id WHERE n.deleted=0`
+  `SELECT n.id,n.directory,m.size,m.mtime,m.mode,COALESCE(n.dirty_blob,n.blob),n.dirty_blob IS NOT NULL,i.ino,n.name,n.parent FROM nodes n LEFT JOIN node_metadata m ON m.node=n.id LEFT JOIN fs_inodes i ON i.node=n.id WHERE n.deleted=0`
 
   无相关子查询、无 p/pi 父连接、无 access_blocked 子查询（探针已证其空）。
 - **慢速路径**（任一探针非空）：保留原 `record_columns()`/`record_joins()` 投影与 `Projection`、`Projection::finish`、`cacheable/unlinked/dirty` 过滤逻辑**原样**，只把 `n.parent` 直接取出、去掉 p/pi 连接与相关子查询（语义在 Rust 复现，见 2.2/2.3）。
@@ -53,9 +53,9 @@ G5 基线（裸机）dense 319,679 条目 / 56,073 目录构建 1.04 s、real ma
 - `ProjectedEntry<'a>` 改为借用 `id/name/parent`，`attributes` 改成轻量 `EntryAttributes`（size/mtime/atime/atime_nsec/mode u16/blocks）。
 - 行先 stage 到 `Vec<ScannedRow>`，再按 pass 2/3 构建 `by_ino`/`children`/`directories`，`HashMap::with_capacity(rows.len())`；每行 `Arc` 分配从 3 次降到 2 次（id、name），`DirEntryLite` 复用。
 
-### 2.4 快速路径不 stat、不 finish
+### 2.4 快速路径按需 stat、不构造完整记录
 
-blob 为 NULL 的行不调用 `std::fs::metadata`（G5 大树本来就没有 blob，旧代码在这条路上也不 stat，但旧代码每行仍构造 `Projection` 并走 `finish` 的条件判断）；dirty 行属性直接置 `None`（旧逻辑算完也会因 `cacheable=false` 丢弃），缺元数据 → `None`（与旧一致触发 `partial=true`）。快速路径**绝不写库**。
+blob 为 NULL 的行不调用 `std::fs::metadata`；blob 非 NULL（列已 `COALESCE(n.dirty_blob,n.blob)`）的行仍 stat `blobs/<blob>` 并用文件长度作 size/blocks——与 `Projection::finish` 的属性优先级逐字节一致（size 以 body 文件长度为准，DB size 只作兜底）；stat 失败 → `None`（该行不进 `by_ino`、`partial=true`，枚举仍保留名字）。dirty 行属性直接置 `None`（旧逻辑算完也会因 `cacheable=false` 丢弃），缺元数据 → `None`（与旧一致触发 `partial=true`）。快速路径**绝不写库**。G5 三棵基准树没有 blob，stat 分支不产生额外开销；生产树的下载体行数决定这部分成本（单个 stat ~0.5–1 µs，已下载 30 万文件约 0.2–0.3 s，仍在 1 s 预算内）。
 
 ### 2.5 扫描期临时提高 SQLite 页缓存
 
@@ -71,7 +71,7 @@ blob 为 NULL 的行不调用 `std::fs::metadata`（G5 大树本来就没有 blo
 | root（`n.parent IS NULL`） | parent=自身 ino | `NO_PARENT` → parent=ino | 等价；`entry_by_ino(1).parent==1` 测试保持 |
 | 缺 ino 行 | `partial=true`，父目录进 `incomplete` | 相同（父 ino 可解析时） | 等价；`dir_block=None` 不分配 inode |
 | ACL / `access_blocked` | 每行 `NOT IN` 子查询 + p 的可见性 | 6 探针任一非空即回退原投影（原 SQL 原样） | 逐字节等价 |
-| 属性 | `Projection::finish`（含 stat/draft/uuid/atime 校验） | 快速路径仅在 6 表全空时启用：无 draft/unlink/local_mode/atime；cacheable = `!dirty`；缺失元数据 → None | 等价（见风险 R1） |
+| 属性 | `Projection::finish`（含 stat/draft/uuid/atime 校验） | 快速路径仅在 6 表全空时启用：无 draft/unlink/local_mode/atime；body 列同为 `COALESCE(dirty_blob,blob)`，有 body 时 stat 文件长度作 size/blocks，stat 失败 → None；cacheable = `!dirty`；缺失元数据 → None | 属性优先级等价（R1 已关闭） |
 | 整代一致性 | revision+stamp 前后校验 | 未改 | 不变 |
 | 预算/降级 | 超时整代丢弃 | 未改 | 不变 |
 | 写路径 | 只有 ino None 时 `INSERT fs_inodes`（索引路径不会走到） | 不写 | 更严格只读 |
@@ -79,7 +79,7 @@ blob 为 NULL 的行不调用 `std::fs::metadata`（G5 大树本来就没有 blo
 已知差异（不影响生产消费方）：
 
 - `EntrySlot.parent`：父节点为 deleted/blocked 的行，旧值为 p/pi 拿到的 raw 父 ino，新值为 0。`EntrySlot.parent` 在 drive-fs 无消费方（grep 确认），仅 `namespace_index.rs` 测试断言 root 的 `.parent==1`。子/目录块的归属不受影响：这类父目录本身不会出现在扫描结果里。
-- 快速路径 size 取 `node_metadata.size`，不再对 blob 文件做 `stat`（见 R1）。
+- 快速路径属性无差异：有 body 的行仍 stat 文件长度（`COALESCE(dirty_blob,blob)`），有本地覆盖的表一非空即回退原投影。
 
 ## 4. 验证清单（远端）
 
@@ -97,7 +97,7 @@ CARGO_TARGET_DIR=$HOME/dn-fix5-opt/build/target-opt cargo build --release --lock
 
 ## 5. 风险
 
-- **R1（属性来源）**：快速路径用 `node_metadata.size` 代表已下载文件长度。下载发布时写入的 blob 长度由远端 size 决定且校验 sha256，正常路径两者一致；若用户绕过客户端改动 blob 文件，旧实现会反映文件长度，新实现反映 DB。此类改动会产生 dirty draft 行（已排除在索引外），属于不支持场景。若验证阶段需要严格 `stat` 语义，可加一条 `EXISTS(SELECT 1 FROM nodes WHERE blob IS NOT NULL)` 探针让有 blob 的树走慢速路径（代价：此类树的构建回到 stat 成本）。
+- **R1（属性来源，已关闭）**：初版快速路径直接使用 `node_metadata.size`，与旧实现“body 文件长度优先”的属性优先级存在偏差（干净已下载文件、DB size 陈旧或 body 缺失时属性不同）。现已改为 `COALESCE(dirty_blob,blob)` + 有 body 时 stat 文件长度，失败置 None；`clean_blob_size_and_local_mode_use_posix_precedence` 与新增的 lean 路径用例覆盖该语义。代价只是有 body 行的一次 stat（G5 三棵树无 body，性能数字不变）。
 - **R2（缓存 PRAGMA）**：64 MiB 仅在构建窗口内生效并恢复；由 `Drop` 兜底，异常路径下最坏是连接后续沿用 64 MiB（只影响性能，不影响正确性）。
 - **R3（慢速路径性能）**：含本地创建/覆盖的树仍走原投影 + Rust 冲突判定，构建成本接近旧值；大树 + 大量本地创建的极端场景可能仍超预算（与旧行为一致：整代丢弃回退 SQL）。
 - 回滚：单次 revert 本提交即可，无 schema/数据迁移。

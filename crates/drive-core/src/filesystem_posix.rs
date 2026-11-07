@@ -188,23 +188,31 @@ fn ino_column(row: &rusqlite::Row<'_>, index: usize) -> Result<Option<u64>> {
 /// Attributes for the lean (clean-tree) projection. It mirrors what
 /// `Projection::finish` returns for every case the lean SQL can reach: no local
 /// override row exists, so mode/atime/unlink take their `node_metadata` or
-/// default branch and no draft can exist. `None` matches the general path's
-/// cache miss for dirty bodies and for missing file metadata; it never
-/// allocates an inode and never touches the filesystem (`finish` may stat local
-/// bodies, which the index build must not need).
-fn lean_namespace_attributes(row: &rusqlite::Row<'_>) -> Option<EntryAttributes> {
+/// default branch and no draft can exist. A downloaded body keeps its exact
+/// `finish` semantics: the blob file length wins over the database size, and a
+/// body that cannot be stat'ed is a cache miss for that row. `None` matches the
+/// general path's cache miss for dirty bodies and for missing file metadata; it
+/// never allocates an inode.
+fn lean_namespace_attributes(row: &rusqlite::Row<'_>, root: &std::path::Path) -> Option<EntryAttributes> {
     let directory: bool = row.get(1).ok()?;
     // Dirty body: live file attributes are authoritative; the general
     // projection marks such a row a cache miss as well.
     if row.get::<_, bool>(6).ok()? {
         return None;
     }
-    let has_blob = !row.get_ref(5).ok()?.is_null();
+    // Column 5 is `COALESCE(n.dirty_blob,n.blob)`, exactly like the general
+    // projection, so an anomalous dirty-blob row reads the same body file.
+    let blob: Option<&str> = optional_text_column(row, 5).ok()?;
     let size: Option<i64> = row.get(2).ok()?;
-    if size.is_none() && !has_blob && !directory {
+    if size.is_none() && blob.is_none() && !directory {
         return None;
     }
-    let size = u64::try_from(size.unwrap_or(0)).ok()?;
+    let mut size = u64::try_from(size.unwrap_or(0)).ok()?;
+    let allocated = blob.is_some();
+    if let Some(blob) = blob {
+        let metadata = std::fs::metadata(root.join("blobs").join(blob)).ok()?;
+        size = metadata.len();
+    }
     let mtime = u64::try_from(row.get::<_, Option<i64>>(3).ok()?.unwrap_or(0)).ok()?;
     let mode = match row.get::<_, Option<i64>>(4).ok()? {
         Some(mode) if mode >= 0 => u16::try_from(mode & 0o777).ok()?,
@@ -219,8 +227,9 @@ fn lean_namespace_attributes(row: &rusqlite::Row<'_>) -> Option<EntryAttributes>
         atime_nsec: 0,
         mode,
         // Downloaded bodies report allocated blocks exactly as the general
-        // path does through `allocated = blob.is_some() || draft.is_some()`.
-        blocks: if has_blob { size.div_ceil(512) } else { 0 },
+        // path does through `allocated = blob.is_some() || draft.is_some()`
+        // (the lean tree has no drafts).
+        blocks: if allocated { size.div_ceil(512) } else { 0 },
     })
 }
 
@@ -247,10 +256,12 @@ fn namespace_fallback_sql(denied: bool) -> String {
 
 /// Lean ten-column projection for the clean-tree case. Every COALESCE/EXISTS of
 /// the general projection collapses to a constant: the local override tables
-/// are empty (so `m.mode`, `n.blob` and `node_metadata` are already the
-/// effective values), no local creation can shadow a row, and no ACL denial
-/// exists.
-const NAMESPACE_LEAN_SQL: &str = "SELECT n.id,n.directory,m.size,m.mtime,m.mode,n.blob,
+/// are empty (so `m.mode` and `node_metadata` are already the effective
+/// values), no local creation can shadow a row, and no ACL denial exists. The
+/// blob column keeps `COALESCE(dirty_blob,blob)`: the dirty-draft probe only
+/// proves no draft row exists, so an anomalous dirty-blob row must still read
+/// the same body file the general projection would.
+const NAMESPACE_LEAN_SQL: &str = "SELECT n.id,n.directory,m.size,m.mtime,m.mode,COALESCE(n.dirty_blob,n.blob),
         n.dirty_blob IS NOT NULL,i.ino,n.name,n.parent
      FROM nodes n
      LEFT JOIN node_metadata m ON m.node=n.id
@@ -323,7 +334,11 @@ impl Store {
                     // No local creation exists on a lean tree, so the shadow
                     // predicate is vacuously true.
                     visible_child: true,
-                    attributes: if ino.is_some() { lean_namespace_attributes(row) } else { None },
+                    attributes: if ino.is_some() {
+                        lean_namespace_attributes(row, &self.root)
+                    } else {
+                        None
+                    },
                 })?;
                 continue;
             }
