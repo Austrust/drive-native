@@ -151,7 +151,7 @@ impl Drop for ReadHandle {
 }
 
 /// Version of the durable state contract, including journal semantics.
-pub const STATE_SCHEMA_VERSION: i64 = 26;
+pub const STATE_SCHEMA_VERSION: i64 = 27;
 
 /// Automatic read-only reconciliation attempts allowed for one uncertain
 /// upload. The budget is durable so a restart cannot restart an unbounded
@@ -218,11 +218,15 @@ impl Store {
                 pinned INTEGER NOT NULL DEFAULT 0, deleted INTEGER NOT NULL DEFAULT 0,
                 conflict INTEGER NOT NULL DEFAULT 0);
             CREATE INDEX IF NOT EXISTS nodes_parent_name_live ON nodes(parent,name,deleted);
+            CREATE INDEX IF NOT EXISTS nodes_conflict ON nodes(id) WHERE conflict=1;
+            CREATE INDEX IF NOT EXISTS nodes_pinned ON nodes(id) WHERE pinned=1;
+            CREATE INDEX IF NOT EXISTS nodes_cached ON nodes(id,local_version,remote_version) WHERE blob IS NOT NULL;
             CREATE TABLE IF NOT EXISTS operations (
                 id TEXT PRIMARY KEY, node TEXT NOT NULL, kind TEXT NOT NULL, base TEXT NOT NULL,
                 blob TEXT, generation INTEGER NOT NULL, state TEXT NOT NULL DEFAULT 'pending',
                 reconcile_attempts INTEGER NOT NULL DEFAULT 0,
                 reconcile_at INTEGER NOT NULL DEFAULT 0);
+            CREATE INDEX IF NOT EXISTS operations_node ON operations(node);
             CREATE TABLE IF NOT EXISTS transfers (
                 id TEXT PRIMARY KEY, node TEXT NOT NULL, version TEXT NOT NULL,
                 direction TEXT NOT NULL, state TEXT NOT NULL, error TEXT,
@@ -240,6 +244,7 @@ impl Store {
             CREATE TABLE IF NOT EXISTS remote_aliases(remote TEXT PRIMARY KEY,node TEXT UNIQUE NOT NULL);
             CREATE TABLE IF NOT EXISTS local_creations(node TEXT PRIMARY KEY,ready INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS namespace_ops(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,node TEXT NOT NULL,body TEXT NOT NULL,state TEXT NOT NULL,kind TEXT NOT NULL DEFAULT 'rename');
+            CREATE INDEX IF NOT EXISTS namespace_ops_node ON namespace_ops(node);
             CREATE TABLE IF NOT EXISTS namespace_overlay(node TEXT PRIMARY KEY,remote TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS content_version_aliases(node TEXT NOT NULL,old TEXT NOT NULL,new TEXT NOT NULL,PRIMARY KEY(node,old));
             CREATE TABLE IF NOT EXISTS upload_origins(operation TEXT PRIMARY KEY,body TEXT NOT NULL);

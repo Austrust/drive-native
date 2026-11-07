@@ -851,7 +851,12 @@ mod tests {
         .unwrap();
         drop(db);
         let s = Store::open(d.path()).unwrap();
-        assert_eq!(crate::STATE_SCHEMA_VERSION, 26);
+        assert_eq!(
+            s.db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            crate::STATE_SCHEMA_VERSION
+        );
+        let backup_prefix = format!("state-before-v{}-", crate::STATE_SCHEMA_VERSION);
         assert_eq!(
             s.sync_history(&crate::sync_history::HistoryQuery::default())
                 .unwrap()
@@ -867,7 +872,7 @@ mod tests {
                 p.file_name()
                     .unwrap()
                     .to_string_lossy()
-                    .starts_with("state-before-v26-")
+                    .starts_with(backup_prefix.as_str())
             })
             .unwrap();
         let db = Connection::open(backup).unwrap();
@@ -901,7 +906,12 @@ mod tests {
         .unwrap();
         drop(db);
         let s = Store::open(d.path()).unwrap();
-        assert_eq!(crate::STATE_SCHEMA_VERSION, 26);
+        assert_eq!(
+            s.db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            crate::STATE_SCHEMA_VERSION
+        );
+        let backup_prefix = format!("state-before-v{}-", crate::STATE_SCHEMA_VERSION);
         let (attempts, at): (i64, i64) = s
             .db
             .query_row(
@@ -928,7 +938,7 @@ mod tests {
                 p.file_name()
                     .unwrap()
                     .to_string_lossy()
-                    .starts_with("state-before-v26-")
+                    .starts_with(backup_prefix.as_str())
             })
             .unwrap();
         let db = Connection::open(backup).unwrap();

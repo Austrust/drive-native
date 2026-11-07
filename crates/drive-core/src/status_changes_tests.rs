@@ -769,7 +769,7 @@ fn schema_inventory_requires_an_explicit_decision_for_new_tables_and_columns() {
         let ignored: &[&str] = match table {
             // Reconcile bookkeeping is local retry scheduling, not an externally
             // visible status change, so the journal deliberately omits both
-            // columns (schema 26; see the operations SOURCES mapping).
+            // columns (schema 27; see the operations SOURCES mapping).
             "operations" => &["id", "reconcile_attempts", "reconcile_at"],
             "transfers" => &["id"],
             "namespace_ops" => &["seq", "id"],
