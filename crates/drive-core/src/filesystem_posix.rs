@@ -12,6 +12,8 @@
 //! then repeated the child attribute join, executing up to sixteen statements
 //! and two recursive accessibility checks per lookup.
 use super::*;
+use crate::namespace_index::{EntryAttributes, ProjectedEntry};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PosixRecord {
@@ -116,69 +118,251 @@ pub struct DirectorySlot<'a> {
     pub directory: bool,
 }
 
+/// Page cache (KiB) used for one bulk namespace scan. The scan touches every
+/// node page and both covering indexes once; keeping them resident removes the
+/// repeated page faults that dominate large trees (measured: dense 319k scan
+/// −20–25 %). This is a connection-local, non-durable setting and Store access
+/// is serialized while the index builds; the guard restores it on every path.
+const NAMESPACE_SCAN_CACHE_KIB: i64 = 64 * 1024;
+
+/// Restores the previous page-cache setting when the bulk scan ends.
+struct CacheSizeGuard<'a> {
+    db: &'a rusqlite::Connection,
+    previous: i64,
+}
+
+impl<'a> CacheSizeGuard<'a> {
+    fn raise(db: &'a rusqlite::Connection, kib: i64) -> Option<Self> {
+        let previous: i64 = db.query_row("PRAGMA cache_size", [], |row| row.get(0)).ok()?;
+        db.execute_batch(&format!("PRAGMA cache_size=-{kib}")).ok()?;
+        Some(Self { db, previous })
+    }
+}
+
+impl Drop for CacheSizeGuard<'_> {
+    fn drop(&mut self) {
+        // Best effort: the scan already finished and a failed restore must not
+        // turn a successful build into an error.
+        let _ = self.db.execute_batch(&format!("PRAGMA cache_size={}", self.previous));
+    }
+}
+
+/// Borrowed UTF-8 text column for the lean projection. Returning `&str` lets
+/// the caller allocate exactly one `Arc<str>` per identity.
+fn text_column<'r>(row: &'r rusqlite::Row<'_>, index: usize) -> rusqlite::Result<&'r str> {
+    use rusqlite::types::{Type, ValueRef};
+    match row.get_ref(index)? {
+        ValueRef::Text(bytes) => std::str::from_utf8(bytes).map_err(|_| {
+            rusqlite::Error::InvalidColumnType(index, "namespace text is not UTF-8".into(), Type::Text)
+        }),
+        _ => Err(rusqlite::Error::InvalidColumnType(
+            index, "namespace text expected".into(), Type::Text,
+        )),
+    }
+}
+
+fn optional_text_column<'r>(
+    row: &'r rusqlite::Row<'_>,
+    index: usize,
+) -> rusqlite::Result<Option<&'r str>> {
+    use rusqlite::types::{Type, ValueRef};
+    match row.get_ref(index)? {
+        ValueRef::Null => Ok(None),
+        ValueRef::Text(bytes) => Ok(Some(std::str::from_utf8(bytes).map_err(|_| {
+            rusqlite::Error::InvalidColumnType(index, "namespace text is not UTF-8".into(), Type::Text)
+        })?)),
+        _ => Err(rusqlite::Error::InvalidColumnType(
+            index, "namespace text expected".into(), Type::Text,
+        )),
+    }
+}
+
+fn ino_column(row: &rusqlite::Row<'_>, index: usize) -> Result<Option<u64>> {
+    match row.get::<_, Option<i64>>(index)? {
+        Some(ino) => Ok(Some(u64::try_from(ino)
+            .map_err(|_| Error::State("invalid namespace inode".into()))?)),
+        None => Ok(None),
+    }
+}
+
+/// Attributes for the lean (clean-tree) projection. It mirrors what
+/// `Projection::finish` returns for every case the lean SQL can reach: no local
+/// override row exists, so mode/atime/unlink take their `node_metadata` or
+/// default branch and no draft can exist. `None` matches the general path's
+/// cache miss for dirty bodies and for missing file metadata; it never
+/// allocates an inode and never touches the filesystem (`finish` may stat local
+/// bodies, which the index build must not need).
+fn lean_namespace_attributes(row: &rusqlite::Row<'_>) -> Option<EntryAttributes> {
+    let directory: bool = row.get(1).ok()?;
+    // Dirty body: live file attributes are authoritative; the general
+    // projection marks such a row a cache miss as well.
+    if row.get::<_, bool>(6).ok()? {
+        return None;
+    }
+    let has_blob = !row.get_ref(5).ok()?.is_null();
+    let size: Option<i64> = row.get(2).ok()?;
+    if size.is_none() && !has_blob && !directory {
+        return None;
+    }
+    let size = u64::try_from(size.unwrap_or(0)).ok()?;
+    let mtime = u64::try_from(row.get::<_, Option<i64>>(3).ok()?.unwrap_or(0)).ok()?;
+    let mode = match row.get::<_, Option<i64>>(4).ok()? {
+        Some(mode) if mode >= 0 => u16::try_from(mode & 0o777).ok()?,
+        Some(_) => return None,
+        None if directory => 0o755,
+        None => 0o644,
+    };
+    Some(EntryAttributes {
+        size,
+        mtime,
+        atime: mtime,
+        atime_nsec: 0,
+        mode,
+        // Downloaded bodies report allocated blocks exactly as the general
+        // path does through `allocated = blob.is_some() || draft.is_some()`.
+        blocks: if has_blob { size.div_ceil(512) } else { 0 },
+    })
+}
+
+/// General projection used whenever a local override table is populated. Parent
+/// identity is deliberately not joined here: `load` resolves it from the same
+/// scanned generation, which is equivalent to the previous `nodes p` /
+/// `fs_inodes pi` pair and removes two index probes per row.
+fn namespace_fallback_sql(denied: bool) -> String {
+    let visibility = if denied {
+        "AND n.id NOT IN (SELECT id FROM access_blocked)"
+    } else {
+        ""
+    };
+    format!(
+        "SELECT {columns},n.name,n.parent
+         FROM nodes n
+         LEFT JOIN fs_inodes i ON i.node=n.id
+         {joins}
+         WHERE n.deleted=0 {visibility}",
+        columns = record_columns(),
+        joins = record_joins(),
+    )
+}
+
+/// Lean ten-column projection for the clean-tree case. Every COALESCE/EXISTS of
+/// the general projection collapses to a constant: the local override tables
+/// are empty (so `m.mode`, `n.blob` and `node_metadata` are already the
+/// effective values), no local creation can shadow a row, and no ACL denial
+/// exists.
+const NAMESPACE_LEAN_SQL: &str = "SELECT n.id,n.directory,m.size,m.mtime,m.mode,n.blob,
+        n.dirty_blob IS NOT NULL,i.ino,n.name,n.parent
+     FROM nodes n
+     LEFT JOIN node_metadata m ON m.node=n.id
+     LEFT JOIN fs_inodes i ON i.node=n.id
+     WHERE n.deleted=0";
+
 impl Store {
     /// Read-only, streaming bulk projection for the namespace index. It uses
     /// the same attribute decoder and precedence as the individual POSIX
     /// queries. The caller holds a committed Store boundary and a read
     /// transaction. Missing inode identities are reported, never allocated.
+    ///
+    /// A clean tree (no access denial and no local override row) uses the lean
+    /// projection, which is roughly half the per-row cost of the general one.
+    /// Otherwise the general projection runs, with the per-row correlated
+    /// local-creation shadow predicate replaced by one preloaded conflict map.
     pub(crate) fn visit_namespace_index(
         &self,
-        mut visit: impl FnMut(crate::namespace_index::ProjectedEntry) -> Result<()>,
+        mut visit: impl FnMut(ProjectedEntry<'_>) -> Result<()>,
     ) -> Result<()> {
-        let denied: bool = self.db.prepare_cached(
-            "SELECT EXISTS(SELECT 1 FROM access_denied)",
-        )?.query_row([], |r| r.get(0))?;
-        // access_blocked includes BOTH current and remote-overlay parent
-        // edges. Materialize it once rather than walking ancestry per row.
-        let visibility = if denied {
-            "AND n.id NOT IN (SELECT id FROM access_blocked)"
-        } else {
-            ""
+        let exists = |sql: &str| -> Result<bool> {
+            Ok(self.db.prepare_cached(sql)?.query_row([], |row| row.get::<_, bool>(0))?)
         };
-        let parent_visibility = if denied {
-            "AND p.id NOT IN (SELECT id FROM access_blocked)"
+        let denied = exists("SELECT EXISTS(SELECT 1 FROM access_denied)")?;
+        // The lean projection is only equivalent when every local override
+        // table is empty: then each COALESCE/EXISTS below is a constant and no
+        // row can be shadowed or reattributed.
+        let lean = !denied
+            && !exists("SELECT EXISTS(SELECT 1 FROM local_creations)")?
+            && !exists("SELECT EXISTS(SELECT 1 FROM local_modes)")?
+            && !exists("SELECT EXISTS(SELECT 1 FROM local_atimes)")?
+            && !exists("SELECT EXISTS(SELECT 1 FROM local_unlinks)")?
+            && !exists("SELECT EXISTS(SELECT 1 FROM drafts WHERE dirty=1)")?;
+        // One pass over the (small) local-creation set replaces the per-row
+        // correlated NOT EXISTS. A row is shadowed iff another live node with a
+        // local creation shares its parent and name; a NULL parent never
+        // conflicts, mirroring SQL NULL comparison.
+        let mut conflicts: HashMap<String, HashMap<String, Vec<String>>> = HashMap::new();
+        if !lean {
+            let mut statement = self.db.prepare_cached(
+                "SELECT s.parent,s.name,s.id FROM nodes s
+                 JOIN local_creations c ON c.node=s.id
+                 WHERE s.deleted=0 AND s.parent IS NOT NULL",
+            )?;
+            let mut rows = statement.query([])?;
+            while let Some(row) = rows.next()? {
+                let parent: String = row.get(0)?;
+                let name: String = row.get(1)?;
+                let id: String = row.get(2)?;
+                conflicts.entry(parent).or_default().entry(name).or_default().push(id);
+            }
+        }
+        let sql = if lean {
+            String::from(NAMESPACE_LEAN_SQL)
         } else {
-            ""
+            namespace_fallback_sql(denied)
         };
-        let sql = format!(
-            "SELECT {columns},n.name,pi.ino,n.parent IS NULL,
-                (n.parent IS NULL OR (p.id IS NOT NULL AND p.deleted=0 {parent_visibility})),
-                NOT EXISTS(SELECT 1 FROM nodes s JOIN local_creations c ON c.node=s.id
-                    WHERE s.parent=n.parent AND s.name=n.name AND s.id!=n.id AND s.deleted=0)
-             FROM nodes n
-             LEFT JOIN fs_inodes i ON i.node=n.id
-             {joins}
-             LEFT JOIN nodes p ON p.id=n.parent
-             LEFT JOIN fs_inodes pi ON pi.node=n.parent
-             WHERE n.deleted=0 {visibility}",
-            columns = record_columns(), joins = record_joins(),
-        );
+        let _cache = CacheSizeGuard::raise(&self.db, NAMESPACE_SCAN_CACHE_KIB);
         let mut query = self.db.prepare_cached(&sql)?;
         let mut rows = query.query([])?;
         while let Some(row) = rows.next()? {
+            if lean {
+                let ino = ino_column(row, 7)?;
+                visit(ProjectedEntry {
+                    id: text_column(row, 0)?,
+                    name: text_column(row, 8)?,
+                    parent: optional_text_column(row, 9)?,
+                    ino,
+                    directory: row.get(1)?,
+                    // No local creation exists on a lean tree, so the shadow
+                    // predicate is vacuously true.
+                    visible_child: true,
+                    attributes: if ino.is_some() { lean_namespace_attributes(row) } else { None },
+                })?;
+                continue;
+            }
             let raw = projection(row, 0)?.ok_or_else(|| Error::State(
                 "namespace projection identity missing".into(),
             ))?;
             let ino = raw.ino;
             let id = raw.id.clone();
             let directory = raw.directory;
-            let parent_ino = row.get::<_, Option<i64>>(13)?
-                .map(u64::try_from).transpose()
-                .map_err(|_| Error::State("invalid namespace parent inode".into()))?;
+            let name: String = row.get(12)?;
+            let parent: Option<String> = row.get(13)?;
+            let visible_child = match &parent {
+                None => true,
+                Some(parent) => conflicts
+                    .get(parent)
+                    .and_then(|by_name| by_name.get(name.as_str()))
+                    .map_or(true, |ids| ids.iter().all(|candidate| candidate == &id)),
+            };
             // finish may stat local bodies. Mutable/unlinked attributes and
             // any row-local failure are a cache miss; enumeration still knows
             // the name/type. No finish call can allocate an inode here.
-            let attributes = ino.and_then(|_| raw.finish(self).ok())
-                .filter(|record| record.cacheable && !record.unlinked);
-            visit(crate::namespace_index::ProjectedEntry {
-                id,
+            let attributes = ino
+                .and_then(|_| raw.finish(self).ok())
+                .filter(|record| record.cacheable && !record.unlinked)
+                .map(|record| EntryAttributes {
+                    size: record.size,
+                    mtime: record.mtime,
+                    atime: record.atime,
+                    atime_nsec: record.atime_nsec,
+                    mode: record.mode as u16,
+                    blocks: record.blocks,
+                });
+            visit(ProjectedEntry {
+                id: &id,
+                name: &name,
+                parent: parent.as_deref(),
                 ino,
-                name: row.get(12)?,
-                parent_ino,
-                root: row.get(14)?,
-                parent_visible: row.get(15)?,
-                visible_child: row.get(16)?,
                 directory,
+                visible_child,
                 attributes,
             })?;
         }
