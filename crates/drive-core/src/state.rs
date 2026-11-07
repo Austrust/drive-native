@@ -171,6 +171,33 @@ fn upload_reconcile_delay(attempts: u32) -> i64 {
     }
 }
 
+/// Candidate nodes for downloads without rescanning `nodes`: stale cached
+/// content (`nodes_cached`), pinned subtrees (`nodes_pinned` seed plus the
+/// parent index for recursion), and download-intent transfers (unique prefix).
+/// Each branch carries the columns the original filter needs, so the outer
+/// statement never joins `nodes` again and cannot degrade into a full scan;
+/// the original filter still runs over the (small) candidate set. Per-candidate
+/// protection checks still run in `downloads_needed`.
+const DOWNLOAD_CANDIDATES: &str = "\
+WITH RECURSIVE pinned_nodes(id,remote_version,cached,local_version,directory,deleted,dirty_blob) AS (
+    SELECT id,remote_version,blob IS NOT NULL,local_version,directory,deleted,dirty_blob
+      FROM nodes WHERE pinned=1
+    UNION
+    SELECT n.id,n.remote_version,n.blob IS NOT NULL,n.local_version,n.directory,n.deleted,n.dirty_blob
+      FROM nodes n JOIN pinned_nodes p ON n.parent=p.id),
+candidates(id,remote_version,cached,local_version,directory,deleted,dirty_blob) AS (
+    SELECT id,remote_version,blob IS NOT NULL,local_version,directory,deleted,dirty_blob
+      FROM nodes WHERE blob IS NOT NULL AND local_version != remote_version
+    UNION
+    SELECT id,remote_version,cached,local_version,directory,deleted,dirty_blob FROM pinned_nodes
+    UNION
+    SELECT n.id,n.remote_version,n.blob IS NOT NULL,n.local_version,n.directory,n.deleted,n.dirty_blob
+      FROM transfers t JOIN nodes n ON n.id=t.node AND n.remote_version=t.version
+     WHERE t.direction='download' AND t.state IN ('pending','inflight','retry','failed'))
+SELECT id,remote_version,cached FROM candidates c
+WHERE directory=0 AND deleted=0 AND id NOT IN (SELECT id FROM access_blocked)
+  AND dirty_blob IS NULL AND (cached=0 OR local_version!=remote_version)";
+
 impl Store {
     /// One store per account + sync root. Independent accounts never share event IDs or cursors.
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
@@ -673,7 +700,7 @@ impl Store {
         Ok(())
     }
     pub fn downloads_needed(&self) -> Result<Vec<DownloadTicket>> {
-        let mut q=self.db.prepare("WITH RECURSIVE pinned_nodes(id) AS (SELECT id FROM nodes WHERE pinned=1 UNION SELECT n.id FROM nodes n JOIN pinned_nodes p ON n.parent=p.id) SELECT n.id,n.remote_version,n.blob IS NOT NULL FROM nodes n WHERE n.directory=0 AND n.deleted=0 AND n.id NOT IN (SELECT id FROM access_blocked) AND n.dirty_blob IS NULL AND (n.blob IS NULL OR n.local_version!=n.remote_version) AND (n.blob IS NOT NULL OR n.id IN (SELECT id FROM pinned_nodes) OR EXISTS(SELECT 1 FROM transfers t WHERE t.node=n.id AND t.version=n.remote_version AND t.direction='download' AND t.state IN ('pending','inflight','retry','failed')))")?;
+        let mut q=self.db.prepare(DOWNLOAD_CANDIDATES)?;
         let candidates = q
             .query_map([], |r| {
                 Ok((
