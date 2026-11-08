@@ -3,9 +3,10 @@
 use crate::{Error, Result, Store};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use crate::filesystem::PosixRecord;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Action {
     Traverse,
@@ -56,6 +57,74 @@ pub enum Decision {
     Allow,
     Deny,
     Unknown,
+}
+
+/// Writer-local memo for effective decisions (#26). Every committed database
+/// write bumps `total_changes`, which invalidates the whole map; read-only
+/// handles never populate it because they cannot observe later commits.
+pub(crate) struct PermissionCache {
+    epoch: u64,
+    decisions: HashMap<(String, String, Action), Decision>,
+    pub(crate) hits: u64,
+    pub(crate) misses: u64,
+}
+impl PermissionCache {
+    pub(crate) fn new() -> Self {
+        Self {
+            epoch: u64::MAX,
+            decisions: HashMap::new(),
+            hits: 0,
+            misses: 0,
+        }
+    }
+    fn roll(&mut self, epoch: u64) {
+        if self.epoch != epoch {
+            self.epoch = epoch;
+            self.decisions.clear();
+        }
+    }
+    pub(crate) fn lookup(
+        &mut self,
+        epoch: u64,
+        root: &str,
+        node: &str,
+        action: Action,
+    ) -> Option<Decision> {
+        self.roll(epoch);
+        match self
+            .decisions
+            .get(&(root.to_owned(), node.to_owned(), action))
+        {
+            Some(decision) => {
+                self.hits += 1;
+                Some(*decision)
+            }
+            None => {
+                self.misses += 1;
+                None
+            }
+        }
+    }
+    pub(crate) fn store(
+        &mut self,
+        epoch: u64,
+        root: &str,
+        node: &str,
+        action: Action,
+        decision: Decision,
+    ) {
+        self.roll(epoch);
+        if self.decisions.len() >= 131_072 {
+            self.decisions.clear();
+        }
+        self.decisions
+            .insert((root.to_owned(), node.to_owned(), action), decision);
+    }
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PermissionCacheStats {
+    pub hits: u64,
+    pub misses: u64,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -211,6 +280,19 @@ fn exact(store: &Store, root: &str, node: &str, action: Action) -> Result<Decisi
     }
 }
 pub fn decide(store: &Store, root: &str, node: &str, action: Action) -> Result<Decision> {
+    if let Some(decision) = store.permission_cache_lookup(root, node, action) {
+        return Ok(decision);
+    }
+    let decision = decide_uncached(store, root, node, action)?;
+    store.permission_cache_store(root, node, action, decision);
+    Ok(decision)
+}
+pub(crate) fn decide_uncached(
+    store: &Store,
+    root: &str,
+    node: &str,
+    action: Action,
+) -> Result<Decision> {
     if action.is_write() && !mount_writable(store, root)? {
         return Ok(Decision::Deny);
     }
@@ -268,7 +350,187 @@ pub fn decide(store: &Store, root: &str, node: &str, action: Action) -> Result<D
     }
     exact(store, root, node, action)
 }
-/// Distinguishes whole-mount policy from a target-specific refusal.
+/// Batched read projection for a READDIRPLUS ACL page (#26). Mirrors the
+/// `drive-fs` `permissions::project` decision order while hoisting the repeated
+/// per-entry queries into a handful of page queries: root lookup, mount policy,
+/// parent reachability, per-page denied identities and permission rows.
+///
+/// Returns one `allowed` flag per record; `false` means the caller must publish
+/// the entry without a lookup (same contract as a failed per-record project).
+pub fn project_read_page(
+    store: &Store,
+    parent: &str,
+    records: &mut [PosixRecord],
+) -> Result<Vec<bool>> {
+    let mut flags = vec![false; records.len()];
+    if records.is_empty() {
+        return Ok(flags);
+    }
+    let Some(root) = filesystem_root(store)? else {
+        // drive-fs project() allows the entry when no filesystem root exists.
+        flags.fill(true);
+        return Ok(flags);
+    };
+    let writable = mount_writable(store, &root)?;
+    // A directory whose own traversal is denied makes every child inaccessible;
+    // one memoized decision covers the page instead of one per entry.
+    let parent_allowed = decide(store, &root, parent, Action::Traverse)? != Decision::Deny;
+    let ids: Vec<&str> = records.iter().map(|record| record.id.as_str()).collect();
+    let placeholders = (1..=ids.len())
+        .map(|index| format!("?{index}"))
+        .collect::<Vec<_>>()
+        .join(",");
+
+    let mut denied_own = HashSet::new();
+    let sql = format!("SELECT node FROM access_denied WHERE node IN ({placeholders})");
+    let mut query = store.db.prepare_cached(&sql)?;
+    let mut rows = query.query(rusqlite::params_from_iter(ids.iter().copied()))?;
+    while let Some(row) = rows.next()? {
+        denied_own.insert(row.get::<_, String>(0)?);
+    }
+
+    let mut states: HashMap<(String, Action), Decision> = HashMap::new();
+    let numbered = (2..=ids.len() + 1)
+        .map(|index| format!("?{index}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!(
+        "SELECT node,action,state FROM directory_permissions
+         WHERE root=?1 AND node IN ({numbered})
+           AND action IN ('traverse','list','read','write_content','setattr')"
+    );
+    let mut query = store.db.prepare_cached(&sql)?;
+    let mut params: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(ids.len() + 1);
+    params.push(&root);
+    for id in &ids {
+        params.push(id);
+    }
+    let mut rows = query.query(params.as_slice())?;
+    while let Some(row) = rows.next()? {
+        let node: String = row.get(0)?;
+        let action: String = row.get(1)?;
+        let state: String = row.get(2)?;
+        let action = Action::ALL
+            .into_iter()
+            .find(|candidate| candidate.as_str() == action)
+            .ok_or_else(invalid)?;
+        let decision = match state.as_str() {
+            "unknown" => Decision::Unknown,
+            "allowed" => Decision::Allow,
+            "denied" => Decision::Deny,
+            _ => return Err(invalid()),
+        };
+        states.insert((node, action), decision);
+    }
+
+    let mut creation = HashSet::new();
+    let sql = format!(
+        "SELECT id FROM nodes WHERE id IN ({placeholders}) AND remote_version=?{}",
+        ids.len() + 1
+    );
+    let mut query = store.db.prepare_cached(&sql)?;
+    let mut params: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(ids.len() + 1);
+    for id in &ids {
+        params.push(id);
+    }
+    params.push(&crate::creations::CREATE_VERSION);
+    let mut rows = query.query(params.as_slice())?;
+    while let Some(row) = rows.next()? {
+        creation.insert(row.get::<_, String>(0)?);
+    }
+
+    // A local rename can give an entry a retained remote ancestry that the
+    // page-level parent check cannot prove; those entries fall back exactly.
+    let mut overlaid = HashSet::new();
+    let sql = format!("SELECT node FROM namespace_overlay WHERE node IN ({placeholders})");
+    let mut query = store.db.prepare_cached(&sql)?;
+    let mut rows = query.query(rusqlite::params_from_iter(ids.iter().copied()))?;
+    while let Some(row) = rows.next()? {
+        overlaid.insert(row.get::<_, String>(0)?);
+    }
+    let create_file = if creation.is_empty() {
+        Decision::Allow
+    } else {
+        decide(store, &root, parent, Action::CreateFile)?
+    };
+
+    for (index, record) in records.iter_mut().enumerate() {
+        let id = record.id.clone();
+        let id = id.as_str();
+        if overlaid.contains(id) {
+            flags[index] = project_record(store, &root, id, record, writable)?;
+            continue;
+        }
+        if !parent_allowed || denied_own.contains(id) {
+            continue;
+        }
+        if state(&states, id, Action::Traverse) == Decision::Deny {
+            continue;
+        }
+        let read = if record.directory { Action::List } else { Action::Read };
+        if state(&states, id, read) == Decision::Deny {
+            record.mode &= !0o444;
+        }
+        if !writable {
+            flags[index] = true;
+            continue;
+        }
+        if record.directory {
+            flags[index] = true;
+            continue;
+        }
+        let write_denied = if creation.contains(id) && create_file == Decision::Deny {
+            true
+        } else {
+            state(&states, id, Action::WriteContent) == Decision::Deny
+        };
+        if write_denied && state(&states, id, Action::Setattr) == Decision::Deny {
+            record.mode &= !0o222;
+        }
+        flags[index] = true;
+    }
+    Ok(flags)
+}
+
+fn state(
+    states: &HashMap<(String, Action), Decision>,
+    node: &str,
+    action: Action,
+) -> Decision {
+    states
+        .get(&(node.to_owned(), action))
+        .copied()
+        .unwrap_or(Decision::Unknown)
+}
+
+fn project_record(
+    store: &Store,
+    root: &str,
+    node: &str,
+    record: &mut PosixRecord,
+    writable: bool,
+) -> Result<bool> {
+    if decide(store, root, node, Action::Traverse)? == Decision::Deny {
+        return Ok(false);
+    }
+    let read = if record.directory {
+        Action::List
+    } else {
+        Action::Read
+    };
+    if decide(store, root, node, read)? == Decision::Deny {
+        record.mode &= !0o444;
+    }
+    if !writable || record.directory {
+        return Ok(true);
+    }
+    let write_denied = decide(store, root, node, Action::WriteContent)? == Decision::Deny;
+    let setattr_denied = decide(store, root, node, Action::Setattr)? == Decision::Deny;
+    if write_denied && setattr_denied {
+        record.mode &= !0o222;
+    }
+    Ok(true)
+}/// Distinguishes whole-mount policy from a target-specific refusal.
 pub fn enforce(store: &Store, root: &str, node: &str, action: Action) -> Result<()> {
     if action.is_write() && !mount_writable(store, root)? {
         return Err(std::io::Error::from_raw_os_error(libc::EROFS).into());

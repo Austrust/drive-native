@@ -122,6 +122,10 @@ pub struct Store {
     /// append WAL frames or fsync; entries are merged into `cache_access` in
     /// one transaction before a budget/trim decision and on drop.
     pub(crate) cache_recency: Mutex<Vec<String>>,
+    /// Writer-local effective-decision memo (#26); see `PermissionCache`. It is
+    /// invalidated wholesale whenever a transaction commits, so it never
+    /// outlives a permission, policy or namespace write.
+    pub(crate) permission_cache: Mutex<crate::write_permissions::PermissionCache>,
     // Fields drop in order: close SQLite before releasing writer ownership.
     // Read-only handles own no lock and therefore carry None.
     _writer_lock: Option<WriterLock>,
@@ -368,6 +372,7 @@ impl Store {
             handles: Arc::new(Mutex::new(HashMap::new())),
             namespace_runtime: Mutex::new(Default::default()),
             cache_recency: Mutex::new(Vec::new()),
+            permission_cache: Mutex::new(crate::write_permissions::PermissionCache::new()),
         })
     }
     /// Second handle for read-only work next to a live writer. Unlike
@@ -413,7 +418,53 @@ impl Store {
             handles: Arc::new(Mutex::new(HashMap::new())),
             namespace_runtime: Mutex::new(Default::default()),
             cache_recency: Mutex::new(Vec::new()),
+            permission_cache: Mutex::new(crate::write_permissions::PermissionCache::new()),
         })
+    }
+    /// Memoized effective decision for the writer connection (#26). Read-only
+    /// handles return `None`: they cannot observe later commits, so caching
+    /// there could resurrect a revoked decision.
+    pub(crate) fn permission_cache_lookup(
+        &self,
+        root: &str,
+        node: &str,
+        action: crate::write_permissions::Action,
+    ) -> Option<crate::write_permissions::Decision> {
+        if self._writer_lock.is_none() {
+            return None;
+        }
+        let epoch = self.db.total_changes();
+        self.permission_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .lookup(epoch, root, node, action)
+    }
+    pub(crate) fn permission_cache_store(
+        &self,
+        root: &str,
+        node: &str,
+        action: crate::write_permissions::Action,
+        decision: crate::write_permissions::Decision,
+    ) {
+        if self._writer_lock.is_none() {
+            return;
+        }
+        let epoch = self.db.total_changes();
+        self.permission_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .store(epoch, root, node, action, decision);
+    }
+    /// Cumulative hit/miss counters of the writer-local decision memo.
+    pub fn permission_cache_stats(&self) -> crate::write_permissions::PermissionCacheStats {
+        let cache = self
+            .permission_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        crate::write_permissions::PermissionCacheStats {
+            hits: cache.hits,
+            misses: cache.misses,
+        }
     }
     /// The state directory, including `state.sqlite` and `blobs`.
     pub fn root(&self) -> &Path {

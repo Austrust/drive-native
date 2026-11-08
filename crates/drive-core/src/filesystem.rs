@@ -606,14 +606,29 @@ impl Store {
     pub fn lookup_node(&self, parent: &str, name: &str) -> Result<Node> {
         let mut q = self
             .db
-            .prepare("SELECT n.id FROM nodes n WHERE n.id NOT IN (SELECT id FROM access_blocked) AND n.parent=?1 AND n.name=?2 AND n.deleted=0 AND NOT EXISTS(SELECT 1 FROM nodes l JOIN local_creations c ON c.node=l.id WHERE l.parent=n.parent AND l.name=n.name AND l.id!=n.id AND l.deleted=0)")?;
+            .prepare("SELECT n.id FROM nodes n WHERE n.parent=?1 AND n.name=?2 AND n.deleted=0 AND NOT EXISTS(SELECT 1 FROM nodes l JOIN local_creations c ON c.node=l.id WHERE l.parent=n.parent AND l.name=n.name AND l.id!=n.id AND l.deleted=0)")?;
         let ids = q
             .query_map(params![parent, name], |r| r.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         if ids.len() > 1 {
-            return Err(Error::State(
-                "ambiguous namespace; recovery required".into(),
-            ));
+            // Denied duplicates are invisible: the old closure-filtered query
+            // simply did not return them. Keep that contract while taking the
+            // ancestor walk instead of materializing the whole blocked closure.
+            let mut visible = Vec::new();
+            for id in &ids {
+                if !self.is_inaccessible(id)? {
+                    visible.push(id.clone());
+                }
+            }
+            if visible.len() > 1 {
+                return Err(Error::State(
+                    "ambiguous namespace; recovery required".into(),
+                ));
+            }
+            return match visible.first() {
+                Some(id) => self.node(id),
+                None => Err(rusqlite::Error::QueryReturnedNoRows.into()),
+            };
         }
         let id = ids.first().ok_or(rusqlite::Error::QueryReturnedNoRows)?;
         self.node(id)

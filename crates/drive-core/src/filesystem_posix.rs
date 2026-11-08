@@ -93,7 +93,6 @@ fn lookup_sql() -> &'static str {
             "SELECT p.directory,{columns} FROM fs_inodes f
              JOIN nodes p ON p.id=f.node
              LEFT JOIN nodes n ON n.parent=p.id AND n.name=?2 AND n.deleted=0
-               AND (NOT EXISTS(SELECT 1 FROM access_denied) OR n.id NOT IN (SELECT id FROM access_blocked))
                AND {child_visible}
                AND NOT EXISTS(SELECT 1 FROM nodes s JOIN local_creations c ON c.node=s.id
                               WHERE s.parent=n.parent AND s.name=n.name AND s.id!=n.id AND s.deleted=0)
@@ -394,6 +393,27 @@ impl Store {
         parent_ino: u64,
         slots: &[DirectorySlot<'_>],
     ) -> Result<Vec<Option<PosixRecord>>> {
+        self.directory_posix_page_inner(parent_ino, slots, false)
+    }
+
+    /// READDIRPLUS ACL page variant: a denied slot is returned as `None` for
+    /// the caller to publish without a lookup, instead of failing the page, and
+    /// the visibility filter is only the per-node ancestor walk (no recursive
+    /// blocked-closure materialization for unrelated denied rows).
+    pub fn directory_posix_page_for_acl(
+        &self,
+        parent_ino: u64,
+        slots: &[DirectorySlot<'_>],
+    ) -> Result<Vec<Option<PosixRecord>>> {
+        self.directory_posix_page_inner(parent_ino, slots, true)
+    }
+
+    fn directory_posix_page_inner(
+        &self,
+        parent_ino: u64,
+        slots: &[DirectorySlot<'_>],
+        acl: bool,
+    ) -> Result<Vec<Option<PosixRecord>>> {
         let parent = self.posix_record_by_inode(parent_ino)?;
         if !parent.directory || parent.unlinked {
             return Err(Error::Io(std::io::Error::from_raw_os_error(libc::ENOTDIR)));
@@ -415,10 +435,14 @@ impl Store {
             .prepare_cached("SELECT EXISTS(SELECT 1 FROM access_denied)")?
             .query_row([], |r| r.get(0))?;
         let visibility = if access_denied {
-            format!(
-                "AND (n.id NOT IN (SELECT id FROM access_blocked)) AND {}",
-                not_inaccessible("n")
-            )
+            if acl {
+                format!("AND {}", not_inaccessible("n"))
+            } else {
+                format!(
+                    "AND (n.id NOT IN (SELECT id FROM access_blocked)) AND {}",
+                    not_inaccessible("n")
+                )
+            }
         } else {
             String::new()
         };
@@ -503,8 +527,9 @@ impl Store {
             result[index] = Some(record);
         }
         // A missing slot that is a known ACL-denied identity is a page error,
-        // not a normal entry: never downgrade the denial.
-        for (index, slot) in slots.iter().enumerate() {
+        // not a normal entry: never downgrade the denial. The ACL variant
+        // reports denied slots as absent entries instead.
+        for (index, slot) in slots.iter().enumerate().filter(|_| !acl) {
             if result[index].is_some() || slot.name == "." || slot.name == ".." {
                 continue;
             }
