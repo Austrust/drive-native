@@ -12,7 +12,7 @@ export CARGO_TARGET_DIR=/tmp/p032-targets/t0
 ```
 
 - `#[ignore]` 用例不会随普通 `cargo test` 执行，必须显式 `-- --ignored --nocapture`。
-- 内核测试（`--test mounted`、`permissions_kernel` 等）需要普通 Linux 用户 + `/dev/fuse`；WSL/容器不满足。
+- 内核测试（`--test mounted`、`permissions_kernel` 等）需要普通 Linux 用户 + `/dev/fuse`；WSL/容器不满足。FUSE 测试二进制之间并行执行会用错误的 OnceLock 顺序初始化 `DRIVE_NATIVE_FS_DIAGNOSTICS` 采样，必须逐二进制串行并显式传 `DRIVE_NATIVE_FS_DIAGNOSTICS=1`（最终验收脚本已按 `--test-threads=1` 执行；测试隔离 follow-up 见 #24）。
 - GUI 测试要求 `GUI_PYTHON` 指向锁定 venv 的 python：`GUI_PYTHON=$HOME/dn/.venv-build/bin/python bash scripts/test-gui.sh`。
 - `status_latency_210k` / `namespace_index_budget` / `scale_perf*` 在测试内自建合成夹具，无需外部 fixture 路径；需要数 GiB 临时盘与 `/dev/fuse`（210k 用例）；`LAT_CURVE_DIRS` / `LAT_CURVE_WARM_ITERS` 可控制规模曲线。
 - 当前合入状态（2026-11-09）：性能修复 `#21–#33` 的代码提交已全部合入 `integration/fixes2`（含 `#26/#28/#29/#31/#32/#33`；#26/#28 的 verifier 收尾不影响代码树）；`#11/#12` 的 fix 分支分别以 `#31/#32` 身份落地。最终计数以最终验收日志的 SUMMARY 为准，本文件命令可直接在冻结树执行（验证树内容见本页开头）。
@@ -122,4 +122,4 @@ export CARGO_TARGET_DIR=/tmp/p032-targets/t0
 
 ## 与 issue #8 三树数字的关系
 
-ISSUES_20261107.md 的三树表与 verifier 数字测于 fix-7/#8 分支线（`58724a0` 等），**未含 #2 `3dd03a1`**；RELEASE_20261108_1.md 的 28 次 48 路超时测于 `.1` 树 `f6f48ea`（含 #2）。最终树（`integration/fixes2` @ `9cb6b1c`，release，`final-final-9cb6b1c.log`）的同一 210k 验收：48 路 mixed **0 超时**（mixed p95 877.6 ms、max 1.74 s），overview 分段 total p95 **0.690 ms**（query 0.089 / serialize 0.021 ms）、lock_hold / lock_wait **0**、read-only calls 40，GetStates p95 229.1 ms、2000 项目录列举 3.91 ms；数字均取自 `status_latency_210k` 的 `#8 METRICS` 输出。
+ISSUES_20261107.md 的三树表与 verifier 数字测于 fix-7/#8 分支线（`58724a0` 等），**未含 #2 `3dd03a1`**；RELEASE_20261108_1.md 的 28 次 48 路超时测于 `.1` 树 `f6f48ea`（含 #2）。最终树（`integration/fixes2` @ `9cb6b1c`，release，`latency-clean-driver.log`，loadavg_end 10.88）的同一 210k 验收：48 路 mixed **0 超时**（mixed p95 861.6 ms、max 1.64 s），overview 分段 total p95 **0.708 ms**、lock_hold / lock_wait **0**、read-only calls 40/40、cached 40，GetStates p95 226.95 ms、2000 项目录列举 3.89 ms、classic_timeouts 0；数字均取自 `status_latency_210k` 的 `#8 METRICS` 输出。
