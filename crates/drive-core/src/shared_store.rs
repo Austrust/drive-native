@@ -188,7 +188,8 @@ impl SharedStore {
     /// handle map and scheduler observations. The SQLite side still observes
     /// only committed WAL, takes no `writer.lock` and cannot write.
     pub fn read_only(&self) -> crate::Result<Store> {
-        Store::open_read_only_observing(&self.root, self.namespace_runtime.clone())
+        let root = self.root();
+        Store::open_read_only_observing(&root, self.namespace_runtime.clone())
     }
     /// Lock-free mirror of [`Store::local_revision`] (SQLite `total_changes`).
     /// Updated when a writer guard publishes its boundary, so desktop overview
