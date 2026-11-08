@@ -23,9 +23,9 @@ const OLD_CANDIDATES: &str = "
             AND state IN ('uncertain','cleanup_uncertain','conflict')))
     ORDER BY id LIMIT 257";
 
-/// Copy of `ISSUE_CANDIDATES` from `crates/drive-core/src/conflicts.rs`.
+/// Copy of `ISSUE_CANDIDATE_SOURCES` from `crates/drive-core/src/conflicts.rs`.
 /// `candidate_query_matches_the_production_constant` keeps this copy honest.
-const NEW_CANDIDATES: &str = "
+const NEW_CANDIDATE_SOURCES: &str = "
     SELECT id FROM (
         SELECT id FROM nodes WHERE conflict=1
         UNION
@@ -41,8 +41,15 @@ const NEW_CANDIDATES: &str = "
          WHERE o.state IN ('uncertain','cleanup_uncertain','conflict')
            AND o.state NOT IN ('committed','superseded')
            AND EXISTS(SELECT 1 FROM nodes n WHERE n.id=o.node)
-    )
-    WHERE id>?1 ORDER BY id LIMIT 257";
+    )";
+
+/// `sync_issues` pages the shared source with this strict keyset tail.
+const NEW_CANDIDATE_PAGE: &str = "WHERE id>?1 ORDER BY id LIMIT 257";
+
+/// `sync_issue_count` walks the same source without paging.
+fn new_candidates() -> String {
+    format!("{NEW_CANDIDATE_SOURCES} {NEW_CANDIDATE_PAGE}")
+}
 
 fn normalize(sql: &str) -> String {
     sql.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -128,7 +135,8 @@ fn walk_old(db: &Connection) -> Vec<String> {
 }
 
 fn walk_new(db: &Connection) -> Vec<String> {
-    walk(|after| page(db, NEW_CANDIDATES, after))
+    let sql = new_candidates();
+    walk(|after| page(db, &sql, after))
 }
 
 /// One node per source at `i % 10`, plus a no-issue decoy at `i % 10 == 9`.
@@ -227,11 +235,20 @@ fn seed_sources(db: &Connection, leaves: usize) -> BTreeSet<String> {
 #[test]
 fn candidate_query_matches_the_production_constant() {
     let source = normalize(include_str!("../src/conflicts.rs"));
-    let sql = normalize(NEW_CANDIDATES);
     assert!(
-        source.contains(&sql),
-        "tests/conflicts_queries.rs NEW_CANDIDATES drifted from conflicts.rs ISSUE_CANDIDATES"
+        source.contains(&normalize(NEW_CANDIDATE_SOURCES)),
+        "tests/conflicts_queries.rs NEW_CANDIDATE_SOURCES drifted from conflicts.rs ISSUE_CANDIDATE_SOURCES"
     );
+    // Both consumers of the shared source are pinned: paginated issues and count.
+    for call in [
+        format!("issue_candidates(\"{NEW_CANDIDATE_PAGE}\")"),
+        format!("issue_candidates(\"{}\")", "ORDER BY id"),
+    ] {
+        assert!(
+            source.contains(&normalize(&call)),
+            "conflicts.rs no longer builds the shared candidate source with {call}"
+        );
+    }
 }
 
 #[test]
@@ -255,10 +272,11 @@ fn old_and_new_candidate_sets_agree_on_every_seeded_source() {
     // candidates: the union must keep the strict id>cursor keyset contract.
     let mut cursors = vec![String::new()];
     cursors.extend((0..leaves).map(leaf));
+    let new_sql = new_candidates();
     for after in cursors {
         assert_eq!(
             page(&db, OLD_CANDIDATES, &after),
-            page(&db, NEW_CANDIDATES, &after),
+            page(&db, &new_sql, &after),
             "page mismatch after cursor {after:?}"
         );
     }
@@ -325,7 +343,7 @@ fn candidate_query_plan_uses_the_union_indexes() {
     };
 
     let old_plan = plan_lines(OLD_CANDIDATES);
-    let new_plan = plan_lines(NEW_CANDIDATES);
+    let new_plan = plan_lines(&new_candidates());
     println!("old candidate plan:\n{}", old_plan.join("\n"));
     println!("new candidate plan:\n{}", new_plan.join("\n"));
 
@@ -454,7 +472,10 @@ fn issue_query_cost_on_a_294k_node_database() {
         rows.collect::<std::result::Result<Vec<_>, _>>().unwrap()
     };
 
-    println!("v27 candidate plan:\n{}", plan_lines(NEW_CANDIDATES).join("\n"));
+    println!(
+        "v27 candidate plan:\n{}",
+        plan_lines(&new_candidates()).join("\n")
+    );
 
     // Warm page cache/statements before measuring so the number reflects the
     // query, not the first touch of the file.
@@ -476,7 +497,7 @@ fn issue_query_cost_on_a_294k_node_database() {
 
     let before = rchar();
     let start = std::time::Instant::now();
-    let candidates = page(&db, NEW_CANDIDATES, "");
+    let candidates = page(&db, &new_candidates(), "");
     let elapsed = start.elapsed();
     let after = rchar();
     println!(
