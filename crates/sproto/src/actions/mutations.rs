@@ -154,7 +154,11 @@ impl Client {
         staging: &Path,
     ) -> Result<UploadReconciliation> {
         intent.validate()?;
-        let Some(before) = self.current_path(intent.view_id, &intent.path).await? else {
+        let mut index = ReadBackIndex::default();
+        let Some(before) = index
+            .current_path(self, intent.view_id, &intent.path)
+            .await?
+        else {
             return Ok(UploadReconciliation::Missing);
         };
         if !intent.matches_metadata(&before) {
@@ -176,7 +180,18 @@ impl Client {
         if verified.sha256 != intent.sha256 {
             return Ok(UploadReconciliation::Diverged(before));
         }
-        let after = self.current_path(intent.view_id, &intent.path).await?;
+        // The verified download already pinned the exact remote revision and
+        // hashed its content, which is a stronger observation than a second
+        // listing. Implicit-mtime uploads may therefore reuse the first
+        // enumeration; an explicit mtime still requires a fresh read-back.
+        let after = if intent.mtime.is_none() {
+            Some(before.clone())
+        } else {
+            let mut fresh = ReadBackIndex::default();
+            fresh
+                .current_path(self, intent.view_id, &intent.path)
+                .await?
+        };
         if !after
             .as_ref()
             .is_some_and(|n| same_revision(&before, n, intent.mtime.is_some()))

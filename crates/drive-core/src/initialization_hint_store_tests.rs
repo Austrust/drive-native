@@ -765,3 +765,71 @@ fn actual_schema20_legacy_receipts_migrate_without_hints_and_preserve_dirty_queu
     );
     // Executing the old schema20 ELF remains an installation-package gate.
 }
+
+fn large_page(count: usize) -> InitializationEventPage {
+    let changes = (0..count)
+        .map(|index| {
+            Change::Upsert(node(
+                &(1000 + index).to_string(),
+                Some("100"),
+                &format!("f{index}.doc"),
+                false,
+                7,
+                "server",
+            ))
+        })
+        .collect();
+    page(changes)
+}
+
+/// The owner records a page and then applies it in the same writer session. The
+/// compatibility path reads the durable body back, hashing and parsing both the
+/// body and its hint sidecar a second time. The page path reuses the translated
+/// page as authoritative evidence and performs no second read-back.
+#[test]
+fn recorded_page_apply_reuses_translated_evidence_instead_of_rehashing() {
+    use super::super::evidence::{page_work, reset_page_work};
+
+    // Baseline: record hashes body and hints once (2). Read-back hashes them
+    // again (2), parses both (2) and validates the page (1).
+    let (_baseline_temp, mut baseline_store, baseline_binding) = setup();
+    let baseline_run = start(&mut baseline_store, &baseline_binding);
+    let page = large_page(4096);
+    reset_page_work();
+    assert!(
+        baseline_store
+            .record_initialization_event_page(&baseline_run, 1, &page)
+            .unwrap()
+    );
+    assert_eq!(page_work(), (2, 0, 0));
+    let baseline = baseline_store
+        .apply_initialization_events_diagnosed(&baseline_run, 1, false)
+        .unwrap();
+    assert_eq!(baseline.result, InitializationApplyResult::Applied);
+    assert_eq!(
+        page_work(),
+        (4, 2, 1),
+        "the durable read-back hashes, parses and validates the page again"
+    );
+
+    // In-process apply: the page that was just recorded is authoritative.
+    let (_fast_temp, mut fast_store, fast_binding) = setup();
+    let fast_run = start(&mut fast_store, &fast_binding);
+    reset_page_work();
+    assert!(
+        fast_store
+            .record_initialization_event_page(&fast_run, 1, &page)
+            .unwrap()
+    );
+    assert_eq!(page_work(), (2, 0, 0));
+    let fast = fast_store
+        .apply_initialization_events_page_diagnosed(&fast_run, 1, false, &page)
+        .unwrap();
+    assert_eq!(fast.result, InitializationApplyResult::Applied);
+    assert_eq!(fast.summary, baseline.summary);
+    assert_eq!(
+        page_work(),
+        (2, 0, 0),
+        "a page recorded in this process must not be hashed again on apply"
+    );
+}
