@@ -4,7 +4,7 @@
 
 未确认上传现在最多核对五次（10/30/120/300 秒退避）后进入可解释终态；本地删除会作废对应的未确认创建；权限失败不再写成粘性 background_error。问题与下载候选查询使用 v27 节点索引与 keyset 分页，GetIssues 移出全局 Store 锁；GetStates 由已提交状态投影的只读 WAL 快照提供。桌面端统一到一个管理窗口，保留托盘活动与持久同步历史，后台接管的 schema 期望同步到 27。
 
-workstation202611 在 `544adb1` 树上验证（该树含 #2 `3dd03a1`、不含 #21–#30 后续修复；以下计数与 48 路为 `.1` 树口径）：workspace all-features 1097 通过 / 0 失败 / 52 忽略，default 1087 / 0 / 47；GUI 24 套 / 257 项通过；`scripts/verify.sh` 退出码 0，lab `--simulate` 报告 LocalComplete。210k 合成树 GetStates p95 312.9 ms（SLO 500 ms），2000 项目录列举 4.07 ms（Store）/0.727 ms（FUSE），持锁 2 秒时 GetStates/GetIssues 310/314 ms。48 路 mixed 负载仍有 28 次超时（SLO 0），原因是 GetOverview 的问题/缓存统计仍在全局锁内；#21 已将 GetOverview 迁移到只读连接，最终合并树的 48 路结果：**TBD-FINAL**（待最终测量回填）。本版不宣称 #8 全量达标。最终合并树的全量计数：**TBD-FINAL**（待最终重跑回填）。
+workstation202611 在 `544adb1` 树上验证（该树含 #2 `3dd03a1`、不含 #21–#30 后续修复；以下计数与 48 路为 `.1` 树口径）：workspace all-features 1097 通过 / 0 失败 / 52 忽略，default 1087 / 0 / 47；GUI 24 套 / 257 项通过；`scripts/verify.sh` 退出码 0，lab `--simulate` 报告 LocalComplete。210k 合成树 GetStates p95 312.9 ms（SLO 500 ms），2000 项目录列举 4.07 ms（Store）/0.727 ms（FUSE），持锁 2 秒时 GetStates/GetIssues 310/314 ms。48 路 mixed 负载仍有 28 次超时（SLO 0），原因是 GetOverview 的问题/缓存统计仍在全局锁内；#21 已将 GetOverview 迁移到只读连接。最终树（`integration/fixes2` @ `9cb6b1c`，release，clean checkout）48 路 mixed 超时 **0**（mixed p95 877.6 ms、max 1.74 s），overview total p95 0.690 ms、lock hold 0 ms，8/8 SLO PASS；全量 **1176 通过 / 0 失败 / 59 忽略**、default **1166 / 0 / 54**、GUI **24 套 / 276 项**、`scripts/verify.sh` 退出码 0（`LocalComplete`）。本版不宣称 #8 全量达标。
 
 #2、#5、#8、#14、#17 保持 open（#15/#16 已由作者关闭）；真实 NAS ACL、真实 dpkg 安装/升级和 Mint 桌面验收未执行。本包为开发版，包生成、实际 ELF/GUI 内容与摘要以同交付的 `REPORT.md`、`SHA256SUMS` 和 `VALIDATION.json` 为准。
 
