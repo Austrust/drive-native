@@ -7,7 +7,7 @@ G0，协调者冻结于 2026-11-04。基线 `codex/fs-recovery-safe-9 @ d555944`
 ## 阶段与所有权
 
 `codex/fix-5-2` 集成 A → B → C → D；随后 `codex/fix-7` 单线实现 ACL。
-最终汇总分支 `codex/fix-all-5-2-7` 保留完整提交历史。schema **24 = history，25 = permissions，26 = 持久上传只读核对预算**（`operations.reconcile_attempts`/`reconcile_at`；当前 `STATE_SCHEMA_VERSION=26`）。
+最终汇总分支 `codex/fix-all-5-2-7` 保留完整提交历史。schema **24 = history，25 = permissions，26 = 持久上传只读核对预算**（`operations.reconcile_attempts`/`reconcile_at`），**27 = 问题/下载候选索引**（`operations_node`/`namespace_ops_node`、partial `nodes_conflict`/`nodes_pinned`/`nodes_cached`；当前 `STATE_SCHEMA_VERSION=27`）。
 每个 stream 独立 worktree、独立 CARGO_TARGET_DIR；G1 只可 cargo check，禁止测试、基准、NAS。
 G2 全量编译；G3 完整实现后才由独立验证代理进入 G4；G5 独占基准窗口。
 不 push、不发布、不读取凭据、不访问生产文件，不修改已发布 .9 资产。
@@ -125,7 +125,7 @@ G3 追加两个 JSON-string IPC：`GetDirectoryPermissions({path})` 返回 `{tas
 已核实的逐操作拒绝经 worker `PermissionDenied{node,action}` 接收；必须匹配本次目标。原生下载仅在 `recv_download` 直接回复边界将已核实 `0x3002/0x3008` 分类为 Read 拒绝；认证、连接、前置读取、本地 I/O、只读码和内容未就绪码不转换。学习拒绝与终态下载重试门禁在同一 Store guard 下发布。
 下载请求捕获权限 revision；期间发生通知或权限更新，迟到的读结果不再持久化旧 allow/deny。迟到拒绝仍向该次调用返回 EACCES，但下载意图回 pending，不留下终态权限重试门禁；后续只读尝试重新判定。此规则不重发任何写入。
 
-下载自动退避保留 schema1 的持久 retry_at，并按 `(node,version,完整failure指纹)` 绑定进程内 Instant 门限。失败发布时以传给 fail_download 的同一墙钟值计算完整退避；前台等待和前台/后台发送资格均检查双门限，重连保留、进程重启仅从持久剩余时间恢复一次。双门限到期正常放行；清除失败记录则提前释放当前门限。旧版本 ticket 不得读取新版本 failure 或驱逐其门限。该规则不改变 core 的纯数据库 now 参数契约、schema26、IPC21 或 FUSE TTL。
+下载自动退避保留 schema1 的持久 retry_at，并按 `(node,version,完整failure指纹)` 绑定进程内 Instant 门限。失败发布时以传给 fail_download 的同一墙钟值计算完整退避；前台等待和前台/后台发送资格均检查双门限，重连保留、进程重启仅从持久剩余时间恢复一次。双门限到期正常放行；清除失败记录则提前释放当前门限。旧版本 ticket 不得读取新版本 failure 或驱逐其门限。该规则不改变 core 的纯数据库 now 参数契约、IPC21 或 FUSE TTL。
 
 写请求的直接权限相关响应默认经 `MutationPermissionUncertain{code}` 保留，按 upload/remove/rename 的已核实小集合验证；进入 uncertain/cleanup_uncertain，不改成 pending，不猜改名哪端拒绝。唯一例外（本轮新增，见[精确写拒绝自动学习增量](validation/issue7-native-001/write-learning/REPORT.md)）：**upload 直接响应 `0x9003` 且请求目标是已存在节点**时，sproto 在直接回复边界产生 typed `MutationPermissionDenied{code}`，worker 把该拒绝绑定到本次请求节点与 `write_content`，经既有 `refuse_operation` 记为 `denied(observed, revision=当前策略 revision)`：journal 由 `targets_denied` 门禁阻止重发（保留本地内容），history 记 failed/permission_denied，profile 变化/重连/重新核对按既有 revision 失效回 unknown。该例外只成立于此已证子集：`0x9004`/`0xa004` 与 profile 只读过滤同码且 wire 无字段可区分，`0xa003` 无已证生产者，rename 源/目标与复合 replace 阶段不可归属，创建（含 mkdir）的 capability 不是 CreateFile/CreateDir primitive——这些全部保持原 hint/uncertain，不写 ACL 行。历史 result=pending、error_kind=permission_commit_uncertain，summary 明确“提交状态待核对”；detail.permission_response 仅含请求动作和数字码，终态清错误提示而保留该次历史响应证据。重连/核对只可查询结果，不重发未知写入。静态证据证明特定 ACL middleware 的提交前拒绝，但同码多来源、精确动作归属和复合阶段的证明仍未齐，真实 NAS 响应未实测。
 
@@ -158,7 +158,7 @@ G4 错误码校正：只有普通文件 WriteContent 与 Setattr 同时 denied �
 
 G3 在 SharedStore 发布已知拒绝后暂停 NSI 回复，走权威逐操作检查。无拒绝时保留内存路径。正文/目录续读使用独立的 `permission_clear_lease()` 持至有界回复；首个拒绝的发布等待此前回复完成，但普通元数据事务不阻塞已缓存正文读取。持此租约不得阻塞获取 Store（目录续读仅 try_lock）；已知拒绝的回复在 Store 内重验后发布。所有权限检查同时覆盖本地祖先和未确认 namespace_overlay 的远端祖先，不继承其写动作。
 
-明确的原生 Read 拒绝不设置自动下载重试截止（`retry_at=null`）。已知 Read 或祖先 Traverse 拒绝同样约束后台补全、重试唤醒及 Bridge 的缓存/新请求入口，返回 EACCES；仅重试传输不覆盖权限证据。重连、profile 通知或用户重新核对按既有 revision 规则恢复 unknown，再允许尝试；权限变更期间的迟到拒绝仍只影响当次调用，不建立旧拒绝门禁。该补充不改变 schema26、IPC21、entry TTL=0 或 attr 默认1000ms。
+明确的原生 Read 拒绝不设置自动下载重试截止（`retry_at=null`）。已知 Read 或祖先 Traverse 拒绝同样约束后台补全、重试唤醒及 Bridge 的缓存/新请求入口，返回 EACCES；仅重试传输不覆盖权限证据。重连、profile 通知或用户重新核对按既有 revision 规则恢复 unknown，再允许尝试；权限变更期间的迟到拒绝仍只影响当次调用，不建立旧拒绝门禁。该补充不改变 IPC21、entry TTL=0 或 attr 默认1000ms。
 
 ## 验收与证据
 
