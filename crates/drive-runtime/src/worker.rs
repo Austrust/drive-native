@@ -40,6 +40,10 @@ struct JobQueue {
     in_flight: Arc<tokio::sync::Semaphore>,
     max_accepted: usize,
     handles: HashMap<u64, tokio::task::AbortHandle>,
+    /// Tokio task id -> command id. `join_next_with_id` reports the former for
+    /// failed tasks, so this map is the only way to retire a panicked job's
+    /// admission slot.
+    task_ids: HashMap<tokio::task::Id, u64>,
     tasks: tokio::task::JoinSet<u64>,
 }
 impl JobQueue {
@@ -48,6 +52,7 @@ impl JobQueue {
             in_flight: Arc::new(tokio::sync::Semaphore::new(max_in_flight)),
             max_accepted,
             handles: HashMap::new(),
+            task_ids: HashMap::new(),
             tasks: tokio::task::JoinSet::new(),
         }
     }
@@ -75,6 +80,7 @@ impl JobQueue {
             job.await;
             id
         });
+        self.task_ids.insert(abort.id(), id);
         self.handles.insert(id, abort);
     }
     fn cancel(&mut self, id: u64) -> bool {
@@ -86,22 +92,35 @@ impl JobQueue {
     }
     async fn next_completed(&mut self) -> Option<u64> {
         loop {
-            match self.tasks.join_next().await {
-                Some(Ok(id)) => {
+            // `join_next_with_id` reports the tokio task id for both completed
+            // and failed tasks. A panicked job never returns its command id, so
+            // the id map is required to release its admission slot instead of
+            // leaking it until shutdown.
+            match self.tasks.join_next_with_id().await {
+                Some(Ok((task_id, id))) => {
+                    self.task_ids.remove(&task_id);
                     self.handles.remove(&id);
                     return Some(id);
                 }
-                // Aborted tasks were removed from `handles` by `cancel`; a
-                // panicked task must not take the session down with it.
-                Some(Err(_)) => continue,
+                Some(Err(join_err)) => {
+                    // Cancelled jobs already left `handles` via `cancel`; a
+                    // panicked job did not. Removing both is idempotent. The
+                    // semaphore permit is tied to the dropped future, so it is
+                    // released either way; neither outcome ends the session.
+                    if let Some(id) = self.task_ids.remove(&join_err.id()) {
+                        self.handles.remove(&id);
+                    }
+                    continue;
+                }
                 None => return None,
             }
         }
     }
     async fn shutdown(mut self) {
         self.tasks.abort_all();
-        while self.tasks.join_next().await.is_some() {}
+        while self.tasks.join_next_with_id().await.is_some() {}
         self.handles.clear();
+        self.task_ids.clear();
     }
 }
 pub async fn serve(socket: UnixStream) -> io::Result<()> {

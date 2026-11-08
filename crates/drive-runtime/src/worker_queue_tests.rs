@@ -25,14 +25,15 @@ async fn drain(queue: &mut JobQueue, count: usize) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn commands_beyond_in_flight_queue_without_ending_the_session() {
-    // Eight accepted commands with only two execution permits: all eight must
-    // stay accepted (queued), never dropped and never running more than two.
+    // A 64-command burst with only four execution permits: every command must
+    // stay accepted (queued), never dropped, never running more than four. The
+    // old worker aborted the whole session at 32 in-flight jobs.
     let gate = Arc::new(Semaphore::new(0));
     let running = Arc::new(AtomicUsize::new(0));
     let peak = Arc::new(AtomicUsize::new(0));
     let done = Arc::new(AtomicUsize::new(0));
-    let mut queue = JobQueue::new(2, 16);
-    for id in 1..=8u64 {
+    let mut queue = JobQueue::new(4, MAX_ACCEPTED);
+    for id in 1..=64u64 {
         let gate = gate.clone();
         let running = running.clone();
         let peak = peak.clone();
@@ -45,10 +46,10 @@ async fn commands_beyond_in_flight_queue_without_ending_the_session() {
             done.fetch_add(1, Ordering::SeqCst);
         });
     }
-    assert_eq!(queue.accepted(), 8, "burst commands must be accepted");
-    assert!(queue.can_accept(), "accepted cap is 16");
-    gate.add_permits(8);
-    while done.load(Ordering::SeqCst) < 8 {
+    assert_eq!(queue.accepted(), 64, "burst commands must be accepted");
+    assert!(queue.can_accept(), "accepted cap is MAX_ACCEPTED");
+    gate.add_permits(64);
+    while done.load(Ordering::SeqCst) < 64 {
         queue
             .next_completed()
             .await
@@ -62,7 +63,7 @@ async fn commands_beyond_in_flight_queue_without_ending_the_session() {
     }
     assert_eq!(queue.accepted(), 0, "finished jobs leave the accepted set");
     assert!(
-        peak.load(Ordering::SeqCst) <= 2,
+        peak.load(Ordering::SeqCst) <= 4,
         "in-flight cap exceeded: {} bodies ran concurrently",
         peak.load(Ordering::SeqCst)
     );
@@ -125,6 +126,30 @@ async fn shutdown_aborts_queued_and_running_jobs_promptly() {
         .await
         .expect("shutdown must abort queued and running jobs");
     assert!(started.elapsed() < Duration::from_secs(2));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_panicked_job_releases_its_admission_slot() {
+    // A panicking job body used to stay in `handles` forever (its join error
+    // carries only the tokio task id), so a worker that saw MAX_ACCEPTED job
+    // panics would leak every slot and answer every later command with
+    // `worker_overloaded`. The queue must retire the command and keep admitting.
+    let mut queue = JobQueue::new(1, 4);
+    queue.spawn(7, async {
+        panic!("job body panicked");
+    });
+    assert_eq!(queue.accepted(), 1);
+    assert!(queue.contains(7));
+    let _ = queue.next_completed().await;
+    assert_eq!(queue.accepted(), 0, "a panicked job must not leak its slot");
+    assert!(!queue.contains(7), "a panicked command id is no longer live");
+    assert!(queue.can_accept(), "admission resumes after a panicked job");
+    queue.spawn(8, async {});
+    assert_eq!(
+        queue.next_completed().await,
+        Some(8),
+        "the session keeps admitting commands after a panic"
+    );
 }
 
 #[test]
