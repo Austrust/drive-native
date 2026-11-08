@@ -3,7 +3,10 @@
 //! The oracle is the unchanged full seed query: after every committed change the
 //! published projection must be row-for-row equal to a fresh
 //! `Store::open_read_only` scan of the same database.
-use super::{MAX_CACHED_NODES, StatusCache, StatusProjection};
+use super::{
+    CacheConfig, CacheState, DegradeReason, FaultKind, Faults, MAX_CACHED_NODES, StatusCache,
+    StatusCacheMetrics, StatusProjection,
+};
 use crate::service::{Profile, Service};
 use drive_core::{
     DownloadTicket, Node, NodeMetadata, Store, desktop_status::StatusSeed,
@@ -107,7 +110,7 @@ fn full_rows(service: &Service) -> Vec<SeedTuple> {
 }
 
 fn projection_rows(projection: &StatusProjection) -> Vec<SeedTuple> {
-    sorted(projection.rows.values().map(tuple).collect())
+    sorted(projection.seeds().map(tuple).collect())
 }
 
 fn wait_ready(cache: &StatusCache) -> Arc<StatusProjection> {
@@ -443,19 +446,36 @@ fn journal_overflow_forces_a_full_rebuild() {
     stop_and_join(&service, task);
 }
 
+/// Issue #25: an over-cap profile used to disable the cache permanently with no
+/// observation point and no recovery. It now reports a visible degraded reason
+/// (retrying in the background) and returns to service once the profile fits.
 #[test]
-fn oversized_profiles_disable_the_cache() {
+fn oversized_profiles_degrade_the_cache_without_disabling_it() {
     let (_dir, service) = fixture();
     let (cache, task) = start(&service, 2);
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !cache.disabled() {
-        assert!(
-            Instant::now() < deadline,
-            "cache did not disable for an oversized profile"
-        );
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    let metrics = wait_degraded(&cache, DegradeReason::TooManyNodes);
+    assert_eq!(metrics.state, CacheState::Degraded);
+    assert_eq!(metrics.degraded_reason, Some(DegradeReason::TooManyNodes));
+    assert!(metrics.degraded_events >= 1);
+    assert!(metrics.recovery_attempts >= 1);
+    // No snapshot existed before the failure, but the worker keeps retrying
+    // instead of shutting the projection down.
     assert!(cache.snapshot().is_none());
+
+    // Shrink the profile below the cap: the retry cycle bootstraps and the cache
+    // resumes without restarting the service.
+    {
+        let mut store = service.bridge.store.lock().unwrap();
+        store
+            .install_remote_snapshot(
+                &[node("root", None, true), node("folder", Some("root"), true)],
+                "2",
+                "server",
+            )
+            .unwrap();
+    }
+    wait_recovered(&cache);
+    wait_matches(&service, &cache, "cap recovery", 0);
     stop_and_join(&service, task);
 }
 
@@ -607,8 +627,11 @@ fn projection_startup_delta_and_rebuild_costs() {
     stop_and_join(&service, task);
 }
 
+/// Issue #25: growing past the node cap is a *degraded* state, not a silent
+/// permanent disable. The last snapshot keeps serving stale-but-usable data and
+/// the worker retries until the namespace fits the cap again.
 #[test]
-fn incremental_growth_past_the_cap_disables_the_cache() {
+fn incremental_growth_past_the_cap_degrades_and_recovers() {
     let (_dir, service) = fixture();
     let (cache, task) = start(&service, 5);
     let projection = wait_ready(&cache);
@@ -630,15 +653,30 @@ fn incremental_growth_past_the_cap_disables_the_cache() {
             .install_remote_snapshot(&extra, "2", "server")
             .unwrap();
     }
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !cache.disabled() {
-        assert!(
-            Instant::now() < deadline,
-            "cache did not disable when an incremental batch grew past the cap"
-        );
-        std::thread::sleep(Duration::from_millis(5));
+    let metrics = wait_degraded(&cache, DegradeReason::TooManyNodes);
+    assert_eq!(metrics.state, CacheState::Degraded);
+    // The previous snapshot is still served: stale data beats no data.
+    let stale = cache.snapshot().expect("degraded cache keeps its last snapshot");
+    assert_eq!(stale.len(), 4);
+    assert!(stale.seed("x0").is_none());
+
+    // Shrink the profile back below the cap and let the retry cycle recover.
+    {
+        let mut store = service.bridge.store.lock().unwrap();
+        let extra = [
+            node("root", None, true),
+            node("folder", Some("root"), true),
+            node("one", Some("folder"), false),
+            node("two", Some("folder"), false),
+        ];
+        store
+            .install_remote_snapshot(&extra, "3", "server")
+            .unwrap();
     }
-    assert!(cache.snapshot().is_none());
+    wait_recovered(&cache);
+    let projection = wait_matches(&service, &cache, "cap regression", projection.generation());
+    assert_eq!(projection.len(), 4);
+    assert_eq!(cache.metrics().state, CacheState::Running);
     stop_and_join(&service, task);
 }
 
@@ -1005,4 +1043,319 @@ fn descendant_moved_out_of_a_moved_directory_stays_visible() {
     assert_eq!(projection_rows(&projection), full_rows(&service));
     stop_and_join(&service, task);
 }
+
+// ---------------------------------------------------------------------------
+// Issue #25: bounded lock holds, sparse publications, recoverable degradation.
+// ---------------------------------------------------------------------------
+
+/// The production lock budget is kept in the test config so the budget
+/// assertions exercise the shipped constant; the throttle/retry intervals are
+/// shortened so tests do not sleep on the production cadence.
+fn issue25_config(faults: Arc<Faults>, max_nodes: usize, backlog_limit: u64) -> CacheConfig {
+    CacheConfig {
+        max_nodes,
+        backlog_limit,
+        publish_interval: Duration::from_millis(20),
+        backlog_yield: Duration::from_millis(1),
+        lock_budget: super::LOCK_BUDGET,
+        retry_initial: Duration::from_millis(100),
+        retry_max: Duration::from_millis(250),
+        faults: Some(faults),
+    }
+}
+
+fn no_faults() -> Arc<Faults> {
+    Arc::new(Faults::default())
+}
+
+/// Polls the observable lifecycle until the cache reports `reason`. A degraded
+/// cache whose fault was consumed recovers after a short bounded retry wait, so
+/// this also proves the degraded state is visible from the outside.
+fn wait_degraded(cache: &StatusCache, reason: DegradeReason) -> StatusCacheMetrics {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let metrics = cache.metrics();
+        if metrics.state == CacheState::Degraded && metrics.degraded_reason == Some(reason) {
+            return metrics;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "cache did not degrade with {reason:?}: state {:?}, reason {:?}",
+            metrics.state,
+            metrics.degraded_reason
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+fn wait_recovered(cache: &StatusCache) -> StatusCacheMetrics {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let metrics = cache.metrics();
+        if metrics.state == CacheState::Running
+            && metrics.recovered_events > 0
+            && cache.snapshot().is_some()
+        {
+            return metrics;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "cache did not recover: state {:?}, reason {:?}, recovered {}",
+            metrics.state,
+            metrics.degraded_reason,
+            metrics.recovered_events
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+/// Issue #25: the first three permanent-disable paths (subscription, read-only
+/// open, bootstrap) now surface a reason and retry to a full recovery without
+/// restarting the service.
+#[test]
+fn startup_faults_degrade_visibly_and_recover_without_a_restart() {
+    for (kind, reason) in [
+        (
+            FaultKind::TakeNotifications,
+            DegradeReason::NotificationsUnavailable,
+        ),
+        (FaultKind::OpenReadOnly, DegradeReason::ReadOnlyOpenFailed),
+        (FaultKind::Bootstrap, DegradeReason::BootstrapFailed),
+    ] {
+        let (_dir, service) = fixture();
+        let faults = no_faults();
+        faults.counter(kind).store(1, Ordering::Relaxed);
+        let (cache, task) = StatusCache::start_with_config(
+            service.clone(),
+            issue25_config(faults, MAX_CACHED_NODES, super::BACKLOG_LIMIT),
+        );
+        let metrics = wait_degraded(&cache, reason);
+        assert_eq!(metrics.state, CacheState::Degraded);
+        assert_eq!(metrics.degraded_reason, Some(reason));
+        assert!(metrics.degraded_events >= 1, "degradation must be counted");
+        assert!(
+            metrics.recovery_attempts >= 1,
+            "the worker must retry while degraded"
+        );
+        wait_recovered(&cache);
+        wait_matches(&service, &cache, "startup fault recovery", 0);
+        stop_and_join(&service, task);
+    }
+}
+
+/// Issue #25: repeated journal read errors (previously swallowed by
+/// `Err(_) => {}`) degrade visibly and recover once reads succeed again.
+#[test]
+fn repeated_read_failures_degrade_and_recover() {
+    let (_dir, service) = fixture();
+    let faults = no_faults();
+    let injected = faults.clone();
+    let (cache, task) = StatusCache::start_with_config(
+        service.clone(),
+        issue25_config(faults, MAX_CACHED_NODES, super::BACKLOG_LIMIT),
+    );
+    let projection = wait_ready(&cache);
+    let before = cache.metrics();
+    // Five consecutive failed page reads cross READ_ERROR_LIMIT.
+    injected
+        .counter(FaultKind::Read)
+        .store(5, Ordering::Relaxed);
+    let metrics = wait_degraded(&cache, DegradeReason::ReadFailed);
+    assert!(metrics.degraded_events >= 1);
+    assert!(
+        cache.snapshot().is_some(),
+        "a degraded cache keeps serving its last snapshot"
+    );
+    wait_recovered(&cache);
+    wait_matches(&service, &cache, "read failure recovery", projection.generation());
+    assert!(cache.metrics().lock_holds > before.lock_holds);
+    stop_and_join(&service, task);
+}
+
+/// Issue #25: a failed full rebuild (previously `disable(); return`) degrades
+/// visibly and recovers without a restart.
+#[test]
+fn rebuild_failures_degrade_and_recover() {
+    let (_dir, service) = fixture();
+    let faults = no_faults();
+    let injected = faults.clone();
+    let (cache, task) = StatusCache::start_with_config(
+        service.clone(),
+        issue25_config(faults, MAX_CACHED_NODES, 2),
+    );
+    let projection = wait_ready(&cache);
+    injected
+        .counter(FaultKind::Rebuild)
+        .store(1, Ordering::Relaxed);
+    {
+        // The three pins exceed the configured backlog limit and force a rebuild.
+        let mut store = service.bridge.store.lock().unwrap();
+        store.pin("one", true).unwrap();
+        store.pin("two", true).unwrap();
+        store.pin("folder", true).unwrap();
+    }
+    let metrics = wait_degraded(&cache, DegradeReason::RebuildFailed);
+    assert!(metrics.degraded_events >= 1);
+    let stale = cache
+        .snapshot()
+        .expect("the last snapshot survives a rebuild failure");
+    assert_eq!(stale.len(), 4);
+    wait_recovered(&cache);
+    wait_matches(
+        &service,
+        &cache,
+        "rebuild failure recovery",
+        projection.generation(),
+    );
+    stop_and_join(&service, task);
+}
+
+/// Issue #25: an `access_denied` journal change is resolved through the scoped
+/// ACL re-read instead of a whole-namespace rebuild.
+#[test]
+fn access_denied_changes_use_the_scoped_acl_refresh() {
+    let (_dir, service) = fixture();
+    let (cache, task) = start(&service, MAX_CACHED_NODES);
+    let projection = wait_ready(&cache);
+    {
+        // Incremental ACL edit: the journal records the denied edge without
+        // installing a snapshot, so the cache must resolve it scoped.
+        let mut store = service.bridge.store.lock().unwrap();
+        store.set_access_denied(&["folder".into()]).unwrap();
+    }
+    let projection = wait_matches(
+        &service,
+        &cache,
+        "access denied",
+        projection.generation(),
+    );
+    let acl_refreshes = cache.metrics().acl_refreshes;
+    assert!(acl_refreshes >= 1, "the ACL page must count a scoped refresh");
+    assert!(projection.seed("root").is_some());
+    assert!(projection.seed("folder").is_none());
+    assert!(projection.seed("one").is_none());
+    assert!(projection.seed("two").is_none());
+    {
+        // Restoring access is the reverse journal change and must reveal the
+        // subtree through the same scoped path.
+        let mut store = service.bridge.store.lock().unwrap();
+        store.set_access_denied(&[]).unwrap();
+    }
+    let projection = wait_matches(
+        &service,
+        &cache,
+        "access restored",
+        projection.generation(),
+    );
+    assert!(cache.metrics().acl_refreshes > acl_refreshes);
+    assert!(projection.seed("folder").is_some());
+    assert!(projection.seed("one").is_some());
+    assert!(projection.seed("two").is_some());
+    stop_and_join(&service, task);
+}
+
+/// Issue #25: every journal page resolves inside a bounded writer-lock hold.
+#[test]
+fn journal_pages_report_a_bounded_lock_hold() {
+    let (_dir, service) = fixture();
+    let (cache, task) = start(&service, MAX_CACHED_NODES);
+    let projection = wait_ready(&cache);
+    {
+        let mut store = service.bridge.store.lock().unwrap();
+        for _ in 0..8 {
+            store.pin("one", true).unwrap();
+            store.pin("one", false).unwrap();
+        }
+    }
+    wait_matches(
+        &service,
+        &cache,
+        "bounded lock hold",
+        projection.generation(),
+    );
+    let metrics = cache.metrics();
+    assert!(metrics.lock_holds > 0);
+    assert!(
+        metrics.lock_hold_p99_us <= metrics.lock_budget_us,
+        "p99 lock hold {}us exceeds the {}us budget",
+        metrics.lock_hold_p99_us,
+        metrics.lock_budget_us
+    );
+    assert_eq!(metrics.lock_budget_violations, 0);
+    stop_and_join(&service, task);
+}
+
+/// Issue #25: publications share the immutable base instead of cloning the whole
+/// table; the delta only carries the changed rows/edges.
+#[test]
+fn publications_share_the_base_snapshot_instead_of_cloning_it() {
+    let (_dir, service) = fixture();
+    let (cache, task) = start(&service, MAX_CACHED_NODES);
+    let first = wait_ready(&cache);
+    let mut generation = first.generation();
+    for round in 0..4u32 {
+        {
+            let mut store = service.bridge.store.lock().unwrap();
+            store.pin("folder", round % 2 == 0).unwrap();
+        }
+        let next = wait_generation(&cache, generation, "sparse publication");
+        generation = next.generation();
+    }
+    let last = cache.snapshot().unwrap();
+    assert!(
+        first.base_shared_with(&last),
+        "incremental publications must reuse the base snapshot"
+    );
+    let metrics = cache.metrics();
+    assert_eq!(metrics.compactions, 0, "small deltas must not rebase");
+    assert!(metrics.base_shares >= 4);
+    assert!(
+        metrics.publish_delta_entries < 32,
+        "published delta entries {} should be sparse",
+        metrics.publish_delta_entries
+    );
+    stop_and_join(&service, task);
+}
+
+/// Issue #25: a delta that grows wide rebases the base once (compaction) instead
+/// of deep-cloning rows on every publish.
+#[test]
+fn wide_deltas_compact_once_instead_of_cloning_every_publish() {
+    let (_dir, service) = fixture();
+    let mut nodes = vec![
+        node("root", None, true),
+        node("folder", Some("root"), true),
+        node("one", Some("folder"), false),
+        node("two", Some("folder"), false),
+    ];
+    for index in 0..600 {
+        nodes.push(node(&format!("n{index}"), Some("folder"), false));
+    }
+    {
+        // Seed the namespace before the cache starts, so bootstrap takes it as
+        // the base (604 rows, wide-delta threshold 512) instead of rebuilding.
+        let mut store = service.bridge.store.lock().unwrap();
+        store.install_remote_snapshot(&nodes, "2", "server").unwrap();
+    }
+    let (cache, task) = start(&service, MAX_CACHED_NODES);
+    let first = wait_ready(&cache);
+    assert_eq!(first.len(), 604);
+    {
+        // 600 distinct journal rows: the delta is wider than the 512 compaction
+        // threshold but each publish still clones only the sparse delta.
+        let mut store = service.bridge.store.lock().unwrap();
+        for index in 0..600 {
+            store.pin(&format!("n{index}"), true).unwrap();
+        }
+    }
+    let projection = wait_matches(&service, &cache, "wide delta", first.generation());
+    assert_eq!(projection.len(), 604);
+    let metrics = cache.metrics();
+    assert!(
+        metrics.compactions >= 1,
+        "a delta wider than max(len/8, 512) must compact the base"
+    );
+    stop_and_join(&service, task);
+}
+
 

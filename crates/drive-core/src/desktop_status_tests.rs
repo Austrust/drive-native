@@ -794,3 +794,65 @@ fn batch_details_match_the_single_node_reads() {
     assert_eq!(cached.status, Status::LocalComplete);
     assert!(cached.offline);
 }
+
+/// Issue #25: the journal-driven ACL refresh closes over the overlay
+/// remote-parent edge, so an `access_denied` page no longer needs a
+/// whole-namespace rebuild to stay correct.
+#[test]
+fn acl_refresh_covers_the_overlay_remote_parent_closure() {
+    let (_dir, s) = small_fixture();
+    s.db.execute(
+        "INSERT INTO namespace_overlay(node,remote) VALUES('b1','{\"parent\":\"den\"}')",
+        [],
+    )
+    .unwrap();
+
+    let refresh = s
+        .desktop_status_acl_refresh(&["den".to_owned()], 1_000)
+        .unwrap()
+        .expect("a small denial closure must be resolvable");
+    let affected: HashSet<&str> = refresh.affected.iter().map(String::as_str).collect();
+    assert!(affected.contains("den"));
+    assert!(affected.contains("den1"));
+    assert!(
+        affected.contains("b1"),
+        "the overlay remote-parent edge must be part of the closure"
+    );
+    // Only the visible ancestors of the closure are returned; denied rows are
+    // filtered out by the shared seed predicate.
+    let seeds: HashSet<&str> = refresh.seeds.iter().map(|seed| seed.id.as_str()).collect();
+    assert_eq!(seeds, HashSet::from(["root", "b"]));
+
+    // Restoring the denial reveals the whole closure through the same query, so
+    // both journal directions are handled without a full scan.
+    s.db.execute("DELETE FROM access_denied WHERE node='den'", [])
+        .unwrap();
+    let refresh = s
+        .desktop_status_acl_refresh(&["den".to_owned()], 1_000)
+        .unwrap()
+        .expect("a small denial closure must be resolvable");
+    let seeds: HashSet<&str> = refresh.seeds.iter().map(|seed| seed.id.as_str()).collect();
+    assert_eq!(
+        seeds,
+        HashSet::from(["root", "b", "den", "den1", "b1"])
+    );
+}
+
+/// Issue #25: an unbounded ACL closure falls back to the rebuild path instead of
+/// scanning the whole namespace inside the resize.
+#[test]
+fn acl_refresh_refuses_closures_over_the_limit() {
+    let (_dir, s) = small_fixture();
+    assert!(
+        s.desktop_status_acl_refresh(&["den".to_owned()], 1)
+            .unwrap()
+            .is_none(),
+        "a two-row closure must not be accepted for a one-row limit"
+    );
+    let empty = s
+        .desktop_status_acl_refresh(&[], 1)
+        .unwrap()
+        .expect("an empty denial list is always resolvable");
+    assert!(empty.affected.is_empty());
+    assert!(empty.seeds.is_empty());
+}
