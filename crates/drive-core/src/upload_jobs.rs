@@ -20,27 +20,53 @@ impl Store {
             .collect::<std::result::Result<Vec<_>, _>>()?)
     }
     pub fn upload_job(&self, op: &str) -> Result<UploadJob> {
-        let (id, base, blob, state): (String, String, String, String) = self.db.query_row(
-            "SELECT node,base,blob,state FROM operations WHERE id=?1 AND kind='upload'",
-            [op],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-        )?;
+        // One row read for the operation (including its durable mtime) and one
+        // recursive walk for the whole ancestor chain. The previous form spent
+        // two point lookups per ancestor, so a depth-D job cost 2+2D queries on
+        // every upload; the chain never leaves the nodes table and only needs
+        // names.
+        let (id, base, blob, state, mtime): (String, String, String, String, Option<i64>) =
+            self.db.query_row(
+                "SELECT node,base,blob,state,
+                        (SELECT mtime FROM upload_times WHERE operation=operations.id)
+                 FROM operations WHERE id=?1 AND kind='upload'",
+                [op],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )?;
         let mut node = self.node_for_handle(&id)?;
         node.version = base;
-        let mut parts = Vec::new();
-        let mut current = self.node_for_handle(&id)?;
-        let mut seen = std::collections::HashSet::new();
-        while let Some(parent) = current.parent {
-            if !seen.insert(current.id) {
+        let parts: Vec<String> = {
+            // The anchor is the uploaded node, so depth grows towards the root;
+            // walking DESC yields root-to-leaf order. The root is the only row
+            // whose parent is NULL; the depth bound turns a corrupted cycle into
+            // a bounded query instead of infinite recursion.
+            let mut q = self.db.prepare(
+                "WITH RECURSIVE chain(id,parent,name,depth) AS (
+                   SELECT id,parent,name,0 FROM nodes WHERE id=?1
+                   UNION ALL
+                   SELECT n.id,n.parent,n.name,c.depth+1 FROM nodes n JOIN chain c ON n.id=c.parent
+                   WHERE c.depth < 65535)
+                 SELECT name,parent FROM chain ORDER BY depth DESC",
+            )?;
+            let rows: Vec<(String, Option<String>)> = q
+                .query_map([&id], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            // The deepest row in DESC order is the root; anything else means the
+            // chain is cyclic or does not reach an authoritative root.
+            let rooted = matches!(rows.first(), Some((_, None)));
+            if !rooted {
                 return Err(Error::State("path cycle".into()));
             }
-            parts.push(current.name);
-            current = self.node_for_handle(&parent)?;
-        }
-        parts.reverse();
+            // Drop the root: names run root-child -> uploaded node.
+            rows.into_iter().skip(1).map(|(name, _)| name).collect()
+        };
         if parts.is_empty() {
             return Err(Error::State("cannot upload root".into()));
         }
+        let mtime = mtime
+            .map(u32::try_from)
+            .transpose()
+            .map_err(|_| Error::State("upload mtime exceeds the supported range".into()))?;
         Ok(UploadJob {
             operation: op.into(),
             node,
@@ -55,7 +81,7 @@ impl Store {
             },
             file: File::open(self.root.join("blobs").join(blob))?,
             state,
-            mtime: self.upload_mtime(op)?,
+            mtime,
         })
     }
     pub fn conflict_upload(&mut self, op: &str) -> Result<()> {
