@@ -10,6 +10,7 @@ pub mod mount_registry;
 pub mod rpc;
 pub mod service;
 mod status_cache;
+pub mod status_events;
 pub mod transport;
 mod wait_activity;
 pub mod wire;
