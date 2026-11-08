@@ -2,6 +2,7 @@
 //! separate, ordered operation and requires an identity-specific tombstone.
 use crate::{Error, Node, Result, Store};
 use rusqlite::{OptionalExtension, params};
+use std::collections::{BTreeMap, HashMap};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -32,91 +33,316 @@ pub struct UploadRemoveBarrier {
     pub operation: String,
     pub path: String,
 }
+#[cfg(test)]
 fn path_related(a: &str, b: &str) -> bool {
     a == b
         || a.strip_prefix(b).is_some_and(|rest| rest.starts_with('/'))
         || b.strip_prefix(a).is_some_and(|rest| rest.starts_with('/'))
 }
-/// Current path of a possibly deleted node. Live ancestor names are walked so
-/// a queued ancestor rename cannot hide the dependency behind a captured path.
-fn live_path(db: &rusqlite::Connection, id: &str) -> Result<Option<String>> {
-    let mut parts = Vec::new();
-    let mut current = id.to_owned();
-    let mut seen = std::collections::HashSet::new();
-    loop {
-        if !seen.insert(current.clone()) {
+/// Batch path resolution for every queued remove intent. The old barrier walked
+/// each remove's ancestors with one query per level; resolving a whole backlog
+/// shares one query per depth instead, so the first barrier after a bulk delete
+/// stays bounded too.
+pub(crate) fn live_paths(db: &rusqlite::Connection, ids: &[String]) -> Result<Vec<Option<String>>> {
+    let mut nodes: HashMap<String, (Option<String>, String)> = HashMap::new();
+    let mut level: Vec<String> = ids.to_vec();
+    let mut depth = 0usize;
+    while !level.is_empty() {
+        depth += 1;
+        if depth > 256 {
             return Err(Error::State("remove path cycle".into()));
         }
-        let row: Option<(Option<String>, String)> = db
-            .query_row("SELECT parent,name FROM nodes WHERE id=?1", [&current], |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })
-            .optional()?;
-        let Some((parent, name)) = row else {
-            return Ok(None);
-        };
-        match parent {
-            // The task root's own name is not part of relative paths.
-            Some(parent) => {
-                parts.push(name);
-                current = parent
+        let mut next = std::collections::HashSet::new();
+        for chunk in level.chunks(500) {
+            let placeholders = vec!["?"; chunk.len()].join(",");
+            let sql = format!("SELECT id,parent,name FROM nodes WHERE id IN ({placeholders})");
+            let mut query = db.prepare(&sql)?;
+            let mut rows = query.query(rusqlite::params_from_iter(chunk.iter()))?;
+            while let Some(row) = rows.next()? {
+                let id: String = row.get(0)?;
+                let parent: Option<String> = row.get(1)?;
+                let name: String = row.get(2)?;
+                if let Some(parent) = &parent {
+                    next.insert(parent.clone());
+                }
+                nodes.insert(id, (parent, name));
             }
-            None => break,
+        }
+        level = next
+            .into_iter()
+            .filter(|id| !nodes.contains_key(id))
+            .collect();
+        level.sort();
+    }
+    let mut paths = Vec::with_capacity(ids.len());
+    for id in ids {
+        let mut parts = Vec::new();
+        let mut current = id.as_str();
+        let mut seen = std::collections::HashSet::new();
+        let mut resolved = true;
+        loop {
+            if !seen.insert(current.to_owned()) {
+                return Err(Error::State("remove path cycle".into()));
+            }
+            match nodes.get(current) {
+                None => {
+                    resolved = false;
+                    break;
+                }
+                Some((parent, name)) => match parent {
+                    // The task root's own name is not part of relative paths.
+                    Some(parent) => {
+                        parts.push(name.clone());
+                        current = parent;
+                    }
+                    None => break,
+                },
+            }
+        }
+        if resolved {
+            parts.reverse();
+            paths.push(Some(parts.join("/")));
+        } else {
+            paths.push(None);
         }
     }
-    parts.reverse();
-    Ok(Some(parts.join("/")))
+    Ok(paths)
 }
-/// Scope the remove barrier to dependencies of one upload target. The previous
-/// global barrier let any unfinished remove, including an uncertain trash entry,
-/// stop every ordinary upload.
-pub(crate) fn upload_remove_barrier(
-    db: &rusqlite::Connection,
-    node: &str,
-    path: &str,
-) -> Result<Option<UploadRemoveBarrier>> {
-    let rows: Vec<(String, String, String)> = {
-        let mut q = db.prepare("SELECT id,node,body FROM namespace_ops WHERE kind='remove' AND id NOT IN (SELECT operation FROM access_blocked_operations) AND state NOT IN ('committed','superseded') ORDER BY seq")?;
-        q.query_map([], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
-        })?
-        .collect::<std::result::Result<Vec<_>, _>>()?
-    };
-    if rows.is_empty() {
-        return Ok(None);
+/// Tracks the unfinished remove intents incrementally. Rebuilding is driven by
+/// TEMP bookkeeping installed on the writer connection: `ops` changes whenever
+/// the queued membership or its state changes, `paths` whenever a node's parent
+/// or name changes (or a node row disappears), because paths must then be
+/// rebound. Batch local deletes only flip `nodes.deleted`, so draining a large
+/// backlog never invalidates the path index.
+#[derive(Default)]
+pub(crate) struct RemoveBarrierCache {
+    ops_version: i64,
+    paths_version: i64,
+    initialized: bool,
+    rows: Vec<CachedRemove>,
+    by_node: HashMap<String, usize>,
+    by_path: BTreeMap<String, usize>,
+    calls: u64,
+    rebuilds: u64,
+    last_rows: usize,
+    last_us: u64,
+}
+struct CachedRemove {
+    seq: i64,
+    operation: String,
+    node: String,
+    captured_path: Option<String>,
+    live_path: Option<String>,
+}
+impl CachedRemove {
+    fn path(&self) -> &str {
+        self.live_path
+            .as_deref()
+            .or(self.captured_path.as_deref())
+            .unwrap_or("")
     }
-    // Identity ancestry must be checked independently of captured paths: a
-    // deleted ancestor remains a dependency even if its path was rebound.
-    let mut ancestors = std::collections::HashSet::new();
-    let mut current = Some(node.to_owned());
-    while let Some(id) = current {
-        if ancestors.len() >= 256 || !ancestors.insert(id.clone()) {
-            return Err(Error::State("upload dependency ancestry invalid".into()));
+}
+/// Install the TEMP versions used by [`RemoveBarrierCache`]. Only the writer
+/// connection needs them; derived state never touches the durable schema.
+pub(crate) fn install_barrier_versions(db: &rusqlite::Connection) -> Result<()> {
+    db.execute_batch(
+        "CREATE TEMP TABLE IF NOT EXISTS dn_barrier_version(ops INTEGER NOT NULL, paths INTEGER NOT NULL);
+         INSERT INTO dn_barrier_version(ops,paths) SELECT 0,0 WHERE NOT EXISTS(SELECT 1 FROM dn_barrier_version);
+         CREATE TEMP TRIGGER IF NOT EXISTS dn_barrier_ops_insert AFTER INSERT ON main.namespace_ops BEGIN UPDATE dn_barrier_version SET ops=ops+1; END;
+         CREATE TEMP TRIGGER IF NOT EXISTS dn_barrier_ops_update AFTER UPDATE ON main.namespace_ops BEGIN UPDATE dn_barrier_version SET ops=ops+1; END;
+         CREATE TEMP TRIGGER IF NOT EXISTS dn_barrier_ops_delete AFTER DELETE ON main.namespace_ops BEGIN UPDATE dn_barrier_version SET ops=ops+1; END;
+         CREATE TEMP TRIGGER IF NOT EXISTS dn_barrier_paths_update AFTER UPDATE OF parent,name ON main.nodes WHEN OLD.parent IS NOT NEW.parent OR OLD.name IS NOT NEW.name BEGIN UPDATE dn_barrier_version SET paths=paths+1; END;
+         CREATE TEMP TRIGGER IF NOT EXISTS dn_barrier_paths_delete AFTER DELETE ON main.nodes BEGIN UPDATE dn_barrier_version SET paths=paths+1; END;",
+    )?;
+    Ok(())
+}
+impl RemoveBarrierCache {
+    fn refresh(&mut self, db: &rusqlite::Connection) -> Result<()> {
+        let (ops, paths): (i64, i64) = db.query_row(
+            "SELECT ops,paths FROM dn_barrier_version",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        if self.initialized && ops == self.ops_version && paths == self.paths_version {
+            return Ok(());
         }
-        current = db
-            .query_row("SELECT parent FROM nodes WHERE id=?1", [&id], |r| {
-                r.get::<_, Option<String>>(0)
-            })
-            .optional()?
-            .flatten();
+        let paths_changed = paths != self.paths_version;
+        let mut added = Vec::new();
+        if !self.initialized || ops != self.ops_version {
+            let fresh: Vec<(i64, String, String)> = {
+                let mut q = db.prepare("SELECT seq,id,node FROM namespace_ops WHERE kind='remove' AND state NOT IN ('committed','superseded') ORDER BY seq")?;
+                q.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+                    .collect::<std::result::Result<Vec<_>, _>>()?
+            };
+            let mut cached: HashMap<String, CachedRemove> = self
+                .rows
+                .drain(..)
+                .map(|row| (row.operation.clone(), row))
+                .collect();
+            let mut rows = Vec::with_capacity(fresh.len());
+            for (seq, operation, node) in fresh {
+                match cached.remove(&operation) {
+                    Some(mut row) => {
+                        row.seq = seq;
+                        rows.push(row);
+                    }
+                    None => {
+                        added.push(rows.len());
+                        rows.push(CachedRemove {
+                            seq,
+                            operation,
+                            node,
+                            captured_path: None,
+                            live_path: None,
+                        });
+                    }
+                }
+            }
+            self.rows = rows;
+        }
+        let targets: Vec<usize> = if paths_changed {
+            (0..self.rows.len()).collect()
+        } else {
+            added
+        };
+        if !targets.is_empty() {
+            let ids: Vec<String> = targets.iter().map(|&i| self.rows[i].node.clone()).collect();
+            let resolved = live_paths(db, &ids)
+                .map_err(|_| Error::State("remove path unreadable".into()))?;
+            for (&index, path) in targets.iter().zip(resolved) {
+                self.rows[index].live_path = path;
+            }
+        }
+        // Captured paths are only needed when a node row disappeared; loading
+        // their bodies lazily keeps the common bulk-delete rebuild cheap.
+        for index in 0..self.rows.len() {
+            if self.rows[index].live_path.is_none() && self.rows[index].captured_path.is_none() {
+                let operation = self.rows[index].operation.clone();
+                let body: String = db.query_row(
+                    "SELECT body FROM namespace_ops WHERE id=?1",
+                    [&operation],
+                    |r| r.get(0),
+                )?;
+                let job: RemoveJob = serde_json::from_str(&body)
+                    .map_err(|_| Error::State("unreadable remove intent".into()))?;
+                if job.operation != operation {
+                    return Err(Error::State("remove intent identity mismatch".into()));
+                }
+                self.rows[index].captured_path = Some(job.path);
+            }
+        }
+        self.by_node.clear();
+        self.by_path.clear();
+        for (index, row) in self.rows.iter().enumerate() {
+            self.by_node.entry(row.node.clone()).or_insert(index);
+            self.by_path.entry(row.path().to_owned()).or_insert(index);
+        }
+        self.ops_version = ops;
+        self.paths_version = paths;
+        self.initialized = true;
+        self.rebuilds += 1;
+        Ok(())
     }
-    for (operation, remove_node, body) in rows {
-        let job: RemoveJob = serde_json::from_str(&body)
-            .map_err(|_| Error::State("unreadable remove intent".into()))?;
-        if job.operation != operation {
-            return Err(Error::State("remove intent identity mismatch".into()));
+    fn barrier(
+        &self,
+        db: &rusqlite::Connection,
+        node: &str,
+        path: &str,
+    ) -> Result<Option<UploadRemoveBarrier>> {
+        if self.rows.is_empty() {
+            return Ok(None);
         }
-        let remove_path = live_path(db, &remove_node)
-            .map_err(|_| Error::State("remove path unreadable".into()))?
-            .unwrap_or_else(|| job.path.clone());
-        if ancestors.contains(&remove_node) || path_related(path, &remove_path) {
+        let mut candidates = Vec::new();
+        let mut ancestors = std::collections::HashSet::new();
+        let mut current = Some(node.to_owned());
+        while let Some(id) = current {
+            if ancestors.len() >= 256 || !ancestors.insert(id.clone()) {
+                return Err(Error::State("upload dependency ancestry invalid".into()));
+            }
+            if let Some(&index) = self.by_node.get(&id) {
+                candidates.push(index);
+            }
+            current = db
+                .query_row("SELECT parent FROM nodes WHERE id=?1", [&id], |r| {
+                    r.get::<_, Option<String>>(0)
+                })
+                .optional()?
+                .flatten();
+        }
+        let mut prefix = String::new();
+        for part in path.split('/') {
+            if !prefix.is_empty() {
+                prefix.push('/');
+            }
+            prefix.push_str(part);
+            if let Some(&index) = self.by_path.get(&prefix) {
+                candidates.push(index);
+            }
+        }
+        let descendants = format!("{path}/");
+        for (_, &index) in self.by_path.range(descendants.clone()..) {
+            if !self.rows[index].path().starts_with(&descendants) {
+                break;
+            }
+            candidates.push(index);
+        }
+        if candidates.is_empty() {
+            return Ok(None);
+        }
+        candidates.sort_unstable();
+        candidates.dedup();
+        // Blocked operations are derived through a recursive view; permission
+        // blocks are rare, so only pay for them when denied roots exist.
+        let denied: bool =
+            db.query_row("SELECT EXISTS(SELECT 1 FROM access_denied)", [], |r| r.get(0))?;
+        let blocked = if denied {
+            let mut q = db.prepare("SELECT operation FROM access_blocked_operations")?;
+            q.query_map([], |r| r.get::<_, String>(0))?
+                .collect::<std::result::Result<std::collections::HashSet<_>, _>>()?
+        } else {
+            std::collections::HashSet::new()
+        };
+        for index in candidates {
+            let row = &self.rows[index];
+            if blocked.contains(&row.operation) {
+                continue;
+            }
             return Ok(Some(UploadRemoveBarrier {
-                operation,
-                path: remove_path,
+                operation: row.operation.clone(),
+                path: row.path().to_owned(),
             }));
         }
+        Ok(None)
     }
-    Ok(None)
+}
+impl Store {
+    /// Scope the remove barrier to dependencies of one upload target. It runs on
+    /// the writer connection, so the TEMP versions above let it answer from an
+    /// incremental index instead of materializing every queued intent.
+    pub(crate) fn upload_remove_barrier(
+        &mut self,
+        node: &str,
+        path: &str,
+    ) -> Result<Option<UploadRemoveBarrier>> {
+        let started = std::time::Instant::now();
+        self.barrier.refresh(&self.db)?;
+        let blocked = self.barrier.barrier(&self.db, node, path)?;
+        let cache = &mut self.barrier;
+        cache.calls += 1;
+        cache.last_rows = cache.rows.len();
+        cache.last_us = started.elapsed().as_micros() as u64;
+        Ok(blocked)
+    }
+    /// Barrier bookkeeping for tests and latency diagnostics: (calls, rebuilds,
+    /// last lookup microseconds, indexed rows).
+    pub fn remove_barrier_stats(&self) -> (u64, u64, u64, usize) {
+        (
+            self.barrier.calls,
+            self.barrier.rebuilds,
+            self.barrier.last_us,
+            self.barrier.last_rows,
+        )
+    }
 }
 fn os(code: i32) -> Error {
     Error::Io(std::io::Error::from_raw_os_error(code))
@@ -389,3 +615,7 @@ mod upload_remove_scope_tests {
         assert!(!path_related("a", "b/a"));
     }
 }
+
+#[cfg(test)]
+#[path = "removals_barrier_tests.rs"]
+mod barrier_tests;
