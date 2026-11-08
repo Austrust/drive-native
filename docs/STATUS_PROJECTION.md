@@ -2,6 +2,8 @@
 
 2026-10-31。本层基于 `7806d62`，并包含 `ca30b0b` 的 journal 传播范围精化，把[事务变化日志](STATUS_CHANGE_JOURNAL.md)转换成可供[增量状态索引](INCREMENTAL_STATUS_INDEX.md)使用的当前节点事实。源码为 [status_projection.rs](../crates/drive-core/src/status_projection.rs)。它没有启动索引拥有者、桌面订阅或缓存核验，也没有改变现有 desktop 查询。
 
+> 2026-11-08 更新：该基础层已由 #8 接入桌面 `GetStates`（只读 WAL 快照、按提交日志增量维护、发布节流 250 ms），并服务增量状态索引；本文保留基础层初始边界与接口记录，接线后的实测见 [ISSUES_20261107.md](ISSUES_20261107.md)。
+
 ## 接口与一致性
 
 - `snapshot_status(budget)` 返回整个 Store 的可见 `StatusSnapshot { through, atoms }`。不裁剪挂载根；消费者以配置的根身份约束查询。根的 `parent=None` 保留。当前是一次 Store 串行边界内的有界捕获，不是可跨锁分页的快照会话。

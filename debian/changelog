@@ -1,3 +1,38 @@
+drive-native (0.1.0~dev20261108.1) unstable; urgency=medium
+
+  * Merge the #14/#17 uncertain-upload and background-error work: bound
+    reconciliation to five attempts with 10/30/120/300 s backoff, let a local
+    deletion void an uncertain creation, stop recording permission denials as
+    sticky background errors, and clear structured background errors on success
+    or recovery.
+  * Merge the #15/#16 SQLite hot-spot work behind schema 27: add node indexes
+    for operations and namespace_ops plus partial nodes indexes for conflicts,
+    pins and cache candidates; rewrite sync_issues as a four-arm UNION; use
+    keyset pagination for conflict and issue queries; collect cache candidates
+    in one query; and move GetIssues outside the global store lock.
+  * Merge the #8 committed status projection: serve GetStates from a read-only
+    WAL snapshot maintained from the commit log. On a 210k-node synthetic tree
+    the states p95 measured 312.9 ms (SLO 500 ms); a 2000-entry directory
+    listed in 4.07 ms from the store and 0.727 ms through FUSE; a 2000 ms held
+    store lock delayed GetStates/GetIssues to 310/314 ms. The 48-way mixed
+    workload still reported 28 timeouts (SLO 0) because GetOverview computes
+    synced-issue and cache counts under the global lock.
+  * Merge the #2 desktop work: one manager window for all mounts, tray
+    activity, persistent sync history and a notification channel; the backend
+    handover check now expects state schema 27.
+  * Merge the #5 namespace projection work: bound the NamespaceIndex build
+    cost and use a lean projection instead of full scans; paired metadata
+    benchmark evidence is in the source archive.
+  * Verification on workstation202611 against tree 544adb1: workspace
+    all-features 1097 passed / 0 failed / 52 ignored, default features
+    1087 / 0 / 47, GUI 24 modules / 257 tests, scripts/verify.sh exit 0 and
+    lab --simulate reported LocalComplete.
+  * Known limits: development build. Real-NAS ACLs, a real dpkg upgrade and
+    Mint desktop acceptance were not exercised; the #8 mixed-workload SLO and
+    several #2 desktop items remain open.
+
+ -- Drive Native contributors <noreply@localhost>  Sun, 08 Nov 2026 16:45:00 +0800
+
 drive-native (0.1.0~dev20261105.3) unstable; urgency=medium
 
   * Retry read-only native initialization requests (pull_event pages, list_dir,
