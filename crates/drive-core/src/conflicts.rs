@@ -252,6 +252,24 @@ impl Store {
         }
         Ok(IssuePage { entries, next })
     }
+    /// Issue count for status summaries. Local metadata only; no paths, tokens,
+    /// or NAS requests. The candidate set is exactly the one [`Self::sync_issues`]
+    /// paginates; entries that resolve to no actionable issue are not counted.
+    pub fn sync_issue_count(&self, root: &str) -> Result<u64> {
+        self.node(root)?;
+        let ids = {
+            let mut q = self.db.prepare("SELECT id FROM nodes n WHERE (conflict=1 OR EXISTS(SELECT 1 FROM drafts d WHERE d.node=n.id AND d.dirty=1 AND (d.base!=n.remote_version OR n.deleted=1) AND NOT EXISTS(SELECT 1 FROM local_unlinks WHERE node=n.id)) OR EXISTS(SELECT 1 FROM operations WHERE node=n.id AND state='uncertain') OR EXISTS(SELECT 1 FROM namespace_ops WHERE node=n.id AND state IN ('uncertain','cleanup_uncertain','conflict'))) ORDER BY id")?;
+            q.query_map([], |r| r.get::<_, String>(0))?
+                .collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        let mut count = 0_u64;
+        for id in ids {
+            if self.sync_issue(root, &id)?.is_some() {
+                count += 1;
+            }
+        }
+        Ok(count)
+    }
     /// Preserve local bytes under a new name and resume the original remote identity.
     /// No server overwrite is generated. Copy upload uses the normal create contract.
     pub fn keep_both(
@@ -379,5 +397,73 @@ impl Store {
             copy,
             path,
         })
+    }
+}
+
+#[cfg(test)]
+mod issue_count_tests {
+    use super::*;
+    use crate::{Batch, Change, Event};
+
+    fn node(id: &str, parent: Option<&str>, version: &str) -> Node {
+        Node {
+            id: id.into(),
+            parent: parent.map(str::to_owned),
+            name: if parent.is_some() {
+                "A.doc".into()
+            } else {
+                "root".into()
+            },
+            version: version.into(),
+            directory: parent.is_none(),
+            metadata: Some(NodeMetadata {
+                size: 3,
+                mtime: 1,
+                mode: 0o644,
+            }),
+        }
+    }
+
+    fn fixture() -> (tempfile::TempDir, Store) {
+        let d = tempfile::tempdir().unwrap();
+        let mut s = Store::open(d.path()).unwrap();
+        s.install_remote_snapshot(
+            &[node("root", None, "r"), node("a", Some("root"), "v1")],
+            "1",
+            "server",
+        )
+        .unwrap();
+        s.ensure_fs_root("root").unwrap();
+        (d, s)
+    }
+
+    fn change(s: &mut Store, to: &str, change: Change) {
+        let from = s.cursor().unwrap();
+        s.receive(&Batch {
+            from,
+            to: to.into(),
+            events: vec![Event {
+                id: to.into(),
+                change,
+            }],
+        })
+        .unwrap();
+        s.drain().unwrap();
+    }
+
+    #[test]
+    fn sync_issue_count_matches_paginated_issues_and_requires_root() {
+        let (_d, mut s) = fixture();
+        assert_eq!(s.sync_issue_count("root").unwrap(), 0);
+        s.save_local("a", b"mine").unwrap();
+        change(&mut s, "2", Change::Upsert(node("a", Some("root"), "v2")));
+        assert_eq!(s.sync_issue_count("root").unwrap(), 1);
+        let page = s.sync_issues("root", "").unwrap();
+        assert_eq!(page.entries.len() as u64, 1);
+        assert_eq!(
+            page.entries.len() as u64,
+            s.sync_issue_count("root").unwrap()
+        );
+        assert!(s.sync_issue_count("missing").is_err());
     }
 }

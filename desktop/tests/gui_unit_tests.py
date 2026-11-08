@@ -117,19 +117,21 @@ class DesktopTests(unittest.TestCase):
             item = window.table.topLevelItem(0)
             item.setSelected(True)
             window.table.setCurrentItem(item)
-            window.rows = [dict(row, status="pinned_complete", offline_available=True)]
+            window.rows = [dict(row, status="pinned_complete", offline_available=True, pinned=True)]
             window.render_rows()
             self.assertIs(window.table.topLevelItem(0), item)
             self.assertIs(window.table.currentItem(), item)
             self.assertTrue(item.isSelected())
-            self.assertEqual(item.text(1), "已固定")
+            # Column 2 is local availability; pinned files report 已固定 there.
+            self.assertEqual(item.text(2), "已固定")
             window.rows = [
                 dict(
                     row, status="download_failed", sync_error={"attempts": 5, "server_code": 32772}
                 )
             ]
             window.render_rows()
-            self.assertEqual(item.text(1), "下载失败")
+            # Column 1 is the sync-status axis; a failed download needs checking.
+            self.assertEqual(item.text(1), "需要检查")
             self.assertIn("32772", item.toolTip(1))
             window.rows = [dict(row, path="renamed")]
             window.render_rows()

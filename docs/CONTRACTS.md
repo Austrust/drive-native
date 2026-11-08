@@ -7,7 +7,7 @@ G0，协调者冻结于 2026-11-04。基线 `codex/fs-recovery-safe-9 @ d555944`
 ## 阶段与所有权
 
 `codex/fix-5-2` 集成 A → B → C → D；随后 `codex/fix-7` 单线实现 ACL。
-最终汇总分支 `codex/fix-all-5-2-7` 保留完整提交历史。schema **24 = history，25 = permissions**。
+最终汇总分支 `codex/fix-all-5-2-7` 保留完整提交历史。schema **24 = history，25 = permissions，26 = 持久上传只读核对预算**（`operations.reconcile_attempts`/`reconcile_at`；当前 `STATE_SCHEMA_VERSION=26`）。
 每个 stream 独立 worktree、独立 CARGO_TARGET_DIR；G1 只可 cargo check，禁止测试、基准、NAS。
 G2 全量编译；G3 完整实现后才由独立验证代理进入 G4；G5 独占基准窗口。
 不 push、不发布、不读取凭据、不访问生产文件，不修改已发布 .9 资产。
@@ -77,22 +77,24 @@ Store 是权威，索引只读，不写业务状态、不下载正文。装载�
 ```json
 {"id":42,"seq":42,"mount":"root-id","node":"node-id","name":"example.txt","path_at_event":"folder/example.txt","action":"upload","result":"ok","attempts":1,"error_kind":null,"error_summary":null,"started_at":null,"completed_at":1793750400,"detail":null}
 ```
-id/seq 为 SQLite i64 的非负整数；seq 持久单调，删除后不复用。时间为 UTC Unix 秒；name/path_at_event 为事件时值。mount 为 root id；每个服务只查询自己的 Store。可空字段为 null 或省略，GUI 兼容二者。action=`upload|download|remote_change|rename|move|delete|error`；result=`ok|failed|cancelled|pending`。detail 为小型 JSON 对象或 null，绝不放正文/凭据。错误只持久化分类与受控摘要，不能复制原始网络错误。
+id/seq 为 SQLite i64 的非负整数；seq 持久单调，删除后不复用。时间为 UTC Unix 秒；name/path_at_event 为事件时值。mount 为 root id；每个服务只查询自己的 Store。可空字段为 null 或省略，GUI 兼容二者。action=`upload|download|remote_change|rename|move|delete|mkdir|replace`（`rename|move|delete` 由 namespace_ops 的 `rename|remove` 分类：`remove` 记 `delete`，父目录变化记 `move`，否则 `rename`；`mkdir`/`replace` 是目录创建与复合覆盖命名空间操作，使用同一 `operation_key`，供后续确认/冲突解析更新；`error` 不是独立 action，失败由 result=failed 与 error_kind 表达）；result=`ok|failed|cancelled|pending`。detail 为小型 JSON 对象或 null，绝不放正文/凭据。错误只持久化分类与受控摘要，不能复制原始网络错误。
 
-四个 D-Bus 方法均接受**一个 JSON 字符串参数**并返回一个 JSON 字符串，沿用 org.drivenative.Client1：
+除无参的 GetSyncHistoryRetention 外，各方法接受**一个 JSON 字符串参数**并返回一个 JSON 字符串，沿用 org.drivenative.Client1：
 
 | 方法 | 参数 | 成功返回 |
 |---|---|---|
 | GetSyncHistory | `{mount?,result?,name?,cursor?,limit?}` | `{records:[record...],next_cursor:null或string}` |
 | GetRecentActivity | `{limit:12}` | `{records:[record...]}` |
-| ResolveHistoryTarget | `{id:42}` | `{path:null或string,exists:bool,mount_online:bool,reason:null或string,parent_path:null或string,offline_available:bool,node:null或string}` |
+| ResolveHistoryTarget | `{id:42}` | `{path:null或string,exists:bool,mount_online:bool,reason:null或string,parent_path:null或string,offline_available:bool,cached:bool,mount_slot:null或string,suggested_action:null或string,node:null或string}` |
 | ClearSyncHistory | `{mode:"older_than_days",days:30}` 或 `{mode:"all"}` | `{removed:integer}` |
+| GetSyncHistoryRetention | 无 | `{schema:1,task_id:string,days:integer,records:integer}` |
+| SetSyncHistoryRetention | `{schema:1,task_id:string,days:30,records:10000}` | `{saved:true,days:integer,records:integer}` |
 
 GetSyncHistory 默认 limit=100，上限500，按 seq DESC/id DESC，cursor 是不透明字符串（可采用十进制 seq 上界），分页严格排他且过滤后返回游标。name 是字面量不区分大小写子串，不是 SQL 通配符。invalid query/cursor 拒绝；不得悄悄扩大清理范围。GetRecentActivity 默认12、上限100。缺 days 默认30，负数拒绝。GUI 超时15s，所有数据库 busy 必须快速返回 `{error:"busy"}`，不阻塞其他服务。全局历史由 GUI 按服务归属聚合，id 必须和所属服务一起保存，不能跨库解析。
 
-ResolveHistoryTarget 基于 node 身份解析当前路径并限制在挂载根内；不直接打开历史 path_at_event。reason 使用 `deleted|offline|online_only|unavailable|not_found|permission_denied`；可用父目录也必须重新校验。offline_available=false 且在线时 GUI 标示下载并打开，不把发现元数据算下载成功；离线无缓存不打开。路径解析本身不 hydrate、不探测 NAS。
+ResolveHistoryTarget 基于 node 身份解析当前路径并限制在挂载根内；不直接打开历史 path_at_event。reason 使用 `deleted|offline|online_only|unavailable|not_found|permission_denied`；可用父目录也必须重新校验。offline_available=false 且在线时 GUI 标示下载并打开，不把发现元数据算下载成功；离线无缓存不打开。路径解析本身不 hydrate、不探测 NAS。未挂载时仍必须基于 Store 元数据返回真实 `exists` 与 `offline_available`（`path`/`parent_path` 为 null，`mount_online=false`；node 身份仍存在时为 `reason=unavailable`，缺失/已删除/无权限分别为 `not_found`/`deleted`/`permission_denied`）；GUI 据此显示“启动挂载”动作，不得直接打开未挂载路径，也不得把发现元数据当作内容可用。`cached` 与 `offline_available` 同值（目录、可读 dirty draft 或已发布缓存正文），供 GUI 优先判断是否可打开；`mount_slot` 是本服务实例槽（`DRIVE_NATIVE_INSTANCE`，legacy 单挂载为 null，GUI 回退自身来源槽）；`suggested_action` 仅在未挂载且 node 身份仍可解析（`exists=true`）时为 `start_mount`，其余为 null；旧 GUI 忽略新增键。
 
-默认保留30天/10,000条，设置存在 metadata；清理只动历史。操作结果与历史在同一事务提交；重试以既有 durable job/operation 身份合并 attempts，不能误合并不同版本。迁移23→24沿用备份、事务、未来版本拒绝保护。C 必须列出无法在所有权范围覆盖的发布/失败写入点，交 G2 接线；不得通过 status 查询制造成功历史。
+默认保留30天/10,000条，设置存在 metadata（`sync_history_days`/`sync_history_records`），GetSyncHistoryRetention 读取、SetSyncHistoryRetention 修改；清理只动历史。GetSyncHistoryRetention 缺键、损坏或越界行按默认值返回，不因坏设置失败。SetSyncHistoryRetention 校验 schema=1、task_id 归属，范围 1..=3650 天、1..=1_000_000 条，拒绝未知字段；成功后立即按新上限裁剪元数据历史，返回 `{saved:true,days,records}`。保留期限与清理都只影响元数据历史，不删除、不修改文件、草稿、缓存内容或排队操作；Store busy 时两个方法都快速返回 `{error:"busy"}`。操作结果与历史在同一事务提交；重试以既有 durable job/operation 身份合并 attempts，不能误合并不同版本。迁移23→24沿用备份、事务、未来版本拒绝保护。C 必须列出无法在所有权范围覆盖的发布/失败写入点，交 G2 接线；不得通过 status 查询制造成功历史。
 
 ## C3 Permission decision 与 overview（G3）
 
@@ -114,12 +116,16 @@ pub fn record_observed(store: &Store, root: &str, node: &str,
 GetOverview 追加字段：`writable_source`（user/legacy），`local_policy`（explicit_read_only/follow_remote），`server_capability`（unknown/allowed/space_forbidden），`write_policy_revision`（非负整数）。保留旧 writable 字段兼容，表示挂载层允许尝试写入，不代表所有节点允许。逐节点来源为 native/file_station/observed/unknown，附 verified_at/revision。
 旧 profile false→explicit_read_only/legacy；true→follow_remote/legacy。新向导显式保存策略，不能复制共享根 ACL 为所有子目录权限。重连、恢复、重新核对使 observed 状态回 unknown 并 bump revision，不修改用户只读策略。File Station 可选且默认关闭；无已验证逐节点 native 字段时明确标注未实测/不可得，不猜字段。
 
+GetOverview 追加状态字段（schema 仍 1，旧 GUI 忽略即可）：`sync_state`（needs_attention/paused/transferring/checking/pending/idle，按连接错误、挂载与暂停、活动传输、初始化阶段、待处理及 uncertain 队列依次推导）、`active_transfers`（≥0 的活动传输数）、`issue_count`（与 GetIssues 同源的待处理冲突项计数；Store 查询失败时为 null，不得当 0）、`cache_availability`（`{state:empty/online_only/partial/complete/pinned,total,offline,pinned}`，实际五态；`pinned` 要求全部非目录节点已固定且可离线读；只统计非目录节点；offline 表示本地有可读内容且未被 access_blocked；目录不计入；字段缺失或旧后台时由 GUI 显示未知，不是后端枚举值）与 `version`（`{build:string,state_schema:26,ipc:21}`）。这些字段只读本地元数据，不打开文件、不探测 NAS，也不改变既有键含义。
+
+GetShutdown 的 `shutdown` 快照新增 `blocking_reason`（null 或固定字符串）：waiting_for_workers/unmounting_mount/draining_open_files/persisting_local_changes/mount_still_present/unmount_failed/checkpoint_failed（`worker_join_failed` 为预留值，当前实现不产生，join 失败归入 unmount_failed；GUI 遇到未知值按通用失败处理）；完成或回到 idle 时自动清空，失败时保留。字符串不含路径或原始错误；`phase`/`elapsed_ms`/`stage_elapsed_ms`/`overdue` 语义不变。升级流程没有后端 stage 事件，也不新增 D-Bus 方法；GetOverview 不提供 `upgrade_stage`。GUI 仅依据既有 BackendUpgrade `changed`/`finished` 显示更新入口与最终结果，并用 `version`（state_schema=26、ipc=21）做配对：不匹配时拒绝确认接管，字段缺失（旧后台）按未知降级、不把版本当作确认依据。旧 GUI 忽略新增字段，BackendUpgrade 契约不变。
+
 G3 追加两个 JSON-string IPC：`GetDirectoryPermissions({path})` 返回 `{task_id,path,node,policy,actions:{action:{state,source,verified_at,revision}}}`，state 为 allowed/denied/unknown；`SetWritePolicy({task_id,expected_revision,local_policy})` 用 revision 比较后保存，返回 `{saved:true,remount_required:bool}`。已挂载任务须重新挂载完整应用 RO/RW 选项；策略门禁立即限制新增写入。版本不符必须刷新，不覆盖另一窗口的选择。
 
 已核实的逐操作拒绝经 worker `PermissionDenied{node,action}` 接收；必须匹配本次目标。原生下载仅在 `recv_download` 直接回复边界将已核实 `0x3002/0x3008` 分类为 Read 拒绝；认证、连接、前置读取、本地 I/O、只读码和内容未就绪码不转换。学习拒绝与终态下载重试门禁在同一 Store guard 下发布。
 下载请求捕获权限 revision；期间发生通知或权限更新，迟到的读结果不再持久化旧 allow/deny。迟到拒绝仍向该次调用返回 EACCES，但下载意图回 pending，不留下终态权限重试门禁；后续只读尝试重新判定。此规则不重发任何写入。
 
-下载自动退避保留 schema1 的持久 retry_at，并按 `(node,version,完整failure指纹)` 绑定进程内 Instant 门限。失败发布时以传给 fail_download 的同一墙钟值计算完整退避；前台等待和前台/后台发送资格均检查双门限，重连保留、进程重启仅从持久剩余时间恢复一次。双门限到期正常放行；清除失败记录则提前释放当前门限。旧版本 ticket 不得读取新版本 failure 或驱逐其门限。该规则不改变 core 的纯数据库 now 参数契约、schema25、IPC21 或 FUSE TTL。
+下载自动退避保留 schema1 的持久 retry_at，并按 `(node,version,完整failure指纹)` 绑定进程内 Instant 门限。失败发布时以传给 fail_download 的同一墙钟值计算完整退避；前台等待和前台/后台发送资格均检查双门限，重连保留、进程重启仅从持久剩余时间恢复一次。双门限到期正常放行；清除失败记录则提前释放当前门限。旧版本 ticket 不得读取新版本 failure 或驱逐其门限。该规则不改变 core 的纯数据库 now 参数契约、schema26、IPC21 或 FUSE TTL。
 
 写请求的直接权限相关响应默认经 `MutationPermissionUncertain{code}` 保留，按 upload/remove/rename 的已核实小集合验证；进入 uncertain/cleanup_uncertain，不改成 pending，不猜改名哪端拒绝。唯一例外（本轮新增，见[精确写拒绝自动学习增量](validation/issue7-native-001/write-learning/REPORT.md)）：**upload 直接响应 `0x9003` 且请求目标是已存在节点**时，sproto 在直接回复边界产生 typed `MutationPermissionDenied{code}`，worker 把该拒绝绑定到本次请求节点与 `write_content`，经既有 `refuse_operation` 记为 `denied(observed, revision=当前策略 revision)`：journal 由 `targets_denied` 门禁阻止重发（保留本地内容），history 记 failed/permission_denied，profile 变化/重连/重新核对按既有 revision 失效回 unknown。该例外只成立于此已证子集：`0x9004`/`0xa004` 与 profile 只读过滤同码且 wire 无字段可区分，`0xa003` 无已证生产者，rename 源/目标与复合 replace 阶段不可归属，创建（含 mkdir）的 capability 不是 CreateFile/CreateDir primitive——这些全部保持原 hint/uncertain，不写 ACL 行。历史 result=pending、error_kind=permission_commit_uncertain，summary 明确“提交状态待核对”；detail.permission_response 仅含请求动作和数字码，终态清错误提示而保留该次历史响应证据。重连/核对只可查询结果，不重发未知写入。静态证据证明特定 ACL middleware 的提交前拒绝，但同码多来源、精确动作归属和复合阶段的证明仍未齐，真实 NAS 响应未实测。
 
@@ -152,7 +158,7 @@ G4 错误码校正：只有普通文件 WriteContent 与 Setattr 同时 denied �
 
 G3 在 SharedStore 发布已知拒绝后暂停 NSI 回复，走权威逐操作检查。无拒绝时保留内存路径。正文/目录续读使用独立的 `permission_clear_lease()` 持至有界回复；首个拒绝的发布等待此前回复完成，但普通元数据事务不阻塞已缓存正文读取。持此租约不得阻塞获取 Store（目录续读仅 try_lock）；已知拒绝的回复在 Store 内重验后发布。所有权限检查同时覆盖本地祖先和未确认 namespace_overlay 的远端祖先，不继承其写动作。
 
-明确的原生 Read 拒绝不设置自动下载重试截止（`retry_at=null`）。已知 Read 或祖先 Traverse 拒绝同样约束后台补全、重试唤醒及 Bridge 的缓存/新请求入口，返回 EACCES；仅重试传输不覆盖权限证据。重连、profile 通知或用户重新核对按既有 revision 规则恢复 unknown，再允许尝试；权限变更期间的迟到拒绝仍只影响当次调用，不建立旧拒绝门禁。该补充不改变 schema25、IPC21、entry TTL=0 或 attr 默认1000ms。
+明确的原生 Read 拒绝不设置自动下载重试截止（`retry_at=null`）。已知 Read 或祖先 Traverse 拒绝同样约束后台补全、重试唤醒及 Bridge 的缓存/新请求入口，返回 EACCES；仅重试传输不覆盖权限证据。重连、profile 通知或用户重新核对按既有 revision 规则恢复 unknown，再允许尝试；权限变更期间的迟到拒绝仍只影响当次调用，不建立旧拒绝门禁。该补充不改变 schema26、IPC21、entry TTL=0 或 attr 默认1000ms。
 
 ## 验收与证据
 

@@ -1,5 +1,6 @@
 """Bounded, local presentation for recovery. No network or filesystem probes."""
 import json
+import re
 from pathlib import PurePosixPath
 
 NEXT_STEPS = {
@@ -68,6 +69,23 @@ def parent_candidates(path):
     return result
 
 
+SHUTDOWN_PHASES = {
+    "idle", "requested", "stopping_workers", "detaching_mount",
+    "draining_filesystem", "checkpointing_local", "complete", "failed",
+}
+# Mirrors drive_native_gui.shutdown.BLOCKING_REASONS; duplicated here so the
+# clipboard path stays importable without the Qt shutdown watcher.
+SHUTDOWN_BLOCKING_REASONS = {
+    "waiting_for_workers", "unmounting_mount", "draining_open_files",
+    "persisting_local_changes", "mount_still_present", "unmount_failed",
+    "checkpoint_failed", "worker_join_failed",
+}
+SYNC_STATES = {"idle", "checking", "transferring", "pending", "paused",
+               "needs_attention", "unknown"}
+CACHE_STATES = {"unknown", "online_only", "partial", "complete", "pinned"}
+DIAGNOSTIC_TOKEN = re.compile(r"[a-z0-9_]{1,64}\Z")
+
+
 def diagnostic_text(overview, row=None):
     """Explicit whitelist: no account, path, IDs, tokens, or raw backend errors."""
     overview = overview if isinstance(overview, dict) else {}
@@ -93,6 +111,73 @@ def diagnostic_text(overview, row=None):
         data["queue_health"] = {k: health[k] for k in ("namespace_uncertain", "upload_uncertain", "namespace_unfinished", "upload_unfinished")
                                 if type(health.get(k)) is int and 0 <= health[k] < 1 << 64}
     data["upload_block_present"] = bool(overview.get("upload_block"))
+    # Cooperative stop facts: phase and a fixed blocker enum only.  A missing
+    # blocking_reason is expected on older backends and is simply omitted.
+    shutdown = overview.get("shutdown")
+    if isinstance(shutdown, dict):
+        closed = {}
+        phase = shutdown.get("phase")
+        if phase in SHUTDOWN_PHASES:
+            closed["phase"] = phase
+        reason = shutdown.get("blocking_reason")
+        if reason in SHUTDOWN_BLOCKING_REASONS:
+            closed["blocking_reason"] = reason
+        elif reason is not None:
+            closed["blocking_reason"] = "unrecognized"
+        for key in ("elapsed_ms", "stage_elapsed_ms"):
+            value = shutdown.get(key)
+            if type(value) is int and 0 <= value < 1 << 62:
+                closed[key] = value
+        if type(shutdown.get("overdue")) is bool:
+            closed["overdue"] = shutdown["overdue"]
+        if closed:
+            data["shutdown"] = closed
+    diagnostics = overview.get("connection_diagnostics")
+    if isinstance(diagnostics, dict):
+        closed = {}
+        for key in ("load_failed", "persistence_failed"):
+            if type(diagnostics.get(key)) is bool:
+                closed[key] = diagnostics[key]
+        for key in ("last_transition", "last_failure"):
+            item = diagnostics.get(key)
+            if isinstance(item, dict):
+                safe = {}
+                for name in ("phase", "category", "recovery"):
+                    token = item.get(name)
+                    if isinstance(token, str) and DIAGNOSTIC_TOKEN.fullmatch(token):
+                        safe[name] = token
+                if safe:
+                    closed[key] = safe
+        if closed:
+            data["connection_diagnostics"] = closed
+    kind = overview.get("background_error_kind")
+    if isinstance(kind, str) and DIAGNOSTIC_TOKEN.fullmatch(kind):
+        data["background_error_kind"] = kind
+    since = overview.get("background_error_since_ms")
+    if type(since) is int and 0 <= since < 1 << 62:
+        data["background_error_since_ms"] = since
+    sync_state = overview.get("sync_state")
+    if sync_state in SYNC_STATES:
+        data["sync_state"] = sync_state
+    count = overview.get("issue_count")
+    if type(count) is int and 0 <= count < 1 << 64:
+        data["issue_count"] = count
+    cache = overview.get("cache_availability")
+    if isinstance(cache, dict):
+        closed = {}
+        state = cache.get("state")
+        if state in CACHE_STATES:
+            closed["state"] = state
+        elif state is not None:
+            closed["state"] = "unrecognized"
+        for key in ("offline", "pinned", "total"):
+            value = cache.get(key)
+            if type(value) is int and 0 <= value < 1 << 64:
+                closed[key] = value
+        if type(cache.get("checked")) is bool:
+            closed["checked"] = cache["checked"]
+        if closed:
+            data["cache_availability"] = closed
     if row:
         data["issue_reason"] = row.get("reason") if row.get("reason") in NEXT_STEPS else "unrecognized"
         for key in ("directory", "can_keep_both", "can_keep_directory"):

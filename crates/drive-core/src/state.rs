@@ -94,6 +94,16 @@ pub struct DownloadTicket {
     pub id: String,
     pub version: String,
 }
+/// Offline availability summary over non-directory nodes. `state` is one of
+/// `empty`, `pinned`, `online_only`, `partial`, or `complete`; it describes
+/// what the local cache can serve while the server is unreachable.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CacheAvailability {
+    pub state: &'static str,
+    pub total: u64,
+    pub offline: u64,
+    pub pinned: u64,
+}
 
 struct WriterLock(File);
 impl Drop for WriterLock {
@@ -1468,6 +1478,39 @@ impl Store {
         Ok(true)
     }
 
+    /// Offline availability summary from local metadata only. Directories are
+    /// not countable entries; deleted and access-blocked nodes never count as
+    /// available. A dirty draft is available because it preserves local bytes.
+    pub fn cache_availability(&self) -> Result<CacheAvailability> {
+        let (total, offline, pinned) = self.db.query_row(
+            "WITH RECURSIVE pinned_tree(id) AS (SELECT id FROM nodes WHERE pinned=1 AND deleted=0 UNION SELECT n.id FROM nodes n JOIN pinned_tree p ON n.parent=p.id WHERE n.deleted=0) SELECT COALESCE(SUM(CASE WHEN n.directory=0 THEN 1 ELSE 0 END),0), COALESCE(SUM(CASE WHEN n.directory=0 AND COALESCE(n.dirty_blob,n.blob) IS NOT NULL AND n.id NOT IN (SELECT id FROM access_blocked) THEN 1 ELSE 0 END),0), COALESCE(SUM(CASE WHEN n.directory=0 AND n.id IN (SELECT id FROM pinned_tree) THEN 1 ELSE 0 END),0) FROM nodes n WHERE n.deleted=0",
+            [],
+            |r| {
+                let total: i64 = r.get(0)?;
+                let offline: i64 = r.get(1)?;
+                let pinned: i64 = r.get(2)?;
+                Ok((total as u64, offline as u64, pinned as u64))
+            },
+        )?;
+        let state = if total == 0 {
+            "empty"
+        } else if pinned > 0 && pinned == total && offline == total {
+            "pinned"
+        } else if offline == 0 {
+            "online_only"
+        } else if offline < total {
+            "partial"
+        } else {
+            "complete"
+        };
+        Ok(CacheAvailability {
+            state,
+            total,
+            offline,
+            pinned,
+        })
+    }
+
     pub fn pending_operations(&self) -> Result<i64> {
         Ok(self.db.query_row(
             "SELECT count(*) FROM operations WHERE state IN ('pending','inflight','uncertain')",
@@ -1493,4 +1536,111 @@ pub(crate) fn valid_node(n: &Node) -> Result<()> {
 }
 pub fn sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
+}
+
+#[cfg(test)]
+mod cache_availability_tests {
+    use super::*;
+
+    fn node(id: &str, parent: Option<&str>, name: &str, version: &str, directory: bool) -> Node {
+        Node {
+            id: id.into(),
+            parent: parent.map(str::to_owned),
+            name: name.into(),
+            version: version.into(),
+            directory,
+            metadata: Some(NodeMetadata {
+                size: 3,
+                mtime: 1,
+                mode: 0o644,
+            }),
+        }
+    }
+
+    fn fixture() -> (tempfile::TempDir, Store) {
+        let d = tempfile::tempdir().unwrap();
+        let mut s = Store::open(d.path()).unwrap();
+        s.install_remote_snapshot(
+            &[
+                node("root", None, "root", "r", true),
+                node("a", Some("root"), "a.doc", "v1", false),
+                node("b", Some("root"), "b.doc", "v1", false),
+            ],
+            "1",
+            "server",
+        )
+        .unwrap();
+        s.ensure_fs_root("root").unwrap();
+        (d, s)
+    }
+
+    fn publish(s: &mut Store, id: &str, bytes: &[u8]) {
+        s.publish_download(
+            &DownloadTicket {
+                id: id.into(),
+                version: "v1".into(),
+            },
+            bytes,
+            &sha256(bytes),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn reports_empty_online_only_partial_complete_and_pinned() {
+        let d = tempfile::tempdir().unwrap();
+        let mut s = Store::open(d.path()).unwrap();
+        assert_eq!(
+            s.cache_availability().unwrap(),
+            CacheAvailability {
+                state: "empty",
+                total: 0,
+                offline: 0,
+                pinned: 0,
+            }
+        );
+        drop(s);
+        let (_d, mut s) = fixture();
+        assert_eq!(s.cache_availability().unwrap().state, "online_only");
+        publish(&mut s, "a", b"a");
+        let c = s.cache_availability().unwrap();
+        assert_eq!((c.state, c.total, c.offline, c.pinned), ("partial", 2, 1, 0));
+        publish(&mut s, "b", b"b");
+        assert_eq!(s.cache_availability().unwrap().state, "complete");
+        s.pin("root", true).unwrap();
+        let c = s.cache_availability().unwrap();
+        assert_eq!((c.state, c.total, c.offline, c.pinned), ("pinned", 2, 2, 2));
+        s.install_remote_snapshot(
+            &[
+                node("root", None, "root", "r2", true),
+                node("a", Some("root"), "a.doc", "v1", false),
+            ],
+            "2",
+            "server",
+        )
+        .unwrap();
+        let c = s.cache_availability().unwrap();
+        assert_eq!((c.state, c.total, c.offline, c.pinned), ("pinned", 1, 1, 1));
+    }
+
+    #[test]
+    fn excludes_access_denied_nodes_from_offline_availability() {
+        let d = tempfile::tempdir().unwrap();
+        let mut s = Store::open(d.path()).unwrap();
+        let nodes = [
+            node("root", None, "root", "r", true),
+            node("a", Some("root"), "a.doc", "v1", false),
+            node("folder", Some("root"), "folder", "v1", true),
+            node("b", Some("folder"), "b.doc", "v1", false),
+        ];
+        s.install_remote_snapshot(&nodes, "1", "server").unwrap();
+        s.ensure_fs_root("root").unwrap();
+        publish(&mut s, "a", b"a");
+        publish(&mut s, "b", b"b");
+        assert_eq!(s.cache_availability().unwrap().state, "complete");
+        s.install_remote_snapshot_with_access(&nodes, "2", "server", &["folder".into()])
+            .unwrap();
+        let c = s.cache_availability().unwrap();
+        assert_eq!((c.state, c.total, c.offline, c.pinned), ("partial", 2, 1, 0));
+    }
 }

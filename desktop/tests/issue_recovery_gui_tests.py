@@ -251,5 +251,67 @@ class RecoveryTests(unittest.TestCase):
             self.assertNotIn("reconcile_attempts", data)
 
 
+    def test_initial_message_never_claims_no_issues(self):
+        dialog = IssuesDialog(self.bus)
+        try:
+            self.assertFalse(dialog.loaded)
+            self.assertIn("正在检查", dialog.message.text())
+            self.assertNotIn("没有需要处理", dialog.message.text())
+        finally:
+            dialog.deleteLater()
+
+    def test_empty_page_before_verification_settles_stays_checking(self):
+        self.dialog.rows.clear()
+        self.dialog.loaded = False
+        self.dialog.update_context(dict(self.context, initialization={"active": True, "phase": "catching_up"}))
+        self.assertIn("正在检查", self.dialog.message.text())
+        self.dialog.received("", self.dialog.generation, {"entries": [], "next": None}, None)
+        self.assertIn("正在检查", self.dialog.message.text())
+        self.assertNotIn("没有需要处理", self.dialog.message.text())
+
+    def test_loaded_online_empty_page_is_the_only_no_issue_claim(self):
+        self.dialog.rows.clear()
+        self.dialog.update_context(dict(self.context, initialization={"active": False}))
+        self.dialog.received("", self.dialog.generation, {"entries": [], "next": None}, None)
+        self.assertEqual(self.dialog.message.text(), "目前没有需要处理的同步问题。")
+
+    def test_offline_empty_page_explains_verification_is_incomplete(self):
+        self.dialog.rows.clear()
+        self.dialog.update_context(dict(self.context, connection="offline"))
+        self.assertIn("尚未完成问题核对", self.dialog.message.text())
+        self.dialog.received("", self.dialog.generation, {"entries": [], "next": None}, None)
+        self.assertIn("尚未完成问题核对", self.dialog.message.text())
+        self.assertIn("离线", self.dialog.message.text())
+
+    def test_diagnostic_includes_shutdown_and_connection_diagnostics(self):
+        self.dialog.update_context(dict(
+            self.context,
+            shutdown={"phase": "draining_filesystem", "blocking_reason": "draining_open_files",
+                      "elapsed_ms": 92000, "stage_elapsed_ms": 33000, "overdue": True,
+                      "raw": "secret"},
+            connection_diagnostics={"load_failed": False, "persistence_failed": True,
+                                    "last_transition": {"phase": "resume", "category": "network",
+                                                        "recovery": "automatic", "message": "secret"}},
+            background_error_kind="network_unavailable",
+            sync_state="checking",
+            issue_count=2,
+            cache_availability={"state": "partial", "offline": 1, "pinned": 0,
+                                "total": 3, "checked": True, "secret": "x"},
+        ))
+        self.dialog.copy_diagnostic(); value = QApplication.clipboard().text()
+        data = json.loads(value)
+        self.assertEqual(data["shutdown"]["blocking_reason"], "draining_open_files")
+        self.assertTrue(data["shutdown"]["overdue"])
+        self.assertEqual(data["connection_diagnostics"]["last_transition"],
+                         {"phase": "resume", "category": "network", "recovery": "automatic"})
+        self.assertEqual(data["background_error_kind"], "network_unavailable")
+        self.assertEqual(data["sync_state"], "checking")
+        self.assertEqual(data["issue_count"], 2)
+        self.assertEqual(data["cache_availability"]["state"], "partial")
+        self.assertNotIn("secret", value)
+        for text in ("private-token", "gone", "synthetic-mount", "synthetic-task"):
+            self.assertNotIn(text, value)
+
+
 if __name__ == "__main__":
     unittest.main()

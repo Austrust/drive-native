@@ -11,7 +11,9 @@ from PySide6.QtDBus import (
 
 NAME = "org.drivenative.Client1"
 PATH = "/org/drivenative/Client1"
-HISTORY_METHODS = frozenset(("GetSyncHistory", "GetRecentActivity", "ResolveHistoryTarget", "ClearSyncHistory"))
+HISTORY_METHODS = frozenset(("GetSyncHistory", "GetRecentActivity", "ResolveHistoryTarget",
+                             "ClearSyncHistory", "GetSyncHistoryRetention",
+                             "SetSyncHistoryRetention"))
 
 
 class ClientBus(QObject):
@@ -66,7 +68,10 @@ class ClientBus(QObject):
         destination = (
             self.owner
             if method
-            in ("Unlock", "KeepBoth", "KeepDirectoryBoth", "RecheckIssues", "SetCacheSettings", "SetTransferSettings", "SetTrustSettings", "Pause", "Resume", "StopMount", "ClearSyncHistory", "SetWritePolicy")
+            in ("Unlock", "KeepBoth", "KeepDirectoryBoth", "RecheckIssues", "SetCacheSettings",
+                "SetTransferSettings", "SetTrustSettings", "Pause", "Resume", "StopMount",
+                "ClearSyncHistory", "SetWritePolicy", "GetSyncHistoryRetention",
+                "SetSyncHistoryRetention")
             else self.service
         )
         if not destination:

@@ -6,6 +6,76 @@ from PySide6.QtDBus import QDBusMessage, QDBusPendingCallWatcher
 from .config import binary
 from .pause_handover import preserve_pause
 
+# Conservative stage labels for the cooperative handover.  A newer backend may
+# add an optional upgrade_stage field to GetOverview; when it is absent (older
+# backend) the local sequence below is the only claim the GUI can display.
+STAGES = {
+    "pausing": "正在暂停同步",
+    "persisting_pause": "正在保存暂停状态",
+    "stopping": "正在结束传输并停止旧后台",
+    "waiting_exit": "正在等待旧后台退出",
+    "starting": "正在启动新版后台",
+    "verifying": "正在确认新版后台接管",
+    "complete": "后台已切换，请检查暂停状态后恢复同步",
+    "failed": "后台未切换，请检查诊断",
+}
+EXPECTED_STATE_SCHEMA = 26
+EXPECTED_IPC = 21
+
+
+def stage_text(stage):
+    return STAGES.get(stage, "") if isinstance(stage, str) else ""
+
+
+def normalize_version(value):
+    """Closed shape {build,state_schema,ipc}; None when absent or malformed."""
+    if not isinstance(value, dict):
+        return None
+    build = value.get("build")
+    schema = value.get("state_schema")
+    ipc = value.get("ipc")
+    if not (isinstance(build, str) and 0 < len(build) <= 64 and build.isprintable()):
+        build = None
+    if type(schema) is not int or schema < 1:
+        schema = None
+    if type(ipc) is not int or ipc < 1:
+        ipc = None
+    if build is None and schema is None and ipc is None:
+        return None
+    return {"build": build, "state_schema": schema, "ipc": ipc}
+
+
+def version_summary(version):
+    if not isinstance(version, dict):
+        return ""
+    parts = []
+    if isinstance(version.get("build"), str):
+        parts.append(version["build"])
+    if type(version.get("state_schema")) is int:
+        parts.append(f"状态库 v{version['state_schema']}")
+    if type(version.get("ipc")) is int:
+        parts.append(f"IPC v{version['ipc']}")
+    return " · ".join(parts)
+
+
+def version_state(version):
+    """ok / mismatch / missing; missing is conservative, never a success claim."""
+    if not isinstance(version, dict):
+        return "missing"
+    schema = version.get("state_schema")
+    ipc = version.get("ipc")
+    if schema is None and ipc is None:
+        return "missing"
+    if schema == EXPECTED_STATE_SCHEMA and ipc == EXPECTED_IPC:
+        return "ok"
+    return "mismatch"
+
+
+def available_upgrades(upgrades):
+    """Slots with a pending handover, for a caller that serialises them."""
+    items = upgrades.items() if isinstance(upgrades, dict) else enumerate(upgrades or ())
+    return [slot for slot, upgrade in items if getattr(upgrade, "available", False)]
+
 
 class _OwnedPidfd:
     """Can outlive the QObject wrapper long enough to close its descriptor."""
@@ -21,6 +91,7 @@ class _OwnedPidfd:
 class BackendUpgrade(QObject):
     changed = Signal(bool)
     finished = Signal(object)
+    stage_changed = Signal(str)
 
     def __init__(self, bus, launcher, parent=None, *, save_pause=None):
         super().__init__(parent)
@@ -39,6 +110,11 @@ class BackendUpgrade(QObject):
         self.confirming = False
         self.confirm_pending = False
         self.elapsed = 0
+        # Display-only handover state; never used to claim that the switch
+        # succeeded (only the pidfd/owner verification can do that).
+        self.stage = ""
+        self.stage_supported = False
+        self.version = None
         self.timer = QTimer(self)
         self.timer.setInterval(250)
         self.timer.timeout.connect(self._wait_exit)
@@ -106,12 +182,20 @@ class BackendUpgrade(QObject):
         self.available = value
         self.changed.emit(value)
 
+    def _set_stage(self, stage):
+        """Display-only progress; never a completion claim."""
+        if stage not in STAGES or stage == self.stage:
+            return
+        self.stage = stage
+        self.stage_changed.emit(stage)
+
     def begin(self, profile=None):
         if self.active or not self.available or self.owner != self.bus.owner:
             self.check()
             return False
         self.active = True
         self.intent_profile = dict(profile) if profile else None
+        self._set_stage("pausing")
         self.bus.call("Pause", callback=self._paused)
         return self.active
 
@@ -119,6 +203,7 @@ class BackendUpgrade(QObject):
         if error or self.owner != self.bus.owner:
             self._finish("暂停未确认，尚未切换后台。")
             return
+        self._set_stage("persisting_pause")
         try:
             if self.save_pause:
                 self.save_pause()
@@ -129,7 +214,9 @@ class BackendUpgrade(QObject):
             return
         self.waiting_exit = True
         self.elapsed = 0
+        self._set_stage("stopping")
         self.bus.call("StopMount", callback=self._stopped)
+        self._set_stage("waiting_exit")
         self.timer.start()
 
     def _stopped(self, _data, error):
@@ -149,6 +236,7 @@ class BackendUpgrade(QObject):
             self.timer.stop()
             self.waiting_exit = False
             self.pidfd = None
+            self._set_stage("starting")
             self.launcher.start()
             return
         self.elapsed += 1
@@ -163,6 +251,7 @@ class BackendUpgrade(QObject):
                 return
             self.confirming = True
             self.elapsed = 0
+            self._set_stage("verifying")
             self.timer.start()
             self._confirm_started()
 
@@ -178,6 +267,17 @@ class BackendUpgrade(QObject):
             if error or self.bus.owner != owner or not isinstance(data, dict):
                 self.confirm_pending = False
                 return
+            # Optional additive fields from a newer backend; absent is expected
+            # on older packages and only degrades the display, never the check.
+            self.version = normalize_version(data.get("version"))
+            if version_state(self.version) == "mismatch":
+                self._finish("新版后台的版本信息与当前界面不匹配，未确认接管；数据仍保留。请检查更新包。")
+                return
+            stage = data.get("upgrade_stage")
+            if isinstance(stage, str) and stage in STAGES:
+                self.stage_supported = True
+                if stage not in ("complete", "failed"):
+                    self._set_stage(stage)
             if not self.intent_profile or data.get("task_id") != self.intent_profile.get("task_id"):
                 self._finish("新后台的任务身份不匹配，未确认接管；数据仍保留。")
                 return
@@ -222,5 +322,6 @@ class BackendUpgrade(QObject):
         self.waiting_exit = False
         self.confirming = False
         self.confirm_pending = False
+        self._set_stage("failed" if error else "complete")
         self.finished.emit(error)
         self.check()

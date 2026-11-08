@@ -102,9 +102,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut shutdown = tokio::task::spawn_blocking(move || -> std::io::Result<()> {
         use drive_runtime::shutdown::Phase;
         let s = shutdown_service;
+        s.shutdown_diagnostics.reason(Some("waiting_for_workers"));
         s.shutdown_diagnostics.phase(Phase::StoppingWorkers);
         tasks.join();
         s.bridge.clear_notifier();
+        s.shutdown_diagnostics.reason(Some("unmounting_mount"));
         s.shutdown_diagnostics.phase(Phase::DetachingMount);
         let session_result = if let Some(session) = mounted {
             session.join_with_unmount(|| {
@@ -112,6 +114,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 {
                     s.mounted.store(present, Ordering::Release);
                 }
+                s.shutdown_diagnostics.reason(Some("draining_open_files"));
                 s.shutdown_diagnostics.phase(Phase::DrainingFilesystem);
             })
         } else {
@@ -120,6 +123,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         // Session destruction has drained all accepted write/fsync callbacks.
         // Persist drafts even when applications kept their file descriptors open.
         // This is a local checkpoint, never a server upload or cache clear.
+        s.shutdown_diagnostics.reason(Some("persisting_local_changes"));
         s.shutdown_diagnostics.phase(Phase::CheckpointingLocal);
         let checkpoint = s
             .bridge
@@ -128,10 +132,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap()
             .checkpoint_recovered_drafts()
             .map_err(std::io::Error::other);
+        let checkpoint_failed = checkpoint.is_err();
         let present = drive_runtime::mount_registry::mount_present(&s.profile.mount);
         if let Ok(value) = present.as_ref() {
             s.mounted.store(*value, Ordering::Release);
         }
+        let mount_present = matches!(present, Ok(true));
         let outcome = session_result.and(checkpoint.map(|_| ())).and_then(|_| {
             if present? {
                 Err(std::io::Error::other(
@@ -141,11 +147,20 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(())
             }
         });
-        s.shutdown_diagnostics.phase(if outcome.is_ok() {
-            Phase::Complete
+        if outcome.is_ok() {
+            s.shutdown_diagnostics.reason(None);
+            s.shutdown_diagnostics.phase(Phase::Complete);
         } else {
-            Phase::Failed
-        });
+            let reason = if mount_present {
+                "mount_still_present"
+            } else if checkpoint_failed {
+                "checkpoint_failed"
+            } else {
+                "unmount_failed"
+            };
+            s.shutdown_diagnostics.reason(Some(reason));
+            s.shutdown_diagnostics.phase(Phase::Failed);
+        }
         outcome
     });
     // Keep the local bus responsive and report the precise slow phase; never

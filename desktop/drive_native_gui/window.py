@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 )
 from .issues import IssuesDialog
 from .trust import TrustSettingsDialog
-from .transfers import TransfersDialog
+from .transfers import TransfersDialog, transfer_overview_summary, transfer_rows
 from .cache_settings import CacheSettingsDialog
 from .bus import ClientBus
 from .config import load_profile, config_path, binary, archive_profile, restore_profile
@@ -36,7 +36,7 @@ from .upgrade import BackendUpgrade
 from .initialization import progress_text
 from .shutdown import shutdown_text, ShutdownWatcher
 from .theme import apply_window_theme
-from .queue_health import queue_notice, uncertain_operations
+from .queue_health import queue_notice
 from .history import HistoryPage, HistorySource
 from .permissions import permission_text, PermissionSettings
 
@@ -79,6 +79,68 @@ ERRORS = {
     "local_or_protocol_error": "同步遇到问题，已保存的本地内容会保留。",
 }
 
+# Connection, sync activity and local availability are three independent axes.
+# Keep their wording in one place so no card can overwrite another one.
+CHANNEL = {
+    "locked": "等待登录",
+    "connecting": "正在连接",
+    "online": "已连接",
+    "offline": "暂时离线",
+    "paused": "未连接（同步已暂停）",
+    "needs_attention": "需要处理",
+    "stopping": "正在停止",
+}
+SYNC = {
+    "needs_attention": "需要处理",
+    "paused": "已暂停同步",
+    "transferring": "正在传输 {n} 项",
+    "checking": "正在检查变更",
+    "pending": "{n} 项等待同步",
+    "idle": "暂无待处理变更",
+    "unknown": "尚未核对",
+}
+CACHE = {
+    "empty": "目录暂无文件",
+    "online_only": "仅在线",
+    "partial": "部分本地可用",
+    "complete": "已缓存可离线打开",
+    "pinned": "已固定",
+    "unknown": "尚未核对",
+}
+SYNC_ROW = {
+    "initializing": "—",
+    "download_retry": "需要检查",
+    "update_retry": "需要检查",
+    "download_failed": "需要检查",
+    "update_failed": "需要检查",
+    "pinning": "正在固定",
+    "downloading": "正在传输",
+    "updating": "正在传输",
+    "pending_upload": "等待同步",
+    "conflict": "需要处理冲突",
+    "deleted": "已移除",
+    "online_only": "暂无待处理变更",
+    "local_complete": "暂无待处理变更",
+    "pinned_complete": "暂无待处理变更",
+    "mixed": "暂无待处理变更",
+}
+
+
+def sync_row_text(row):
+    if row.get("error"):
+        return "状态读取失败"
+    return SYNC_ROW.get(row.get("status"), "尚未核对")
+
+
+def cache_row_text(row):
+    if row.get("status") == "initializing":
+        return "尚未可用"
+    if row.get("status") == "mixed":
+        return "部分本地可用"
+    if row.get("offline_available"):
+        return "已固定" if row.get("pinned") else "已缓存"
+    return "仅在线"
+
 
 def status_icon(status):
     color = QColor(STATUS.get(status, ("", "#c14c58"))[1])
@@ -102,9 +164,20 @@ def status_icon(status):
     return QIcon(pix)
 
 
+class _MountActions:
+    """Start hook handed to the history page: one page owns exactly one mount."""
+
+    def __init__(self, window):
+        self.window = window
+
+    def start_mount(self, slot=None):
+        return self.window.start_mount(slot)
+
+
 class MainWindow(QMainWindow):
     ready = Signal()
     pause_intent = Signal()
+    stop_requested = Signal()
 
     def __init__(self, parent=None, *, instance=None, new_name=None):
         super().__init__(parent)
@@ -125,6 +198,9 @@ class MainWindow(QMainWindow):
         self.display_limit = 256
         self.view_generation = 0
         self.rows = []
+        # Directory page accumulator: a GetDirectory reply may arrive before
+        # received_overview creates it for the first time.
+        self.page_rows = []
         self.loading = False
         self.progress_loading = False
         self.progress_again = False
@@ -132,6 +208,17 @@ class MainWindow(QMainWindow):
         self.pending_password = None
         self.auto_unlock_attempted = False
         self.keyring_job = None
+        # In-flight transfer summary state (see refresh_transfers): a reply is
+        # only applied while it still belongs to the visible page generation.
+        self.transfer_loading = False
+        self.transfer_again = False
+        self.transfer_generation = 0
+        self.transfer_rows = []
+        self.transfer_count = 0
+        # The embedded page is hidden whenever the owner window goes to the
+        # tray; remember the owner's maximized state across that hide/show.
+        self.restore_maximized = False
+        self.cache_from_backend = False
         root = QWidget()
         self.setCentralWidget(root)
         layout = QVBoxLayout(root)
@@ -180,6 +267,10 @@ class MainWindow(QMainWindow):
         self.open_folder = QPushButton("在文件管理器中打开")
         self.open_folder.clicked.connect(self.open_in_files)
         left.addWidget(self.open_folder)
+        self.stop_mount = QPushButton("停止此挂载并卸载…")
+        self.stop_mount.setAccessibleName("停止此挂载并卸载")
+        self.stop_mount.clicked.connect(self.stop_and_unmount)
+        left.addWidget(self.stop_mount)
         left.addStretch()
         self.account = QLabel("尚未连接 NAS")
         self.account.setWordWrap(True)
@@ -217,13 +308,33 @@ class MainWindow(QMainWindow):
         cards = QHBoxLayout()
         cards.setSpacing(14)
         self.connection_value = self.card(cards, "连接状态", "尚未启动")
-        self.pending_value = self.card(cards, "待处理操作", "—")
-        self.availability_value = self.card(cards, "当前目录本地可用", "按需查询")
+        self.sync_value = self.card(cards, "同步活动", "尚未核对")
+        # Compatibility alias: existing pages/tests still address the card by
+        # its historical attribute name.
+        self.pending_value = self.sync_value
+        self.availability_value = self.card(cards, "本地可用性", "尚未核对")
         content.addLayout(cards)
         self.progress_label = QLabel()
         self.progress_label.setWordWrap(True)
         self.progress_label.hide()
         content.addWidget(self.progress_label)
+        self.transfer_title = QLabel("当前传输")
+        self.transfer_title.setObjectName("muted")
+        content.addWidget(self.transfer_title)
+        self.transfer_summary = QLabel("当前没有正在传输的文件")
+        self.transfer_summary.setWordWrap(True)
+        content.addWidget(self.transfer_summary)
+        self.transfer_table = QTreeWidget()
+        self.transfer_table.setHeaderLabels(["文件", "方向", "阶段", "正文进度"])
+        self.transfer_table.setRootIsDecorated(False)
+        self.transfer_table.setSelectionMode(QTreeWidget.NoSelection)
+        self.transfer_table.setMaximumHeight(8 * 24 + 26)
+        self.transfer_table.hide()
+        content.addWidget(self.transfer_table)
+        self.transfer_more = QPushButton()
+        self.transfer_more.clicked.connect(self.show_transfers)
+        self.transfer_more.hide()
+        content.addWidget(self.transfer_more, 0, Qt.AlignLeft)
         self.shutdown_label = QLabel(); self.shutdown_label.setWordWrap(True)
         self.shutdown_label.hide(); content.addWidget(self.shutdown_label)
         self.shutdown_watcher = ShutdownWatcher(self.bus, lambda: self.profile.get("task_id") if self.profile else None, self.render_shutdown, self)
@@ -282,7 +393,7 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.filter)
         details.addLayout(toolbar)
         self.table = QTreeWidget()
-        self.table.setHeaderLabels(["名称", "同步状态", "离线使用"])
+        self.table.setHeaderLabels(["名称", "同步状态", "本地可用性"])
         self.table.setRootIsDecorated(False)
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionMode(QTreeWidget.ExtendedSelection)
@@ -302,7 +413,8 @@ class MainWindow(QMainWindow):
         self.more.hide()
         footer.addWidget(self.more)
         details.addLayout(footer)
-        self.history_page = HistoryPage(self.history_sources, self)
+        self.history_page = HistoryPage(
+            self.history_sources, self, mount_actions=_MountActions(self))
         self.tabs.addTab(self.history_page, "同步历史")
         self.issues_page = QWidget()
         issue_layout = QVBoxLayout(self.issues_page)
@@ -325,6 +437,11 @@ class MainWindow(QMainWindow):
         self.progress_timer = QTimer(self)
         self.progress_timer.setInterval(2000)
         self.progress_timer.timeout.connect(self.refresh_progress)
+        # The transfer summary refreshes only while the overview page is
+        # visible; replies that arrive after hiding are discarded.
+        self.transfer_timer = QTimer(self)
+        self.transfer_timer.setInterval(2000)
+        self.transfer_timer.timeout.connect(self.refresh_transfers)
         self.bus.availability.connect(self.service_availability)
         for label in self.findChildren(QLabel):
             label.setTextFormat(Qt.PlainText)
@@ -336,9 +453,10 @@ class MainWindow(QMainWindow):
         self.files_button.setText("收起文件状态" if visible else "查看文件状态")
         self.view_generation += 1
         if visible:
+            self.stop_transfer_timer()
             self.schedule_refresh()
         else:
-            self.availability_value.setText("按需查询")
+            self.start_transfer_timer()
 
     def tab_changed(self, _index):
         visible = self.tabs.currentWidget() is self.file_details
@@ -346,7 +464,13 @@ class MainWindow(QMainWindow):
         self.files_button.setChecked(visible)
         self.files_button.blockSignals(False)
         self.view_generation += 1
-        if visible: self.schedule_refresh()
+        if visible:
+            self.stop_transfer_timer()
+            self.schedule_refresh()
+        elif self.tabs.currentWidget() is self.overview_page:
+            self.start_transfer_timer()
+        else:
+            self.stop_transfer_timer()
         if self.tabs.currentWidget() is self.issues_page: self.show_issues()
 
     def history_sources(self):
@@ -365,14 +489,107 @@ class MainWindow(QMainWindow):
         super().showEvent(event)
         self.schedule_refresh()
         self.refresh_progress()
+        self.start_transfer_timer()
         if hasattr(self.bus, "shutdown_changed"): self.shutdown_watcher.refresh()
+        if self.restore_maximized:
+            QTimer.singleShot(0, self, self.restore_owner_maximized)
 
     def hideEvent(self, event):
         self.refresh_timer.stop()
         self.progress_timer.stop()
+        self.stop_transfer_timer()
         self.refresh_again = False
         self.view_generation += 1
+        owner = self.window()
+        self.restore_maximized = bool(owner is not self and owner.isMaximized())
         super().hideEvent(event)
+
+    def start_transfer_timer(self):
+        if not self.transfer_page_visible():
+            return
+        if not self.transfer_timer.isActive():
+            self.transfer_timer.start()
+        self.refresh_transfers()
+
+    def stop_transfer_timer(self):
+        self.transfer_timer.stop()
+        self.transfer_generation += 1
+        self.transfer_loading = False
+        self.transfer_again = False
+
+    def transfer_page_visible(self):
+        return self.isVisible() and self.tabs.currentWidget() is self.overview_page
+
+    def refresh_transfers(self):
+        if not self.transfer_page_visible():
+            return
+        if self.transfer_loading:
+            self.transfer_again = True
+            return
+        self.transfer_loading = True
+        generation = self.transfer_generation
+        task = (self.profile or {}).get("task_id")
+
+        def received(data, error):
+            self.transfer_loading = False
+            if generation != self.transfer_generation or not self.transfer_page_visible():
+                self.transfer_again = False
+                return
+            if task and (self.profile or {}).get("task_id") != task:
+                self.transfer_again = False
+                return
+            self.render_transfers(data, error)
+            if self.transfer_again:
+                self.transfer_again = False
+                QTimer.singleShot(100, self.refresh_transfers)
+
+        if not self.bus.owner:
+            self.transfer_loading = False
+            self.render_transfers(None, "service_unavailable")
+            return
+        self.bus.call("GetTransfers", callback=received)
+
+    def render_transfers(self, data, error):
+        if error or not isinstance(data, dict) or data.get("schema") != 1:
+            self.transfer_summary.setText("当前传输状态暂不可用。")
+            self.transfer_table.clear()
+            self.transfer_table.hide()
+            self.transfer_more.hide()
+            return
+        task = (self.profile or {}).get("task_id")
+        if task and data.get("task_id") != task:
+            self.transfer_summary.setText("任务身份不一致，等待刷新后重试。")
+            self.transfer_table.clear()
+            self.transfer_table.hide()
+            self.transfer_more.hide()
+            return
+        entries = data.get("entries", [])
+        self.transfer_rows = transfer_rows(entries)
+        self.transfer_count = len(entries) if isinstance(entries, list) else 0
+        self.transfer_summary.setText(transfer_overview_summary(entries))
+        self.transfer_table.clear()
+        for row in self.transfer_rows[:8]:
+            item = QTreeWidgetItem([
+                Path(row["path"]).name or row["path"],
+                row["direction"],
+                row["phase"],
+                row["progress_text"],
+            ])
+            item.setToolTip(0, row["path"])
+            self.transfer_table.addTopLevelItem(item)
+        visible = bool(self.transfer_rows)
+        more = visible and self.transfer_count > 8
+        self.transfer_table.setVisible(visible)
+        self.transfer_more.setVisible(more)
+        if more:
+            self.transfer_more.setText(f"查看全部（共 {self.transfer_count} 项）")
+
+    def restore_owner_maximized(self):
+        owner = self.window()
+        if (self.restore_maximized and owner is not self
+                and owner.isVisible() and not owner.isMaximized()):
+            owner.showMaximized()
+        self.restore_maximized = False
 
     def show_transfers(self):
         if self.transfers_dialog is None:
@@ -457,6 +674,22 @@ class MainWindow(QMainWindow):
         self.connection_value.setText("正在启动")
         self.launcher.start(enable=enable)
 
+    def start_mount(self, slot=None):
+        """Start this page's mount task for the history retry action.
+
+        The page only owns its own instance; a history row bound to another
+        mount must be started from that mount's page instead of pretending the
+        start succeeded here.
+        """
+        if slot is not None and (slot or "") != (self.instance or ""):
+            self.show_error("只能从当前挂载页面启动该挂载，请在对应挂载页面中启动。")
+            return False
+        if not self.profile:
+            self.show_error("无法启动挂载：当前挂载配置尚未载入。")
+            return False
+        self.start_service(enable=True)
+        return True
+
     def service_started(self, error):
         if error:
             self.show_error(error)
@@ -471,6 +704,8 @@ class MainWindow(QMainWindow):
         self.progress_timer.stop()
         self.progress_label.hide()
         self.connection_value.setText("尚未连接")
+        self.sync_value.setText("尚未核对")
+        self.availability_value.setText("尚未核对")
         self.preview_label.hide()
         self.pause.setEnabled(False)
         self.open_folder.setEnabled(False)
@@ -636,16 +871,80 @@ class MainWindow(QMainWindow):
                 self.progress_timer.start()
         else:
             self.progress_timer.stop()
-        if title and self.bus.owner and (
-                not self.overview or self.overview.get("connection") in ("connecting", "online")):
-            self.connection_value.setText(
-                CONNECTION.get(self.overview.get("connection"), "需要检查")
-                if uncertain_operations(self.overview) else title)
 
     def edit_permissions(self):
         if "write_policy_revision" in self.overview:
             PermissionSettings(self.bus, self.overview, self).exec()
             self.refresh()
+
+    def count(self, value):
+        return int(value) if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
+
+    def update_sync_card(self, data):
+        """Sync activity card; connection and cache state stay separate."""
+        pending = self.count(data.get("pending_operations")) + self.count(
+            data.get("uncertain_operations"))
+        initialization = data.get("initialization")
+        if not isinstance(initialization, dict):
+            initialization = {}
+        phase = initialization.get("phase")
+        sync_state = data.get("sync_state")
+        derived = sync_state not in SYNC or sync_state == "unknown"
+        if not derived:
+            value = SYNC[sync_state]
+            if sync_state == "transferring":
+                active = data.get("active_transfers")
+                value = (value.format(n=self.count(active))
+                         if isinstance(active, int) and not isinstance(active, bool) else "正在传输")
+            elif sync_state == "pending":
+                value = value.format(n=pending)
+        else:
+            state = data.get("connection")
+            if data.get("error") or state == "needs_attention":
+                value = SYNC["needs_attention"]
+            elif state == "paused":
+                value = SYNC["paused"]
+            elif data.get("upload_block"):
+                value = "上传暂缓"
+            elif initialization.get("active") is True and phase != "waiting":
+                value = SYNC["checking"]
+            elif pending:
+                value = SYNC["pending"].format(n=pending)
+            elif phase == "waiting":
+                value = SYNC["idle"]
+            else:
+                value = "尚未核对"
+        self.sync_value.setText(value)
+        tooltip = []
+        if initialization:
+            _title, detail = progress_text(initialization)
+            if detail:
+                tooltip.append(detail)
+        tooltip.append(f"待处理 {self.count(data.get('pending_operations'))} 项")
+        if self.count(data.get("uncertain_operations")):
+            tooltip.append(f"待确认 {self.count(data.get('uncertain_operations'))} 项")
+        if derived:
+            tooltip.append("按旧后台推导")
+        self.sync_value.setToolTip("\n".join(tooltip))
+
+    def update_availability_card(self, data):
+        """Local availability card; owner of the cache aggregate is the backend."""
+        cache = data.get("cache_availability")
+        if isinstance(cache, dict) and cache.get("state") in CACHE:
+            self.cache_from_backend = True
+            self.availability_value.setText(CACHE[cache["state"]])
+            total = self.count(cache.get("total"))
+            offline = self.count(cache.get("offline"))
+            pinned = self.count(cache.get("pinned"))
+            self.availability_value.setToolTip(f"可离线打开 {offline}/{total}；已固定 {pinned}")
+        else:
+            self.cache_from_backend = False
+            self.availability_value.setToolTip("后端不支持缓存汇总")
+
+    def mark_cards_stale(self):
+        for card in (self.connection_value, self.sync_value, self.availability_value):
+            if card.text():
+                card.setToolTip("状态可能过期（上次确认）")
 
     def received_overview(self, data, error):
         if error:
@@ -656,6 +955,7 @@ class MainWindow(QMainWindow):
                 # NoReply/Timeout can be a slow local transaction. Preserve the
                 # last confirmed mount/control state; only owner loss is offline.
                 self.show_error(f"暂时无法读取状态详情（{error}）。保留上次确认的挂载状态。")
+                self.mark_cards_stale()
                 self.refresh_progress()
                 self.ready.emit()
             self.followup_refresh()
@@ -682,9 +982,11 @@ class MainWindow(QMainWindow):
             if data.get("preview_only") is True else
             "文件可直接从文件管理器打开。\n选择“文件”页，按需载入当前目录的状态列表。")
         state = data["connection"]
-        self.connection_value.setText(CONNECTION.get(state, "需要检查"))
+        self.connection_value.setText(CHANNEL.get(state, "需要检查"))
+        self.connection_value.setToolTip("")
         self.render_progress(data.get("initialization"))
-        self.pending_value.setText(str(data["pending_operations"]))
+        self.update_sync_card(data)
+        self.update_availability_card(data)
         self.account.setText(f"{data.get('username','')}\n{data.get('host','')}")
         self.configure.setText("解锁 / 重新登录")
         self.configure.setEnabled(self.profile is not None)
@@ -777,7 +1079,8 @@ class MainWindow(QMainWindow):
             self.more.hide()
             self.detail.setText("该目录暂时没有访问权限。" if data.get("directory_state") == "denied"
                                 else "目录列表尚未就绪，完成核对后会自动刷新。")
-            self.availability_value.setText("尚未确认")
+            if not self.cache_from_backend:
+                self.availability_value.setText("尚未确认")
             self.up.setEnabled(bool(self.folder))
             self.ready.emit()
             self.followup_refresh()
@@ -792,7 +1095,8 @@ class MainWindow(QMainWindow):
             self.render_rows()
             self.more.hide()
             self.detail.setText("目录内容已变化，等待下一次状态刷新。")
-            self.availability_value.setText("尚未确认")
+            if not self.cache_from_backend:
+                self.availability_value.setText("尚未确认")
             self.ready.emit()
             self.followup_refresh()
             return
@@ -811,9 +1115,10 @@ class MainWindow(QMainWindow):
         if links: suffix += f" · 已跳过 {links} 个符号链接（暂不支持，不读取链接目标）"
         qualifier = "初始化预览，正文尚未可用" if data.get("preview_only") is True else "状态按最后已知远端版本显示"
         self.detail.setText(f"{len(self.rows)} / {data['total']} 项 · {qualifier}" + suffix)
-        self.availability_value.setText(
-            f"{sum(bool(r.get('offline_available')) for r in self.rows)} / {len(self.rows)}"
-        )
+        if not self.cache_from_backend:
+            self.availability_value.setText(
+                f"{sum(bool(r.get('offline_available')) for r in self.rows)} / {len(self.rows)}"
+            )
         self.breadcrumb.setText(self.files_title.text() + ("/" + self.folder if self.folder else ""))
         self.up.setEnabled(bool(self.folder))
         self.ready.emit()
@@ -850,15 +1155,11 @@ class MainWindow(QMainWindow):
                 self.table.takeTopLevelItem(self.table.indexOfTopLevelItem(item))
                 self.table.insertTopLevelItem(index, item)
             status = row.get("status")
-            label = STATUS.get(status, ("状态不可用", ""))[0]
-            if row.get("error"):
-                label = "状态读取失败"
             for column, text in enumerate(
                 [
                     Path(row["path"]).name,
-                    label,
-                    "尚未可用" if status == "initializing" else
-                    ("可用" if row.get("offline_available") else "需要联网"),
+                    sync_row_text(row),
+                    cache_row_text(row),
                 ]
             ):
                 if item.text(column) != text:
@@ -941,6 +1242,32 @@ class MainWindow(QMainWindow):
             "Resume" if self.overview.get("connection") == "paused" else "Pause",
             callback=self.action_done,
         )
+
+    def stop_and_unmount(self):
+        """Confirm, then ask the unified window to stop and unmount this mount.
+
+        This page never stops services itself: the window owns stage polling and
+        diagnostics. Pausing keeps the mount; stopping ends the mount and its
+        background service without deleting local cache, drafts or remote files.
+        """
+        answer = QMessageBox.question(
+            self, "停止此挂载并卸载",
+            "暂停同步只暂停此挂载并保留挂载点，可稍后恢复。\n"
+            "停止并卸载会结束此挂载及其后台服务，不会删除本地缓存、草稿或远端文件。\n"
+            "确定要停止并卸载此挂载吗？",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if answer != QMessageBox.Yes:
+            return
+        self.set_stopping(True)
+        self.show_error("已请求停止并卸载此挂载，正在等待后台确认停止阶段。暂停同步只会暂停并保留挂载。")
+        self.stop_requested.emit()
+
+    def set_stopping(self, stopping, message=""):
+        """Allow the owner window to restore the button when stopping fails."""
+        self.stop_mount.setEnabled(not stopping)
+        self.stop_mount.setText("正在停止并卸载…" if stopping else "停止此挂载并卸载…")
+        if message:
+            self.show_error(message)
 
     def show_error(self, text):
         self.banner.setText(text)

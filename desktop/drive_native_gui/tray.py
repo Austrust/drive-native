@@ -2,17 +2,47 @@
 from pathlib import Path
 import os
 import select
+import time
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QAction, QCursor
+from PySide6.QtGui import QAction, QColor, QCursor, QIcon, QPainter, QPixmap
 from PySide6.QtDBus import QDBusMessage, QDBusPendingCallWatcher
 from PySide6.QtWidgets import (
     QApplication, QDialog, QVBoxLayout, QLabel, QTreeWidget, QTreeWidgetItem,
     QPushButton, QMenu, QSystemTrayIcon, QHeaderView, QWidget, QTabWidget, QMessageBox,
 )
 from .window import status_icon
+from .theme import status_color, status_icon as status_glyph
+from .shutdown import STOP_DEADLINE_SECONDS, blocking_reason_text
 from .transfers import PHASES, size_text
 from .queue_health import uncertain_operations
 from .history import HistoryPage
+
+
+def tray_icon(kind):
+    """Draw a tray icon from the shared semantic palette (theme.py owns the colors)."""
+    try:
+        color = QColor(status_color(kind))
+        glyph = status_glyph(kind)
+    except (KeyError, TypeError):
+        # Keep the tray meaningful if theme.py ever loses a semantic kind.
+        return status_icon({"idle": "local_complete", "attention": "conflict",
+                            "paused": "mixed", "unknown": "pinning"}.get(kind, "local_complete"))
+    pixmap = QPixmap(22, 22); pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    try:
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen); painter.setBrush(color)
+        painter.drawEllipse(1, 1, 20, 20)
+        painter.setPen(QColor("#20242b" if color.lightness() > 150 else "#ffffff"))
+        font = painter.font(); font.setPixelSize(13); font.setBold(True); painter.setFont(font)
+        painter.drawText(pixmap.rect(), Qt.AlignCenter, glyph)
+    finally:
+        painter.end()
+    return QIcon(pixmap)
+
+
+def count(value):
+    return value if type(value) is int and 0 <= value < 1 << 64 else 0
 
 
 class CurrentActivity(QDialog):
@@ -29,7 +59,7 @@ class CurrentActivity(QDialog):
         tabs = QTabWidget(); layout.addWidget(tabs, 1)
         current = QWidget(); current_layout = QVBoxLayout(current)
         tabs.addTab(current, "当前传输")
-        self.history = HistoryPage(manager.history_sources, self, recent=True)
+        self.history = HistoryPage(manager.history_sources, self, recent=True, mount_actions=manager)
         tabs.addTab(self.history, "近期历史")
         self.table = QTreeWidget()
         self.table.setHeaderLabels(["挂载", "文件", "阶段", "正文进度"])
@@ -111,15 +141,19 @@ class MountTray:
         self.stop_checks = set()
         self.stopping = False
         self.stop_generation = 0
+        self.stop_deadline = None
+        self.notifications = None
         self.stop_poll = QTimer(manager); self.stop_poll.setInterval(500)
         self.stop_poll.timeout.connect(self.poll_stopping)
         manager.destroyed.connect(self.close_stop_fds)
         self.activity = CurrentActivity(manager)
-        self.icon = QSystemTrayIcon(status_icon('local_complete'), manager)
+        # "unknown" until the first overview arrives: never claim healthy early.
+        self.icon = QSystemTrayIcon(tray_icon('unknown'), manager)
         self.menu = QMenu(manager)
         self.menu.aboutToShow.connect(self.rebuild_menu)
         self.icon.setContextMenu(self.menu)
         self.icon.activated.connect(self.activated)
+        self.icon.messageClicked.connect(self.notification_clicked)
         self.icon.show()
         self.refresh()
         # A panel may disappear after startup. Never leave the only entry hidden.
@@ -128,6 +162,18 @@ class MountTray:
 
     def available(self):
         return QSystemTrayIcon.isSystemTrayAvailable() and self.icon.isVisible()
+
+    def show_message(self, title, body, *, warning=False):
+        # Notifications are a convenience: without a usable panel the window banner is the channel.
+        if not self.available():
+            return False
+        icon = QSystemTrayIcon.Warning if warning else QSystemTrayIcon.Information
+        self.icon.showMessage(title, body, icon, 8000)
+        return True
+
+    def notification_clicked(self):
+        if self.notifications is not None:
+            self.notifications.clicked()
 
     def ensure_reachable(self):
         if not self.available() and not self.manager.isVisible():
@@ -152,26 +198,61 @@ class MountTray:
                                max(bounds.top(), min(anchor.y(), bounds.bottom() - self.activity.height())))
 
     def refresh(self):
-        states = [data.get('connection') for data in self.manager.overviews.values()]
-        unknown = len(states) != len(self.manager.records)
-        if (unknown or any(s in ('needs_attention', 'locked') for s in states)
-                or any(uncertain_operations(data) for data in self.manager.overviews.values())):
-            status, label = 'conflict', '有任务需要检查'
-        elif any(s in ('connecting', 'offline', 'stopping') for s in states):
-            status, label = 'pinning', '连接或恢复中'
-        elif states and all(s == 'paused' for s in states):
-            status, label = 'mixed', '全部已暂停'
-        elif any(data.get('pending_operations', 0) for data in self.manager.overviews.values()):
-            status, label = 'pending_upload', '有待处理操作'
+        records = self.manager.records
+        fresh = {slot: data for slot, data in self.manager.overviews.items()
+                 if slot in records and data.get('task_id') == records[slot].get('task_id')}
+        counts = self.manager.transfer_counts() if hasattr(self.manager, 'transfer_counts') else {}
+        active = sum(counts.values())
+        pending = sum(count(data.get('pending_operations')) for data in fresh.values())
+        uncertain = sum(uncertain_operations(data) for data in fresh.values())
+        issues = 0
+        for data in fresh.values():
+            value = data.get('issue_count')
+            if type(value) is int:
+                issues += max(0, value)
+            else:
+                # Older backends have no issue_count; count only known signals.
+                issues += count(data.get('download_errors')) + uncertain_operations(data)
+                issues += int(data.get('connection') in ('needs_attention', 'locked'))
+                issues += int(bool(data.get('error')))
+        attention = any(data.get('connection') in ('needs_attention', 'locked') or bool(data.get('error'))
+                        for data in fresh.values())
+        states = [data.get('connection') for data in fresh.values()]
+        paused_any = any(state == 'paused' for state in states)
+        paused_all = bool(states) and all(state == 'paused' for state in states)
+        if not records:
+            kind, label = 'idle', '尚未添加挂载'
+        elif len(fresh) != len(records):
+            kind, label = 'unknown', '正在检查状态'
+        elif attention or issues > 0:
+            kind = 'attention'
+            label = '有任务需要检查' + (f'（{issues} 项问题）' if issues else '')
+        elif any(state in ('connecting', 'offline', 'stopping') for state in states):
+            kind, label = 'syncing', '连接或恢复中'
+        elif active:
+            kind, label = 'syncing', f'正在传输 {active} 项'
+        elif paused_any:
+            kind, label = 'paused', '全部已暂停' if paused_all else '部分已暂停'
+        elif pending or uncertain:
+            parts = []
+            if pending: parts.append(f'{pending} 项待同步')
+            if uncertain: parts.append(f'{uncertain} 项提交待确认')
+            kind, label = 'syncing', ' · '.join(parts)
         else:
-            status, label = 'local_complete', '查看当前活动'
-        self.icon.setIcon(status_icon(status))
-        uploads = sum(count(data.get('uploading', data.get('pending_operations', 0)))
-                      for data in self.manager.overviews.values())
-        issues = sum(count(data.get('download_errors')) + uncertain_operations(data)
-                     + int(data.get('connection') in ('needs_attention', 'locked'))
-                     for data in self.manager.overviews.values())
-        self.icon.setToolTip(f"Drive Native · {len(self.manager.records)} 个挂载，{uploads} 项上传/待同步，{issues} 个问题 · {label}")
+            kind, label = 'idle', '查看当前活动'
+        self.icon.setIcon(tray_icon(kind))
+        self.icon.setToolTip(self.tooltip_text(fresh, active, pending, uncertain, issues, label))
+
+    def tooltip_text(self, fresh, active, pending, uncertain, issues, label):
+        parts = [f"Drive Native · {len(self.manager.records)} 个挂载"]
+        if fresh:
+            parts.append(f"，{issues} 个问题")
+        else:
+            parts.append("，问题数暂不可用")
+        if active: parts.append(f"，{active} 项传输中")
+        if pending: parts.append(f"，{pending} 项待同步")
+        if uncertain: parts.append(f"，{uncertain} 项提交待确认")
+        return ''.join(parts) + f" · {label}"
 
     def action(self, menu, title, callback):
         action = QAction(title, menu); action.triggered.connect(callback); menu.addAction(action)
@@ -190,6 +271,9 @@ class MountTray:
             action = self.action(sub, '恢复同步' if state == 'paused' else '暂停同步',
                                  lambda _checked=False, slot=slot: self.pause(slot))
             action.setEnabled(state not in (None, 'stopping'))
+            stop = self.action(sub, '停止此挂载并卸载…',
+                               lambda _checked=False, slot=slot: self.manager.stop_task(slot))
+            stop.setEnabled(state != 'stopping')
         self.menu.addSeparator()
         pause_all = self.action(self.menu, '全部暂停', self.pause_all)
         pause_all.setEnabled(not self.bulk_pending and not self.stopping)
@@ -257,6 +341,7 @@ class MountTray:
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
             return
         self.stopping = True
+        self.stop_deadline = time.monotonic() + STOP_DEADLINE_SECONDS
         self.stop_generation += 1
         self.stop_identity_pending.clear()
         self.close_stop_fds()
@@ -315,6 +400,25 @@ class MountTray:
 
     def poll_stopping(self):
         if not self.stopping: return
+        if self.stop_deadline is not None and time.monotonic() >= self.stop_deadline:
+            # A cooperative stop that never settles must say so; it never force-kills.
+            reasons = []
+            for slot in self.stop_requested:
+                watcher = self.manager.shutdown_watchers.get(slot)
+                value = watcher.value if watcher is not None else None
+                reason = blocking_reason_text(value) if isinstance(value, dict) else ''
+                if reason and reason not in reasons: reasons.append(reason)
+            for slot in list(self.stop_requested): self.stop_failures.add(slot)
+            self.stop_poll.stop(); self.stopping = False
+            self.stop_generation += 1
+            self.stop_deadline = None
+            self.close_stop_fds()
+            self.manager.activate()
+            detail = f"（阻塞原因：{'、'.join(reasons)}）" if reasons else ''
+            self.manager.message.setText(
+                f'等待后台确认停止超时（已等待超过 {STOP_DEADLINE_SECONDS} 秒）{detail}；界面保持打开，'
+                '不会强制结束后台。请打开主窗口查看停止诊断并复制诊断信息。')
+            return
         complete = []
         for slot, (task, bus) in self.stop_requested.items():
             if slot in self.stop_failures: continue
@@ -341,15 +445,19 @@ class MountTray:
         if self.stop_failures and not (set(self.stop_requested) - self.stop_failures):
             self.stop_poll.stop(); self.stopping = False
             self.stop_generation += 1
+            self.stop_deadline = None
             self.close_stop_fds()
             self.manager.message.setText('部分挂载尚未确认正常停止，界面保持打开。请检查停止阶段；不会强杀后台或清理数据。')
         elif not self.stop_requested:
-            self.stop_poll.stop(); self.stopping = False; self.quit_interface()
+            self.stop_poll.stop(); self.stopping = False
+            self.stop_deadline = None
+            self.quit_interface()
         elif self.stop_failures:
             self.manager.message.setText('正在停止其余挂载；部分挂载身份或停止结果尚未确认，全部完成前保持界面打开。')
 
     def quit_interface(self):
         self.stop_generation += 1
+        self.stop_deadline = None
         self.stop_poll.stop()
         self.close_stop_fds()
         self.icon.hide()
@@ -358,7 +466,3 @@ class MountTray:
     def close_stop_fds(self, *_):
         for fd in self.stop_pidfds.values(): os.close(fd)
         self.stop_pidfds.clear()
-
-
-def count(value):
-    return value if type(value) is int and 0 <= value < 1 << 64 else 0

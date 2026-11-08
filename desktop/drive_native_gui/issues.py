@@ -34,6 +34,37 @@ def reason_label(row, fallback="需要检查"):
     return text
 
 
+CHECKING_ISSUES = "正在检查同步问题…"
+UNAVAILABLE_ISSUES = "尚未完成同步问题核对，请稍后刷新。"
+OFFLINE_ISSUES = "当前离线，尚未完成问题核对；恢复连接后会自动刷新。"
+EMPTY_ISSUES = "目前没有需要处理的同步问题。"
+
+
+def issues_check_pending(overview):
+    """True while a first result or an in-progress verification is outstanding."""
+    if not isinstance(overview, dict):
+        return True
+    init = overview.get("initialization")
+    if isinstance(init, dict) and init.get("active") is True and init.get("phase") not in (None, "waiting"):
+        return True
+    return overview.get("connection") in ("locked", "connecting", "stopping")
+
+
+def empty_issues_text(loaded, overview):
+    """Never claim "no problems" before a page loaded and verification settled."""
+    if not loaded:
+        return CHECKING_ISSUES
+    if not isinstance(overview, dict):
+        return UNAVAILABLE_ISSUES
+    if issues_check_pending(overview):
+        return CHECKING_ISSUES
+    if overview.get("connection") == "offline":
+        return OFFLINE_ISSUES
+    if overview.get("error"):
+        return UNAVAILABLE_ISSUES
+    return EMPTY_ISSUES
+
+
 class IssuesDialog(QDialog):
     resolved = Signal()
     pause_intent = Signal()
@@ -51,6 +82,7 @@ class IssuesDialog(QDialog):
         self.generation = 0
         self.selected_id = None
         self.rows = {}
+        self.loaded = False
         self.cursor = ""
         self.display_limit = 256
         self.setWindowTitle("同步问题 · Drive Native")
@@ -60,7 +92,7 @@ class IssuesDialog(QDialog):
         title = QLabel("处理同步问题")
         title.setObjectName("heading")
         layout.addWidget(title)
-        self.message = QLabel("正在读取本地状态…")
+        self.message = QLabel(CHECKING_ISSUES)
         self.message.setWordWrap(True)
         layout.addWidget(self.message)
         self.context_notice = QLabel()
@@ -145,6 +177,11 @@ class IssuesDialog(QDialog):
             self.refresh_again = True
             return
         self.generation += 1
+        # A refresh is a new query: never keep an old "no problems" claim while
+        # the first page is still outstanding.
+        if not self.rows:
+            self.loaded = False
+            self.message.setText(CHECKING_ISSUES)
         self.request_page("", self.generation)
         self.refresh_context()
 
@@ -162,6 +199,7 @@ class IssuesDialog(QDialog):
             return
         self.loading = False
         if error or not isinstance(data, dict) or not isinstance(data.get("entries"), list):
+            self.loaded = False
             self.message.setText("暂时无法读取状态，请在服务恢复后刷新。")
             self.rows.clear()
             self.table.clear()
@@ -186,7 +224,8 @@ class IssuesDialog(QDialog):
         self.table.blockSignals(False)
         self.cursor = data.get("next") or ""
         self.more.setVisible(bool(self.cursor))
-        self.message.setText(f"{len(self.rows)} 项待处理 · 本地修改会保留" if self.rows else "目前没有需要处理的同步问题。")
+        self.loaded = True
+        self.message.setText(f"{len(self.rows)} 项待处理 · 本地修改会保留" if self.rows else empty_issues_text(True, self.overview))
         self.selection_changed()
         if self.refresh_again:
             self.refresh_again = False
@@ -244,6 +283,8 @@ class IssuesDialog(QDialog):
         else:
             self.context_notice.setText("")
         self.context_notice.setVisible(bool(self.context_notice.text()))
+        if not self.rows:
+            self.message.setText(empty_issues_text(self.loaded, self.overview))
         self.update_actions(self.selected_row())
 
     def update_actions(self, row):

@@ -58,7 +58,10 @@ class QueueTests(unittest.TestCase):
                 window.received_overview(value, None)
                 self.assertEqual(window.connection_value.text(), '已连接')
                 self.assertIn('尚未确认', window.banner.text())
-                self.assertEqual(window.pending_value.text(), '27')
+                # The sync card now carries the pending count as a sentence; the
+                # raw 27 must stay visible instead of only in the old bare number.
+                self.assertEqual(window.sync_value.text(), '27 项等待同步')
+                self.assertIn('待处理 27 项', window.sync_value.toolTip())
                 window.render_progress({'active': True, 'phase': 'waiting'})
                 self.assertEqual(window.connection_value.text(), '已连接')
                 window.received_overview(dict(value, queue_health={

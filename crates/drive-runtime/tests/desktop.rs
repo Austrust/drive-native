@@ -105,6 +105,9 @@ fn history_target_handles_online_offline_cached_deleted_and_unmounted() {
     assert_eq!(online["reason"],"online_only");
     assert_eq!(online["exists"],true);
     assert_eq!(online["offline_available"],false);
+    assert_eq!(online["cached"],false);
+    assert!(online["suggested_action"].is_null());
+    assert!(online["mount_slot"].is_null()||online["mount_slot"].is_string());
     assert_eq!(online["node"],"one");
     assert_eq!(online["path"],"/tmp/drive-native-test-mount/folder/one");
     service.control.lock().unwrap().state=ConnectionState::Offline;
@@ -117,8 +120,23 @@ fn history_target_handles_online_offline_cached_deleted_and_unmounted() {
     }
     let cached=target();
     assert_eq!(cached["offline_available"],true);
+    assert_eq!(cached["cached"],true);
     assert!(!cached["path"].is_null());
     assert!(cached["reason"].is_null());
+    // Unmounted: Store-level facts remain, mounted paths do not. The GUI uses
+    // cached/exists plus suggested_action to offer a mount action.
+    service.mounted.store(false,std::sync::atomic::Ordering::Release);
+    let unmounted=target();
+    assert!(unmounted["path"].is_null());
+    assert!(unmounted["parent_path"].is_null());
+    assert_eq!(unmounted["mount_online"],false);
+    assert_eq!(unmounted["exists"],true);
+    assert_eq!(unmounted["offline_available"],true);
+    assert_eq!(unmounted["cached"],true);
+    assert_eq!(unmounted["suggested_action"],"start_mount");
+    assert!(unmounted["mount_slot"].is_null()||unmounted["mount_slot"].is_string());
+    assert_eq!(unmounted["reason"],"unavailable");
+    service.mounted.store(true,std::sync::atomic::Ordering::Release);
     {
         let mut store=service.bridge.store.lock().unwrap();
         store.receive(&Batch{from:"2".into(),to:"3".into(),events:vec![Event{id:"history-deletion".into(),change:Change::Delete{id:"one".into()}}]}).unwrap();
@@ -128,10 +146,6 @@ fn history_target_handles_online_offline_cached_deleted_and_unmounted() {
     assert_eq!(deleted["reason"],"deleted");
     assert_eq!(deleted["exists"],false);
     assert_eq!(deleted["parent_path"],"/tmp/drive-native-test-mount/folder");
-    service.mounted.store(false,std::sync::atomic::Ordering::Release);
-    let unmounted=target();
-    assert!(unmounted["path"].is_null());
-    assert!(unmounted["parent_path"].is_null());
 }
 
 #[test]
@@ -144,6 +158,40 @@ fn history_target_follows_renamed_identity_instead_of_event_path() {
     let result:serde_json::Value=serde_json::from_str(&desktop::resolve_history_target(&service,&serde_json::json!({"id":id}).to_string()).unwrap()).unwrap();
     assert_eq!(result["path"],"/tmp/drive-native-test-mount/renamed.txt");
     assert_eq!(result["parent_path"],"/tmp/drive-native-test-mount/");
+}
+
+#[test]
+fn history_target_unmounted_without_cache_reports_store_availability() {
+    let (_dir,service)=fixture();
+    let id=remote_history(&service);
+    service.mounted.store(false,std::sync::atomic::Ordering::Release);
+    let result:serde_json::Value=serde_json::from_str(&desktop::resolve_history_target(&service,&serde_json::json!({"id":id}).to_string()).unwrap()).unwrap();
+    assert_eq!(result["reason"],"unavailable");
+    assert_eq!(result["mount_online"],false);
+    assert_eq!(result["node"],"one");
+    assert_eq!(result["exists"],true);
+    assert_eq!(result["offline_available"],false);
+    assert_eq!(result["cached"],false);
+    assert_eq!(result["suggested_action"],"start_mount");
+    assert!(result["mount_slot"].is_null()||result["mount_slot"].is_string());
+    assert!(result["path"].is_null());
+    assert!(result["parent_path"].is_null());
+}
+
+#[test]
+fn history_target_unmounted_dirty_draft_is_offline_available() {
+    let (_dir,service)=fixture();
+    let id=remote_history(&service);
+    service.bridge.store.lock().unwrap().save_local("one",b"unsent local body").unwrap();
+    service.mounted.store(false,std::sync::atomic::Ordering::Release);
+    let result:serde_json::Value=serde_json::from_str(&desktop::resolve_history_target(&service,&serde_json::json!({"id":id}).to_string()).unwrap()).unwrap();
+    assert_eq!(result["reason"],"unavailable");
+    assert_eq!(result["exists"],true);
+    assert_eq!(result["offline_available"],true);
+    assert_eq!(result["cached"],true);
+    assert_eq!(result["suggested_action"],"start_mount");
+    assert!(result["path"].is_null());
+    assert!(result["parent_path"].is_null());
 }
 
 #[test]
@@ -164,11 +212,63 @@ fn history_queries_clear_only_history_and_reject_unsafe_clear_requests() {
 }
 
 #[test]
+fn history_retention_is_task_bound_and_changes_metadata_history_only() {
+    let (_dir, service) = fixture();
+    let read = || {
+        serde_json::from_str::<serde_json::Value>(
+            &desktop::get_sync_history_retention(&service).unwrap(),
+        )
+        .unwrap()
+    };
+    let initial = read();
+    assert_eq!(initial["schema"], 1);
+    assert_eq!(initial["task_id"], service.profile.task_id);
+    assert_eq!(initial["days"], 30);
+    assert_eq!(initial["records"], 10_000);
+    let body = |task: &str, days: u32, records: u32| {
+        serde_json::json!({"schema":1,"task_id":task,"days":days,"records":records}).to_string()
+    };
+    for invalid in [
+        body("other-task", 7, 500),
+        serde_json::json!({"schema":2,"task_id":service.profile.task_id,"days":7,"records":500}).to_string(),
+        body(&service.profile.task_id, 0, 500),
+        body(&service.profile.task_id, 3_651, 500),
+        body(&service.profile.task_id, 7, 0),
+        body(&service.profile.task_id, 7, 1_000_001),
+        serde_json::json!({"schema":1,"task_id":service.profile.task_id,"days":7,"records":500,"unexpected":true}).to_string(),
+    ] {
+        assert!(desktop::set_sync_history_retention(&service, &invalid).is_err(), "{invalid}");
+    }
+    assert!(desktop::set_sync_history_retention(&service, &"x".repeat(8193)).is_err());
+    assert_eq!(read(), initial);
+
+    service.bridge.store.lock().unwrap().save_local("two", b"keep dirty body").unwrap();
+    remote_history(&service);
+    let saved: serde_json::Value = serde_json::from_str(
+        &desktop::set_sync_history_retention(&service, &body(&service.profile.task_id, 7, 500)).unwrap(),
+    ).unwrap();
+    assert_eq!(saved["saved"], true);
+    assert_eq!(saved["days"], 7);
+    assert_eq!(saved["records"], 500);
+    let configured = read();
+    assert_eq!(configured["days"], 7);
+    assert_eq!(configured["records"], 500);
+    // Retention is metadata-only: dirty drafts, cached content, queued uploads,
+    // and retained history all survive the setting change and its prune.
+    let store = service.bridge.store.lock().unwrap();
+    assert_eq!(store.open_cached("two").unwrap().size().unwrap(), 15);
+    assert_eq!(store.pending_operations().unwrap(), 1);
+    assert_eq!(store.sync_history(&Default::default()).unwrap().records.len(), 1);
+}
+
+#[test]
 fn history_ipc_busy_returns_without_waiting_for_store_or_control() {
     let (_dir,service)=fixture();
     let _store=service.bridge.store.lock().unwrap();
+    let retention=serde_json::json!({"schema":1,"task_id":service.profile.task_id,"days":30,"records":10000}).to_string();
     for response in [desktop::sync_history(&service,"{}"),desktop::recent_activity(&service,"{}"),
-        desktop::clear_sync_history(&service,r#"{"mode":"all"}"#),desktop::resolve_history_target(&service,r#"{"id":1}"#)] {
+        desktop::clear_sync_history(&service,r#"{"mode":"all"}"#),desktop::resolve_history_target(&service,r#"{"id":1}"#),
+        desktop::get_sync_history_retention(&service),desktop::set_sync_history_retention(&service,&retention)] {
         assert_eq!(serde_json::from_str::<serde_json::Value>(&response.unwrap()).unwrap()["error"],"busy");
     }
     drop(_store);
@@ -220,6 +320,16 @@ async fn recovery_action_real_dbus_preserves_unknown_queue_and_user_pause() {
     let overview: String = proxy.call("GetOverview", &()).await.unwrap();
     let overview: serde_json::Value = serde_json::from_str(&overview).unwrap();
     assert_eq!(overview["recovery_actions"]["recheck_issues"], true);
+    assert!(overview["sync_state"].is_string());
+    assert!(overview["active_transfers"].is_u64());
+    assert!(overview["issue_count"].is_null() || overview["issue_count"].is_u64());
+    assert!(overview["cache_availability"]["total"].is_u64());
+    assert_eq!(overview["version"]["state_schema"], 26);
+    assert_eq!(overview["version"]["ipc"], 21);
+    let shutdown: String = proxy.call("GetShutdown", &()).await.unwrap();
+    let shutdown: serde_json::Value = serde_json::from_str(&shutdown).unwrap();
+    assert_eq!(shutdown["shutdown"]["phase"], "idle");
+    assert!(shutdown["shutdown"]["blocking_reason"].is_null());
     let initial: String = proxy.call("RecheckIssues", &()).await.unwrap();
     assert_eq!(serde_json::from_str::<serde_json::Value>(&initial).unwrap()["message_code"], "login_required");
     let _: () = proxy.call("Unlock", &("synthetic-not-sent",)).await.unwrap();
@@ -244,9 +354,28 @@ async fn recovery_action_real_dbus_preserves_unknown_queue_and_user_pause() {
     assert_eq!(serde_json::from_str::<serde_json::Value>(&recent).unwrap()["records"].as_array().unwrap().len(),1);
     let target_request=serde_json::json!({"id":history["records"][0]["id"]}).to_string();
     let target:String=proxy.call("ResolveHistoryTarget", &(target_request,)).await.unwrap();
-    assert_eq!(serde_json::from_str::<serde_json::Value>(&target).unwrap()["exists"],false);
+    let target:serde_json::Value=serde_json::from_str(&target).unwrap();
+    assert_eq!(target["reason"],"unavailable");
+    assert_eq!(target["exists"],true);
+    assert!(target["cached"].is_boolean());
+    assert_eq!(target["suggested_action"],"start_mount");
+    assert!(target["mount_slot"].is_null()||target["mount_slot"].is_string());
+    assert!(target["path"].is_null());
     let cleared:String=proxy.call("ClearSyncHistory", &(r#"{"mode":"all"}"#,)).await.unwrap();
     assert_eq!(serde_json::from_str::<serde_json::Value>(&cleared).unwrap()["removed"],1);
+    let defaults:String=proxy.call("GetSyncHistoryRetention", &()).await.unwrap();
+    let defaults:serde_json::Value=serde_json::from_str(&defaults).unwrap();
+    assert_eq!(defaults["schema"],1);
+    assert_eq!(defaults["task_id"],service.profile.task_id);
+    assert_eq!(defaults["days"],30);
+    assert_eq!(defaults["records"],10_000);
+    let retention=serde_json::json!({"schema":1,"task_id":service.profile.task_id,"days":7,"records":500}).to_string();
+    let saved:String=proxy.call("SetSyncHistoryRetention", &(retention,)).await.unwrap();
+    let saved:serde_json::Value=serde_json::from_str(&saved).unwrap();
+    assert_eq!(saved["saved"],true);
+    assert_eq!(saved["days"],7);
+    let configured:String=proxy.call("GetSyncHistoryRetention", &()).await.unwrap();
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&configured).unwrap()["records"],500);
     assert_eq!(service.bridge.store.lock().unwrap().pending_operations().unwrap(),1);
     drop(proxy);drop(client);drop(server);
 }
@@ -759,6 +888,9 @@ fn shutdown_diagnostics_remain_available_while_store_and_control_are_held() {
     let (_root, service) = fixture();
     service
         .shutdown_diagnostics
+        .reason(Some("persisting_local_changes"));
+    service
+        .shutdown_diagnostics
         .phase(drive_runtime::shutdown::Phase::CheckpointingLocal);
     let store = service.bridge.store.lock().unwrap();
     let control = service.control.lock().unwrap();
@@ -778,6 +910,7 @@ fn shutdown_diagnostics_remain_available_while_store_and_control_are_held() {
         serde_json::from_str(&result.expect("shutdown status waited on Store/control")).unwrap();
     assert_eq!(data["task_id"], service.profile.task_id);
     assert_eq!(data["shutdown"]["phase"], "checkpointing_local");
+    assert_eq!(data["shutdown"]["blocking_reason"], "persisting_local_changes");
     assert_eq!(data["mounted"], false);
 }
 
@@ -1051,4 +1184,24 @@ fn states_json_stays_stable_while_a_started_service_builds_the_projection() {
         "service stop+join exceeded 2s: {:?}",
         started.elapsed()
     );
+}
+
+#[test]
+fn overview_reports_sync_state_cache_availability_and_version() {
+    let (_dir, service) = fixture();
+    let overview: serde_json::Value =
+        serde_json::from_str(&desktop::overview(&service).unwrap()).unwrap();
+    // A fresh fixture has no transfers, uncertain commits, or pending work.
+    assert_eq!(overview["sync_state"], "idle");
+    assert_eq!(overview["active_transfers"], 0);
+    assert_eq!(overview["issue_count"], 0);
+    let cache = &overview["cache_availability"];
+    assert_eq!(cache["state"], "online_only");
+    assert_eq!(cache["total"], 2);
+    assert_eq!(cache["offline"], 0);
+    assert_eq!(cache["pinned"], 0);
+    assert_eq!(overview["version"]["build"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(overview["version"]["state_schema"], 26);
+    assert_eq!(overview["version"]["ipc"], 21);
+    assert_eq!(overview["schema"], 1);
 }
