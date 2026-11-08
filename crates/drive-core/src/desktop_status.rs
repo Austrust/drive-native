@@ -430,6 +430,113 @@ pub fn desktop_status_details(
     Ok(out)
 }
 
+/// Mount-relative location of one namespace node, resolved by
+/// [`desktop_status_ancestry_paths`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StatusPath {
+    /// Mount-relative path; `.` is the namespace root.
+    pub path: String,
+    pub directory: bool,
+    /// Mount-relative paths of every resolvable ancestor, nearest first.
+    pub ancestors: Vec<String>,
+}
+
+/// Resolve `ids` (plus the ancestor chains they need) to mount-relative paths
+/// with one recursive read. Missing nodes — deleted, repository-only or
+/// access-filtered — are omitted; a journal consumer keeps the recorded old
+/// parent/name for those.
+pub fn desktop_status_ancestry_paths(
+    store: &Store,
+    ids: &[String],
+) -> Result<HashMap<String, StatusPath>> {
+    let mut out = HashMap::new();
+    if ids.is_empty() {
+        return Ok(out);
+    }
+    let encoded = serde_json::to_string(ids)?;
+    let sql = "WITH RECURSIVE targets(id) AS (SELECT value FROM json_each(?1)), \
+         ancestry(id,parent,name,directory) AS ( \
+           SELECT n.id,n.parent,n.name,n.directory FROM nodes n WHERE n.id IN (SELECT id FROM targets) \
+           UNION SELECT n.id,n.parent,n.name,n.directory FROM nodes n JOIN ancestry a ON n.id=a.parent WHERE a.parent IS NOT NULL) \
+         SELECT id,parent,name,directory FROM ancestry";
+    let mut facts: HashMap<String, (Option<String>, String, bool)> = HashMap::new();
+    {
+        let mut query = store.db.prepare_cached(sql)?;
+        let mut rows = query.query_map([&encoded], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)? != 0,
+            ))
+        })?;
+        for row in rows {
+            let (id, parent, name, directory) = row?;
+            facts.insert(id, (parent, name, directory));
+        }
+    }
+    let mut resolved: HashMap<String, Option<String>> = HashMap::new();
+    for id in ids {
+        let Some((parent, _, directory)) = facts.get(id) else {
+            continue;
+        };
+        let Some(path) = resolve_status_path(&facts, id, &mut resolved, 0) else {
+            continue;
+        };
+        let mut ancestors = Vec::new();
+        let mut current = parent.clone();
+        let mut guard = 0usize;
+        while let Some(pid) = current {
+            if guard >= 128 {
+                break;
+            }
+            guard += 1;
+            let Some(path) = resolve_status_path(&facts, &pid, &mut resolved, 0) else {
+                break;
+            };
+            ancestors.push(path);
+            current = facts.get(&pid).and_then(|(parent, _, _)| parent.clone());
+        }
+        out.insert(
+            id.clone(),
+            StatusPath {
+                path,
+                directory: *directory,
+                ancestors,
+            },
+        );
+    }
+    Ok(out)
+}
+
+fn resolve_status_path(
+    facts: &HashMap<String, (Option<String>, String, bool)>,
+    id: &str,
+    memo: &mut HashMap<String, Option<String>>,
+    depth: u8,
+) -> Option<String> {
+    if let Some(cached) = memo.get(id) {
+        return cached.clone();
+    }
+    if depth > 128 {
+        return None;
+    }
+    let (parent, name, _) = facts.get(id)?;
+    let path = match parent {
+        None => ".".to_string(),
+        Some(parent) => {
+            let base = resolve_status_path(facts, parent, memo, depth + 1)?;
+            if base == "." {
+                name.clone()
+            } else {
+                format!("{base}/{name}")
+            }
+        }
+    };
+    memo.insert(id.to_owned(), Some(path.clone()));
+    Some(path)
+}
+
 /// Scoped seed SQL, kept separate so tests can inspect its query plan.
 fn scoped_seed_sql() -> String {
     format!(

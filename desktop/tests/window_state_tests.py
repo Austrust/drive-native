@@ -13,6 +13,7 @@ TASK = 'a' * 32
 
 class Bus(QObject):
     changed = Signal()
+    changed2 = Signal(object)
     progress_changed = Signal()
     availability = Signal(bool)
     owner = ':1.synthetic'
@@ -20,10 +21,16 @@ class Bus(QObject):
     def __init__(self, parent=None, *, instance=None):
         super().__init__(parent)
         self.calls = []
+        self.calls_with_args = []
         self.waiting = []
+        self.states_reply = None
 
     def call(self, method, args=(), callback=None):
         self.calls.append(method)
+        self.calls_with_args.append((method, args))
+        if method == 'GetStates' and self.states_reply is not None and callback:
+            callback(self.states_reply, None)
+            return
         if callback:
             self.waiting.append((method, callback))
 
@@ -241,6 +248,134 @@ class WindowStateTests(unittest.TestCase):
         self.window.received_directory('', generation,
                                        {'offset': 0, 'entries': [entry], 'total': 1}, None)
         self.assertEqual([row['path'] for row in self.window.page_rows], ['/Lab/new.txt'])
+
+
+    # Issue #31: StatusChanged2 is consumed as a revisioned change set. A
+    # status-only event patches the visible rows via one GetStates batch and
+    # must not fall back to GetOverview/GetDirectory.
+    def status_rows(self):
+        mount = '/tmp/synthetic'
+        lab = mount + '/Lab'
+        rows = [
+            {'path': lab + '/a.txt', 'status': 'online_only', 'directory': False,
+             'offline_available': False},
+            {'path': lab + '/b.txt', 'status': 'online_only', 'directory': False,
+             'offline_available': False},
+        ]
+        self.window.folder = lab
+        self.window.files_button.setChecked(True)
+        app.processEvents()
+        # The initial show-time refresh is still waiting for a synthetic reply;
+        # clear its in-flight flags so the event path under test is reachable.
+        self.window.loading = False
+        self.window.progress_loading = False
+        self.window._directory_loading = False
+        self.window.refresh_again = False
+        self.window.refresh_timer.stop()
+        self.window.page_rows = [dict(row) for row in rows]
+        self.window.rows = [dict(row) for row in rows]
+        self.window.status2_seen = True
+        self.window.status_epoch = 'epoch-1'
+        self.window.status_revision = 7
+        return lab
+
+    def test_status_only_event_patches_rows_without_overview_or_directory(self):
+        from drive_native_gui.bus import StatusEvent
+        from PySide6.QtTest import QTest
+        lab = self.status_rows()
+        overview_before = self.window.overview_queries
+        directory_before = self.window.directory_queries
+        states_before = self.window.status_getstates
+        self.bus.calls.clear()
+        self.bus.calls_with_args.clear()
+        self.bus.states_reply = {'schema': 1, 'entries': [{
+            'path': lab + '/a.txt', 'id': 'node-a', 'directory': False,
+            'status': 'local_complete', 'pinned': False,
+            'offline_available': True, 'sync_error': None,
+        }]}
+        self.bus.changed2.emit(StatusEvent(
+            7, 8, 'epoch-1', False, False,
+            [{'path': lab + '/a.txt', 'directory': False, 'kind': 'status'}]))
+        QTest.qWait(20)
+        self.assertEqual(self.window.overview_queries, overview_before)
+        self.assertEqual(self.window.directory_queries, directory_before)
+        self.assertEqual(self.bus.calls.count('GetStates'), 1)
+        states_call = [args for name, args in self.bus.calls_with_args if name == 'GetStates']
+        self.assertEqual(list(states_call[0][0]), [lab + '/a.txt'])
+        self.assertEqual(self.window.status_getstates, states_before + 1)
+        patched = [row for row in self.window.rows if row['path'] == lab + '/a.txt'][0]
+        self.assertEqual(patched['status'], 'local_complete')
+        self.assertTrue(patched['offline_available'])
+        untouched = [row for row in self.window.rows if row['path'] == lab + '/b.txt'][0]
+        self.assertEqual(untouched['status'], 'online_only')
+
+    def test_status_only_storm_coalesces_into_one_pending_batch(self):
+        from drive_native_gui.bus import StatusEvent
+        from PySide6.QtTest import QTest
+        lab = self.status_rows()
+        overview_before = self.window.overview_queries
+        directory_before = self.window.directory_queries
+        self.bus.calls.clear()
+        self.bus.waiting.clear()
+        for revision in range(7, 17):
+            self.bus.changed2.emit(StatusEvent(
+                revision, revision + 1, 'epoch-1', False, False,
+                [{'path': lab + '/a.txt', 'directory': False, 'kind': 'status'}]))
+        QTest.qWait(20)
+        self.assertEqual(self.window.overview_queries, overview_before)
+        self.assertEqual(self.window.directory_queries, directory_before)
+        self.assertEqual(self.bus.calls.count('GetStates'), 1)
+        self.assertEqual(self.window.status_getstates, 1)
+        # While the batch is in flight the other nine events only queue paths;
+        # the reply triggers a single follow-up query for all of them.
+        in_flight = [entry for entry in self.bus.waiting if entry[0] == 'GetStates']
+        self.assertEqual(len(in_flight), 1)
+        in_flight[0][1]({'schema': 1, 'entries': []}, None)
+        self.assertEqual(self.bus.calls.count('GetStates'), 2)
+        self.assertEqual(self.window.status_getstates, 2)
+
+    def test_status_gap_falls_back_to_overview(self):
+        from drive_native_gui.bus import StatusEvent
+        from PySide6.QtTest import QTest
+        self.status_rows()
+        self.window.last_overview_at = 0.0
+        self.bus.calls.clear()
+        self.bus.changed2.emit(StatusEvent(9, 10, 'epoch-1', False, False, []))
+        QTest.qWait(30)
+        self.assertGreaterEqual(self.bus.calls.count('GetOverview'), 1)
+        self.assertEqual(self.bus.calls.count('GetStates'), 0)
+
+    def test_overview_changed_event_uses_coalesced_overview(self):
+        from drive_native_gui.bus import StatusEvent
+        from PySide6.QtTest import QTest
+        self.status_rows()
+        self.window.last_overview_at = 0.0
+        self.bus.calls.clear()
+        self.bus.changed2.emit(StatusEvent(7, 8, 'epoch-1', False, True, []))
+        QTest.qWait(30)
+        self.assertGreaterEqual(self.bus.calls.count('GetOverview'), 1)
+        self.assertEqual(self.bus.calls.count('GetStates'), 0)
+
+    def test_membership_listing_event_reloads_current_directory(self):
+        from drive_native_gui.bus import StatusEvent
+        from PySide6.QtTest import QTest
+        lab = self.status_rows()
+        self.bus.calls.clear()
+        self.bus.changed2.emit(StatusEvent(
+            7, 8, 'epoch-1', False, False,
+            [{'path': lab, 'directory': True, 'kind': 'listing'}]))
+        QTest.qWait(400)
+        self.assertIn('GetDirectory', self.bus.calls)
+        self.assertGreaterEqual(self.window.membership_refreshes, 1)
+
+    def test_legacy_changed_signal_is_ignored_once_status2_is_seen(self):
+        from PySide6.QtTest import QTest
+        self.window.status2_seen = True
+        self.window.last_overview_at = 0.0
+        self.bus.calls.clear()
+        self.bus.changed.emit()
+        QTest.qWait(30)
+        self.assertNotIn('GetOverview', self.bus.calls)
 
 
 class MaximizedOwnerTests(unittest.TestCase):

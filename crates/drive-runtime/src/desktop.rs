@@ -769,6 +769,13 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
     let background_error = background.as_ref().map(|failure| failure.message);
     let background_error_kind = background.as_ref().map(|failure| failure.source.as_str());
     let background_error_since_ms = background.as_ref().map(|failure| failure.since_ms);
+    // Issue #31: the status journal epoch lets a GUI tell a same-daemon delta
+    // from a restarted writer (its cursor epoch differs after a restart).
+    let status_epoch = ro
+        .as_ref()
+        .and_then(|store| store.status_change_watermark().ok())
+        .map(|watermark| watermark.cursor.epoch)
+        .unwrap_or_default();
     let serialize = Instant::now();
     let body = serde_json::json!({"schema":1,"task_id":service.profile.task_id,"mount":service.profile.mount,
         "connection":state,"error":error,"background_error":background_error,
@@ -783,6 +790,7 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
         "skipped_symlinks":skipped_symlinks,
         "skipped_permission_directories":inaccessible,
         "pending_operations":pending,"revision":revision,"local_revision":local_revision,
+        "status_revision":key.revision,"status_verified":key.verified,"status_epoch":status_epoch,
         "queue_health":queue_health,
         "downloads_started":service.bridge.downloads.load(Ordering::Relaxed),
         "download_errors":download_errors,
@@ -1425,6 +1433,20 @@ impl Desktop {
     pub async fn status_changed(
         emitter: &zbus::object_server::SignalEmitter<'_>,
         revision: u64,
+    ) -> zbus::Result<()>;
+    /// Issue #31: one revisioned status-journal delta. `changes` is a JSON
+    /// document (schema 1) of absolute mount paths, so a consumer only re-reads
+    /// the paths a committed change actually touched. The legacy
+    /// `status_changed` signal is still emitted for older consumers.
+    #[zbus(signal)]
+    pub async fn status_changed2(
+        emitter: &zbus::object_server::SignalEmitter<'_>,
+        from_revision: u64,
+        to_revision: u64,
+        epoch: &str,
+        reset: bool,
+        overview_changed: bool,
+        changes: &str,
     ) -> zbus::Result<()>;
     #[zbus(signal)]
     pub async fn shutdown_changed(
