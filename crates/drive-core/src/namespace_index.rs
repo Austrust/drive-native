@@ -5,7 +5,7 @@
 //! selecting AND publishing index results. This module's Store revision is
 //! `total_changes`, not the independent SharedStore commit generation.
 //! `None` means "use the SQL path", never authoritative ENOENT.
-use crate::{Error, Result, Store, filesystem::{DirectoryViewStamp, PosixRecord}};
+use crate::{Error, Result, Store, filesystem::DirectoryViewStamp};
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex, RwLock, atomic::{AtomicU64, Ordering}},
@@ -52,16 +52,45 @@ pub struct DirBlock {
     pub built_at_gen: u64,
 }
 
-pub(crate) struct ProjectedEntry {
-    pub id: String,
+/// Attributes the index serves for one node. They are validated with exactly
+/// the `PosixRecord` precedence, but the index never needs the identity string
+/// or the mutable-body flags that a full POSIX record carries.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct EntryAttributes {
+    pub size: u64,
+    pub mtime: u64,
+    pub atime: u64,
+    pub atime_nsec: u32,
+    pub mode: u16,
+    pub blocks: u64,
+}
+
+/// One row of the authoritative namespace scan, still unresolved for parent
+/// identity. Borrowed from the SQLite row for the duration of the callback.
+pub(crate) struct ProjectedEntry<'a> {
+    pub id: &'a str,
+    pub name: &'a str,
+    pub parent: Option<&'a str>,
     pub ino: Option<u64>,
-    pub name: String,
-    pub parent_ino: Option<u64>,
-    pub root: bool,
-    pub parent_visible: bool,
-    pub visible_child: bool,
     pub directory: bool,
-    pub attributes: Option<PosixRecord>,
+    pub visible_child: bool,
+    pub attributes: Option<EntryAttributes>,
+}
+
+/// Parent slot for a row whose `n.parent` is NULL (the authoritative root).
+const NO_PARENT: u32 = u32::MAX;
+
+/// Staged scan row. Parent identities are interned during the scan so parent
+/// inode and parent visibility can be resolved from the scanned generation
+/// itself instead of through two correlated parent joins per row.
+struct ScannedRow {
+    id: Arc<str>,
+    name: Arc<str>,
+    parent: u32,
+    ino: Option<u64>,
+    directory: bool,
+    visible_child: bool,
+    attributes: Option<EntryAttributes>,
 }
 
 #[derive(Clone, Copy)]
@@ -228,18 +257,17 @@ fn load(store: &Store, epoch: u64, budget: Budget) -> Result<Snapshot> {
     if !initialized {
         return Err(Error::State("namespace index requires an authoritative filesystem root".into()));
     }
-    let mut snapshot = Snapshot {
-        revision, invalidation: epoch, stamp: Some(stamp.clone()),
-        by_ino: HashMap::new(), dirs: HashMap::new(), bytes: 0,
-        partial: false, degraded: false,
-    };
-    let mut children: HashMap<u64, Vec<(Arc<str>, DirEntryLite)>> = HashMap::new();
-    let mut directories: HashMap<u64, u64> = HashMap::new();
-    let mut incomplete: HashSet<u64> = HashSet::new();
     let mut count = 0usize;
     // Conservative allocation charge includes map slack, Arc headers and the
     // temporary construction maps, not merely UTF-8 payload length.
     let mut charged = 0usize;
+    let mut rows: Vec<ScannedRow> = Vec::new();
+    // Parent identities are interned during the scan (normally about a fifth
+    // of the rows), then resolved to `(visible, ino)` from the scanned
+    // generation itself. A parent row is present in this scan iff it is live
+    // and not access-blocked, which is exactly the predicate the previous
+    // per-row `LEFT JOIN nodes p` / `LEFT JOIN fs_inodes pi` pair applied.
+    let mut parent_ids: HashMap<Box<str>, u32> = HashMap::new();
     let result = store.visit_namespace_index(|row| {
         count = count.checked_add(1).ok_or_else(budget_error)?;
         charged = charged.checked_add(
@@ -249,33 +277,26 @@ fn load(store: &Store, epoch: u64, budget: Budget) -> Result<Snapshot> {
             || (count & 255 == 0 && start.elapsed() > budget.duration) {
             return Err(budget_error());
         }
-        let Some(ino) = row.ino else {
-            snapshot.partial = true;
-            if let Some(parent) = row.parent_ino { incomplete.insert(parent); }
-            return Ok(());
+        let parent = match row.parent {
+            Some(parent) => match parent_ids.get(parent) {
+                Some(index) => *index,
+                None => {
+                    let index = u32::try_from(parent_ids.len()).map_err(|_| budget_error())?;
+                    parent_ids.insert(Box::from(parent), index);
+                    index
+                }
+            },
+            None => NO_PARENT,
         };
-        let parent = if row.root { ino } else { row.parent_ino.unwrap_or(0) };
-        let name: Arc<str> = Arc::from(row.name);
-        let node: Arc<str> = Arc::from(row.id);
-        if row.directory && row.parent_visible && parent != 0 {
-            directories.insert(ino, parent);
-        }
-        if !row.root && row.visible_child && parent != 0 {
-            children.entry(parent).or_default().push((Arc::clone(&node), DirEntryLite {
-                ino, name: Arc::clone(&name),
-                kind: if row.directory { FileKind::Directory } else { FileKind::File },
-            }));
-        }
-        if let Some(record) = row.attributes {
-            snapshot.by_ino.insert(ino, Arc::new(EntrySlot {
-                ino, node, parent, name, directory: row.directory,
-                size: record.size, mtime: record.mtime,
-                atime: (record.atime, record.atime_nsec), mode: record.mode as u16,
-                blocks: record.blocks, dirty: false, preview: false,
-            }));
-        } else {
-            snapshot.partial = true;
-        }
+        rows.push(ScannedRow {
+            id: Arc::from(row.id),
+            name: Arc::from(row.name),
+            parent,
+            ino: row.ino,
+            directory: row.directory,
+            visible_child: row.visible_child,
+            attributes: row.attributes,
+        });
         Ok(())
     });
     if let Err(error) = result {
@@ -286,6 +307,61 @@ fn load(store: &Store, epoch: u64, budget: Budget) -> Result<Snapshot> {
             return Ok(Snapshot::empty(revision, epoch, Some(stamp)));
         }
         return Err(error);
+    }
+    let mut parent_ino: Vec<Option<u64>> = vec![None; parent_ids.len()];
+    let mut parent_visible: Vec<bool> = vec![false; parent_ids.len()];
+    for row in &rows {
+        if let Some(&index) = parent_ids.get(&*row.id) {
+            parent_visible[index as usize] = true;
+            parent_ino[index as usize] = row.ino;
+        }
+    }
+    let mut snapshot = Snapshot {
+        revision, invalidation: epoch, stamp: Some(stamp.clone()),
+        by_ino: HashMap::with_capacity(rows.len()), dirs: HashMap::new(), bytes: 0,
+        partial: false, degraded: false,
+    };
+    let mut children: HashMap<u64, Vec<(Arc<str>, DirEntryLite)>> = HashMap::new();
+    let mut directories: Vec<(u64, u64)> = Vec::new();
+    let mut incomplete: HashSet<u64> = HashSet::new();
+    for row in rows {
+        let Some(ino) = row.ino else {
+            snapshot.partial = true;
+            // A directory whose child cannot be identified must not publish a
+            // block: enumeration would silently omit that child. The parent
+            // resolution above is what tells us which block to skip.
+            if row.parent != NO_PARENT && parent_visible[row.parent as usize] {
+                if let Some(parent) = parent_ino[row.parent as usize] { incomplete.insert(parent); }
+            }
+            continue;
+        };
+        let root = row.parent == NO_PARENT;
+        let (parent, visible) = if root {
+            (ino, true)
+        } else if parent_visible[row.parent as usize] {
+            (parent_ino[row.parent as usize].unwrap_or(0), true)
+        } else {
+            (0, false)
+        };
+        if row.directory && visible && parent != 0 {
+            directories.push((ino, parent));
+        }
+        if !root && row.visible_child && parent != 0 {
+            children.entry(parent).or_default().push((Arc::clone(&row.id), DirEntryLite {
+                ino, name: Arc::clone(&row.name),
+                kind: if row.directory { FileKind::Directory } else { FileKind::File },
+            }));
+        }
+        if let Some(attributes) = row.attributes {
+            snapshot.by_ino.insert(ino, Arc::new(EntrySlot {
+                ino, node: row.id, parent, name: row.name, directory: row.directory,
+                size: attributes.size, mtime: attributes.mtime,
+                atime: (attributes.atime, attributes.atime_nsec), mode: attributes.mode,
+                blocks: attributes.blocks, dirty: false, preview: false,
+            }));
+        } else {
+            snapshot.partial = true;
+        }
     }
     for (ino, parent) in directories {
         if incomplete.contains(&ino) { continue; }
@@ -319,7 +395,7 @@ fn load(store: &Store, epoch: u64, budget: Budget) -> Result<Snapshot> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Batch, Change, DownloadTicket, Event, Node, NodeMetadata};
+    use crate::{Batch, Change, DownloadTicket, Event, Node, NodeMetadata, filesystem::PosixRecord};
 
     fn node(id: &str, parent: Option<&str>, directory: bool) -> Node {
         Node {
@@ -477,6 +553,42 @@ mod tests {
         let entry = index.entry_by_ino(inode).unwrap();
         assert_record(&entry, &store.posix_record_by_inode(inode).unwrap());
         assert_eq!((entry.size, entry.mode, entry.blocks), (3, 0o600, 1));
+    }
+
+    #[test]
+    fn lean_tree_clean_blob_size_uses_posix_precedence() {
+        // Same precedence on the lean path: no local override row exists, so
+        // the lean projection is used and it must still stat the body file
+        // instead of trusting a stale node_metadata size.
+        let (_path, mut store) = fixture();
+        store.publish_download(&DownloadTicket { id: "file".into(), version: "1".into() },
+            b"abc", &crate::sha256(b"abc")).unwrap();
+        store.db.execute("UPDATE node_metadata SET size=999 WHERE node='file'", []).unwrap();
+        let inode = ino_for(&store, "file").unwrap();
+        let index = build(&store).unwrap();
+        assert!(!index.is_degraded());
+        let entry = index.entry_by_ino(inode).unwrap();
+        assert_record(&entry, &store.posix_record_by_inode(inode).unwrap());
+        assert_eq!((entry.size, entry.mode, entry.blocks), (3, 0o644, 1));
+    }
+
+    #[test]
+    fn lean_tree_missing_blob_is_a_lean_attribute_miss() {
+        // A body that cannot be stat'ed is a cache miss for that row, exactly
+        // like the general projection's failed `finish`; the directory block is
+        // still published so enumeration keeps the name.
+        let (_path, mut store) = fixture();
+        store.publish_download(&DownloadTicket { id: "file".into(), version: "1".into() },
+            b"abc", &crate::sha256(b"abc")).unwrap();
+        let blob: String = store.db.query_row("SELECT blob FROM nodes WHERE id='file'", [],
+            |row| row.get(0)).unwrap();
+        std::fs::remove_file(store.root.join("blobs").join(blob)).unwrap();
+        let inode = ino_for(&store, "file").unwrap();
+        let parent = ino_for(&store, "A").unwrap();
+        let index = build(&store).unwrap();
+        assert!(index.is_partial());
+        assert!(index.entry_by_ino(inode).is_none());
+        assert_eq!(index.dir_block(parent).unwrap().entries[2].ino, inode);
     }
 
     #[test]
