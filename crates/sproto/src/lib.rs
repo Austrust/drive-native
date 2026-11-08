@@ -33,4 +33,7 @@ pub mod receive_activity;
 pub(crate) mod test_support;
 
 #[cfg(test)]
+mod pool_integration_tests;
+
+#[cfg(test)]
 mod reconcile_listing_tests;
