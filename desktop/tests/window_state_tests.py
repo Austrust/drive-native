@@ -182,6 +182,67 @@ class WindowStateTests(unittest.TestCase):
         self.assertEqual(self.window.availability_value.text(), '1 / 1')
 
 
+    def test_status_icon_is_memoized(self):
+        from drive_native_gui import window as window_module
+        self.assertIs(window_module.status_icon('online'), window_module.status_icon('online'))
+
+    def test_signal_storm_coalesces_overview_queries(self):
+        from PySide6.QtTest import QTest
+        window = self.window
+        window.loading = False
+        window.refresh_again = False
+
+        def call(method, args=(), callback=None):
+            if method == 'GetOverview':
+                if callback:
+                    window.received_overview(overview(), None)
+            elif callback:
+                callback(None, 'service_unavailable')
+
+        window.bus.call = call
+        baseline = window.overview_queries
+        for _ in range(12):
+            window.bus.changed.emit()
+            QTest.qWait(80)
+        QTest.qWait(700)
+        self.assertLessEqual(window.overview_queries - baseline, 2,
+                             'a 12-signal burst must not issue more than one overview per second')
+
+    def test_render_rows_reuses_status_icons_and_filter_passes(self):
+        from drive_native_gui import window as window_module
+        original = window_module.status_icon
+        calls = []
+        window_module.status_icon = lambda status: calls.append(status) or original(status)
+        try:
+            self.window.rows = [
+                {'path': '/Lab/a.txt', 'status': 'local_complete', 'directory': False},
+                {'path': '/Lab/b.txt', 'status': 'online_only', 'directory': False},
+                {'path': '/Lab/sub', 'status': 'pending_upload', 'directory': True},
+            ]
+            self.window.render_rows()
+            first_render_icons = len(calls)
+            self.window.render_rows()
+            self.assertEqual(len(calls), first_render_icons,
+                             'identical rows must not rebuild status icons')
+        finally:
+            window_module.status_icon = original
+        filters = []
+        original_filter = self.window.apply_filter
+        self.window.apply_filter = lambda: filters.append(1) or original_filter()
+        self.window.render_rows()
+        self.assertEqual(filters, [], 'an unchanged render must not re-run the whole-table filter')
+
+    def test_directory_offset_zero_replaces_stale_accumulator(self):
+        self.window.files_button.setChecked(True)
+        app.processEvents()
+        self.window.page_rows = [{'path': '/Lab/stale.txt'}]
+        generation = self.window.view_generation
+        entry = {'path': '/Lab/new.txt', 'status': 'local_complete', 'directory': False}
+        self.window.received_directory('', generation,
+                                       {'offset': 0, 'entries': [entry], 'total': 1}, None)
+        self.assertEqual([row['path'] for row in self.window.page_rows], ['/Lab/new.txt'])
+
+
 class MaximizedOwnerTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

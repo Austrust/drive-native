@@ -313,5 +313,18 @@ class RecoveryTests(unittest.TestCase):
             self.assertNotIn(text, value)
 
 
+    def test_context_overview_is_coalesced_per_second(self):
+        self.bus.calls.clear()
+        self.dialog.context_loading = False
+        self.dialog.context_queried = 0.0
+        overviews = 0
+        for _ in range(5):
+            self.dialog.schedule_context()
+            if any(call[0] == "GetOverview" for call in self.bus.calls):
+                self.bus.respond("GetOverview", self.context)
+                overviews += 1
+        self.assertEqual(overviews, 1, "a refresh burst must issue one capability GetOverview")
+
+
 if __name__ == "__main__":
     unittest.main()

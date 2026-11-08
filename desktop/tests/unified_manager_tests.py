@@ -639,4 +639,28 @@ class UnifiedTests(unittest.TestCase):
         self.assertIs(self.window.stack.currentWidget(), self.window.pages[B])
 
 
+    def test_status_signal_storm_coalesces_overview_queries(self):
+        from PySide6.QtTest import QTest
+        slot = A
+        bus = self.window.buses[slot]
+        bus.waiting.clear()
+        bus.calls.clear()
+        window = self.window
+
+        def call(method, args=(), callback=None):
+            bus.calls.append(method)
+            if callback:
+                callback({'task_id': 'task-' + slot, 'connection': 'online', 'mounted': True},
+                         None)
+
+        bus.call = call
+        baseline = window.overview_queries
+        for _ in range(12):
+            bus.changed.emit()
+            QTest.qWait(80)
+        QTest.qWait(700)
+        self.assertLessEqual(window.overview_queries - baseline, 2,
+                             'a signal burst must not issue more than one overview per second')
+
+
 if __name__ == '__main__': unittest.main()
