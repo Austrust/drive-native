@@ -363,4 +363,3 @@ pub fn checkpoint_draft_shared(
 #[cfg(test)]
 #[path = "draft_fsync_tests.rs"]
 mod draft_fsync_tests;
-
