@@ -255,3 +255,8 @@ impl Store {
         Ok(count)
     }
 }
+
+#[cfg(test)]
+#[path = "draft_fsync_tests.rs"]
+mod draft_fsync_tests;
+
