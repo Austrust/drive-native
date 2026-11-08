@@ -40,6 +40,9 @@ pub(crate) enum Cause {
     NativeRootUnavailable,
     NativeIndexCapacity,
     NativeResponseCapacity,
+    /// The worker admitted the maximum number of commands and refused this one
+    /// with a retryable category; the session and running jobs stay alive.
+    WorkerOverloaded,
     AuthenticationOrProtocol,
     CertificateOrConfiguration,
     ProtocolOrLocal,

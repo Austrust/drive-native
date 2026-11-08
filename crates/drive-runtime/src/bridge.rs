@@ -118,6 +118,9 @@ pub struct Bridge {
     session_pending: AtomicBool,
     flights: Mutex<HashMap<(String, String), Arc<Flight>>>,
     download_retry_clock: Mutex<crate::download_retry_clock::RetryClock>,
+    /// Wakes flights waiting for a retry deadline when another flight
+    /// publishes or clears a retry gate (#31).
+    retry_wake: (Mutex<()>, Condvar),
     notify_hub: Arc<Mutex<Option<drive_fs::NotifyHub>>>,
     notifications: std::sync::mpsc::SyncSender<Invalidation>,
     /// Committed invalidations rejected by the bounded notification queue.
@@ -309,6 +312,7 @@ impl Bridge {
             connection: Mutex::new(rpc),
             flights: Mutex::new(HashMap::new()),
             download_retry_clock: Mutex::new(crate::download_retry_clock::RetryClock::default()),
+            retry_wake: (Mutex::new(()), Condvar::new()),
             notify_hub,
             notifications,
             notification_overflows: AtomicU64::new(0),
@@ -662,6 +666,7 @@ impl Bridge {
                 }
                 store.finish_download(&ticket).map_err(|_|libc::EIO)?;
                 self.download_retry_clock.lock().unwrap().clear(&ticket);
+                self.retry_wake.1.notify_all();
                 Ok(())
             }
             Err((errno, _, _)) if errno == libc::EINTR => {
@@ -847,6 +852,7 @@ impl Bridge {
         }
         let failure = store.download_failure(&ticket.id)?;
         self.download_retry_clock.lock().unwrap().publish(ticket, failure.as_ref(), wall, now);
+        self.retry_wake.1.notify_all();
         Ok(())
     }
     fn retry_clock_ready(&self, store: &drive_core::Store, ticket: &DownloadTicket, now: u64) -> drive_core::Result<bool> {
@@ -996,15 +1002,22 @@ impl Bridge {
                 if let Err(error) = permission {
                     return self.reject_download_flight(node, flight, &ticket, error);
                 }
-                if std::time::Instant::now() >= retry_deadline {
+                let remaining =
+                    retry_deadline.saturating_duration_since(std::time::Instant::now());
+                if remaining.is_zero() {
                     return Err(libc::EAGAIN);
                 }
                 if !self.connection().is_connected() {
                     return Err(libc::ENETDOWN);
                 }
-                // No flight-map/database locks while waiting. Other readers
-                // still attach to this flight and can cancel independently.
-                std::thread::sleep(Duration::from_millis(25));
+                // No flight-map/database locks while waiting. A bounded slice
+                // (≤250 ms) keeps cancellation observable, and another flight
+                // publishing or clearing this ticket wakes us early, instead of
+                // taking three Store locks and several SQL reads every 25 ms.
+                let wait = retry_wait_slice(remaining);
+                if let Ok(guard) = self.retry_wake.0.lock() {
+                    let _ = self.retry_wake.1.wait_timeout(guard, wait);
+                }
             }
             if std::time::Instant::now() >= retry_deadline {
                 return Err(libc::EAGAIN);
@@ -1803,6 +1816,11 @@ fn operation_error(body: Response) -> io::Error {
     if matches!(&body, Response::Failed { category } if category == "native_root_unavailable") {
         return io::Error::new(io::ErrorKind::InvalidData, RootUnavailable);
     }
+    if matches!(&body, Response::Failed { category } if category == crate::worker::WORKER_OVERLOADED_CATEGORY) {
+        // The bounded worker queue refused this command. It is retryable and
+        // session-preserving; it must not masquerade as a transport loss.
+        return io::Error::new(io::ErrorKind::TimedOut, Cause::WorkerOverloaded);
+    }
     if let Response::Failed { category } = &body {
         let timeout = match category.as_str() {
             "native_receive_idle" => Some(Cause::NativeReceiveIdle),
@@ -1849,6 +1867,19 @@ fn unix_seconds() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+#[cfg(test)]
+#[path = "overload_mapping_tests.rs"]
+mod overload_mapping_tests;
+
+/// A waiting reader re-checks the retry gate at most this often, so a
+/// cancellation or a republished retry deadline is observed without a busy
+/// 25 ms loop. The 35 s foreground window therefore needs ≤ 140 checks.
+const RETRY_WAIT_SLICE: Duration = Duration::from_millis(250);
+
+fn retry_wait_slice(remaining: Duration) -> Duration {
+    remaining.min(RETRY_WAIT_SLICE)
 }
 
 /// Transport loss during a read-only reconciliation attempt is not evidence
