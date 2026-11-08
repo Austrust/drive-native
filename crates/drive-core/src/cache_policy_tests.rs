@@ -1,7 +1,7 @@
 //! Candidate-selection equivalence and read-volume evidence for the set-based
 //! cache policy query. The legacy per-candidate pipeline is only compiled in
 //! tests (`cache_candidates_legacy`).
-use super::CACHE_CANDIDATES_SQL;
+use super::{CACHE_CANDIDATES_SQL, CACHE_RECENCY_CAPACITY, CacheRecency};
 use crate::{DownloadTicket, Node, Store, sha256};
 use std::collections::HashSet;
 
@@ -364,4 +364,37 @@ fn candidate_query_read_volume_is_bounded() {
     for line in plan {
         println!("  {line}");
     }
+}
+
+/// The recency ledger is the hottest open-path data structure: verify exact
+/// last-use ordering, duplicate compaction and bounded eviction without SQLite.
+/// This is the unit-level guard for the scan/timing test in `tests/cache_policy.rs`.
+#[test]
+fn recency_ledger_orders_deduplicates_and_evicts_in_bounded_space() {
+    let mut recency = CacheRecency::new();
+    for id in ["a", "b", "a", "c", "b"] {
+        recency.note(id);
+    }
+    assert_eq!(recency.take(), vec!["a", "c", "b"]);
+    assert_eq!(recency.take(), Vec::<String>::new());
+
+    // A hot id must not grow the eviction queue without bound.
+    for _ in 0..CACHE_RECENCY_CAPACITY * 2 + 4096 {
+        recency.note("hot");
+    }
+    assert!(recency.order.len() <= CACHE_RECENCY_CAPACITY * 2 + 64);
+    assert_eq!(recency.take(), vec!["hot"]);
+
+    // Writes past capacity drop only the oldest distinct entries.
+    let mut recency = CacheRecency::new();
+    for i in 0..CACHE_RECENCY_CAPACITY + 2 {
+        recency.note(&format!("n{i:06}"));
+    }
+    let pending = recency.take();
+    assert_eq!(pending.len(), CACHE_RECENCY_CAPACITY);
+    assert_eq!(pending[0], "n000002");
+    assert_eq!(
+        pending.last().unwrap(),
+        &format!("n{:06}", CACHE_RECENCY_CAPACITY + 1)
+    );
 }

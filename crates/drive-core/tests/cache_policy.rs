@@ -183,6 +183,71 @@ fn schema_11_upgrade_keeps_contents_and_creates_backup_and_policy_tables() {
     }));
 }
 
+/// Hot-path guard: `note_cache_use` runs for every successful cached open, so
+/// its cost must not scale with the number of files remembered. A `Vec` ring
+/// scanned on every hit degrades quadratically for large working sets; the
+/// recency ledger must stay amortized O(1) while still persisting the exact
+/// last-use order that the cache LRU consumes.
+#[test]
+fn recency_bookkeeping_stays_flat_for_large_working_sets() {
+    const DISTINCT: usize = 65_536;
+    const HITS: usize = 65_536;
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = Store::open(dir.path()).unwrap();
+    let mut nodes = Vec::with_capacity(DISTINCT + 1);
+    nodes.push(node("root"));
+    for i in 0..DISTINCT {
+        nodes.push(node(&format!("f{i:06}")));
+    }
+    s.install_remote_snapshot(&nodes, "1", "server").unwrap();
+    let ids: Vec<String> = (0..DISTINCT).map(|i| format!("f{i:06}")).collect();
+    drop(nodes);
+
+    let started = std::time::Instant::now();
+    for id in &ids {
+        s.note_cache_use(id).unwrap();
+    }
+    // Sliding-window hits: worst case for a scan when the id sits near the end.
+    for i in 0..HITS {
+        s.note_cache_use(&ids[(i * 7919) % DISTINCT]).unwrap();
+    }
+    let elapsed = started.elapsed();
+    println!(
+        "RECENCY_BENCH distinct={DISTINCT} repeat_hits={HITS} elapsed_us={} per_call_ns={}",
+        elapsed.as_micros(),
+        elapsed.as_nanos() / ((DISTINCT + HITS) as u128)
+    );
+    assert!(
+        elapsed < std::time::Duration::from_secs(1),
+        "note_cache_use took {elapsed:?} for {DISTINCT} distinct + {HITS} repeat hits"
+    );
+
+    // The deferred flush must reproduce the global last-use order exactly.
+    let mut last_use: std::collections::HashMap<&str, usize> = ids
+        .iter()
+        .enumerate()
+        .map(|(position, id)| (id.as_str(), position))
+        .collect();
+    for i in 0..HITS {
+        last_use.insert(ids[(i * 7919) % DISTINCT].as_str(), DISTINCT + i);
+    }
+    let mut expected: Vec<(&str, usize)> = last_use.into_iter().collect();
+    expected.sort_unstable_by_key(|(_, position)| *position);
+    let expected: Vec<String> = expected.into_iter().map(|(id, _)| id.to_owned()).collect();
+
+    drop(s);
+    let observer = rusqlite::Connection::open(dir.path().join("state.sqlite")).unwrap();
+    let order: Vec<String> = observer
+        .prepare("SELECT node FROM cache_access ORDER BY seq")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<std::result::Result<_, _>>()
+        .unwrap();
+    assert_eq!(order.len(), expected.len());
+    assert_eq!(order, expected);
+}
+
 fn wal_state(dir: &std::path::Path) -> (u64, Option<std::time::SystemTime>) {
     match std::fs::symlink_metadata(dir.join("state.sqlite-wal")) {
         Ok(metadata) => (metadata.len(), metadata.modified().ok()),

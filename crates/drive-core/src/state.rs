@@ -122,8 +122,9 @@ pub struct Store {
     pub(crate) namespace_runtime: Arc<Mutex<crate::namespace_schedule::NamespaceRuntime>>,
     /// Deferred LRU recency for cached file opens. The FUSE open path must not
     /// append WAL frames or fsync; entries are merged into `cache_access` in
-    /// one transaction before a budget/trim decision and on drop.
-    pub(crate) cache_recency: Mutex<Vec<String>>,
+    /// one transaction before a budget/trim decision and on drop. Maintained as
+    /// an amortized O(1) ledger because this is the hottest FUSE path.
+    pub(crate) cache_recency: Mutex<crate::cache_policy::CacheRecency>,
     // Issue #24 counters; the Store writer lock serializes access, so plain
     // integers are cheaper than another atomic layer.
     pub(crate) draft_stats: DraftWriteStats,
@@ -387,7 +388,7 @@ impl Store {
             root,
             handles: Arc::new(Mutex::new(HashMap::new())),
             namespace_runtime: Arc::new(Mutex::new(Default::default())),
-            cache_recency: Mutex::new(Vec::new()),
+            cache_recency: Mutex::new(crate::cache_policy::CacheRecency::new()),
             draft_stats: DraftWriteStats::default(),
         })
     }
@@ -448,7 +449,7 @@ impl Store {
             root,
             handles: Arc::new(Mutex::new(HashMap::new())),
             namespace_runtime,
-            cache_recency: Mutex::new(Vec::new()),
+            cache_recency: Mutex::new(crate::cache_policy::CacheRecency::new()),
             draft_stats: DraftWriteStats::default(),
         })
     }
