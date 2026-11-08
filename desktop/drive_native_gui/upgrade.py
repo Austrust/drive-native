@@ -19,7 +19,7 @@ STAGES = {
     "complete": "后台已切换，请检查暂停状态后恢复同步",
     "failed": "后台未切换，请检查诊断",
 }
-EXPECTED_STATE_SCHEMA = 26
+EXPECTED_STATE_SCHEMA = 27
 EXPECTED_IPC = 21
 
 
