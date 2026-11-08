@@ -1,5 +1,6 @@
 import os
 import json
+import time
 from pathlib import Path
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal, QProcess
 from PySide6.QtGui import QDesktopServices, QAction, QIcon, QColor, QPainter, QPixmap, QPalette
@@ -142,7 +143,17 @@ def cache_row_text(row):
     return "仅在线"
 
 
+# Status icons never change for a given status: build each one once and reuse
+# the QIcon. The old code painted a fresh 20x20 pixmap for every row on every
+# four-per-second signal burst (issue #29).
+_STATUS_ICONS = {}
+OVERVIEW_SIGNAL_INTERVAL = 1.0
+
+
 def status_icon(status):
+    cached = _STATUS_ICONS.get(status)
+    if cached is not None:
+        return cached
     color = QColor(STATUS.get(status, ("", "#c14c58"))[1])
     pix = QPixmap(20, 20)
     pix.fill(Qt.transparent)
@@ -161,7 +172,9 @@ def status_icon(status):
     else:
         painter.drawText(pix.rect(), Qt.AlignCenter, "·")
     painter.end()
-    return QIcon(pix)
+    icon = QIcon(pix)
+    _STATUS_ICONS[status] = icon
+    return icon
 
 
 class _MountActions:
@@ -201,6 +214,16 @@ class MainWindow(QMainWindow):
         # Directory page accumulator: a GetDirectory reply may arrive before
         # received_overview creates it for the first time.
         self.page_rows = []
+        # #29 counters: asserted by tests and reported as evidence.
+        self.overview_queries = 0
+        self.directory_queries = 0
+        self.icon_sets = 0
+        self.filter_passes = 0
+        self.filter_row_updates = 0
+        self.last_overview_at = 0.0
+        self._directory_loading = False
+        self._dir_icon = None
+        self._file_icon = None
         self.loading = False
         self.progress_loading = False
         self.progress_again = False
@@ -428,7 +451,7 @@ class MainWindow(QMainWindow):
         self.tabs.currentChanged.connect(self.tab_changed)
         self.refresh_timer = QTimer(self)
         self.refresh_timer.setSingleShot(True)
-        self.refresh_timer.setInterval(100)
+        self.refresh_timer.setInterval(int(OVERVIEW_SIGNAL_INTERVAL * 1000))
         self.refresh_timer.timeout.connect(self.refresh)
         self.bus.changed.connect(self.schedule_refresh)
         self.bus.progress_changed.connect(self.refresh_progress)
@@ -822,8 +845,15 @@ class MainWindow(QMainWindow):
             return
         if self.loading:
             self.refresh_again = True
-        elif not self.refresh_timer.isActive():
-            self.refresh_timer.start()
+            return
+        if self.refresh_timer.isActive():
+            return
+        # Coalesce signal bursts into at most one GetOverview per second while
+        # keeping the first signal prompt (issue #29). Direct refresh() calls
+        # (buttons, first show, tests) are intentionally not throttled.
+        elapsed = time.monotonic() - self.last_overview_at
+        delay = max(0, int((OVERVIEW_SIGNAL_INTERVAL - elapsed) * 1000))
+        self.refresh_timer.start(delay)
 
     def refresh(self):
         if not self.isVisible():
@@ -832,6 +862,8 @@ class MainWindow(QMainWindow):
             self.refresh_again = True
             return
         self.loading = True
+        self.last_overview_at = time.monotonic()
+        self.overview_queries += 1
         self.refresh_progress()
         self.bus.call("GetOverview", callback=self.received_overview)
 
@@ -1024,8 +1056,11 @@ class MainWindow(QMainWindow):
             self.auto_unlock_attempted = True
             self.keyring_job = secret_job(self.profile["task_id"], self.keyring_loaded)
         if data["mounted"] and self.isVisible() and self.files_button.isChecked():
-            self.page_rows = []
-            self.request_page(self.folder, self.view_generation, 0)
+            # Keep the current page accumulator until the replacement offset-0
+            # reply arrives; clearing it here dropped rows that the first page
+            # of a multi-page directory had already appended (issue #29).
+            if not self._directory_loading:
+                self.request_page(self.folder, self.view_generation, 0)
         else:
             self.loading = False
             self.ready.emit()
@@ -1049,6 +1084,8 @@ class MainWindow(QMainWindow):
             self.show_error(error)
 
     def request_page(self, path, generation, offset):
+        self.directory_queries += 1
+        self._directory_loading = True
         self.bus.call(
             "GetDirectory",
             [path, offset],
@@ -1056,6 +1093,10 @@ class MainWindow(QMainWindow):
         )
 
     def received_directory(self, path, generation, data, error):
+        # This callback closes one page; a multi-page traversal re-arms the
+        # flag in request_page. While it is set, received_overview must not
+        # start a duplicate offset-0 request (issue #29).
+        self._directory_loading = False
         if not self.isVisible() or not self.files_button.isChecked():
             self.loading = False
             self.followup_refresh()
@@ -1087,7 +1128,11 @@ class MainWindow(QMainWindow):
             return
         token = (data.get("preview_only") is True, data.get("preview_generation"))
         if data["offset"] == 0:
+            # Offset 0 starts a new listing: replace the accumulator here
+            # rather than in received_overview, so a reply that races an
+            # overview refresh cannot append the same first page twice.
             self.page_view_token = token
+            self.page_rows = list(data["entries"])
         elif token != getattr(self, "page_view_token", None):
             self.loading = False
             self.page_rows = []
@@ -1100,7 +1145,8 @@ class MainWindow(QMainWindow):
             self.ready.emit()
             self.followup_refresh()
             return
-        self.page_rows.extend(data["entries"])
+        else:
+            self.page_rows.extend(data["entries"])
         next_offset = data["offset"] + len(data["entries"])
         if data["entries"] and next_offset < min(self.display_limit, data["total"]):
             self.request_page(path, generation, next_offset)
@@ -1133,6 +1179,7 @@ class MainWindow(QMainWindow):
         # Keep item identities while status signals arrive. Rebuilding the tree
         # between press/release/double-click loses Qt's activation target and
         # also disrupts keyboard focus, selection and scrolling.
+        changed = False
         existing = {}
         for index in range(self.table.topLevelItemCount()):
             item = self.table.topLevelItem(index)
@@ -1145,12 +1192,14 @@ class MainWindow(QMainWindow):
         for key, item in existing.items():
             if key not in wanted:
                 self.table.takeTopLevelItem(self.table.indexOfTopLevelItem(item))
+                changed = True
         for index, row in enumerate(ordered):
             key = row.get("id", row["path"])
             item = existing.get(key)
             if item is None:
                 item = QTreeWidgetItem()
                 self.table.insertTopLevelItem(index, item)
+                changed = True
             elif self.table.indexOfTopLevelItem(item) != index:
                 self.table.takeTopLevelItem(self.table.indexOfTopLevelItem(item))
                 self.table.insertTopLevelItem(index, item)
@@ -1164,6 +1213,7 @@ class MainWindow(QMainWindow):
             ):
                 if item.text(column) != text:
                     item.setText(column, text)
+                    changed = True
             failure = row.get("sync_error")
             detail = ""
             if failure:
@@ -1174,20 +1224,38 @@ class MainWindow(QMainWindow):
                     detail += " · 仍可使用已有完整版本"
             item.setToolTip(1, detail)
             item.setData(0, Qt.UserRole, row)
-            item.setIcon(1, status_icon(status))
-            item.setIcon(
-                0,
-                self.style().standardIcon(
-                    QStyle.SP_DirIcon if row.get("directory") else QStyle.SP_FileIcon
-                ),
-            )
-        self.apply_filter()
+            if item.data(1, Qt.UserRole) != status:
+                item.setIcon(1, status_icon(status))
+                item.setData(1, Qt.UserRole, status)
+                self.icon_sets += 1
+            directory = bool(row.get("directory"))
+            if item.data(0, Qt.UserRole + 1) != directory:
+                item.setIcon(0, self._standard_icon(directory))
+                item.setData(0, Qt.UserRole + 1, directory)
+                self.icon_sets += 1
+        if changed:
+            self.apply_filter()
+
+    def _standard_icon(self, directory):
+        # QStyle returns the same standard icon every call, but resolving it
+        # per row per repaint is avoidable state lookup (issue #29).
+        if directory:
+            if self._dir_icon is None:
+                self._dir_icon = self.style().standardIcon(QStyle.SP_DirIcon)
+            return self._dir_icon
+        if self._file_icon is None:
+            self._file_icon = self.style().standardIcon(QStyle.SP_FileIcon)
+        return self._file_icon
 
     def apply_filter(self):
+        self.filter_passes += 1
         text = self.filter.text().casefold()
         for index in range(self.table.topLevelItemCount()):
             item = self.table.topLevelItem(index)
-            item.setHidden(text not in item.text(0).casefold())
+            hidden = text not in item.text(0).casefold()
+            if item.isHidden() != hidden:
+                item.setHidden(hidden)
+                self.filter_row_updates += 1
 
     def navigate(self, path):
         self.folder = path

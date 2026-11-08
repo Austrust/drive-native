@@ -1,4 +1,5 @@
 """Local conflict centre. Decisions carry a version token checked by the fsd."""
+import time
 from pathlib import Path, PurePosixPath
 from uuid import uuid4
 from PySide6.QtCore import Qt, QTimer, Signal, QUrl
@@ -155,6 +156,12 @@ class IssuesDialog(QDialog):
         self.timer.setInterval(150)
         self.timer.timeout.connect(self.refresh)
         self.bus.changed.connect(self.schedule_refresh)
+        # Cap the extra capability GetOverview that refresh() issues, so a
+        # changed-signal burst cannot double the query rate (issue #29).
+        self.context_queried = 0.0
+        self.context_timer = QTimer(self)
+        self.context_timer.setSingleShot(True)
+        self.context_timer.timeout.connect(self.refresh_context)
         self.selection_changed()
 
     def showEvent(self, event):
@@ -183,7 +190,7 @@ class IssuesDialog(QDialog):
             self.loaded = False
             self.message.setText(CHECKING_ISSUES)
         self.request_page("", self.generation)
-        self.refresh_context()
+        self.schedule_context()
 
     def load_more(self):
         if self.cursor and not self.loading and not self.busy:
@@ -297,9 +304,25 @@ class IssuesDialog(QDialog):
         self.pause_sync.setEnabled(not self.busy and self.overview.get("connection") in ("online", "offline", "connecting", "needs_attention"))
         self.login.setEnabled(not self.busy and self.configure is not None)
 
+    CONTEXT_INTERVAL = 1.0
+
+    def schedule_context(self):
+        """One capability GetOverview per second while the dialog is visible."""
+        if not self.isVisible():
+            return
+        if self.context_loading:
+            return
+        elapsed = time.monotonic() - self.context_queried
+        delay = int((self.CONTEXT_INTERVAL - elapsed) * 1000)
+        if delay <= 0:
+            self.refresh_context()
+        elif not self.context_timer.isActive():
+            self.context_timer.start(delay)
+
     def refresh_context(self):
         if not self.isVisible() or self.context_loading:
             return
+        self.context_queried = time.monotonic()
         self.context_loading = True
         def done(data, error):
             self.context_loading = False

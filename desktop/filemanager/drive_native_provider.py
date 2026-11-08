@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import time
 from collections import OrderedDict
 import gi
 
@@ -27,6 +28,7 @@ STATES = {
     "conflict": ("需要处理冲突", "drive-native-error"),
     "mixed": ("部分本地可用", "drive-native-online"),
 }
+STATUS_SIGNAL_INTERVAL = 1.0
 
 
 def build_provider(FileManager):
@@ -43,6 +45,14 @@ def build_provider(FileManager):
             self.timer = None
             self.busy = False
             self.generation = 0
+            # StatusChanged storms used to run a full reorder + GetOverview per
+            # signal (issue #29). At most one window per second fires; signals
+            # arriving inside the window collapse into one trailing refresh.
+            self.status_signal_at = 0.0
+            self.status_signal_timer = None
+            self.status_signal_seen = 0
+            self.overview_queries = 0
+            self.coalesced_signals = 0
             Gio.DBusProxy.new_for_bus(
                 Gio.BusType.SESSION,
                 Gio.DBusProxyFlags.DO_NOT_AUTO_START | Gio.DBusProxyFlags.DO_NOT_LOAD_PROPERTIES,
@@ -82,10 +92,28 @@ def build_provider(FileManager):
 
         def _signal(self, _proxy, _sender, signal, _parameters):
             if signal == "StatusChanged":
+                self._status_signal()
+
+        def _status_signal(self):
+            now = time.monotonic()
+            if now - self.status_signal_at >= STATUS_SIGNAL_INTERVAL:
+                self.status_signal_at = now
                 self._changed()
+                return
+            self.coalesced_signals += 1
+            if self.status_signal_timer is None:
+                delay = int((STATUS_SIGNAL_INTERVAL - (now - self.status_signal_at)) * 1000) + 1
+                self.status_signal_timer = GLib.timeout_add(delay, self._status_trailing)
+
+        def _status_trailing(self):
+            self.status_signal_timer = None
+            self.status_signal_at = time.monotonic()
+            self._changed()
+            return GLib.SOURCE_REMOVE
 
         def _changed(self):
             self.generation += 1
+            self.overview_queries += 1
             generation = self.generation
 
             def overview(data, failed):

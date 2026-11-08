@@ -143,4 +143,19 @@ class Tests(unittest.TestCase):
         self.task._changed()
         self.assertEqual(file.invalidations, 1)
 
+    def test_status_signal_storm_issues_single_overview(self):
+        calls = []
+
+        def reply(method, args, cb):
+            calls.append(method)
+            cb({'mount': self.task.root, 'connection': 'online'} if method == 'GetOverview'
+               else {'entries': []}, False)
+
+        self.task._call = reply
+        for _ in range(100):
+            self.task._signal(None, None, 'StatusChanged', None)
+        self.assertEqual(calls.count('GetOverview'), 1)
+        self.assertGreaterEqual(self.task.coalesced_signals, 99)
+
+
 if __name__=='__main__':unittest.main()
