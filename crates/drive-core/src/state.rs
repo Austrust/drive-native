@@ -653,6 +653,20 @@ impl Store {
             |r| r.get(0),
         )?;
         if batch.from != received {
+            // Applied receipts are deleted from the inbox (see `apply_next`), so
+            // the duplicate check above cannot see a batch that has already been
+            // committed. A resend whose target cursor equals the committed cursor
+            // is the last applied batch being replayed: ignore it so redelivery
+            // stays idempotent even after the receipt is gone. Anything else is a
+            // genuine gap.
+            let committed: String = tx.query_row(
+                "SELECT value FROM metadata WHERE key='committed_cursor'",
+                [],
+                |r| r.get(0),
+            )?;
+            if batch.to == committed {
+                return Ok(());
+            }
             return Err(Error::State(
                 "event cursor gap; reconciliation required".into(),
             ));
