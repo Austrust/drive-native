@@ -161,7 +161,9 @@ impl CacheFilesystem {
         self
     }
     fn refresh_index_later(&self) {
-        if self.notify.delivery_failed() { return; }
+        // Keep refreshing while the hub is degraded: leases stay gated by
+        // `delivery_failed`, but the index must already be fresh when the quiet
+        // window ends so recovery needs no restart and no extra round trip.
         if let Some(binding) = &self.namespace_index {
             binding.schedule(self.store.clone(), &self.queue);
         }

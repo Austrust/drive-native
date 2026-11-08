@@ -708,14 +708,10 @@ impl Bridge {
                 self.initialization.work.count(Counter::Checkpoints, 1);
                 invalidations
             };
-            for (inode, parent, name) in invalidations {
-                if let Some(inode) = inode {
-                    self.enqueue_invalidation(Invalidation::Inode(inode));
-                }
-                if let Some(parent) = parent {
-                    self.enqueue_invalidation(Invalidation::Entry(parent, name));
-                }
-            }
+            // The commit replaced the whole namespace; publish one generation
+            // invalidation instead of per-node messages that cannot fit the
+            // bounded notification queue (~2 per node for 210k/294k nodes).
+            self.enqueue_snapshot_invalidations(invalidations);
             self.signal_upload();
             self.initialization.activity();
             return Ok(());
