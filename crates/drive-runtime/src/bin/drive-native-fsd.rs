@@ -54,8 +54,11 @@ fn status_delta(
     if let Some(watermark) = watermark.as_ref() {
         match last {
             // The first observation only records the committed boundary; the
-            // consumer's first delta is a full refresh anyway.
-            None => {}
+            // consumer's first delta is a full refresh anyway. A later tick
+            // without a cursor (for example the previous delta returned reset)
+            // must keep the reset sticky instead of emitting an empty
+            // continuous delta that hides the missed window (verify-31 c1).
+            None => reset = status_events::resets_without_cursor(from_revision),
             Some(last) if last.epoch != watermark.cursor.epoch => reset = true,
             Some(last) => {
                 let mut current = last.clone();
