@@ -44,9 +44,14 @@ pub enum Stage {
     TtlDelivered,
     /// Invalidations queued (may lag delivery).
     TtlInvalidations,
-    /// Invalidation failures (notification rejected/unsupported). Non-zero means
-    /// the mount has fallen back to zero TTL.
+    /// Invalidation failures (notification rejected/unsupported or queue
+    /// overflow). Non-zero means the mount suspended cacheable publication for
+    /// one quiet lease window; it recovers on its own (see `TtlDegraded`).
     TtlFailures,
+    /// One transition into the degraded quiet window (leases suspended).
+    TtlDegraded,
+    /// One automatic recovery out of the degraded quiet window.
+    TtlRecovered,
     /// LOOKUP replies published with a non-zero positive-entry TTL.
     EntryTtlNonZero,
     /// LOOKUP replies published with a zero entry TTL.
@@ -79,7 +84,7 @@ pub enum Stage {
     /// Elapsed time for index attempts/replies, not a CPU-time attribution.
     IndexReadUs,
 }
-const STAGES: [Stage; 50] = [
+const STAGES: [Stage; 52] = [
     Stage::LookupQueue,
     Stage::LookupStoreWait,
     Stage::LookupProjection,
@@ -120,6 +125,7 @@ const STAGES: [Stage; 50] = [
     Stage::IndexPartial, Stage::PermissionDenied, Stage::SpaceForbidden,
     Stage::LookupRequests, Stage::GetattrRequests, Stage::OpendirRequests,
     Stage::ReaddirRequests, Stage::ReaddirPlusRequests, Stage::IndexReadUs,
+    Stage::TtlDegraded, Stage::TtlRecovered,
 ];
 struct Aggregate {
     count: AtomicU64,
@@ -137,7 +143,7 @@ impl Aggregate {
         }
     }
 }
-static TOTALS: [Aggregate; 50] = [const { Aggregate::new() }; 50];
+static TOTALS: [Aggregate; 52] = [const { Aggregate::new() }; 52];
 static ENABLED: OnceLock<bool> = OnceLock::new();
 pub(crate) fn enabled() -> bool {
     *ENABLED

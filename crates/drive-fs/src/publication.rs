@@ -15,16 +15,21 @@
 //!
 //! Delivery runs without a lock that a FUSE reply needs: a notification may
 //! wait for a kernel operation which is itself waiting for that reply. Queue
-//! overflow or a hard notification failure stops new attribute leases; it does
-//! not retroactively revoke outstanding leases. Both the runtime feeder and
-//! this hub must propagate loss. The hub is inert until a notifier is installed.
+//! overflow or a rejected notification suspends new attribute leases for one
+//! old-lease window instead of closing the mount for the rest of the session.
+//! The window is quiet (no in-flight cacheable reply, then the previous TTL
+//! plus a short grace) so every pre-degradation answer has aged out; afterwards
+//! the hub resumes publishing on its own, without a restart or remount.
+//! A wholesale generation invalidation (one message for a whole snapshot
+//! commit) uses the same suspended window. Both the runtime feeder and this hub
+//! must propagate loss. The hub is inert until a notifier is installed.
 use fuser::Notifier;
 use std::{
     collections::HashMap,
     ffi::OsStr,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering},
         mpsc::{self, SyncSender},
     },
     time::{Duration, Instant},
@@ -37,14 +42,53 @@ pub const DEFAULT_TTL_MS: u64 = 1_000;
 /// Names always revalidate, independently of attribute caching configuration.
 pub const ENTRY_TTL: Duration = Duration::ZERO;
 const INVALIDATION_QUEUE: usize = 65_536;
+/// Slack added to the previous lease TTL before publishing resumes. It absorbs
+/// scheduler/clock granularity between the last cacheable reply and recovery.
+const DEGRADED_GRACE_MS: u64 = 100;
 
 enum Invalidate {
     Entry(u64, String),
     Inode(u64),
 }
 
-/// Non-blocking observation token for a published metadata reply.
-pub struct ReplyPermit;
+/// Why the hub suspended publishing cacheable metadata.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DegradeReason {
+    /// The bounded invalidation queue rejected a message.
+    QueueOverflow = 1,
+    /// A whole-cache (snapshot generation) invalidation is being delivered.
+    WholeCache = 2,
+    /// The kernel rejected a notification, so a change may be unobservable.
+    DeliveryFailure = 3,
+}
+impl DegradeReason {
+    fn encode(self) -> u8 {
+        self as u8
+    }
+    fn decode(value: u8) -> Option<Self> {
+        match value {
+            1 => Some(Self::QueueOverflow),
+            2 => Some(Self::WholeCache),
+            3 => Some(Self::DeliveryFailure),
+            _ => None,
+        }
+    }
+}
+
+/// Non-blocking observation token for a published metadata reply. It also keeps
+/// the reply in flight: a degradation only resumes leases once every reply that
+/// could carry a pre-degradation answer has been written to the kernel.
+pub struct ReplyPermit {
+    shared: Arc<Shared>,
+}
+impl Drop for ReplyPermit {
+    fn drop(&mut self) {
+        self.shared.in_flight.fetch_sub(1, Ordering::Release);
+        self.shared
+            .last_reply_ms
+            .fetch_max(elapsed_ms(&self.shared), Ordering::AcqRel);
+    }
+}
 
 struct Shared {
     notifier: Mutex<Option<Notifier>>,
@@ -52,15 +96,29 @@ struct Shared {
     #[cfg(any(test, feature = "test-seams"))]
     reply_delay: Mutex<Option<Duration>>,
     active: AtomicBool,
-    /// Mirrors `active && !failed && ttl_ms > 0`: one relaxed load on the hot
+    /// Mirrors `active && !degraded && ttl_ms > 0`: one relaxed load on the hot
     /// reply path so a disabled cache costs no gate or clock work.
     caching: AtomicBool,
-    failed: AtomicBool,
+    /// Cacheable publication is suspended; cleared after a quiet lease window.
+    degraded: AtomicBool,
+    degraded_reason: AtomicU8,
+    /// Latest degradation event, in monotonic milliseconds since `start`.
+    degraded_since_ms: AtomicU64,
+    /// Completion of the latest cacheable reply, in monotonic milliseconds.
+    last_reply_ms: AtomicU64,
+    /// Replies holding a permit; degradation resumes only at zero.
+    in_flight: AtomicUsize,
     ttl_ms: AtomicU64,
     published: AtomicU64,
     invalidations: AtomicU64,
     delivered: AtomicU64,
     failures: AtomicU64,
+    overflows: AtomicU64,
+    recoveries: AtomicU64,
+    start: Instant,
+    /// Serializes degradation/recovery transitions only; never taken while
+    /// holding the notifier lock, and never taken by a reply path.
+    recovery: Mutex<()>,
     /// Directories touched by a change recently; READDIRPLUS must not publish a
     /// positive entry TTL for them until the view is stable again.
     touched: Mutex<HashMap<u64, Instant>>,
@@ -75,9 +133,15 @@ pub struct NotifyStats {
     pub invalidations: u64,
     /// Invalidations that passed the publication gate (delivery attempted).
     pub delivered: u64,
+    /// Degradation transitions: a committed change may have been unobservable.
     pub failures: u64,
+    /// Degradations caused by a rejected invalidation/notification.
+    pub overflows: u64,
+    /// Automatic recoveries after a quiet lease window (no restart needed).
+    pub recoveries: u64,
     pub active: bool,
-    pub failed: bool,
+    pub degraded: bool,
+    pub reason: Option<DegradeReason>,
 }
 
 #[derive(Clone)]
@@ -99,9 +163,82 @@ impl Drop for Worker {
     }
 }
 
+fn elapsed_ms(shared: &Shared) -> u64 {
+    u64::try_from(shared.start.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
+
+/// The moment the previous lease window is provably over: the later of the
+/// degradation event and the last completed cacheable reply, plus the TTL that
+/// reply could have carried, plus a short grace.
+fn quiet_deadline_ms(shared: &Shared, ttl_ms: u64) -> u64 {
+    let from = shared
+        .degraded_since_ms
+        .load(Ordering::Acquire)
+        .max(shared.last_reply_ms.load(Ordering::Acquire));
+    from.saturating_add(ttl_ms).saturating_add(DEGRADED_GRACE_MS)
+}
+
+/// Suspend cacheable publication. Repeated events extend the quiet window but
+/// only the first transition counts as a failure. A hub without an installed
+/// notifier never granted a lease; its degradation flag still gates the index
+/// (a committed change may already be unobservable) and `install` clears it.
+fn begin_degraded(shared: &Shared, reason: DegradeReason) {
+    let _guard = shared.recovery.lock().unwrap();
+    shared.caching.store(false, Ordering::Release);
+    if !shared.degraded.swap(true, Ordering::AcqRel) {
+        shared.failures.fetch_add(1, Ordering::Relaxed);
+        crate::diagnostics::count(crate::diagnostics::Stage::TtlDegraded);
+    }
+    shared
+        .degraded_reason
+        .store(reason.encode(), Ordering::Release);
+    shared
+        .degraded_since_ms
+        .store(elapsed_ms(shared), Ordering::Release);
+}
+
+/// Resume publication once the previous lease window is fully quiet.
+fn try_recover(shared: &Shared) -> bool {
+    if !shared.degraded.load(Ordering::Acquire) {
+        return true;
+    }
+    {
+        let _guard = shared.recovery.lock().unwrap();
+        if !shared.degraded.load(Ordering::Acquire) {
+            return true;
+        }
+        // A reply that started before the degradation may still publish an
+        // answer computed before it; its lease must expire before leases resume.
+        if shared.in_flight.load(Ordering::Acquire) != 0 {
+            return false;
+        }
+        let ttl_ms = shared.ttl_ms.load(Ordering::Relaxed);
+        if elapsed_ms(shared) < quiet_deadline_ms(shared, ttl_ms) {
+            return false;
+        }
+        shared.degraded_reason.store(0, Ordering::Release);
+        shared.degraded.store(false, Ordering::Release);
+        shared.recoveries.fetch_add(1, Ordering::Relaxed);
+        crate::diagnostics::count(crate::diagnostics::Stage::TtlRecovered);
+        let caching = shared.active.load(Ordering::Acquire) && ttl_ms > 0;
+        shared.caching.store(caching, Ordering::Release);
+    }
+    true
+}
+
+/// Count and apply a wholesale generation invalidation. Deliberate: the caller
+/// replaces every per-node invalidation of a snapshot commit.
+fn note_whole_cache(shared: &Shared) {
+    shared.invalidations.fetch_add(1, Ordering::Relaxed);
+    crate::diagnostics::count(crate::diagnostics::Stage::TtlInvalidations);
+    shared.touched.lock().unwrap().clear();
+    begin_degraded(shared, DegradeReason::WholeCache);
+}
+
 /// Best-effort `FUSE_NOTIFY_INC_EPOCH` (kernel >= 6.16). Unsupported kernels
 /// answer EINVAL/ENOSYS, which is remembered and treated as optional; any other
-/// failure falls back to zero TTL like a lost invalidation.
+/// failure suspends publication for one quiet lease window like a lost
+/// invalidation.
 fn bump_epoch(shared: &Shared, notifier: &Notifier) {
     match shared.epoch.load(Ordering::Relaxed) {
         2 => return,
@@ -120,17 +257,9 @@ fn bump_epoch(shared: &Shared, notifier: &Notifier) {
             if unsupported {
                 shared.epoch.store(2, Ordering::Relaxed);
             } else {
-                fail_closed(shared);
+                begin_degraded(shared, DegradeReason::DeliveryFailure);
             }
         }
-    }
-}
-
-fn fail_closed(shared: &Shared) {
-    if !shared.failed.swap(true, Ordering::AcqRel) {
-        shared.caching.store(false, Ordering::Release);
-        shared.failures.fetch_add(1, Ordering::Relaxed);
-        crate::diagnostics::count(crate::diagnostics::Stage::TtlFailures);
     }
 }
 
@@ -151,12 +280,20 @@ impl NotifyHub {
             reply_delay: Mutex::new(None),
             active: AtomicBool::new(false),
             caching: AtomicBool::new(false),
-            failed: AtomicBool::new(false),
+            degraded: AtomicBool::new(false),
+            degraded_reason: AtomicU8::new(0),
+            degraded_since_ms: AtomicU64::new(0),
+            last_reply_ms: AtomicU64::new(0),
+            in_flight: AtomicUsize::new(0),
             ttl_ms: AtomicU64::new(ttl_ms),
             published: AtomicU64::new(0),
             invalidations: AtomicU64::new(0),
             delivered: AtomicU64::new(0),
             failures: AtomicU64::new(0),
+            overflows: AtomicU64::new(0),
+            recoveries: AtomicU64::new(0),
+            start: Instant::now(),
+            recovery: Mutex::new(()),
             touched: Mutex::new(HashMap::new()),
             epoch: AtomicU8::new(0),
         });
@@ -170,7 +307,7 @@ impl NotifyHub {
                 // ordering (see the module documentation).
                 worker_shared.delivered.fetch_add(1, Ordering::Relaxed);
                 crate::diagnostics::count(crate::diagnostics::Stage::TtlDelivered);
-                if worker_shared.failed.load(Ordering::Acquire) {
+                if worker_shared.degraded.load(Ordering::Acquire) {
                     continue;
                 }
                 let notifier = worker_shared.notifier.lock().unwrap();
@@ -178,8 +315,8 @@ impl NotifyHub {
                     continue;
                 };
                 // Strict variants: the lenient fuser API swallows ENOENT,
-                // which would hide a dropped invalidation. Any error fails the
-                // mount closed to zero TTL.
+                // which would hide a dropped invalidation. Any error suspends
+                // cacheable publication for one quiet lease window.
                 let result = match message {
                     Invalidate::Entry(parent, name) => {
                         notifier.inval_entry_strict(parent, OsStr::new(&name))
@@ -192,11 +329,11 @@ impl NotifyHub {
                     // Under the bounded-staleness contract that is benign: there
                     // is no installed cache entry to revoke. Any other write
                     // failure means an invalidation may have been lost, so stop
-                    // publishing cacheable metadata.
+                    // publishing cacheable metadata for a lease window.
                     if error.raw_os_error() != Some(libc::ENOENT) {
-                        fail_closed(&worker_shared);
+                        begin_degraded(&worker_shared, DegradeReason::DeliveryFailure);
                     }
-                } else if !worker_shared.ttl_ms.load(Ordering::Relaxed).eq(&0) {
+                } else if worker_shared.ttl_ms.load(Ordering::Relaxed) != 0 {
                     bump_epoch(&worker_shared, notifier);
                 }
             }
@@ -213,6 +350,7 @@ impl NotifyHub {
     pub fn install(&self, notifier: Notifier) {
         *self.shared.notifier.lock().unwrap() = Some(notifier);
         self.shared.active.store(true, Ordering::Release);
+        self.clear_degraded();
         self.refresh_caching();
     }
     /// Stop publishing or delivering: the mount is going away.
@@ -220,10 +358,18 @@ impl NotifyHub {
         self.shared.active.store(false, Ordering::Release);
         self.shared.caching.store(false, Ordering::Release);
         self.shared.notifier.lock().unwrap().take();
+        self.clear_degraded();
+    }
+    /// A new session (or a test activation) starts from a clean degradation
+    /// state: the previous notifier connection and its lost changes are gone.
+    fn clear_degraded(&self) {
+        let _guard = self.shared.recovery.lock().unwrap();
+        self.shared.degraded_reason.store(0, Ordering::Release);
+        self.shared.degraded.store(false, Ordering::Release);
     }
     fn refresh_caching(&self) {
         let caching = self.shared.active.load(Ordering::Acquire)
-            && !self.shared.failed.load(Ordering::Acquire)
+            && !self.shared.degraded.load(Ordering::Acquire)
             && self.shared.ttl_ms.load(Ordering::Relaxed) > 0;
         self.shared.caching.store(caching, Ordering::Release);
     }
@@ -232,12 +378,13 @@ impl NotifyHub {
     pub fn activate_ttl_for_tests(&self, ttl_ms: u64) {
         self.shared.ttl_ms.store(ttl_ms, Ordering::Relaxed);
         self.shared.active.store(true, Ordering::Release);
+        self.clear_degraded();
         self.refresh_caching();
     }
     /// Model a rejected notification / unsupported kernel (tests only).
     #[doc(hidden)]
-    pub fn force_failure_for_tests(&self) {
-        fail_closed(&self.shared);
+    pub fn force_degraded_for_tests(&self) {
+        begin_degraded(&self.shared, DegradeReason::DeliveryFailure);
     }
     /// Test-only: hold a metadata reply for `delay` after its projection and
     /// publication permit, before the reply is written to the kernel. This makes
@@ -290,12 +437,14 @@ impl NotifyHub {
         self.shared.epoch.load(Ordering::Relaxed) == 1
     }
 
-    /// Configured TTL, or zero when caching is not publishable.
+    /// Configured TTL, or zero while caching is not publishable. Polling this
+    /// during a degraded window is what resumes publication once it is quiet.
     #[inline]
     pub fn ttl(&self) -> Duration {
-        if !self.shared.active.load(Ordering::Acquire)
-            || self.shared.failed.load(Ordering::Acquire)
-        {
+        if !self.shared.active.load(Ordering::Acquire) {
+            return Duration::ZERO;
+        }
+        if self.shared.degraded.load(Ordering::Acquire) && !try_recover(&self.shared) {
             return Duration::ZERO;
         }
         Duration::from_millis(self.shared.ttl_ms.load(Ordering::Relaxed))
@@ -305,14 +454,20 @@ impl NotifyHub {
         // One relaxed load on the hot path; the slow path only runs when the
         // cache is configured and installed.
         if !self.shared.caching.load(Ordering::Relaxed) {
-            return false;
+            if !self.shared.degraded.load(Ordering::Relaxed) || !try_recover(&self.shared) {
+                return false;
+            }
         }
         !self.ttl().is_zero()
     }
-    /// A lost notification disables index publication as well as attribute TTL.
+    /// A lost notification suspends index publication as well as attribute TTL
+    /// until the hub recovers.
     #[inline]
     pub fn delivery_failed(&self) -> bool {
-        self.shared.failed.load(Ordering::Acquire)
+        if !self.shared.degraded.load(Ordering::Acquire) {
+            return false;
+        }
+        !try_recover(&self.shared)
     }
     /// Observation only, never a lock: metadata reply paths must stay
     /// non-blocking. Holding this does not order replies against invalidations;
@@ -322,14 +477,32 @@ impl NotifyHub {
         if !self.is_caching() {
             return None;
         }
+        // Reserve the in-flight slot before the authority read so a concurrent
+        // degradation cannot resume leases while this answer is still pending.
+        self.shared.in_flight.fetch_add(1, Ordering::Acquire);
         self.shared.published.fetch_add(1, Ordering::Relaxed);
         crate::diagnostics::count(crate::diagnostics::Stage::TtlPublishedReplies);
-        Some(ReplyPermit)
+        Some(ReplyPermit {
+            shared: self.shared.clone(),
+        })
     }
-    /// An upstream queue lost a committed invalidation. Stop all new attribute
-    /// leases; existing kernel leases still have their previously granted bound.
+    /// An upstream queue lost a committed invalidation. Suspend all new
+    /// attribute leases; existing kernel leases still have their granted bound
+    /// and publication resumes after that bound plus a short grace.
     pub fn invalidate_delivery_failed(&self) {
-        fail_closed(&self.shared);
+        self.shared.overflows.fetch_add(1, Ordering::Relaxed);
+        begin_degraded(&self.shared, DegradeReason::QueueOverflow);
+    }
+    /// One generation invalidation for a whole snapshot commit: no per-node
+    /// message has to fit the bounded delivery queue. It protects replies even
+    /// when no notifier instance is installed, and revalidates every dentry on
+    /// kernels that support epoch bumps.
+    pub fn invalidate_all(&self) {
+        note_whole_cache(&self.shared);
+        let notifier = self.shared.notifier.lock().unwrap();
+        if let Some(notifier) = notifier.as_ref() {
+            bump_epoch(&self.shared, notifier);
+        }
     }
     pub fn invalidate_entry(&self, parent_ino: u64, name: &str) {
         self.mark_directory_touched(parent_ino);
@@ -340,7 +513,8 @@ impl NotifyHub {
             .try_send(Invalidate::Entry(parent_ino, name.to_owned()))
             .is_err()
         {
-            fail_closed(&self.shared);
+            self.shared.overflows.fetch_add(1, Ordering::Relaxed);
+            begin_degraded(&self.shared, DegradeReason::QueueOverflow);
         }
     }
     pub fn invalidate_inode(&self, ino: u64) {
@@ -348,7 +522,8 @@ impl NotifyHub {
         self.shared.invalidations.fetch_add(1, Ordering::Relaxed);
         crate::diagnostics::count(crate::diagnostics::Stage::TtlInvalidations);
         if self.queue.try_send(Invalidate::Inode(ino)).is_err() {
-            fail_closed(&self.shared);
+            self.shared.overflows.fetch_add(1, Ordering::Relaxed);
+            begin_degraded(&self.shared, DegradeReason::QueueOverflow);
         }
     }
     pub fn stats(&self) -> NotifyStats {
@@ -357,8 +532,11 @@ impl NotifyHub {
             invalidations: self.shared.invalidations.load(Ordering::Relaxed),
             delivered: self.shared.delivered.load(Ordering::Relaxed),
             failures: self.shared.failures.load(Ordering::Relaxed),
+            overflows: self.shared.overflows.load(Ordering::Relaxed),
+            recoveries: self.shared.recoveries.load(Ordering::Relaxed),
             active: self.shared.active.load(Ordering::Acquire),
-            failed: self.shared.failed.load(Ordering::Acquire),
+            degraded: self.shared.degraded.load(Ordering::Acquire),
+            reason: DegradeReason::decode(self.shared.degraded_reason.load(Ordering::Acquire)),
         }
     }
 }
@@ -366,6 +544,17 @@ impl NotifyHub {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn wait_until(deadline: Duration, mut condition: impl FnMut() -> bool) -> bool {
+        let end = Instant::now() + deadline;
+        while Instant::now() < end {
+            if condition() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        condition()
+    }
 
     #[test]
     fn invalidation_delivery_never_blocks_metadata_replies() {
@@ -375,18 +564,14 @@ mod tests {
         for index in 0..1000 {
             hub.invalidate_entry(1, &format!("name-{index}"));
         }
-        let started = std::time::Instant::now();
+        let started = Instant::now();
         let _second = hub.reply_guard().expect("caching active");
         assert!(
             started.elapsed() < Duration::from_millis(100),
             "reply path blocked on invalidation delivery"
         );
         drop(permit);
-        let deadline = std::time::Instant::now() + Duration::from_secs(2);
-        while hub.stats().delivered == 0 && std::time::Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        assert!(hub.stats().delivered >= 1);
+        assert!(wait_until(Duration::from_secs(2), || hub.stats().delivered > 0));
     }
 
     #[test]
@@ -407,7 +592,7 @@ mod tests {
     }
 
     #[test]
-    fn zero_ttl_and_failure_disable_caching() {
+    fn zero_ttl_disables_caching_and_degradation_recovers_without_restart() {
         let hub = NotifyHub::with_ttl_ms(0);
         assert!(hub.ttl().is_zero());
         assert!(hub.reply_guard().is_none());
@@ -415,14 +600,59 @@ mod tests {
         assert_eq!(hub.ttl(), Duration::from_millis(1500));
         hub.deactivate();
         assert!(hub.ttl().is_zero());
-        // A rejected/failing invalidation falls back to zero TTL: earlier
-        // cacheable answers then age out within the previous bound.
-        hub.activate_ttl_for_tests(1500);
-        hub.force_failure_for_tests();
+
+        // A rejected/failing invalidation suspends new leases for one old-lease
+        // window; earlier cacheable answers then age out within their bound.
+        hub.activate_ttl_for_tests(30);
+        hub.force_degraded_for_tests();
         assert!(hub.ttl().is_zero());
         assert!(hub.reply_guard().is_none());
         let stats = hub.stats();
-        assert!(stats.failed);
+        assert!(stats.degraded);
         assert_eq!(stats.failures, 1);
+        assert_eq!(stats.reason, Some(DegradeReason::DeliveryFailure));
+
+        // No restart/remount: publishing resumes on its own once quiet.
+        assert!(
+            wait_until(Duration::from_secs(2), || !hub.ttl().is_zero()),
+            "quarantined hub did not recover after its quiet lease window"
+        );
+        assert!(hub.reply_guard().is_some());
+        let stats = hub.stats();
+        assert!(!stats.degraded);
+        assert_eq!(stats.reason, None);
+        assert_eq!(stats.recoveries, 1);
+    }
+
+    #[test]
+    fn recovery_waits_for_replies_that_predate_the_degradation() {
+        let hub = NotifyHub::with_ttl_ms(20);
+        hub.activate_ttl_for_tests(20);
+        let permit = hub.reply_guard().expect("caching active");
+        hub.force_degraded_for_tests();
+        // The lease window alone would be over by now, but the pre-degradation
+        // reply is still pending and could publish an answer computed earlier.
+        std::thread::sleep(Duration::from_millis(250));
+        assert!(hub.ttl().is_zero(), "leases resumed with an old reply in flight");
+        drop(permit);
+        assert!(wait_until(Duration::from_secs(2), || !hub.ttl().is_zero()));
+        assert_eq!(hub.stats().recoveries, 1);
+    }
+
+    #[test]
+    fn a_whole_cache_invalidation_is_one_message_and_quarantines_the_hub() {
+        let hub = NotifyHub::with_ttl_ms(20);
+        hub.activate_ttl_for_tests(20);
+        assert!(!hub.ttl().is_zero());
+        hub.invalidate_all();
+        assert!(hub.ttl().is_zero());
+        assert!(
+            wait_until(Duration::from_secs(2), || !hub.ttl().is_zero()),
+            "whole-cache invalidation did not recover"
+        );
+        let stats = hub.stats();
+        assert_eq!(stats.invalidations, 1);
+        assert_eq!(stats.overflows, 0);
+        assert_eq!(stats.recoveries, 1);
     }
 }
