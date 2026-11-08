@@ -393,7 +393,7 @@ impl Store {
             }
         }
         let body = serde_json::to_string(batch)?;
-        let digest = crate::sha256(body.as_bytes());
+        let digest = super::evidence::page_hash(body.as_bytes());
         let hint_body = page
             .map(|page| encode_event_page(&s.binding, &run.run_id, sequence, &digest, page))
             .transpose()?;
@@ -441,7 +441,7 @@ impl Store {
         tx.execute("INSERT INTO initialization_events(run,seq,from_cursor,to_cursor,body,digest,bytes) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![run.run_id,number(sequence)?,batch.from,batch.to,body,digest,body.len() as i64])?;
         if let Some(hints) = hint_body {
             tx.execute("INSERT INTO initialization_event_hints(run,seq,body,digest,bytes) VALUES(?1,?2,?3,?4,?5)",
-                params![run.run_id,number(sequence)?,hints,crate::sha256(hints.as_bytes()),hints.len() as i64])?;
+                params![run.run_id,number(sequence)?,hints,super::evidence::page_hash(hints.as_bytes()),hints.len() as i64])?;
         }
         tx.execute("UPDATE initialization_run SET received=?2,received_seq=?3,event_bytes=?4,fenced=NULL,fence_ticket=NULL WHERE run_id=?1",params![run.run_id,batch.to,number(sequence)?,number(total)?])?;
         tx.commit()?;
@@ -514,13 +514,37 @@ impl Store {
         sequence: u64,
         directory_race: bool,
     ) -> Result<InitializationApplyOutcome> {
+        self.apply_initialization_events_with(run, sequence, directory_race, None)
+    }
+    /// Apply the page the caller translated and durably recorded at this exact
+    /// sequence in the same writer session. The page was validated by
+    /// `record_initialization_event_page`; it is authoritative evidence, so the
+    /// receipt body must not be read, parsed or hashed a second time.
+    pub fn apply_initialization_events_page_diagnosed(
+        &mut self,
+        run: &InitializationRun,
+        sequence: u64,
+        directory_race: bool,
+        page: &InitializationEventPage,
+    ) -> Result<InitializationApplyOutcome> {
+        self.apply_initialization_events_with(run, sequence, directory_race, Some(page))
+    }
+    fn apply_initialization_events_with(
+        &mut self,
+        run: &InitializationRun,
+        sequence: u64,
+        directory_race: bool,
+        page: Option<&InitializationEventPage>,
+    ) -> Result<InitializationApplyOutcome> {
         let tx = self.db.transaction()?;
         let s = checked(&tx, run, false)?;
         if sequence == 0 || sequence > s.received_sequence {
             return Err(invalid("event not received"));
         }
         if sequence <= s.applied_sequence {
-            read_event_receipt(&tx, &s, sequence)?;
+            if page.is_none() {
+                read_event_receipt(&tx, &s, sequence)?;
+            }
             return Ok(InitializationApplyOutcome {
                 result: InitializationApplyResult::AlreadyApplied,
                 summary: InitializationApplySummary::default(),
@@ -529,7 +553,17 @@ impl Store {
         if sequence != s.applied_sequence + 1 {
             return Err(invalid("event application gap"));
         }
-        let (batch, page) = read_event_receipt(&tx, &s, sequence)?;
+        let receipt;
+        let (batch, hints): (&Batch, Option<&[InitializationEventHint]>) = match page {
+            Some(page) => (&page.batch, Some(page.hints.as_slice())),
+            None => {
+                receipt = read_event_receipt(&tx, &s, sequence)?;
+                (
+                    &receipt.0,
+                    receipt.1.as_ref().map(|envelope| envelope.hints()),
+                )
+            }
+        };
         if batch.from != s.applied_cursor {
             return Err(invalid("candidate applied cursor mismatch"));
         }
@@ -603,7 +637,7 @@ impl Store {
                     &tx,
                     &s,
                     node,
-                    page.as_ref().and_then(|p| p.hint(ordinal)),
+                    hints.and_then(|hint| hint.get(ordinal)),
                 )? {
                     unknown_directories.insert(node.id.as_str(), plan);
                 }
@@ -629,7 +663,7 @@ impl Store {
                         &tx,
                         &s,
                         node,
-                        page.as_ref().and_then(|p| p.hint(ordinal)),
+                        hints.and_then(|hint| hint.get(ordinal)),
                         parent_plan,
                     )? {
                         unknown_directories.insert(node.id.as_str(), plan);
@@ -685,7 +719,7 @@ impl Store {
                     &tx,
                     &s,
                     event,
-                    page.as_ref().and_then(|p| p.hint(ordinal)),
+                    hints.and_then(|hint| hint.get(ordinal)),
                     old.as_ref(),
                 )? {
                     local_subtrees.insert(plan.directory);
@@ -730,7 +764,7 @@ impl Store {
                                         local_recheck::covers_unknown_parent_file(
                                             plan,
                                             node,
-                                            page.as_ref().and_then(|p| p.hint(ordinal)),
+                                            hints.and_then(|hint| hint.get(ordinal)),
                                         )
                                     });
                             if !covered {

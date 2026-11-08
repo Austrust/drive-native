@@ -293,7 +293,8 @@ impl Bridge {
         self.current(rpc)?;
         let mut store = self.initialization_store();
         let mut changed = false;
-        if let Some(batch) = batch {
+        let mut recorded_page = None;
+        if let Some(batch) = &batch {
             let _span = self.initialization.work.span(Stage::EventCollect);
             let status = store
                 .initialization_status()
@@ -302,16 +303,16 @@ impl Bridge {
             if status.run != *run {
                 return Err(invalid("candidate changed"));
             }
+            let sequence = status
+                .received_sequence
+                .checked_add(1)
+                .ok_or_else(|| invalid("receipt overflow"))?;
             changed = store
-                .record_initialization_event_page(
-                    run,
-                    status
-                        .received_sequence
-                        .checked_add(1)
-                        .ok_or_else(|| invalid("receipt overflow"))?,
-                    &batch,
-                )
+                .record_initialization_event_page(run, sequence, batch)
                 .map_err(io::Error::other)?;
+            // The receipt body was just translated and validated in this process.
+            // Apply it from this page instead of hashing and parsing it again.
+            recorded_page = Some((sequence, batch));
         }
         // Crash after receipt before apply is safe: replay the saved body before
         // requesting another page, never skip to a fresh server watermark.
@@ -326,9 +327,14 @@ impl Bridge {
                 }
                 break false;
             };
-            let outcome = store
-                .apply_initialization_events_diagnosed(run, sequence, directory_race)
-                .map_err(io::Error::other)?;
+            let outcome = match recorded_page {
+                Some((recorded, page)) if recorded == sequence => store
+                    .apply_initialization_events_page_diagnosed(run, sequence, directory_race, page)
+                    .map_err(io::Error::other)?,
+                _ => store
+                    .apply_initialization_events_diagnosed(run, sequence, directory_race)
+                    .map_err(io::Error::other)?,
+            };
             self.initialization.work.event_application(&outcome);
             match outcome.result {
                 InitializationApplyResult::AwaitingCoverage => {
