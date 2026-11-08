@@ -35,6 +35,43 @@ fn snapshot(restore: &str, cursor: u64) -> RemoteSnapshot {
     }
 }
 
+// A first install wide enough that per-inode/entry invalidations cannot fit the
+// bounded delivery queue, while the namespace still has one enumerable directory.
+fn wide_snapshot(restore: &str, cursor: u64, files: usize) -> RemoteSnapshot {
+    let mut data = snapshot(restore, cursor);
+    data.nodes.truncate(1);
+    for index in 0..files {
+        let id = (100_001 + index).to_string();
+        let version = serde_json::json!({"schema":1,"restore":restore,"view":1,"root":"100",
+            "file":id,"sync":cursor,"max":cursor,"size":3,"hash":"","directory":false})
+        .to_string();
+        data.nodes.push(Node {
+            id,
+            parent: Some("100".into()),
+            name: format!("wide-{index:05}.txt"),
+            directory: false,
+            version,
+            metadata: Some(NodeMetadata {
+                size: 3,
+                mtime: 0,
+                mode: 0o644,
+            }),
+        });
+    }
+    data
+}
+
+fn wait_for(deadline: Duration, mut condition: impl FnMut() -> bool) -> bool {
+    let end = Instant::now() + deadline;
+    while Instant::now() < end {
+        if condition() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    condition()
+}
+
 fn complete_store(path: &std::path::Path, cursor: u64, dirty: bool) -> Store {
     let mut store = Store::open(path).unwrap();
     let data = snapshot("server", cursor);
@@ -1018,6 +1055,82 @@ fn cold_owner_uses_reliable_steps_and_commits_only_after_separate_fence() {
             "candidate-pull:native-v1:7"
         ]
     );
+}
+
+#[test]
+fn first_install_commit_publishes_one_generation_invalidation_and_recovers() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = wide_snapshot("server", 7, 600);
+    let peer = Peer::standard(data.clone());
+    let bridge = bridge(Store::open(dir.path()).unwrap(), &peer, "server");
+    let hub = drive_fs::NotifyHub::with_ttl_ms(40);
+    hub.activate_ttl_for_tests(40);
+    bridge.set_notify_hub(hub.clone());
+    assert!(bridge.initial_pull().unwrap());
+    // Committing this 601-node namespace used to enqueue two messages per node
+    // (1201) into a 1024-slot channel; one generation message now covers it.
+    assert!(
+        wait_for(Duration::from_secs(3), || hub.stats().invalidations > 0),
+        "generation invalidation was never delivered"
+    );
+    let stats = hub.stats();
+    assert_eq!(stats.invalidations, 1);
+    assert_eq!(stats.overflows, 0);
+    assert_eq!(bridge.notification_overflows(), 0);
+    // The mount suspends cacheable publication for one old-lease quiet window
+    // and resumes by itself: the first install never needs a restart.
+    assert!(
+        wait_for(Duration::from_secs(5), || !hub.ttl().is_zero()),
+        "mount never resumed cacheable publication after the first-install storm"
+    );
+    let stats = hub.stats();
+    assert!(!stats.degraded);
+    assert_eq!(stats.recoveries, 1);
+    assert!(hub.reply_guard().is_some());
+    let log = peer.finish();
+    assert_eq!(
+        log,
+        vec![
+            "seed",
+            "candidate-pull:native-v1:7",
+            "directory:100",
+            "candidate-pull:native-v1:7"
+        ]
+    );
+}
+
+#[test]
+fn snapshot_invalidation_generation_is_bounded_at_nas_scale() {
+    let dir = tempfile::tempdir().unwrap();
+    let bridge = Arc::new(
+        Bridge::offline(Arc::new(drive_core::SharedStore::new(
+            Store::open(dir.path()).unwrap(),
+        )))
+        .unwrap(),
+    );
+    let hub = drive_fs::NotifyHub::with_ttl_ms(20);
+    hub.activate_ttl_for_tests(20);
+    bridge.set_notify_hub(hub.clone());
+    for nodes in [210_000usize, 294_000] {
+        let invalidations = (0..nodes)
+            .map(|index| {
+                (
+                    Some(index as u64),
+                    Some(index as u64),
+                    "entry".to_string(),
+                )
+            })
+            .collect::<Vec<_>>();
+        bridge.enqueue_snapshot_invalidations(invalidations);
+    }
+    assert!(
+        wait_for(Duration::from_secs(3), || hub.stats().invalidations == 2),
+        "each snapshot generation must be one message instead of two per node"
+    );
+    let stats = hub.stats();
+    assert_eq!(stats.invalidations, 2);
+    assert_eq!(stats.overflows, 0);
+    assert_eq!(bridge.notification_overflows(), 0);
 }
 
 #[test]

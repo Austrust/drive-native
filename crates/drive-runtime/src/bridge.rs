@@ -12,7 +12,7 @@ use std::{
     process::{Child, Command as Process, Stdio},
     sync::{
         Arc, Condvar, Mutex,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -71,6 +71,9 @@ impl Drop for WorkerProcess {
 enum Invalidation {
     Inode(u64),
     Entry(u64, String),
+    /// The whole committed namespace changed (a snapshot generation): one
+    /// message replaces a per-node invalidation list that cannot fit the queue.
+    All,
 }
 #[derive(Default)]
 struct Demand {
@@ -117,6 +120,10 @@ pub struct Bridge {
     download_retry_clock: Mutex<crate::download_retry_clock::RetryClock>,
     notify_hub: Arc<Mutex<Option<drive_fs::NotifyHub>>>,
     notifications: std::sync::mpsc::SyncSender<Invalidation>,
+    /// Committed invalidations rejected by the bounded notification queue.
+    /// Non-zero means the mount suspended cacheable publication for one quiet
+    /// lease window and then resumed; it never needs a restart (#27).
+    notification_overflows: AtomicU64,
     pub downloads: AtomicUsize,
     pub download_failures_seen: AtomicUsize,
     pub last_download_failure: Mutex<Option<(DownloadFailureKind, Option<u32>)>>,
@@ -281,13 +288,14 @@ impl Bridge {
         std::thread::spawn(move || {
             for message in rx {
                 // The hub owns the publication gate, the kernel notifier and the
-                // fail-closed fallback; delivery order is decided there.
+                // degraded/recovery fallback; delivery order is decided there.
                 let Some(hub) = target.lock().unwrap().clone() else {
                     continue;
                 };
                 match message {
                     Invalidation::Inode(ino) => hub.invalidate_inode(ino),
                     Invalidation::Entry(parent, name) => hub.invalidate_entry(parent, &name),
+                    Invalidation::All => hub.invalidate_all(),
                 }
             }
         });
@@ -303,6 +311,7 @@ impl Bridge {
             download_retry_clock: Mutex::new(crate::download_retry_clock::RetryClock::default()),
             notify_hub,
             notifications,
+            notification_overflows: AtomicU64::new(0),
             downloads: AtomicUsize::new(0),
             download_failures_seen: AtomicUsize::new(0),
             last_download_failure: Mutex::new(None),
@@ -316,10 +325,47 @@ impl Bridge {
             initialization: Arc::new(crate::initialization::Tracker::default()),
         })
     }
-    /// Every upstream queue failure must disable attribute leases, not silently
-    /// lose a committed mutation before it reaches the mount's notification hub.
+    /// Every upstream queue failure must suspend cacheable publication, not
+    /// silently lose a committed mutation before it reaches the mount's hub.
     fn enqueue_invalidation(&self, invalidation: Invalidation) {
-        enqueue_invalidation(&self.notifications, &self.notify_hub, invalidation);
+        if !enqueue_invalidation(&self.notifications, &self.notify_hub, invalidation) {
+            self.notification_overflows.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    /// Committed invalidations dropped by the bounded notification queue.
+    /// Observable for root diagnostics; the mount recovers without a restart.
+    pub fn notification_overflows(&self) -> u64 {
+        self.notification_overflows.load(Ordering::Relaxed)
+    }
+    /// Above this many per-node invalidations one generation message is cheaper
+    /// and bounded: a snapshot commit touches every node, and one message per
+    /// inode/entry cannot fit the bounded delivery queue (210k nodes ≈ 420k
+    /// messages).
+    const SNAPSHOT_GENERATION_THRESHOLD: usize = 64;
+    /// Publish the invalidation set of a whole-snapshot commit (first install or
+    /// recovery rebuild). Small sets keep precise per-node messages; a large
+    /// set collapses into one generation invalidation so the bounded channel
+    /// cannot lose any part of a commit that already replaced the namespace.
+    fn enqueue_snapshot_invalidations(
+        &self,
+        invalidations: Vec<(Option<u64>, Option<u64>, String)>,
+    ) {
+        let messages = invalidations
+            .iter()
+            .map(|(inode, parent, _)| usize::from(inode.is_some()) + usize::from(parent.is_some()))
+            .sum::<usize>();
+        if messages > Self::SNAPSHOT_GENERATION_THRESHOLD {
+            self.enqueue_invalidation(Invalidation::All);
+            return;
+        }
+        for (inode, parent, name) in invalidations {
+            if let Some(inode) = inode {
+                self.enqueue_invalidation(Invalidation::Inode(inode));
+            }
+            if let Some(parent) = parent {
+                self.enqueue_invalidation(Invalidation::Entry(parent, name));
+            }
+        }
     }
     /// Stop publishing cacheable metadata once background producers stop.
     pub fn clear_notifier(&self) {
@@ -520,14 +566,7 @@ impl Bridge {
             invalidations.extend(store.snapshot_invalidations().map_err(io::Error::other)?);
             invalidations
         };
-        for (inode, parent, name) in invalidations {
-            if let Some(ino) = inode {
-                self.enqueue_invalidation(Invalidation::Inode(ino));
-            }
-            if let Some(parent) = parent {
-                self.enqueue_invalidation(Invalidation::Entry(parent, name));
-            }
-        }
+        self.enqueue_snapshot_invalidations(invalidations);
         self.signal_upload();
         self.initialization.activity();
         Ok(true)
@@ -2225,19 +2264,23 @@ mod root_diagnostics_tests {
     }
 }
 
-/// Non-blocking on Store and kernel notification delivery. Also used for former
-/// blocking sends so a saturated channel cannot hold a state transaction open.
+/// Non-blocking on Store and kernel notification delivery; returns whether the
+/// bounded queue accepted the message. A rejected committed invalidation
+/// suspends the mount's cacheable publication for one quiet lease window (the
+/// hub recovers by itself), never a permanent fail-closed (#27).
 fn enqueue_invalidation(
     queue: &std::sync::mpsc::SyncSender<Invalidation>,
     hub: &Mutex<Option<drive_fs::NotifyHub>>,
     invalidation: Invalidation,
-) {
-    if queue.try_send(invalidation).is_err() {
+) -> bool {
+    let accepted = queue.try_send(invalidation).is_ok();
+    if !accepted {
         let hub = hub.lock().unwrap().clone();
         if let Some(hub) = hub {
             hub.invalidate_delivery_failed();
         }
     }
+    accepted
 }
 
 #[cfg(test)]
