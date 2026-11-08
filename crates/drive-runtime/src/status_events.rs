@@ -128,6 +128,18 @@ pub fn change_paths(changes: &[StatusChange], paths: &HashMap<String, StatusPath
     map.into_values().collect()
 }
 
+/// Whether a delta produced without a previously recorded journal cursor must
+/// stay flagged as a reset (#31 verify-31 c1).
+///
+/// The first semantic tick of a process (`from_revision == 0`) is a full
+/// refresh for every consumer, so an empty continuous delta is harmless. After
+/// that a lost cursor (for example the previous tick already returned `reset`)
+/// must stay sticky: a consumer sitting at a non-zero revision cannot tell an
+/// empty delta from a window it missed, so it has to rebuild.
+pub fn resets_without_cursor(from_revision: u64) -> bool {
+    from_revision > 0
+}
+
 /// Serialize one `StatusChanged2` payload. Paths are emitted as absolute mount
 /// paths (desktop consumers match them against tracked filesystem paths). The
 /// returned flag is the final reset state: true when the caller already knew of
@@ -319,5 +331,17 @@ mod tests {
         assert_eq!(value["reset"], true);
         assert_eq!(value["truncated"], false);
         assert!(value["changes"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_lost_cursor_keeps_the_reset_sticky_after_the_first_delta() {
+        // The first semantic tick of the process starts every consumer from an
+        // unknown revision, so the empty delta is followed by a full refresh.
+        assert!(!resets_without_cursor(0));
+        // Later ticks lost the cursor (for example the previous tick returned
+        // `reset` with cursor None). An empty non-reset delta would look
+        // continuous and hide every change since that reset.
+        assert!(resets_without_cursor(1));
+        assert!(resets_without_cursor(42));
     }
 }
