@@ -182,3 +182,56 @@ fn schema_11_upgrade_keeps_contents_and_creates_backup_and_policy_tables() {
             ))
     }));
 }
+
+fn wal_state(dir: &std::path::Path) -> (u64, Option<std::time::SystemTime>) {
+    match std::fs::symlink_metadata(dir.join("state.sqlite-wal")) {
+        Ok(metadata) => (metadata.len(), metadata.modified().ok()),
+        Err(_) => (0, None),
+    }
+}
+
+fn data_version(db: &rusqlite::Connection) -> i64 {
+    db.query_row("PRAGMA data_version", [], |row| row.get(0))
+        .unwrap()
+}
+
+/// Evidence for issue #22 acceptance 1: the store-touching part of a cached
+/// read-only open (LRU recency) must not append a WAL frame, commit, or fsync.
+/// `PRAGMA data_version` on an independent reader observes commits by the
+/// writer; WAL length observes frames that a commit would append. Only closing
+/// the store is allowed to fold the deferred list into one bounded transaction.
+#[test]
+fn cached_read_only_open_bookkeeping_does_not_write_or_fsync_the_store() {
+    let (dir, s) = setup();
+    let observer = rusqlite::Connection::open(dir.path().join("state.sqlite")).unwrap();
+    let baseline_data = data_version(&observer);
+    let baseline_wal = wal_state(dir.path());
+    s.note_cache_use("c").unwrap();
+    s.note_cache_use("a").unwrap();
+    s.note_cache_use("b").unwrap();
+    s.note_cache_use("d").unwrap();
+    assert_eq!(
+        data_version(&observer),
+        baseline_data,
+        "read-only open committed to the state database"
+    );
+    assert_eq!(
+        wal_state(dir.path()),
+        baseline_wal,
+        "read-only open appended WAL frames"
+    );
+
+    // Deferred, single commit at close: still the same durable LRU order that
+    // the synchronous per-open writes used to produce.
+    drop(s);
+    assert!(data_version(&observer) > baseline_data);
+    assert!(wal_state(dir.path()).0 > baseline_wal.0);
+    let order: Vec<String> = observer
+        .prepare("SELECT node FROM cache_access ORDER BY seq")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<std::result::Result<_, _>>()
+        .unwrap();
+    assert_eq!(order, vec!["c", "a", "b", "d"]);
+}

@@ -118,6 +118,10 @@ pub struct Store {
     pub(crate) root: PathBuf,
     pub(crate) handles: Arc<Mutex<HashMap<String, (String, usize)>>>,
     pub(crate) namespace_runtime: Mutex<crate::namespace_schedule::NamespaceRuntime>,
+    /// Deferred LRU recency for cached file opens. The FUSE open path must not
+    /// append WAL frames or fsync; entries are merged into `cache_access` in
+    /// one transaction before a budget/trim decision and on drop.
+    pub(crate) cache_recency: Mutex<Vec<String>>,
     // Fields drop in order: close SQLite before releasing writer ownership.
     // Read-only handles own no lock and therefore carry None.
     _writer_lock: Option<WriterLock>,
@@ -363,6 +367,7 @@ impl Store {
             root,
             handles: Arc::new(Mutex::new(HashMap::new())),
             namespace_runtime: Mutex::new(Default::default()),
+            cache_recency: Mutex::new(Vec::new()),
         })
     }
     /// Second handle for read-only work next to a live writer. Unlike
@@ -407,6 +412,7 @@ impl Store {
             root,
             handles: Arc::new(Mutex::new(HashMap::new())),
             namespace_runtime: Mutex::new(Default::default()),
+            cache_recency: Mutex::new(Vec::new()),
         })
     }
     /// The state directory, including `state.sqlite` and `blobs`.
