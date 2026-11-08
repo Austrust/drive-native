@@ -123,6 +123,8 @@ pub struct Store {
     // Fields drop in order: close SQLite before releasing writer ownership.
     // Read-only handles own no lock and therefore carry None.
     _writer_lock: Option<WriterLock>,
+    // #28: incremental remove-barrier index; empty on read-only handles.
+    pub(crate) barrier: crate::removals::RemoveBarrierCache,
 }
 
 /// A handle retains its immutable version even if a newer blob is published.
@@ -359,12 +361,14 @@ impl Store {
         // Derived state starts after startup recovery. TEMP objects and a fresh
         // epoch keep the durable schema and external readers unchanged.
         crate::status_changes::install(&db)?;
+        crate::removals::install_barrier_versions(&db)?;
         Ok(Self {
             _writer_lock: Some(writer_lock),
             db,
             root,
             handles: Arc::new(Mutex::new(HashMap::new())),
             namespace_runtime: Arc::new(Mutex::new(Default::default())),
+            barrier: Default::default(),
         })
     }
     /// Second handle for read-only work next to a live writer. Unlike
@@ -424,6 +428,7 @@ impl Store {
             root,
             handles: Arc::new(Mutex::new(HashMap::new())),
             namespace_runtime,
+            barrier: Default::default(),
         })
     }
     /// The state directory, including `state.sqlite` and `blobs`.
@@ -1078,7 +1083,7 @@ impl Store {
         // or overlapping path) may precede the upload. A global remove barrier
         // let unrelated pending removes, such as freedesktop trash entries,
         // block every ordinary upload.
-        if let Some(blocked) = crate::removals::upload_remove_barrier(&self.db, &node, &path)? {
+        if let Some(blocked) = self.upload_remove_barrier(&node, &path)? {
             return Err(Error::State(format!(
                 "pending remove of {} blocks upload of {}",
                 blocked.path, path
