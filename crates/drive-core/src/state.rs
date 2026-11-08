@@ -124,9 +124,27 @@ pub struct Store {
     /// append WAL frames or fsync; entries are merged into `cache_access` in
     /// one transaction before a budget/trim decision and on drop.
     pub(crate) cache_recency: Mutex<Vec<String>>,
+    // Issue #24 counters; the Store writer lock serializes access, so plain
+    // integers are cheaper than another atomic layer.
+    pub(crate) draft_stats: DraftWriteStats,
     // Fields drop in order: close SQLite before releasing writer ownership.
     // Read-only handles own no lock and therefore carry None.
     _writer_lock: Option<WriterLock>,
+}
+
+/// Counters that make the draft write path observable without tracing every
+/// syscall. Diagnostic only: no behaviour depends on these values.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DraftWriteStats {
+    /// Content writes routed through a draft handle.
+    pub writes: u64,
+    /// Durable draft-metadata statements: dirty-epoch marks plus checkpoint
+    /// updates (checkpoint advances share the snapshot transaction).
+    pub metadata_commits: u64,
+    /// fsync calls on the mutable draft file itself (begin copy, checkpoint).
+    pub draft_file_fsyncs: u64,
+    /// Checkpoints that produced an upload snapshot.
+    pub checkpoints: u64,
 }
 
 /// A handle retains its immutable version even if a newer blob is published.
@@ -370,6 +388,7 @@ impl Store {
             handles: Arc::new(Mutex::new(HashMap::new())),
             namespace_runtime: Arc::new(Mutex::new(Default::default())),
             cache_recency: Mutex::new(Vec::new()),
+            draft_stats: DraftWriteStats::default(),
         })
     }
     /// Second handle for read-only work next to a live writer. Unlike
@@ -430,6 +449,7 @@ impl Store {
             handles: Arc::new(Mutex::new(HashMap::new())),
             namespace_runtime,
             cache_recency: Mutex::new(Vec::new()),
+            draft_stats: DraftWriteStats::default(),
         })
     }
     /// The state directory, including `state.sqlite` and `blobs`.
@@ -1011,7 +1031,7 @@ impl Store {
         bytes: &[u8],
     ) -> Result<String> {
         let blob = self.write_blob(bytes)?;
-        self.commit_local_blob(id, opened_version, blob)
+        self.commit_local_blob(id, opened_version, blob, None)
     }
     /// FUSE uses an immutable/locked draft reader; no whole-file allocation.
     pub fn save_local_reader_from_version<R: Read>(
@@ -1021,28 +1041,34 @@ impl Store {
         source: &mut R,
     ) -> Result<String> {
         let blob = self.write_blob_reader(source, None)?;
-        self.commit_local_blob(id, opened_version, blob)
+        self.commit_local_blob(id, opened_version, blob, None)
     }
     /// Preserve the mutable draft timestamp on its immutable queued snapshot.
     /// The byte copy creates a new inode; copying only bytes loses utimens.
+    ///
+    /// `draft_checkpoint` folds the draft's `checkpoint=generation` advance into
+    /// the snapshot transaction: one commit instead of two, and a crash between
+    /// the two writes can no longer leave a snapshot whose draft row disagrees.
     pub(crate) fn save_draft_file_from_version(
         &mut self,
         id: &str,
         base: &str,
         source: &mut File,
+        draft_checkpoint: Option<(&str, i64)>,
     ) -> Result<String> {
         let modified = source.metadata()?.modified()?;
         let blob = self.write_blob_reader(source, None)?;
         let snapshot = File::open(self.root.join("blobs").join(&blob))?;
         snapshot.set_modified(modified)?;
         snapshot.sync_all()?;
-        self.commit_local_blob(id, base, blob)
+        self.commit_local_blob(id, base, blob, draft_checkpoint)
     }
     fn commit_local_blob(
         &mut self,
         id: &str,
         opened_version: &str,
         blob: String,
+        draft_checkpoint: Option<(&str, i64)>,
     ) -> Result<String> {
         let mtime = crate::timestamps::native_mtime(
             std::fs::metadata(self.root.join("blobs").join(&blob))?.modified()?,
@@ -1066,6 +1092,17 @@ impl Store {
             "INSERT INTO upload_times(operation,mtime) VALUES(?1,?2)",
             params![op, mtime],
         )?;
+        if let Some((token, generation)) = draft_checkpoint {
+            let changed = tx.execute(
+                "UPDATE drafts SET checkpoint=?3 WHERE node=?1 AND token=?2",
+                params![id, token, generation],
+            )?;
+            if changed != 1 {
+                return Err(Error::State(
+                    "draft checkpoint row vanished during snapshot commit".into(),
+                ));
+            }
+        }
         tx.commit()?;
         Ok(op)
     }

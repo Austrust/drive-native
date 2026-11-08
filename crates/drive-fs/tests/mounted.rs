@@ -515,3 +515,156 @@ fn kernel_offline_nested_mkdir_moves_and_restart_preserve_tree_and_child_bytes()
         .unwrap();
     assert_eq!(body, b"offline nested bytes");
 }
+
+#[test]
+#[ignore = "requires ordinary Linux user and /dev/fuse; run explicitly"]
+fn kernel_sequential_100_mib_write_has_bounded_metadata_commits_and_fsyncs() {
+    use std::io::Write;
+    // Acceptance for #24: a 100 MiB sequential write must not commit or fsync
+    // once per syscall. The only durable metadata commit while writing is the
+    // first-edit epoch marker; the draft file is fsynced by the following
+    // checkpoint, not by each write or by SETATTR(mtime).
+    // SAFETY: this test binary runs a single filtered test, before any other
+    // thread could read the environment.
+    unsafe {
+        std::env::set_var("DRIVE_NATIVE_FS_DIAGNOSTICS", "1");
+    }
+    let uid = unsafe { libc::getuid() };
+    let gid = unsafe { libc::getgid() };
+    assert_ne!(uid, 0);
+    let d = tempfile::tempdir().unwrap();
+    let mount = d.path().join("mount");
+    std::fs::create_dir(&mount).unwrap();
+    let state = d.path().join("state");
+    let mut s = Store::open(&state).unwrap();
+    s.install_remote_snapshot(&[node("root", 0, "1"), node("a", 3, "1")], "1", "server")
+        .unwrap();
+    const CHUNK: usize = 128 * 1024;
+    const CHUNKS: usize = 800;
+    const TOTAL: usize = CHUNK * CHUNKS;
+    s.publish_download(
+        &DownloadTicket {
+            id: "a".into(),
+            version: "1".into(),
+        },
+        b"old",
+        &sha256(b"old"),
+    )
+    .unwrap();
+    let s = Arc::new(drive_core::SharedStore::new(s));
+    let fs = drive_fs::CacheFilesystem::new(s.clone(), "root", uid, gid)
+        .unwrap()
+        .with_writes_enabled();
+    let session = fuser::spawn_mount2(
+        fs,
+        &mount,
+        &[
+            fuser::MountOption::RW,
+            fuser::MountOption::DefaultPermissions,
+            fuser::MountOption::NoDev,
+            fuser::MountOption::NoSuid,
+        ],
+    )
+    .unwrap();
+    let path = mount.join("A.doc");
+    let mut file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+    let before = s.lock().unwrap().draft_write_stats();
+    let chunk = vec![0xa5u8; CHUNK];
+    let started = std::time::Instant::now();
+    // The first write lazily creates the draft: two one-time fsyncs (draft file
+    // and drafts directory) plus the one durable dirty-epoch marker.
+    file.write_all(&chunk).unwrap();
+    let after_first = s.lock().unwrap().draft_write_stats();
+    assert_eq!(
+        after_first.draft_file_fsyncs - before.draft_file_fsyncs,
+        2,
+        "draft creation fsyncs once, before any bulk write"
+    );
+    assert_eq!(
+        after_first.metadata_commits - before.metadata_commits,
+        1,
+        "the first edit durably marks the dirty epoch"
+    );
+    for _ in 0..CHUNKS - 1 {
+        file.write_all(&chunk).unwrap();
+    }
+    let write_elapsed = started.elapsed();
+    let after_writes = s.lock().unwrap().draft_write_stats();
+    assert!(
+        after_writes.writes - after_first.writes >= CHUNKS as u64 - 1,
+        "kernel may split large writes; expected at least {} draft writes",
+        CHUNKS - 1
+    );
+    assert_eq!(
+        after_writes.metadata_commits - after_first.metadata_commits,
+        0,
+        "bulk writes must not commit metadata per syscall"
+    );
+    assert_eq!(
+        after_writes.draft_file_fsyncs - after_first.draft_file_fsyncs,
+        0,
+        "bulk writes must not fsync the draft file"
+    );
+    assert_eq!(std::fs::metadata(&path).unwrap().len(), TOTAL as u64);
+
+    let fsync_started = std::time::Instant::now();
+    file.sync_all().unwrap();
+    let fsync_elapsed = fsync_started.elapsed();
+    let after_checkpoint = s.lock().unwrap().draft_write_stats();
+    assert_eq!(
+        after_checkpoint.metadata_commits - after_writes.metadata_commits,
+        1,
+        "checkpoint folds its row update into the snapshot transaction"
+    );
+    assert_eq!(
+        after_checkpoint.checkpoints - after_writes.checkpoints,
+        1,
+        "explicit fsync checkpoints the dirty draft once"
+    );
+    assert_eq!(
+        after_checkpoint.draft_file_fsyncs - after_writes.draft_file_fsyncs,
+        1,
+        "checkpoint fsyncs the draft file once"
+    );
+    assert_eq!(
+        s.lock().unwrap().status("a").unwrap(),
+        Status::PendingUpload
+    );
+    let samples = drive_fs::diagnostics::snapshot();
+    let count_for = |stage: drive_fs::diagnostics::Stage| {
+        samples
+            .iter()
+            .find(|sample| std::mem::discriminant(&sample.stage) == std::mem::discriminant(&stage))
+            .map(|sample| sample.count)
+            .unwrap_or(0)
+    };
+    assert!(count_for(drive_fs::diagnostics::Stage::WriteQueue) > 0);
+    assert!(count_for(drive_fs::diagnostics::Stage::WriteStoreWait) > 0);
+    assert!(count_for(drive_fs::diagnostics::Stage::WriteHold) > 0);
+    assert!(
+        count_for(drive_fs::diagnostics::Stage::CheckpointTotal) > 0,
+        "explicit fsync checkpoint is instrumented"
+    );
+    println!(
+        "#24 kernel sequential_write: {} chunks x {} KiB = {} MiB in {} draft writes, write {:?} ({} MiB/s), checkpoint {:?}, metadata_commits +{}, draft_file_fsyncs +{}",
+        CHUNKS,
+        CHUNK / 1024,
+        TOTAL / (1024 * 1024),
+        after_writes.writes - before.writes,
+        write_elapsed,
+        (TOTAL / (1024 * 1024)) as u128 * 1_000_000 / write_elapsed.as_micros().max(1),
+        fsync_elapsed,
+        after_checkpoint.metadata_commits - before.metadata_commits,
+        after_checkpoint.draft_file_fsyncs - before.draft_file_fsyncs,
+    );
+    drop(file);
+    session.join();
+    drop(s);
+    let s = Store::open(&state).unwrap();
+    assert_eq!(s.status("a").unwrap(), Status::PendingUpload);
+    let mut first = [0u8; 16];
+    use std::io::Read as _;
+    s.open_cached("a").unwrap().read_exact(&mut first).unwrap();
+    assert_eq!(first, [0xa5u8; 16]);
+    assert_eq!(s.record("a").unwrap().size, TOTAL as u64);
+}

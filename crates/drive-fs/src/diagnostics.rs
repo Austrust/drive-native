@@ -78,8 +78,16 @@ pub enum Stage {
     ReaddirPlusRequests,
     /// Elapsed time for index attempts/replies, not a CPU-time attribution.
     IndexReadUs,
+    /// Time one WRITE request waited in the local queue before executing.
+    WriteQueue,
+    /// Time a WRITE job waited to acquire the shared store lock.
+    WriteStoreWait,
+    /// Time a WRITE job held the shared store lock (draft write + permissions).
+    WriteHold,
+    /// Wall time of one checkpoint: dirty-draft barrier, snapshot and commit.
+    CheckpointTotal,
 }
-const STAGES: [Stage; 50] = [
+const STAGES: [Stage; 54] = [
     Stage::LookupQueue,
     Stage::LookupStoreWait,
     Stage::LookupProjection,
@@ -120,6 +128,8 @@ const STAGES: [Stage; 50] = [
     Stage::IndexPartial, Stage::PermissionDenied, Stage::SpaceForbidden,
     Stage::LookupRequests, Stage::GetattrRequests, Stage::OpendirRequests,
     Stage::ReaddirRequests, Stage::ReaddirPlusRequests, Stage::IndexReadUs,
+    Stage::WriteQueue, Stage::WriteStoreWait, Stage::WriteHold,
+    Stage::CheckpointTotal,
 ];
 struct Aggregate {
     count: AtomicU64,
@@ -137,7 +147,7 @@ impl Aggregate {
         }
     }
 }
-static TOTALS: [Aggregate; 50] = [const { Aggregate::new() }; 50];
+static TOTALS: [Aggregate; 54] = [const { Aggregate::new() }; 54];
 static ENABLED: OnceLock<bool> = OnceLock::new();
 pub(crate) fn enabled() -> bool {
     *ENABLED
