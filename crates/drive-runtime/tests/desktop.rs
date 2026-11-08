@@ -324,7 +324,10 @@ async fn recovery_action_real_dbus_preserves_unknown_queue_and_user_pause() {
     assert!(overview["active_transfers"].is_u64());
     assert!(overview["issue_count"].is_null() || overview["issue_count"].is_u64());
     assert!(overview["cache_availability"]["total"].is_u64());
-    assert_eq!(overview["version"]["state_schema"], 27);
+    assert_eq!(
+        overview["version"]["state_schema"],
+        drive_core::STATE_SCHEMA_VERSION
+    );
     assert_eq!(overview["version"]["ipc"], 21);
     let shutdown: String = proxy.call("GetShutdown", &()).await.unwrap();
     let shutdown: serde_json::Value = serde_json::from_str(&shutdown).unwrap();
@@ -1201,7 +1204,10 @@ fn overview_reports_sync_state_cache_availability_and_version() {
     assert_eq!(cache["offline"], 0);
     assert_eq!(cache["pinned"], 0);
     assert_eq!(overview["version"]["build"], env!("CARGO_PKG_VERSION"));
-    assert_eq!(overview["version"]["state_schema"], 27);
+    assert_eq!(
+        overview["version"]["state_schema"],
+        drive_core::STATE_SCHEMA_VERSION
+    );
     assert_eq!(overview["version"]["ipc"], 21);
     assert_eq!(overview["schema"], 1);
 }
