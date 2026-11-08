@@ -117,7 +117,9 @@ pub struct Store {
     pub(crate) db: Connection,
     pub(crate) root: PathBuf,
     pub(crate) handles: Arc<Mutex<HashMap<String, (String, usize)>>>,
-    pub(crate) namespace_runtime: Mutex<crate::namespace_schedule::NamespaceRuntime>,
+    // Shared with the `SharedStore` and every read-only handle it opens: the
+    // scheduler observations describe the writer's domain, not one connection.
+    pub(crate) namespace_runtime: Arc<Mutex<crate::namespace_schedule::NamespaceRuntime>>,
     // Fields drop in order: close SQLite before releasing writer ownership.
     // Read-only handles own no lock and therefore carry None.
     _writer_lock: Option<WriterLock>,
@@ -362,7 +364,7 @@ impl Store {
             db,
             root,
             handles: Arc::new(Mutex::new(HashMap::new())),
-            namespace_runtime: Mutex::new(Default::default()),
+            namespace_runtime: Arc::new(Mutex::new(Default::default())),
         })
     }
     /// Second handle for read-only work next to a live writer. Unlike
@@ -373,6 +375,21 @@ impl Store {
     /// database is missing, does not match this build's schema or is not in WAL
     /// mode; those cases keep the one-writer contract intact.
     pub fn open_read_only(root: &Path) -> Result<Self> {
+        Self::open_read_only_with(root, Arc::new(Mutex::new(Default::default())))
+    }
+    /// Read-only handle whose scheduler diagnostics come from the live writer's
+    /// `NamespaceRuntime` instead of a private empty copy. The SQLite connection
+    /// is still a plain committed-WAL snapshot: only observations are shared.
+    pub(crate) fn open_read_only_observing(
+        root: &Path,
+        namespace_runtime: Arc<Mutex<crate::namespace_schedule::NamespaceRuntime>>,
+    ) -> Result<Self> {
+        Self::open_read_only_with(root, namespace_runtime)
+    }
+    fn open_read_only_with(
+        root: &Path,
+        namespace_runtime: Arc<Mutex<crate::namespace_schedule::NamespaceRuntime>>,
+    ) -> Result<Self> {
         let root = root.to_owned();
         let database = root.join("state.sqlite");
         if !database.is_file() {
@@ -406,7 +423,7 @@ impl Store {
             db,
             root,
             handles: Arc::new(Mutex::new(HashMap::new())),
-            namespace_runtime: Mutex::new(Default::default()),
+            namespace_runtime,
         })
     }
     /// The state directory, including `state.sqlite` and `blobs`.
@@ -1482,16 +1499,32 @@ impl Store {
     /// not countable entries; deleted and access-blocked nodes never count as
     /// available. A dirty draft is available because it preserves local bytes.
     pub fn cache_availability(&self) -> Result<CacheAvailability> {
-        let (total, offline, pinned) = self.db.query_row(
-            "WITH RECURSIVE pinned_tree(id) AS (SELECT id FROM nodes WHERE pinned=1 AND deleted=0 UNION SELECT n.id FROM nodes n JOIN pinned_tree p ON n.parent=p.id WHERE n.deleted=0) SELECT COALESCE(SUM(CASE WHEN n.directory=0 THEN 1 ELSE 0 END),0), COALESCE(SUM(CASE WHEN n.directory=0 AND COALESCE(n.dirty_blob,n.blob) IS NOT NULL AND n.id NOT IN (SELECT id FROM access_blocked) THEN 1 ELSE 0 END),0), COALESCE(SUM(CASE WHEN n.directory=0 AND n.id IN (SELECT id FROM pinned_tree) THEN 1 ELSE 0 END),0) FROM nodes n WHERE n.deleted=0",
+        // One sequential pass answers both counters. The previous shape folded
+        // the recursive pinned CTE into the same scan, so SQLite built automatic
+        // partial indexes for every recursion step: ~11x slower at 210k nodes
+        // even though the result is three numbers (issue #21).
+        let (total, offline) = self.db.query_row(
+            "SELECT COALESCE(SUM(CASE WHEN n.directory=0 THEN 1 ELSE 0 END),0), \
+                    COALESCE(SUM(CASE WHEN n.directory=0 AND COALESCE(n.dirty_blob,n.blob) IS NOT NULL \
+                        AND n.id NOT IN (SELECT id FROM access_blocked) THEN 1 ELSE 0 END),0) \
+             FROM nodes n WHERE n.deleted=0",
             [],
-            |r| {
-                let total: i64 = r.get(0)?;
-                let offline: i64 = r.get(1)?;
-                let pinned: i64 = r.get(2)?;
-                Ok((total as u64, offline as u64, pinned as u64))
-            },
+            |r| Ok((r.get::<_, i64>(0)? as u64, r.get::<_, i64>(1)? as u64)),
         )?;
+        // Directories are not countable entries, so carry `directory` through the
+        // pinned recursion and count the co-routine's output. `id IN pinned_tree`
+        // would materialize the tree and re-scan all nodes once per aggregate.
+        let pinned: i64 = self.db.query_row(
+            "WITH RECURSIVE pinned_tree(id,directory) AS (\
+                SELECT id,directory FROM nodes WHERE pinned=1 AND deleted=0 \
+                UNION \
+                SELECT n.id,n.directory FROM nodes n INDEXED BY nodes_parent_name_live \
+                    JOIN pinned_tree p ON n.parent=p.id WHERE n.deleted=0) \
+             SELECT count(*) FROM pinned_tree WHERE directory=0",
+            [],
+            |r| r.get(0),
+        )?;
+        let pinned = pinned as u64;
         let state = if total == 0 {
             "empty"
         } else if pinned > 0 && pinned == total && offline == total {

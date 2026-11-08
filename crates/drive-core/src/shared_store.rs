@@ -68,6 +68,14 @@ pub struct SharedStore {
     // Shared with the writer's Store: off-lock readers must see the same open
     // handle set the writer protects in `cache_usage`.
     handles: Arc<Mutex<HashMap<String, (String, usize)>>>,
+    // Same reason as `handles`: desktop overview serves `queue_health` from a
+    // read-only connection, and its scheduler observations describe the writer's
+    // domain rather than that throwaway connection.
+    namespace_runtime: Arc<Mutex<crate::namespace_schedule::NamespaceRuntime>>,
+    // Lock-free mirror of `Store::local_revision()` (`total_changes`), published
+    // whenever a writer guard finishes, so off-lock projections keep the field's
+    // historical meaning instead of reading 0 from their own connection.
+    local_revision: AtomicU64,
 }
 
 /// A short metadata publication lease. It never holds SQLite/Store; callers
@@ -123,6 +131,7 @@ impl SharedStore {
         // Cloned before the Store moves into the mutex: read-only readers need
         // the same handle map to answer cache protection without a Store lock.
         let handles = store.handles.clone();
+        let namespace_runtime = store.namespace_runtime.clone();
         let permission_denials = crate::write_permissions::has_denials(&store).unwrap_or(true);
         let boundary = boundary(&store).ok();
         let unverified = boundary.is_none();
@@ -149,12 +158,26 @@ impl SharedStore {
             permission_publication: RwLock::new(()),
             root,
             handles,
+            namespace_runtime,
+            local_revision: AtomicU64::new(total_changes),
         }
     }
     /// The state directory this handle owns. Answered from the captured path;
     /// it never acquires the Store or projection lock.
     pub fn root(&self) -> PathBuf {
         self.root.clone()
+    }
+    /// Read-only connection beside the live writer that shares the writer's
+    /// handle map and scheduler observations. The SQLite side still observes
+    /// only committed WAL, takes no `writer.lock` and cannot write.
+    pub fn read_only(&self) -> crate::Result<Store> {
+        Store::open_read_only_observing(&self.root, self.namespace_runtime.clone())
+    }
+    /// Lock-free mirror of [`Store::local_revision`] (SQLite `total_changes`).
+    /// Updated when a writer guard publishes its boundary, so desktop overview
+    /// can read it without acquiring the Store.
+    pub fn local_revision(&self) -> u64 {
+        self.local_revision.load(Ordering::Acquire)
     }
     /// Number of open cached/draft handles recorded by the writer (the sum of
     /// all reference counts). Answered from the shared handle map alone; it
@@ -316,6 +339,11 @@ impl StoreGuard<'_> {
             }
         }
         guard.total_changes = hint;
+        // Publish the same value `Store::local_revision` would answer under this
+        // guard, before any off-lock reader can ask for it.
+        self.shared
+            .local_revision
+            .store(hint, Ordering::Release);
         let verified = !guard.unverified;
         if projection_changed || projection_before.verified != verified {
             let denied=crate::write_permissions::has_denials(&guard.store).unwrap_or(true);
