@@ -838,6 +838,45 @@ fn acl_refresh_covers_the_overlay_remote_parent_closure() {
     );
 }
 
+/// Issue #31: journal node ids must resolve to mount-relative paths in one
+/// read, including ancestors and rows that are flagged deleted.
+#[test]
+fn ancestry_paths_resolve_a_journal_batch_with_ancestors() {
+    let (_dir, s) = small_fixture();
+    let ids: Vec<String> = [
+        "root", "a", "a1", "a2a", "b1", "pinned", "gone_child", "shadowed", "absent",
+    ]
+    .iter()
+    .map(|id| (*id).to_owned())
+    .collect();
+    let paths = super::desktop_status_ancestry_paths(&s, &ids).unwrap();
+
+    assert_eq!(paths["root"].path, ".");
+    assert!(paths["root"].directory);
+    assert!(paths["root"].ancestors.is_empty());
+
+    assert_eq!(paths["a"].path, "a");
+    assert_eq!(paths["a"].ancestors, vec!["."]);
+    assert_eq!(paths["a1"].path, "a/a1");
+    assert!(!paths["a1"].directory);
+    assert_eq!(paths["a1"].ancestors, vec!["a", "."]);
+    assert_eq!(paths["a2a"].path, "a/a2/a2a");
+    assert_eq!(paths["a2a"].ancestors, vec!["a/a2", "a", "."]);
+    assert_eq!(paths["b1"].path, "b/b1");
+    assert_eq!(paths["pinned"].path, "pinned");
+    // Deleted rows still resolve for as long as the tombstone row is retained.
+    assert_eq!(paths["gone_child"].path, "gone/gone_child");
+    assert_eq!(paths["shadowed"].path, "a/shadowed");
+    assert!(
+        !paths.contains_key("absent"),
+        "missing ids must be omitted so callers keep the recorded old facts"
+    );
+
+    assert!(super::desktop_status_ancestry_paths(&s, &[])
+        .unwrap()
+        .is_empty());
+}
+
 /// Issue #25: an unbounded ACL closure falls back to the rebuild path instead of
 /// scanning the whole namespace inside the resize.
 #[test]
