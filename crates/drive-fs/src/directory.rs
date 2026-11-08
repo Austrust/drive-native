@@ -838,7 +838,10 @@ fn kind(kind: FileKind) -> FileType {
     match kind { FileKind::Directory => FileType::Directory, FileKind::File => FileType::RegularFile }
 }
 // ACL publication holds Store through the bounded reply. Known revocations
-// cannot use the immutable-name busy-Store fallback of ordinary scans.
+// cannot use the immutable-name busy-Store fallback of ordinary scans. Pages
+// are projected in bounded batches instead of one SQL round-trip per entry, so
+// a 2000-entry directory keeps the Store guard for a handful of page queries
+// rather than ~50k per-entry statements (#26).
 fn send_acl_plus(store:&drive_core::SharedStore,notify:&NotifyHub,view:&View,offset:usize,uid:u32,gid:u32,mut reply:ReplyDirectoryPlus) {
     let guard=match store.try_lock(){Ok(g)=>g,Err(_)=>{reply.error(libc::EAGAIN);return;}};
     if let Err(e)=permissions::inode(&guard,view.ino,permissions::Action::List){reply.error(errno(&e));return;}
@@ -846,14 +849,64 @@ fn send_acl_plus(store:&drive_core::SharedStore,notify:&NotifyHub,view:&View,off
     let entries:Vec<_>=if let Some((block,_))=view.indexed(){block.entries.iter().map(|e|(e.ino,e.name.as_ref(),kind(e.kind))).collect()}
         else{view.snapshot().entries.iter().map(|e|(e.ino,e.name.as_str(),if e.directory{FileType::Directory}else{FileType::RegularFile})).collect()};
     if offset>entries.len(){reply.error(libc::EINVAL);return;}
-    for (position,(ino,name,kind)) in entries.iter().enumerate().skip(offset) {
-        let cookie=(position+1) as i64;
-        let full=match guard.posix_record_by_inode(*ino).and_then(|mut r|{permissions::project(&guard,&mut r)?;Ok(r)}) {
-            Ok(r)=>{let(_,ttl)=preview::reply_ttls(notify,r.cacheable,true);reply.add_with_timeouts(*ino,cookie,name,&ENTRY_TTL,&ttl,&preview::posix_attr(&r,uid,gid),0)},
-            Err(_)=>reply.add_without_lookup(*ino,cookie,name,*kind),
+    let parent=match guard.posix_record_by_inode(view.ino){Ok(record)=>record.id,Err(error)=>{reply.error(errno(&error));return;}};
+    let cache_before=guard.permission_cache_stats();
+    let mut index=offset;
+    while index<entries.len() {
+        let end=(index+PLUS_PAGE).min(entries.len());
+        let chunk=&entries[index..end];
+        let slots=chunk.iter().map(|(ino,name,directory)|drive_core::filesystem::DirectorySlot{
+            ino:*ino,name,directory:*directory==FileType::Directory,
+        }).collect::<Vec<_>>();
+        let page=match guard.directory_posix_page_for_acl(view.ino,&slots){
+            Ok(page)=>page,Err(error)=>{reply.error(errno(&error));return;}
         };
-        if full{break;}
+        let mut records:Vec<drive_core::filesystem::PosixRecord>=Vec::new();
+        let mut slot_records:Vec<Option<usize>>=vec![None;slots.len()];
+        let mut dots:Vec<Option<drive_core::filesystem::PosixRecord>>=vec![None;slots.len()];
+        for (position,slot) in slots.iter().enumerate() {
+            let Some(record)=page[position].clone() else {continue;};
+            if slot.name=="."||slot.name==".." {dots[position]=Some(record);}
+            else {slot_records[position]=Some(records.len());records.push(record);}
+        }
+        let mut batched=true;
+        let allowed=match drive_core::write_permissions::project_read_page(&guard,&parent,&mut records) {
+            Ok(allowed)=>allowed,
+            Err(_)=>{
+                // Exact fallback keeps the old per-entry contract on any page
+                // shape the batch path does not cover (e.g. overlay ancestry).
+                batched=false;
+                let mut allowed=Vec::with_capacity(records.len());
+                for record in records.iter_mut() {allowed.push(permissions::project(&guard,record).is_ok());}
+                allowed
+            }
+        };
+        if batched {diagnostics::add_count(diagnostics::Stage::ReaddirPlusBatchedPages,1);}
+        let mut full=false;
+        for position in 0..slots.len() {
+            let (ino,name,kind)=&chunk[position];
+            let cookie=(index+position+1) as i64;
+            let record=if let Some(dot)=dots[position].take() {
+                let mut dot=dot;
+                match permissions::project(&guard,&mut dot) {Ok(())=>Some(dot),Err(_)=>None}
+            } else if let Some(next)=slot_records[position] {
+                if allowed.get(next).copied().unwrap_or(false) {Some(records[next].clone())} else {None}
+            } else {None};
+            let full_entry=match record {
+                Some(record)=>{
+                    let(_,ttl)=preview::reply_ttls(notify,record.cacheable,true);
+                    reply.add_with_timeouts(*ino,cookie,name,&ENTRY_TTL,&ttl,&preview::posix_attr(&record,uid,gid),0)
+                }
+                None=>reply.add_without_lookup(*ino,cookie,name,*kind),
+            };
+            if full_entry {full=true;break;}
+        }
+        if full {break;}
+        index=end;
     }
+    let cache_after=guard.permission_cache_stats();
+    diagnostics::add_count(diagnostics::Stage::PermissionCacheHits,cache_after.hits.saturating_sub(cache_before.hits));
+    diagnostics::add_count(diagnostics::Stage::PermissionCacheMisses,cache_after.misses.saturating_sub(cache_before.misses));
     reply.ok();drop(guard);
 }
 fn send_index_page(block: &DirBlock, offset: usize, mut reply: ReplyDirectory) {

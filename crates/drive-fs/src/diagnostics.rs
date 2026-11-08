@@ -66,6 +66,12 @@ pub enum Stage {
     ReaddirPlusQueue,
     /// One bounded attribute page projection for READDIRPLUS.
     ReaddirPlusProjection,
+    /// One READDIRPLUS ACL page whose permission projection ran batched (#26).
+    ReaddirPlusBatchedPages,
+    /// Effective decisions served by the writer-local memo (#26).
+    PermissionCacheHits,
+    /// Effective decisions computed and memoized by the writer-local memo (#26).
+    PermissionCacheMisses,
     IndexHits,
     IndexMisses,
     IndexFallback,
@@ -92,7 +98,7 @@ pub enum Stage {
     /// Wall time of one checkpoint: dirty-draft barrier, snapshot and commit.
     CheckpointTotal,
 }
-const STAGES: [Stage; 56] = [
+const STAGES: [Stage; 59] = [
     Stage::LookupQueue,
     Stage::LookupStoreWait,
     Stage::LookupProjection,
@@ -136,6 +142,8 @@ const STAGES: [Stage; 56] = [
     Stage::ReaddirRequests, Stage::ReaddirPlusRequests, Stage::IndexReadUs,
     Stage::WriteQueue, Stage::WriteStoreWait, Stage::WriteHold,
     Stage::CheckpointTotal,
+    Stage::ReaddirPlusBatchedPages, Stage::PermissionCacheHits,
+    Stage::PermissionCacheMisses,
 ];
 struct Aggregate {
     count: AtomicU64,
@@ -153,7 +161,7 @@ impl Aggregate {
         }
     }
 }
-static TOTALS: [Aggregate; 56] = [const { Aggregate::new() }; 56];
+static TOTALS: [Aggregate; 59] = [const { Aggregate::new() }; 59];
 static ENABLED: OnceLock<bool> = OnceLock::new();
 pub(crate) fn enabled() -> bool {
     *ENABLED
@@ -173,6 +181,15 @@ pub fn count(stage: Stage) {
     if enabled() {
         record(stage, 0);
     }
+}
+/// Add a count without treating it as a duration sample.
+pub(crate) fn add_count(stage: Stage, count: u64) {
+    if !enabled() || count == 0 {
+        return;
+    }
+    TOTALS[stage as usize]
+        .count
+        .fetch_add(count, Ordering::Relaxed);
 }
 pub(crate) fn value(stage: Stage, value: u64) {
     if enabled() { record(stage, value); }
