@@ -844,3 +844,59 @@ fn repeated_budget_and_acknowledgement_do_not_create_coarse_notifications() {
         watermark.cursor
     );
 }
+
+#[test]
+fn namespace_watermark_separates_semantics_from_inode_lru_and_attribute_writes() {
+    let (_dir, mut s) = fixture();
+    let start = s.namespace_watermark().unwrap();
+    // Writes every projection must ignore: LRU bookkeeping and settings. They
+    // may change total_changes, but not the namespace semantic watermark.
+    s.note_cache_use("a").unwrap();
+    s.set_cache_limit(4096).unwrap();
+    assert_eq!(s.namespace_watermark().unwrap(), start);
+
+    // Identity allocation is an attribute-only source: it must not publish a
+    // semantic desktop change, but it must invalidate attribute projections.
+    // The remote snapshot install already allocated inodes for the whole
+    // fixture namespace, so record a fresh derived mapping instead of
+    // allocating `p` a second time.
+    let before_inode = s.namespace_watermark().unwrap();
+    s.db.execute("INSERT INTO fs_inodes(node) VALUES('unindexed')", [])
+        .unwrap();
+    let allocated = s.namespace_watermark().unwrap();
+    assert_eq!(allocated.journal, before_inode.journal);
+    assert!(allocated.attributes > before_inode.attributes);
+    // A read through the authoritative POSIX projection writes nothing.
+    assert!(s.posix_lookup_by_inode(1, "p").is_ok());
+    assert_eq!(s.namespace_watermark().unwrap(), allocated);
+
+    // Explicit atime is the other attribute-only source.
+    s.set_local_atime("a", 4, 2).unwrap();
+    let atime = s.namespace_watermark().unwrap();
+    assert_eq!(atime.journal, allocated.journal);
+    assert_eq!(atime.attributes, allocated.attributes + 1);
+
+    // A semantic source moves the journal cursor and leaves the counter alone.
+    s.pin("a", true).unwrap();
+    let semantic = s.namespace_watermark().unwrap();
+    assert_ne!(semantic.journal, atime.journal);
+    assert_eq!(semantic.attributes, atime.attributes);
+
+    // Pruning the retained history changes the floor only; projections that
+    // already compared equal watermarks must not rebuild for cleanup.
+    s.prune_status_changes(&semantic.journal).unwrap();
+    assert_eq!(s.namespace_watermark().unwrap(), semantic);
+    consistent(&s);
+}
+
+#[test]
+fn namespace_watermark_never_reports_an_uncommitted_boundary() {
+    let (_dir, s) = fixture();
+    let committed = s.namespace_watermark().unwrap();
+    s.db.execute_batch("BEGIN; UPDATE nodes SET name=name WHERE id='a';")
+        .unwrap();
+    assert!(s.namespace_watermark().is_err());
+    s.db.execute_batch("ROLLBACK;").unwrap();
+    assert_eq!(s.namespace_watermark().unwrap(), committed);
+}
+

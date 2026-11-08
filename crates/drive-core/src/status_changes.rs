@@ -56,6 +56,31 @@ pub struct JournalWatermark {
     pub budget: JournalBudget,
 }
 
+/// Namespace semantic watermark: the version/invalidation primitive a
+/// materialized namespace projection compares instead of `total_changes`.
+///
+/// `journal` is the committed status-journal cursor. It advances exactly when
+/// the semantic sources in [`SOURCES`] change names, parents, visibility,
+/// types, content identity, pins, local precedence, ACL overlays, drafts or
+/// task state.
+///
+/// `attributes` counts the two attribute-only tables the namespace/attribute
+/// projection reads but the semantic journal deliberately excludes:
+/// `fs_inodes` (identity allocation) and `local_atimes` (explicit atime). A
+/// semantic-only write therefore does not move it, and an attribute-only write
+/// does not move the journal.
+///
+/// Two equal watermarks prove that a projection captured under the same writer
+/// connection is still current. No projection may serve results across unequal
+/// watermarks, and comparisons across processes always differ because the
+/// journal epoch is per writer connection and the counter is TEMP-backed.
+/// The type is a value to compare, never a durable receipt.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NamespaceWatermark {
+    pub journal: StatusCursor,
+    pub attributes: u64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ChangeScope {
     NodeAndAncestors,
@@ -297,6 +322,37 @@ pub(crate) fn install(db: &Connection) -> Result<()> {
             ))?;
         }
     }
+    // Attribute-only projection sources. They are read by the namespace and
+    // attribute projection but deliberately excluded from the semantic journal
+    // above: hot-path inode allocation and explicit atime updates must not
+    // publish desktop status notifications. A compact counter keeps that
+    // projection exact without durable schema, journal rows or per-write
+    // bookkeeping beyond one TEMP row update. The counter and its triggers are
+    // TEMP objects on this writer connection only.
+    db.execute_batch(
+        "CREATE TEMP TABLE dn_namespace_meta (
+        singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+        attributes INTEGER NOT NULL);
+        INSERT INTO dn_namespace_meta VALUES(1,0);
+        CREATE TEMP TRIGGER dn_namespace_attributes_fs_inodes_insert
+        AFTER INSERT ON main.fs_inodes BEGIN
+        UPDATE dn_namespace_meta SET attributes=attributes+1; END;
+        CREATE TEMP TRIGGER dn_namespace_attributes_fs_inodes_update
+        AFTER UPDATE ON main.fs_inodes BEGIN
+        UPDATE dn_namespace_meta SET attributes=attributes+1; END;
+        CREATE TEMP TRIGGER dn_namespace_attributes_fs_inodes_delete
+        AFTER DELETE ON main.fs_inodes BEGIN
+        UPDATE dn_namespace_meta SET attributes=attributes+1; END;
+        CREATE TEMP TRIGGER dn_namespace_attributes_local_atimes_insert
+        AFTER INSERT ON main.local_atimes BEGIN
+        UPDATE dn_namespace_meta SET attributes=attributes+1; END;
+        CREATE TEMP TRIGGER dn_namespace_attributes_local_atimes_update
+        AFTER UPDATE ON main.local_atimes BEGIN
+        UPDATE dn_namespace_meta SET attributes=attributes+1; END;
+        CREATE TEMP TRIGGER dn_namespace_attributes_local_atimes_delete
+        AFTER DELETE ON main.local_atimes BEGIN
+        UPDATE dn_namespace_meta SET attributes=attributes+1; END;",
+    )?;
     Ok(())
 }
 
@@ -361,6 +417,30 @@ impl Store {
             ));
         }
         Ok(watermark)
+    }
+
+    /// The namespace semantic watermark: committed journal cursor plus the
+    /// attribute-only counter. Projections that SQLite backs (the FUSE
+    /// namespace index and, later, the desktop status index) compare this
+    /// value instead of `total_changes`, so unrelated writes — open/LRU
+    /// bookkeeping, settings, receipt bodies and TEMP maintenance — cannot
+    /// invalidate them while name, identity, visibility and projected
+    /// attribute changes still do. Like [`Store::status_change_watermark`] it
+    /// requires a committed boundary and fails while a transaction or bulk
+    /// replacement is open.
+    pub fn namespace_watermark(&self) -> Result<NamespaceWatermark> {
+        let watermark = self.status_change_watermark()?;
+        let attributes: i64 =
+            self.db
+                .query_row("SELECT attributes FROM dn_namespace_meta", [], |row| {
+                    row.get(0)
+                })?;
+        let attributes = u64::try_from(attributes)
+            .map_err(|_| Error::State("invalid namespace attribute counter".into()))?;
+        Ok(NamespaceWatermark {
+            journal: watermark.cursor,
+            attributes,
+        })
     }
 
     /// Returns invalidations, not complete historical atoms. Read current node
