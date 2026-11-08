@@ -7,7 +7,7 @@ G0，协调者冻结于 2026-11-04。基线 `codex/fs-recovery-safe-9 @ d555944`
 ## 阶段与所有权
 
 `codex/fix-5-2` 集成 A → B → C → D；随后 `codex/fix-7` 单线实现 ACL。
-最终汇总分支 `codex/fix-all-5-2-7` 保留完整提交历史。schema **24 = history，25 = permissions，26 = 持久上传只读核对预算**（`operations.reconcile_attempts`/`reconcile_at`），**27 = 问题/下载候选索引**（`operations_node`/`namespace_ops_node`、partial `nodes_conflict`/`nodes_pinned`/`nodes_cached`），**28 = 存储残留收敛**（`operations_countable`/`operations_node_active`/`operations_blob_active`/`operations_uncertain_reconcile`/`inbox_pending` 与 `sync_history_mount_seq`/`sync_history_result_seq` 七个 partial 索引，启动时按 durable marker 一次性裁剪 operations/namespace_ops/inbox 历史；`#32` 同时批量化快照映射与上传祖先查询；当前 `STATE_SCHEMA_VERSION=28`）。
+最终汇总分支 `codex/fix-all-5-2-7` 保留完整提交历史。schema **24 = history，25 = permissions，26 = 持久上传只读核对预算**（`operations.reconcile_attempts`/`reconcile_at`），**27 = 问题/下载候选索引**（`operations_node`/`namespace_ops_node`、partial `nodes_conflict`/`nodes_pinned`/`nodes_cached`），**28 = 存储残留收敛**（5 个 partial 索引 `operations_countable`/`operations_node_active`/`operations_blob_active`/`operations_uncertain_reconcile`/`inbox_pending` + 2 个 `sync_history` 序号索引 `sync_history_mount_seq`/`sync_history_result_seq`，启动时按 durable marker 一次性裁剪 operations/namespace_ops/inbox 历史；`#32` 同时批量化快照映射与上传祖先查询；当前 `STATE_SCHEMA_VERSION=28`）。
 每个 stream 独立 worktree、独立 CARGO_TARGET_DIR；G1 只可 cargo check，禁止测试、基准、NAS。
 G2 全量编译；G3 完整实现后才由独立验证代理进入 G4；G5 独占基准窗口。
 不 push、不发布、不读取凭据、不访问生产文件，不修改已发布 .9 资产。

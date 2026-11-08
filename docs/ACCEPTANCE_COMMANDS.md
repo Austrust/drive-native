@@ -1,6 +1,6 @@
 # 性能 issue 验收命令（P032 / issue #34）
 
-本页是性能复核 issue [#1](https://github.com/Austrust/drive-native/issues/1)–[#14](https://github.com/Austrust/drive-native/issues/14) 的可复制验收命令。命令以最终合并树 `integration/fixes2`（`work/integ2/src`）为准。最终验收的验证树 = `integration/fixes2` @ `9cb6b1c`（clean checkout，远端 `wt/integ2` HEAD 即 `9cb6b1c`，`final-<tag>.log` 首行记录该真实 HEAD）。重负载必须在远端 Linux 构建机执行，不要在 WSL 或开发机跑长基准。
+本页是性能复核 issue [#1](https://github.com/Austrust/drive-native/issues/1)–[#14](https://github.com/Austrust/drive-native/issues/14) 的可复制验收命令。命令以最终合并树 `integration/fixes2`（`work/integ2/src`）为准。最终验收的验证代码树 = `integration/fixes2` @ `9cb6b1c`（clean checkout；`docs merge 7fd7f2f` 仅文档，不改变代码/二进制），`final-<tag>.log` 首行记录该真实 HEAD。重负载必须在远端 Linux 构建机执行，不要在 WSL 或开发机跑长基准。
 
 ## 共同前提
 
@@ -116,9 +116,11 @@ export CARGO_TARGET_DIR=/tmp/p032-targets/t0
     ```sh
     cargo test --workspace --all-features --locked
     bash scripts/verify.sh
-    rg -n -g '*.md' "6\.35|477-532|487-532|schema 26|STATE_SCHEMA_VERSION=27" docs/*.md
+    rg -n '6[.]35|47[7]-532|schema[ ]26|STATE_SCHEMA_VERSION=[2]7|TBD[-]FINAL|c3b62a[1]|229[.]1|877[.]6|0[.]690' docs/
+    # 远端无 rg 时用 grep 备用：
+    grep -rnE '6[.]35|47[7]-532|schema[ ]26|STATE_SCHEMA_VERSION=[2]7|TBD[-]FINAL|c3b62a[1]' docs/
     ```
-    第一条覆盖代码-文档引用不被破坏；grep 只扫描顶层 docs/*.md（排除 docs/validation 证据文件），用于确认过时口径（6.35 ms、旧持锁行号、schema 26 当前版、旧 v27 当前版）没有残留；当前契约 schema 为 v28（`STATE_SCHEMA_VERSION=28`）。
+    前两条覆盖代码-文档引用不被破坏；grep 只扫描顶层 `docs/*.md`（排除 `docs/validation` 证据文件），用于确认过时口径（无出处的毫秒数、旧持锁行号、旧 schema 当前版表述、旧 v27 当前版、TBD 占位与旧树标识、旧 final1 数字）没有残留；括号写法避免命令匹配本文件自身。当前契约 schema 为 v28（`STATE_SCHEMA_VERSION=28`）。
 
 ## 与 issue #8 三树数字的关系
 
