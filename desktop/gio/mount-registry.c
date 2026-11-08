@@ -163,6 +163,49 @@ static gboolean live_mount_matches(const gchar *root,guint64 id,guint64 unique,c
 done:
     g_mutex_unlock(&mount_cache_lock);return matched;
 }
+/* Prefix cache for verified mount roots. Entries are never trusted alone: every
+ * cached candidate is re-validated by live_mount_matches against the current
+ * namespace snapshot, so a stale entry can only cost a scan (never widen the
+ * scope). The cache lets a directory listing reuse one registry scan per mount
+ * root instead of reopening every .mount record for every path. */
+typedef struct { guint64 id, unique; } scope_root_record;
+static GMutex scope_cache_lock;
+static GHashTable *scope_roots; /* root -> scope_root_record* */
+static gint scope_checks, scope_cache_hits, scope_scan_misses;
+
+static gboolean scope_cache_matches(const gchar *path) {
+    gboolean matched=FALSE;
+    g_mutex_lock(&scope_cache_lock);
+    if (scope_roots) {
+        GHashTableIter iter;gpointer key,value;
+        g_hash_table_iter_init(&iter,scope_roots);
+        while (g_hash_table_iter_next(&iter,&key,&value)) {
+            const gchar *root=key;const scope_root_record *record=value;
+            if (beneath(path,root) && live_mount_matches(root,record->id,record->unique,path)) {
+                matched=TRUE;break;
+            }
+        }
+    }
+    g_mutex_unlock(&scope_cache_lock);return matched;
+}
+static void scope_cache_remember(const gchar *root,guint64 id,guint64 unique) {
+    scope_root_record *record=g_new(scope_root_record,1);
+    record->id=id;record->unique=unique;
+    g_mutex_lock(&scope_cache_lock);
+    if (!scope_roots) scope_roots=g_hash_table_new_full(g_str_hash,g_str_equal,g_free,g_free);
+    if (!g_hash_table_contains(scope_roots,root)) g_hash_table_insert(scope_roots,g_strdup(root),record);
+    else g_free(record);
+    g_mutex_unlock(&scope_cache_lock);
+}
+void dn_scope_cache_stats(DnScopeCacheStats *stats) {
+    if (!stats) return;
+    stats->checks=(guint64)g_atomic_int_get(&scope_checks);
+    stats->cache_hits=(guint64)g_atomic_int_get(&scope_cache_hits);
+    stats->scan_misses=(guint64)g_atomic_int_get(&scope_scan_misses);
+    g_mutex_lock(&scope_cache_lock);
+    stats->cached_roots=scope_roots ? g_hash_table_size(scope_roots) : 0;
+    g_mutex_unlock(&scope_cache_lock);
+}
 static gboolean record_matches(int directory,const gchar *name,const gchar *path) {
     int fd=openat(directory,name,O_RDONLY|O_NOFOLLOW|O_CLOEXEC|O_NONBLOCK);
     if (fd<0) return FALSE;
@@ -185,8 +228,10 @@ static gboolean record_matches(int directory,const gchar *name,const gchar *path
             key_number(key,"pid",&pid) && key_number(key,"pid_start",&start) && key_number(key,"mount_id",&id) && key_number(key,"mount_unique_id",&unique)) {
             gchar *hex=g_key_file_get_value(key,"Mount","path_hex",NULL);
             gchar *root=decode_hex(hex);g_free(hex);
-            if (root && beneath(path,root) && process_matches(pid,start))
+            if (root && beneath(path,root) && process_matches(pid,start)) {
                 matched=live_mount_matches(root,id,unique,path);
+                if (matched) scope_cache_remember(root,id,unique);
+            }
             g_free(root);
         }
     }
@@ -207,6 +252,9 @@ gboolean dn_scope_contains_path(const gchar *path) {
     int root=private_dir(-1,runtime);if (root<0) return FALSE;
     int app=private_dir(root,"drive-native");close(root);if (app<0) return FALSE;
     int mounts=private_dir(app,"mounts");close(app);if (mounts<0) return FALSE;
+    g_atomic_int_inc(&scope_checks);
+    if (scope_cache_matches(path)) {g_atomic_int_inc(&scope_cache_hits);close(mounts);return TRUE;}
+    g_atomic_int_inc(&scope_scan_misses);
     DIR *directory=fdopendir(mounts);if (!directory) {close(mounts);return FALSE;}
     gboolean result=FALSE;
     struct dirent *entry;unsigned count=0;
