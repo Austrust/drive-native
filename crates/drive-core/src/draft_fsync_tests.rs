@@ -61,6 +61,11 @@ fn begin(store: &mut Store) -> drafts::DraftHandle {
 fn sequential_write_path_does_not_commit_metadata_per_syscall() {
     let (_dir, mut s) = setup_empty(b"");
     let h = begin(&mut s);
+    assert_eq!(
+        s.draft_write_stats().draft_file_fsyncs,
+        2,
+        "begin must durably create the mutable working copy"
+    );
     let payload = vec![0x5a_u8; CHUNK];
     let before = s.db.total_changes();
     let started = std::time::Instant::now();
@@ -70,16 +75,28 @@ fn sequential_write_path_does_not_commit_metadata_per_syscall() {
     }
     let elapsed = started.elapsed();
     let write_changes = s.db.total_changes() - before;
+    let stats = s.draft_write_stats();
     eprintln!(
-        "#24 sequential_write: {} writes, {} MiB, {} SQLite row changes in {elapsed:?}",
+        "#24 sequential_write: {} writes, {} MiB, {} SQLite row changes in {elapsed:?}, \
+         metadata_commits={} draft_file_fsyncs={}",
         CHUNKS,
         (CHUNKS * CHUNK) / (1024 * 1024),
-        write_changes
+        write_changes,
+        stats.metadata_commits,
+        stats.draft_file_fsyncs
     );
     assert!(
         write_changes <= 16,
         "100 MiB sequential write issued {write_changes} SQLite row changes; \
          a bounded write path must only persist one dirty-epoch mark"
+    );
+    assert_eq!(
+        stats.metadata_commits, 1,
+        "the whole dirty epoch must be marked by exactly one durable statement"
+    );
+    assert_eq!(
+        stats.draft_file_fsyncs, 2,
+        "content writes must not fsync the working file per syscall"
     );
     assert_eq!(s.status("big").unwrap(), Status::PendingUpload);
 }
@@ -122,10 +139,17 @@ fn checkpoint_persists_dirty_edits_in_one_metadata_transaction() {
     let before = s.db.total_changes();
     let op = s.checkpoint_draft(&h).unwrap().unwrap();
     let checkpoint_changes = s.db.total_changes() - before;
+    let stats = s.draft_write_stats();
     assert!(
         checkpoint_changes <= 64,
         "checkpoint issued {checkpoint_changes} SQLite row changes; expected one bounded transaction"
     );
+    assert_eq!(
+        stats.metadata_commits, 2,
+        "checkpoint must merge its row update into the snapshot commit"
+    );
+    assert_eq!(stats.checkpoints, 1);
+    assert_eq!(stats.draft_file_fsyncs, 3, "two begin fsyncs + one barrier");
     assert!(op.starts_with("op-") || !op.is_empty());
     let mut uploaded = Vec::new();
     s.open_cached("big")
@@ -133,4 +157,39 @@ fn checkpoint_persists_dirty_edits_in_one_metadata_transaction() {
         .read_to_end(&mut uploaded)
         .unwrap();
     assert_eq!(uploaded, payload);
+}
+
+/// SETATTR(mtime) used to fsync twice (SQLite commit + an eager working-file
+/// sync_all). The mtime is only durable through the checkpoint, so the single
+/// barrier now belongs to the checkpoint.
+#[test]
+fn timestamp_edit_defers_its_single_fsync_to_checkpoint() {
+    let (_dir, mut s) = setup_empty(b"old");
+    let h = begin(&mut s);
+    let after_begin = s.draft_write_stats();
+    s.draft_set_mtime(&h, 123456).unwrap();
+    let after_set_mtime = s.draft_write_stats();
+    assert_eq!(
+        after_set_mtime.draft_file_fsyncs, after_begin.draft_file_fsyncs,
+        "SETATTR(mtime) must not fsync before the checkpoint that persists it"
+    );
+    assert_eq!(
+        after_set_mtime.metadata_commits - after_begin.metadata_commits,
+        1,
+        "mtime edit must durably mark its dirty epoch"
+    );
+    let op = s.checkpoint_draft(&h).unwrap().unwrap();
+    assert!(!op.is_empty());
+    let after = s.draft_write_stats();
+    assert_eq!(
+        after.draft_file_fsyncs - after_begin.draft_file_fsyncs,
+        1,
+        "the timestamp edit costs exactly one working-file fsync"
+    );
+    assert_eq!(
+        after.metadata_commits - after_begin.metadata_commits,
+        2,
+        "epoch mark + merged checkpoint advance"
+    );
+    assert_eq!(after.checkpoints, 1);
 }
