@@ -61,6 +61,47 @@ fn projection_lease_covers_atime_without_changing_semantic_notifications() {
     assert!(shared.try_lock().is_ok());
 }
 
+/// Acceptance for issue #22: a projection lease must survive writes that no
+/// namespace view reads (LRU bookkeeping here), and still cover every source
+/// the index does read (identity via `fs_inodes`, explicit atime, semantic
+/// journal sources). The semantic notification stream stays untouched by the
+/// attribute-only sources.
+#[test]
+fn projection_lease_ignores_non_semantic_writes_but_covers_attributes() {
+    let (_dir, shared, notifications) = fixture();
+    let semantic = shared.change_state();
+    let before = shared.projection_state();
+    let guard = shared.lock().unwrap();
+    guard
+        .db
+        .execute("INSERT OR REPLACE INTO cache_access(node) VALUES('a')", [])
+        .unwrap();
+    let after_lru = guard.finish_projection();
+    assert!(after_lru.verified);
+    assert_eq!(after_lru, before, "LRU bookkeeping invalidated the projection");
+    assert_eq!(semantic, shared.change_state());
+    quiet(&notifications);
+
+    let guard = shared.lock().unwrap();
+    guard
+        .db
+        .execute(
+            "INSERT INTO local_atimes(node,seconds,nanoseconds) VALUES('a',7,8)",
+            [],
+        )
+        .unwrap();
+    let after_atime = guard.finish_projection();
+    assert!(after_atime.verified && after_atime.revision > after_lru.revision);
+    assert_eq!(semantic, shared.change_state());
+    quiet(&notifications);
+
+    let mut guard = shared.lock().unwrap();
+    guard.pin("a", true).unwrap();
+    let after_semantic = guard.finish_projection();
+    assert!(after_semantic.revision > after_atime.revision);
+    assert_ne!(semantic, shared.change_state());
+}
+
 #[test]
 fn uncommitted_projection_never_becomes_a_verified_reply_token() {
     let (_dir, shared, _) = fixture();
