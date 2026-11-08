@@ -2,10 +2,12 @@
 //!
 //! A returned Arc owns its generation; refreshing never invalidates a Rust
 //! reference. Callers must hold the SharedStore projection read lease while
-//! selecting AND publishing index results. This module's Store revision is
-//! `total_changes`, not the independent SharedStore commit generation.
+//! selecting AND publishing index results. This module's freshness token is
+//! the namespace semantic watermark (the transactional journal cursor plus the
+//! attribute-source counter), not `total_changes`: LRU bookkeeping, settings,
+//! inode-map receipts and journal cleanup must not rebuild the namespace.
 //! `None` means "use the SQL path", never authoritative ENOENT.
-use crate::{Error, Result, Store, filesystem::DirectoryViewStamp};
+use crate::{Error, Result, Store, status_changes::NamespaceWatermark};
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex, RwLock, atomic::{AtomicU64, Ordering}},
@@ -105,7 +107,7 @@ impl Default for Budget {
 struct Snapshot {
     revision: u64,
     invalidation: u64,
-    stamp: Option<DirectoryViewStamp>,
+    watermark: Option<NamespaceWatermark>,
     by_ino: HashMap<u64, Arc<EntrySlot>>,
     dirs: HashMap<u64, Arc<DirBlock>>,
     bytes: usize,
@@ -113,18 +115,31 @@ struct Snapshot {
     degraded: bool,
 }
 impl Snapshot {
-    fn empty(revision: u64, invalidation: u64, stamp: Option<DirectoryViewStamp>) -> Self {
+    fn empty(revision: u64, invalidation: u64, watermark: Option<NamespaceWatermark>) -> Self {
         Self {
-            revision, invalidation, stamp, by_ino: HashMap::new(), dirs: HashMap::new(),
+            revision, invalidation, watermark, by_ino: HashMap::new(), dirs: HashMap::new(),
             bytes: 0, partial: true, degraded: true,
         }
     }
+}
+
+/// A rebuild that failed without publishing a generation keeps its previous
+/// data in memory, but an unrecoverable empty generation is not acceptable: the
+/// next `ensure_fresh` calls retry explicitly, backing off only after a
+/// repeated failure so one transient boundary error recovers immediately.
+#[derive(Clone, Copy, Debug)]
+struct Retry { failures: u32, not_before: Instant }
+const RETRY_BASE: Duration = Duration::from_millis(100);
+const RETRY_CAP: Duration = Duration::from_secs(10);
+fn retry_delay(failures: u32) -> Duration {
+    RETRY_BASE.saturating_mul(1u32 << failures.min(7)).min(RETRY_CAP)
 }
 #[derive(Debug)]
 struct Inner {
     snapshot: RwLock<Arc<Snapshot>>,
     invalidation: AtomicU64,
     builder: Mutex<()>,
+    retry: Mutex<Option<Retry>>,
 }
 /// Cloning an index shares freshness and invalidation; it does not fork state.
 #[derive(Clone, Debug)]
@@ -138,7 +153,7 @@ impl NamespaceIndex {
     pub fn degraded() -> Self {
         Self { inner: Arc::new(Inner {
             snapshot: RwLock::new(Arc::new(Snapshot::empty(0, 0, None))),
-            invalidation: AtomicU64::new(0), builder: Mutex::new(()),
+            invalidation: AtomicU64::new(0), builder: Mutex::new(()), retry: Mutex::new(None),
         }) }
     }
     pub fn build(store: &Store) -> Result<Self> {
@@ -148,7 +163,7 @@ impl NamespaceIndex {
         let snapshot = load(store, 0, budget)?;
         Ok(Self { inner: Arc::new(Inner {
             snapshot: RwLock::new(Arc::new(snapshot)),
-            invalidation: AtomicU64::new(0), builder: Mutex::new(()),
+            invalidation: AtomicU64::new(0), builder: Mutex::new(()), retry: Mutex::new(None),
         }) })
     }
     fn snapshot(&self) -> Option<Arc<Snapshot>> {
@@ -200,42 +215,79 @@ impl NamespaceIndex {
         }
     }
 
+    /// Returns whether the index is current for this Store. The token is the
+    /// namespace semantic watermark, so LRU bookkeeping, settings and inode-map
+    /// receipts no longer rebuild the projection. A rebuild that fails without
+    /// publishing a generation leaves the previous data in memory but keeps it
+    /// out of the current epoch; later calls retry it explicitly instead of
+    /// settling on an unrecoverable empty generation.
     pub fn ensure_fresh(&self, store: &Store) -> RefreshOutcome {
         let Ok(_builder) = self.inner.builder.try_lock() else {
             // Another rebuild is in progress or poisoned. Never wait behind
             // a large namespace load in a FUSE request.
             return RefreshOutcome::Degraded;
         };
-        let stamp = match store.directory_view_stamp() {
-            Ok(stamp) => stamp,
-            Err(_) => { self.invalidate(InvalidateHint::All); return RefreshOutcome::Degraded; }
+        let watermark = match store.namespace_watermark() {
+            Ok(watermark) => watermark,
+            Err(_) => {
+                // An unconfirmed boundary is a transient read failure: do not
+                // publish a generation for it, retry on the next call.
+                self.invalidate(InvalidateHint::All);
+                self.note_refresh_failed();
+                return RefreshOutcome::Degraded;
+            }
         };
-        let revision = store.local_revision();
         let epoch = self.inner.invalidation.load(Ordering::Acquire);
         if epoch == u64::MAX { return RefreshOutcome::Degraded; }
         if let Some(snapshot) = self.snapshot() {
-            if snapshot.invalidation == epoch && snapshot.revision == revision
-                && snapshot.stamp.as_ref() == Some(&stamp) {
+            if snapshot.invalidation == epoch && snapshot.watermark.as_ref() == Some(&watermark) {
                 // A budget failure is stable for this generation. Do not
                 // repeatedly spend 1s rebuilding on each lookup/EOF request.
                 return if snapshot.degraded { RefreshOutcome::Degraded } else { RefreshOutcome::Fresh };
             }
         }
+        if self.retry_blocked() { return RefreshOutcome::Degraded; }
         self.invalidate(InvalidateHint::All);
         let epoch = self.inner.invalidation.load(Ordering::Acquire);
         if epoch == u64::MAX { return RefreshOutcome::Degraded; }
-        let snapshot = load(store, epoch, Budget::default()).unwrap_or_else(|_| {
-            Snapshot::empty(revision, epoch, Some(stamp))
-        });
-        let degraded = snapshot.degraded;
-        let Ok(mut destination) = self.inner.snapshot.write() else { return RefreshOutcome::Degraded; };
-        // An invalidation arriving during load must not be swallowed by the
-        // new publication. Its epoch mismatch keeps every read on SQL.
-        if self.inner.invalidation.load(Ordering::Acquire) != epoch {
-            return RefreshOutcome::Degraded;
+        match load(store, epoch, Budget::default()) {
+            Ok(snapshot) => {
+                let degraded = snapshot.degraded;
+                let Ok(mut destination) = self.inner.snapshot.write() else {
+                    return RefreshOutcome::Degraded;
+                };
+                // An invalidation arriving during load must not be swallowed by
+                // the new publication. Its epoch mismatch keeps every read on
+                // SQL.
+                if self.inner.invalidation.load(Ordering::Acquire) != epoch {
+                    return RefreshOutcome::Degraded;
+                }
+                *destination = Arc::new(snapshot);
+                self.clear_refresh_failure();
+                if degraded { RefreshOutcome::Degraded } else { RefreshOutcome::Refreshed }
+            }
+            Err(_) => {
+                // Keep the previous generation allocated for later recovery and
+                // diagnostics. The epoch bump above already keeps it off the
+                // fast path, so SQL stays authoritative until a retry succeeds.
+                self.invalidate(InvalidateHint::All);
+                self.note_refresh_failed();
+                RefreshOutcome::Degraded
+            }
         }
-        *destination = Arc::new(snapshot);
-        if degraded { RefreshOutcome::Degraded } else { RefreshOutcome::Refreshed }
+    }
+
+    fn retry_blocked(&self) -> bool {
+        let retry = *self.inner.retry.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        matches!(retry, Some(retry) if retry.failures >= 2 && Instant::now() < retry.not_before)
+    }
+    fn note_refresh_failed(&self) {
+        let mut retry = self.inner.retry.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let failures = retry.map_or(1, |retry| retry.failures.saturating_add(1));
+        *retry = Some(Retry { failures, not_before: Instant::now() + retry_delay(failures) });
+    }
+    fn clear_refresh_failure(&self) {
+        *self.inner.retry.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
     }
 }
 
@@ -244,8 +296,8 @@ fn budget_error() -> Error {
 }
 fn load(store: &Store, epoch: u64, budget: Budget) -> Result<Snapshot> {
     let start = Instant::now();
-    let stamp = store.directory_view_stamp()?;
-    let revision = store.local_revision();
+    let watermark = store.namespace_watermark()?;
+    let revision = watermark.journal.sequence;
     // The transaction covers all joins and ACL/shadow membership. It is read
     // only: unlike posix_lookup/directory_snapshot, no inode is allocated.
     let transaction = store.db.unchecked_transaction()?;
@@ -304,7 +356,7 @@ fn load(store: &Store, epoch: u64, budget: Budget) -> Result<Snapshot> {
         // failures propagate so the caller can record a build-failure metric.
         if matches!(&error, Error::Io(error) if error.raw_os_error() == Some(libc::ENOMEM)) {
             transaction.commit()?;
-            return Ok(Snapshot::empty(revision, epoch, Some(stamp)));
+            return Ok(Snapshot::empty(revision, epoch, Some(watermark)));
         }
         return Err(error);
     }
@@ -317,7 +369,7 @@ fn load(store: &Store, epoch: u64, budget: Budget) -> Result<Snapshot> {
         }
     }
     let mut snapshot = Snapshot {
-        revision, invalidation: epoch, stamp: Some(stamp.clone()),
+        revision, invalidation: epoch, watermark: Some(watermark.clone()),
         by_ino: HashMap::with_capacity(rows.len()), dirs: HashMap::new(), bytes: 0,
         partial: false, degraded: false,
     };
@@ -375,18 +427,18 @@ fn load(store: &Store, epoch: u64, budget: Budget) -> Result<Snapshot> {
         charged = charged.saturating_add(128 + entries.capacity() * std::mem::size_of::<DirEntryLite>());
         if charged > budget.bytes || start.elapsed() > budget.duration {
             transaction.commit()?;
-            return Ok(Snapshot::empty(revision, epoch, Some(stamp)));
+            return Ok(Snapshot::empty(revision, epoch, Some(watermark.clone())));
         }
         snapshot.dirs.insert(ino, Arc::new(DirBlock {
             ino, entries, version: epoch, built_at_gen: revision,
         }));
     }
     transaction.commit()?;
-    if store.local_revision() != revision || store.directory_view_stamp()? != stamp {
+    if store.namespace_watermark()? != watermark {
         return Err(Error::State("namespace changed during index build".into()));
     }
     if start.elapsed() > budget.duration {
-        return Ok(Snapshot::empty(revision, epoch, Some(stamp)));
+        return Ok(Snapshot::empty(revision, epoch, Some(watermark)));
     }
     snapshot.bytes = charged;
     Ok(snapshot)
@@ -437,10 +489,11 @@ mod tests {
     #[test]
     fn batch_projection_matches_sql_without_writes_or_hydration() {
         let (path, store) = fixture();
+        let watermark = store.namespace_watermark().unwrap();
         let before = store.local_revision();
         let index = build(&store).unwrap();
         assert!(!index.is_degraded());
-        assert_eq!(index.revision(), before);
+        assert_eq!(index.revision(), watermark.journal.sequence);
         assert!(index.bytes() > 0 && index.bytes() <= MAX_BYTES);
         for parent in [1, ino_for(&store, "A").unwrap(), ino_for(&store, "B").unwrap()] {
             let expected = store.directory_snapshot(parent, MAX_BYTES).unwrap();
@@ -453,6 +506,7 @@ mod tests {
             }
         }
         assert_eq!(store.local_revision(), before);
+        assert_eq!(store.namespace_watermark().unwrap(), watermark);
         assert!(store.downloads_needed().unwrap().is_empty());
         assert_eq!(std::fs::read_dir(path.path().join("blobs")).unwrap().count(), 0);
     }
@@ -496,14 +550,21 @@ mod tests {
     }
 
     #[test]
-    fn uncommitted_boundary_cannot_publish_and_rollback_recovers() {
+    fn uncommitted_boundary_keeps_the_previous_generation_and_rollback_recovers() {
         let (_path, store) = fixture();
         let index = build(&store).unwrap();
+        let generation = (index.revision(), index.bytes());
+        assert!(generation.1 > 0);
         store.db.execute_batch("BEGIN; UPDATE node_metadata SET size=88 WHERE node='file';").unwrap();
         assert_eq!(index.ensure_fresh(&store), RefreshOutcome::Degraded);
+        // The failed rebuild must not replace the retained generation with an
+        // empty one; only the epoch keeps it off the fast path.
+        assert_eq!((index.revision(), index.bytes()), generation);
         assert!(index.entry_by_ino(1).is_none());
         assert!(NamespaceIndex::build(&store).is_err());
         store.db.execute_batch("ROLLBACK").unwrap();
+        // The first failure retries immediately: a transient boundary error
+        // must not need a backoff before the index can become current again.
         assert_eq!(index.ensure_fresh(&store), RefreshOutcome::Refreshed);
         assert_eq!(index.entry_by_ino(ino_for(&store, "file").unwrap()).unwrap().size, 3);
     }

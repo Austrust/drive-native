@@ -5,6 +5,11 @@ use serde::Serialize;
 use std::collections::HashSet;
 pub const RECENT_DOWNLOAD_SECONDS: u64 = 60;
 pub const MAX_CACHE_LIMIT: u64 = 1024 * 1024 * 1024 * 1024 * 1024;
+/// Bound for the deferred recency ring. Eviction order only needs to be exact
+/// for the working set a budget decision can actually see; dropping the oldest
+/// hints keeps one long session from pinning unbounded memory, and the next
+/// flush re-seeds rows that are still cached.
+const CACHE_RECENCY_CAPACITY: usize = 65_536;
 /// Candidate discovery with every structural protection evaluated once as a
 /// set instead of once per cached row. The previous correlated `NOT EXISTS`
 /// forms rescanned `nodes` for each candidate (GB-scale page reads); the
@@ -100,11 +105,48 @@ impl Store {
         Ok(())
     }
     /// Actual file opens only; icon/status and directory queries must not call it.
+    ///
+    /// This is deliberately memory-only. A cached read-only open is the hottest
+    /// FUSE path and must not append a WAL frame or fsync: the deferred recency
+    /// list is merged into `cache_access` in one transaction before the next
+    /// budget decision and when the store closes.
     pub fn note_cache_use(&self, id: &str) -> Result<()> {
-        self.db.execute(
-            "INSERT OR REPLACE INTO cache_access(node) SELECT id FROM nodes WHERE id=?1",
-            [id],
-        )?;
+        let mut recency = self
+            .cache_recency
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if let Some(position) = recency.iter().position(|seen| seen == id) {
+            recency.remove(position);
+        }
+        recency.push(id.to_owned());
+        if recency.len() > CACHE_RECENCY_CAPACITY {
+            recency.remove(0);
+        }
+        Ok(())
+    }
+    /// Merge deferred open recency into `cache_access` with a single commit.
+    /// Row order reproduces use order (`INSERT OR REPLACE` assigns increasing
+    /// `seq`), so a restart preserves the same LRU result as before without
+    /// paying a synchronous write per open.
+    pub(crate) fn flush_cache_recency(&self) -> Result<()> {
+        let pending = {
+            let mut recency = self
+                .cache_recency
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            if recency.is_empty() {
+                return Ok(());
+            }
+            std::mem::take(&mut *recency)
+        };
+        let transaction = self.db.unchecked_transaction()?;
+        for id in &pending {
+            transaction.execute(
+                "INSERT OR REPLACE INTO cache_access(node) SELECT id FROM nodes WHERE id=?1",
+                [id],
+            )?;
+        }
+        transaction.commit()?;
         Ok(())
     }
     /// Protection shared by explicit release and automatic eviction. Open draft
@@ -130,6 +172,9 @@ impl Store {
         Ok(self.db.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE node=?1 AND state IN ('pending','inflight','uncertain','conflict')) OR EXISTS(SELECT 1 FROM local_creations WHERE node=?1)",[id],|r|r.get(0))?)
     }
     fn cache_candidates(&self, now: u64, active: &HashSet<String>) -> Result<Vec<(String, u64)>> {
+        // Visibility for a budget decision, not a durable notification: fold the
+        // deferred open recency in before ordering candidates by `cache_access`.
+        self.flush_cache_recency()?;
         let mut q = self.db.prepare(CACHE_CANDIDATES_SQL)?;
         let rows = q
             .query_map([], |r| {
@@ -305,6 +350,15 @@ impl Store {
             released,
             reclaimed_bytes: reclaimed,
         })
+    }
+}
+
+impl Drop for Store {
+    fn drop(&mut self) {
+        // One bounded commit at close keeps cross-session LRU order. Errors are
+        // ignored: a read-only handle cannot write, and a failing state database
+        // is already reported by whichever operation needed it.
+        let _ = self.flush_cache_recency();
     }
 }
 
