@@ -901,7 +901,10 @@ mod tests {
         drop(s);
         let db = Connection::open(d.path().join("state.sqlite")).unwrap();
         db.execute_batch(
-            "ALTER TABLE operations DROP COLUMN reconcile_attempts;ALTER TABLE operations DROP COLUMN reconcile_at;PRAGMA user_version=25;",
+            // A real v25 database predates the v28 partial index, so remove it
+            // before simulating the old shape: SQLite refuses to drop a column
+            // that an index still references.
+            "DROP INDEX IF EXISTS operations_uncertain_reconcile;ALTER TABLE operations DROP COLUMN reconcile_attempts;ALTER TABLE operations DROP COLUMN reconcile_at;PRAGMA user_version=25;",
         )
         .unwrap();
         drop(db);

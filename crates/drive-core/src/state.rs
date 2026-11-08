@@ -186,7 +186,7 @@ impl Drop for ReadHandle {
 }
 
 /// Version of the durable state contract, including journal semantics.
-pub const STATE_SCHEMA_VERSION: i64 = 27;
+pub const STATE_SCHEMA_VERSION: i64 = 28;
 
 /// Automatic read-only reconciliation attempts allowed for one uncertain
 /// upload. The budget is durable so a restart cannot restart an unbounded
@@ -359,6 +359,21 @@ impl Store {
                 ))?;
             }
         }
+        // Schema 28 index candidates. They are created after every `ALTER TABLE`
+        // above because `operations.reconcile_at` only exists on v25+ databases,
+        // and they are idempotent so an interrupted upgrade simply re-creates
+        // them on the next open.
+        //
+        // `operations_countable` is the exact predicate of `pending_operations`
+        // and the cache candidate guard; the previous partial index keyed on
+        // `id` could satisfy existence tests but not this aggregate.
+        db.execute_batch(
+            "CREATE INDEX IF NOT EXISTS operations_countable ON operations(id) WHERE state IN ('pending','inflight','uncertain');
+             CREATE INDEX IF NOT EXISTS operations_node_active ON operations(node) WHERE state IN ('pending','inflight','uncertain','conflict');
+             CREATE INDEX IF NOT EXISTS operations_blob_active ON operations(blob) WHERE blob IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict');
+             CREATE INDEX IF NOT EXISTS operations_uncertain_reconcile ON operations(reconcile_at) WHERE kind='upload' AND state='uncertain';
+             CREATE INDEX IF NOT EXISTS inbox_pending ON inbox(seq) WHERE done=0;",
+        )?;
         crate::initialization_store::migrate(&db)?;
         crate::preview::migrate(&db)?;
         sync_history::migrate(&db)?;
