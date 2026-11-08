@@ -1,4 +1,5 @@
 import json
+import os
 from .config import bus_name
 from PySide6.QtCore import QObject, Signal, Slot, SLOT
 from PySide6.QtDBus import (
@@ -14,10 +15,82 @@ PATH = "/org/drivenative/Client1"
 HISTORY_METHODS = frozenset(("GetSyncHistory", "GetRecentActivity", "ResolveHistoryTarget",
                              "ClearSyncHistory", "GetSyncHistoryRetention",
                              "SetSyncHistoryRetention"))
+STATUS_SCHEMA = 1
+STATUS_KINDS = frozenset(("status", "listing", "subtree"))
+
+
+class StatusEvent:
+    """A normalised ``StatusChanged2`` notification (issue #31).
+
+    Consumers keep the last ``(epoch, to_revision)`` they saw and fall back to a
+    full GetOverview whenever the revision stream is discontinuous.
+    """
+
+    __slots__ = ("from_revision", "to_revision", "epoch", "reset", "overview_changed",
+                 "changes", "truncated", "invalid")
+
+    def __init__(self, from_revision, to_revision, epoch, reset, overview_changed,
+                 changes=None, truncated=False, invalid=False):
+        self.from_revision = int(from_revision)
+        self.to_revision = int(to_revision)
+        self.epoch = str(epoch)
+        self.reset = bool(reset)
+        self.overview_changed = bool(overview_changed)
+        self.changes = changes or []
+        self.truncated = bool(truncated)
+        self.invalid = bool(invalid)
+
+    def discontinuous(self, epoch, revision):
+        """True when this event must be applied as a full refresh."""
+        return (
+            self.invalid
+            or self.reset
+            or self.truncated
+            or epoch != self.epoch
+            or revision is None
+            or self.from_revision != revision
+        )
+
+
+def parse_status_event(from_revision, to_revision, epoch, reset, overview_changed, changes_json):
+    """Validate and normalise the JSON change set carried by StatusChanged2.
+
+    Any malformed payload is surfaced as ``invalid`` so consumers can take the
+    full-refresh fallback instead of guessing at partial changes.
+    """
+
+    def rejected():
+        return StatusEvent(from_revision, to_revision, epoch, reset, overview_changed,
+                           changes=[], truncated=False, invalid=True)
+
+    try:
+        payload = json.loads(changes_json) if changes_json else None
+        if not isinstance(payload, dict) or payload.get("schema") != STATUS_SCHEMA:
+            return rejected()
+        changes = []
+        for item in payload.get("changes") or []:
+            if not isinstance(item, dict):
+                return rejected()
+            path = item.get("path")
+            kind = item.get("kind")
+            if not isinstance(path, str) or not path.startswith("/"):
+                return rejected()
+            if kind not in STATUS_KINDS:
+                return rejected()
+            changes.append({
+                "path": os.path.normpath(path),
+                "directory": bool(item.get("directory")),
+                "kind": kind,
+            })
+        return StatusEvent(from_revision, to_revision, epoch, reset, overview_changed,
+                           changes=changes, truncated=bool(payload.get("truncated")))
+    except (ValueError, TypeError):
+        return rejected()
 
 
 class ClientBus(QObject):
     changed = Signal()
+    changed2 = Signal(object)
     progress_changed = Signal()
     shutdown_changed = Signal()
     availability = Signal(bool)
@@ -28,6 +101,9 @@ class ClientBus(QObject):
         self.bus = QDBusConnection.sessionBus()
         self.pending = set()
         self.generation = 0
+        # Old daemons only emit StatusChanged; once a StatusChanged2 arrives the
+        # legacy signal is a duplicate of the same change and is suppressed.
+        self.status2_seen = False
         self.watcher = QDBusServiceWatcher(
             self.service, self.bus, QDBusServiceWatcher.WatchForOwnerChange, self
         )
@@ -36,6 +112,10 @@ class ClientBus(QObject):
         self.owner = reply.value() if reply.isValid() else ""
         self.bus.connect(
             self.service, PATH, NAME, "StatusChanged", self, SLOT("_status_changed(qulonglong)")
+        )
+        self.status2_connected = self.bus.connect(
+            self.service, PATH, NAME, "StatusChanged2", self,
+            SLOT("_status_changed2(qulonglong,qulonglong,QString,bool,bool,QString)")
         )
         self.bus.connect(
             self.service, PATH, NAME, "ProgressChanged", self, SLOT("_progress_changed(qulonglong)")
@@ -54,13 +134,25 @@ class ClientBus(QObject):
 
     @Slot("qulonglong")
     def _status_changed(self, _revision):
-        self.changed.emit()
+        if not self.status2_seen:
+            self.changed.emit()
+
+    @Slot("qulonglong", "qulonglong", "QString", "bool", "bool", "QString")
+    def _status_changed2(self, from_revision, to_revision, epoch, reset, overview_changed,
+                         changes_json):
+        self.status2_seen = True
+        self.changed2.emit(parse_status_event(
+            from_revision, to_revision, epoch, reset, overview_changed, changes_json))
 
     @Slot(str, str, str)
     def _owner_changed(self, _name, _old, new):
         self.generation += 1
         self.owner = new
+        self.status2_seen = False
         self.availability.emit(bool(new))
+        # A replacement owner may speak either protocol: consumers reset their
+        # revision tracking and refresh everything once.
+        self.changed2.emit(StatusEvent(0, 0, "", True, True, [], invalid=True))
         self.changed.emit()
 
     def call(self, method, args=(), callback=None):

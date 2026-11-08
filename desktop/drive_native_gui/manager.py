@@ -150,6 +150,12 @@ class MountManager(QMainWindow):
         self.status_queried = {}
         self.status_timers = {}
         self.overview_queries = 0
+        # #31 revisioned change-set tracking (per mount): status-only changes do
+        # not re-query the overview; reset/gap/overview_changed do.
+        self.status2_seen = {}
+        self.status_epoch = {}
+        self.status_revision = {}
+        self.status2_events = 0
         self.refresh_catalog()
         from .tray import MountTray
         self.tray = MountTray(self)
@@ -305,6 +311,8 @@ class MountManager(QMainWindow):
                 old_bus = self.buses.pop(slot, None)
                 if old_bus is not None: old_bus.deleteLater()
                 self.status_pending.discard(slot); self.status_again.discard(slot)
+                self.status2_seen.pop(slot, None); self.status_epoch.pop(slot, None)
+                self.status_revision.pop(slot, None)
                 self.progress_pending.discard(slot); self.progress_again.discard(slot)
                 self.transfer_pending.discard(slot); self.transfer_again.discard(slot)
                 self.transfer_cache.pop(slot, None)
@@ -319,7 +327,9 @@ class MountManager(QMainWindow):
             if slot == selected: self.table.setCurrentItem(item)
             if slot not in self.buses:
                 bus = ClientBus(self, instance=slot); self.buses[slot] = bus
-                bus.changed.connect(lambda key=slot: self.schedule_status(key))
+                bus.changed.connect(lambda key=slot: self._legacy_status(key))
+                if hasattr(bus, "changed2"):
+                    bus.changed2.connect(lambda event, key=slot: self.status2_changed(key, event))
                 bus.progress_changed.connect(lambda key=slot: self.refresh_progress(key))
                 bus.availability.connect(lambda _up, key=slot: self.schedule_status(key))
                 watcher = ShutdownWatcher(bus, lambda key=slot: self.records.get(key, {}).get("task_id"), lambda value, mounted, key=slot: self.render_shutdown(key, value, mounted), bus)
@@ -365,6 +375,35 @@ class MountManager(QMainWindow):
         timer = self.status_timers.get(slot)
         if timer is not None: timer.stop()
         self.refresh_status(slot)
+
+    def _legacy_status(self, slot):
+        # An old daemon only emits the unversioned signal, which always means a
+        # full refresh; after StatusChanged2 was seen the legacy signal is a
+        # duplicate of the same revision (issue #31).
+        if self.status2_seen.get(slot):
+            return
+        self.schedule_status(slot)
+
+    def status2_changed(self, slot, event):
+        """Apply one revisioned StatusChanged2 event for a mount (issue #31).
+
+        Only reset/gap/invalid/overview_changed events require a new overview;
+        a plain status change just updates the mount row's activity counts via
+        the regular coalesced query path when the GUI needs it.
+        """
+        if slot not in self.items: return
+        self.status2_events += 1
+        if event.epoch:
+            self.status2_seen[slot] = True
+        else:
+            # Owner-change sentinel; a replacement daemon may speak v1 only.
+            self.status2_seen[slot] = False
+        full = event.discontinuous(self.status_epoch.get(slot),
+                                   self.status_revision.get(slot))
+        self.status_epoch[slot] = event.epoch or None
+        self.status_revision[slot] = event.to_revision
+        if full or event.overview_changed:
+            self.schedule_status(slot)
 
     def refresh_status(self, slot):
         if slot not in self.items: return

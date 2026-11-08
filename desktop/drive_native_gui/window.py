@@ -148,6 +148,9 @@ def cache_row_text(row):
 # four-per-second signal burst (issue #29).
 _STATUS_ICONS = {}
 OVERVIEW_SIGNAL_INTERVAL = 1.0
+# A membership change (listing/subtree) reloads the current directory page at
+# most this often, so a rename burst opens one page request, not one per event.
+MEMBERSHIP_REFRESH_MS = 250
 
 
 def status_icon(status):
@@ -224,6 +227,20 @@ class MainWindow(QMainWindow):
         self._directory_loading = False
         self._dir_icon = None
         self._file_icon = None
+        # #31 revisioned change-set consumer: a StatusChanged2 storm patches the
+        # visible rows with one GetStates batch instead of refreshing everything.
+        self.status2_seen = False
+        self.status_epoch = None
+        self.status_revision = None
+        self.status_events = 0
+        self.status_getstates = 0
+        self.status_patched_rows = 0
+        self.status_dropped_rows = 0
+        self.membership_refreshes = 0
+        self._status_loading = False
+        self._status_pending = set()
+        self._status_generation = None
+        self._membership_again = False
         self.loading = False
         self.progress_loading = False
         self.progress_again = False
@@ -453,7 +470,13 @@ class MainWindow(QMainWindow):
         self.refresh_timer.setSingleShot(True)
         self.refresh_timer.setInterval(int(OVERVIEW_SIGNAL_INTERVAL * 1000))
         self.refresh_timer.timeout.connect(self.refresh)
-        self.bus.changed.connect(self.schedule_refresh)
+        self.bus.changed.connect(self._legacy_status_changed)
+        if hasattr(self.bus, "changed2"):
+            self.bus.changed2.connect(self.received_status2)
+        self.membership_timer = QTimer(self)
+        self.membership_timer.setSingleShot(True)
+        self.membership_timer.setInterval(MEMBERSHIP_REFRESH_MS)
+        self.membership_timer.timeout.connect(self._refresh_membership)
         self.bus.progress_changed.connect(self.refresh_progress)
         # This reads only the local monotonic clocks while a phase is active.
         # It never increments completed work or starts a NAS request.
@@ -866,6 +889,152 @@ class MainWindow(QMainWindow):
         self.overview_queries += 1
         self.refresh_progress()
         self.bus.call("GetOverview", callback=self.received_overview)
+
+    def _legacy_status_changed(self):
+        # A daemon without StatusChanged2 only has the unversioned signal; the
+        # only correct interpretation is a full refresh. Once a StatusChanged2
+        # has been seen the legacy signal is a duplicate of the same revision.
+        if self.status2_seen:
+            return
+        self.schedule_refresh()
+
+    def received_status2(self, event):
+        """Apply one revisioned StatusChanged2 change set (issue #31).
+
+        Reset/gap/invalid/oversized payloads fall back to the existing full
+        refresh path. A plain status change is patched through a single
+        GetStates batch, so a write storm does not re-run GetOverview or reload
+        the directory page.
+        """
+        self.status_events += 1
+        if event.epoch:
+            self.status2_seen = True
+        else:
+            # Owner-change sentinel: a replacement daemon may speak the old
+            # protocol, so let the legacy signal drive refreshes again.
+            self.status2_seen = False
+        full = event.discontinuous(self.status_epoch, self.status_revision)
+        self.status_epoch = event.epoch or None
+        self.status_revision = event.to_revision
+        if full or event.overview_changed:
+            self.schedule_refresh()
+            return
+        if (not self.isVisible() or not self.files_button.isChecked()
+                or self.loading or self._directory_loading or not self.rows
+                or not event.changes):
+            return
+        if self._membership_affected(event.changes):
+            self._queue_membership_refresh()
+        paths = self._changed_row_paths(event.changes)
+        if paths:
+            self._request_status_patch(paths)
+
+    @staticmethod
+    def _beneath(path, root):
+        if not path or not root:
+            return False
+        root = root.rstrip("/") or "/"
+        if root == "/":
+            return path.startswith("/") and path != "/"
+        return path != root and path.startswith(root + "/")
+
+    def _changed_row_paths(self, changes):
+        wanted = set()
+        for row in self.rows:
+            row_path = row.get("path")
+            if not row_path:
+                continue
+            for change in changes:
+                changed_path = change["path"]
+                if row_path == changed_path:
+                    wanted.add(row_path)
+                    break
+                kind = change["kind"]
+                if kind in ("listing", "subtree"):
+                    if (self._beneath(row_path, changed_path)
+                            or self._beneath(changed_path, row_path)):
+                        wanted.add(row_path)
+                        break
+                elif kind == "status" and self._beneath(changed_path, row_path):
+                    # A changed child updates the aggregate on its ancestor rows.
+                    wanted.add(row_path)
+                    break
+        return wanted
+
+    def _membership_affected(self, changes):
+        folder = self.folder or (self.overview or {}).get("mount") or ""
+        if not folder:
+            return False
+        for change in changes:
+            path = change["path"]
+            if change["kind"] == "listing" and path == folder:
+                return True
+            if change["kind"] == "subtree" and (
+                    path == folder or self._beneath(folder, path)):
+                return True
+        return False
+
+    def _queue_membership_refresh(self):
+        if self._membership_again or self.membership_timer.isActive():
+            return
+        self._membership_again = True
+        self.membership_timer.start()
+
+    def _refresh_membership(self):
+        self._membership_again = False
+        if (not self.isVisible() or not self.files_button.isChecked()
+                or self._directory_loading or self.loading):
+            return
+        self.membership_refreshes += 1
+        self.request_page(self.folder, self.view_generation, 0)
+
+    def _request_status_patch(self, paths):
+        if self._status_loading:
+            self._status_pending.update(paths)
+            return
+        self._status_loading = True
+        self._status_generation = self.view_generation
+        self.status_getstates += 1
+        self.bus.call("GetStates", [sorted(paths)[:256]],
+                      callback=self._received_status_states)
+
+    def _received_status_states(self, data, error):
+        self._status_loading = False
+        current = (self._status_generation == self.view_generation
+                   and not error and self.isVisible()
+                   and self.files_button.isChecked()
+                   and isinstance(data, dict))
+        if current:
+            states = {entry["path"]: entry for entry in data.get("entries", [])
+                      if isinstance(entry, dict) and entry.get("path")}
+            patched = 0
+            dropped = 0
+            page_rows = []
+            for row in self.page_rows:
+                state = states.get(row.get("path"))
+                if state is None:
+                    page_rows.append(row)
+                elif state.get("error"):
+                    dropped += 1
+                else:
+                    row.update({key: value for key, value in state.items()
+                                if key != "path"})
+                    page_rows.append(row)
+                    patched += 1
+            self.page_rows = page_rows
+            self.status_patched_rows += patched
+            self.status_dropped_rows += dropped
+            if patched or dropped:
+                self.rows = list({
+                    row.get("id", row.get("path")): row
+                    for row in self.page_rows}.values())
+                self.render_rows()
+            if dropped:
+                self._queue_membership_refresh()
+        if self._status_pending:
+            pending = self._status_pending
+            self._status_pending = set()
+            self._request_status_patch(pending)
 
     def refresh_progress(self):
         if not self.isVisible():
