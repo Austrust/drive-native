@@ -45,6 +45,8 @@ fn other() -> io::Error {
     io::Error::other("local state unavailable")
 }
 pub fn resolve(store: &Store, root: &str, mount: &Path, input: &str) -> io::Result<Node> {
+    #[cfg(test)]
+    counters::count_resolve();
     if input.len() > 8192 || input.contains('\0') {
         return Err(io::Error::other("invalid path"));
     }
@@ -282,14 +284,8 @@ fn states_off_lock(
     }
     store.ensure_fs_root(root).map_err(|_| other())?;
     let resolved = resolve_all(store, service, paths);
-    // A ready projection answers folder aggregation without another scoped SQL
-    // read; unready (None) keeps the authoritative scoped read.
-    let projection = service.status_projection();
-    let mut tree = match projection.as_deref() {
-        Some(projection) => load_tree_with_projection(store, projection, &resolved)?,
-        None => load_tree(store, &resolved)?,
-    };
-    Ok(render_states(resolved, active, Some(store), &mut tree))
+    let entries = entries_off_lock(store, service, resolved, active)?;
+    Ok(states_document(entries))
 }
 fn states_locked(
     service: &Service,
@@ -362,6 +358,43 @@ fn tree_roots(resolved: &[(String, io::Result<Node>)]) -> Option<Vec<String>> {
 #[cfg(test)]
 static PROJECTION_TREE_LOADS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
+/// Test-only per-thread counters for one page request (issue #30): the desktop
+/// path must resolve each requested path once and serialize its document once.
+#[cfg(test)]
+mod counters {
+    use std::cell::Cell;
+    thread_local! {
+        static RESOLVE_CALLS: Cell<usize> = Cell::new(0);
+        static JSON_SERIALIZATIONS: Cell<usize> = Cell::new(0);
+        static JSON_PARSES: Cell<usize> = Cell::new(0);
+    }
+    pub(super) fn bump(counter: &'static std::thread::LocalKey<Cell<usize>>) {
+        counter.with(|value| value.set(value.get() + 1));
+    }
+    pub(super) fn reset() {
+        RESOLVE_CALLS.with(|value| value.set(0));
+        JSON_SERIALIZATIONS.with(|value| value.set(0));
+        JSON_PARSES.with(|value| value.set(0));
+    }
+    pub(super) fn resolve_calls() -> usize {
+        RESOLVE_CALLS.with(Cell::get)
+    }
+    pub(super) fn serializations() -> usize {
+        JSON_SERIALIZATIONS.with(Cell::get)
+    }
+    pub(super) fn parses() -> usize {
+        JSON_PARSES.with(Cell::get)
+    }
+    pub(super) fn count_resolve() {
+        bump(&RESOLVE_CALLS);
+    }
+    pub(super) fn count_serialize() {
+        bump(&JSON_SERIALIZATIONS);
+    }
+    pub(super) fn count_parse() {
+        bump(&JSON_PARSES);
+    }
+}
 /// Prefer the committed projection (issue #8): it answers the batch without a
 /// scoped SQLite read. A projection that cannot describe every resolved root
 /// (stale snapshot, missing ancestor, disabled cache) falls back to the
@@ -383,12 +416,12 @@ fn load_tree_with_projection<'p>(
         Err(_) => load_tree(store, resolved),
     }
 }
-fn render_states(
+fn render_entries(
     resolved: Vec<(String, io::Result<Node>)>,
     active: &HashSet<String>,
     store: Option<&Store>,
     tree: &mut Option<status_tree::StatusTree<'_>>,
-) -> String {
+) -> Vec<PathState> {
     let mut memo = HashMap::new();
     let mut out = Vec::new();
     for (path, node) in resolved {
@@ -417,7 +450,107 @@ fn render_states(
             },
         });
     }
-    serde_json::json!({"schema":1,"entries":out}).to_string()
+    out
+}
+/// Covered entries for a batch whose paths are already resolved: the same
+/// projection-or-scoped choice as [`states_off_lock`], without resolving again.
+fn entries_off_lock(
+    store: &Store,
+    service: &Service,
+    resolved: Vec<(String, io::Result<Node>)>,
+    active: &HashSet<String>,
+) -> io::Result<Vec<PathState>> {
+    // A ready projection answers folder aggregation without another scoped SQL
+    // read; unready (None) keeps the authoritative scoped read.
+    let projection = service.status_projection();
+    let mut tree = match projection.as_deref() {
+        Some(projection) => load_tree_with_projection(store, projection, &resolved)?,
+        None => load_tree(store, &resolved)?,
+    };
+    Ok(render_entries(resolved, active, Some(store), &mut tree))
+}
+/// Locked fall-back for [`entries_off_lock`]; the caller must not hold the
+/// writer mutex.
+fn entries_locked(
+    service: &Service,
+    resolved: Vec<(String, io::Result<Node>)>,
+    active: &HashSet<String>,
+) -> io::Result<Vec<PathState>> {
+    let store = service.bridge.store.lock().unwrap();
+    store
+        .ensure_fs_root(&service.profile.scope.file_id)
+        .map_err(|_| other())?;
+    let mut tree = load_tree(&store, &resolved)?;
+    // Folder aggregation is CPU-only after capture; release the writer's mutex
+    // before walking the tree so FUSE and overview keep making progress.
+    let guard = if tree.is_some() {
+        drop(store);
+        None
+    } else {
+        Some(store)
+    };
+    Ok(render_entries(
+        resolved,
+        active,
+        guard.as_deref(),
+        &mut tree,
+    ))
+}
+fn entries_with_fallback(
+    service: &Service,
+    resolved: Vec<(String, io::Result<Node>)>,
+    active: &HashSet<String>,
+) -> io::Result<Vec<PathState>> {
+    let Some(store) = read_only(service) else {
+        return entries_locked(service, resolved, active);
+    };
+    let paths: Vec<String> = resolved.iter().map(|(path, _)| path.clone()).collect();
+    match entries_off_lock(&store, service, resolved, active) {
+        Ok(entries) => Ok(entries),
+        // The private snapshot could not describe the page (stale projection,
+        // missing identity). Re-resolve under the writer lock so the fallback
+        // matches `states_locked` exactly.
+        Err(_) => entries_locked_paths(service, paths, active),
+    }
+}
+/// Locked fall-back for [`entries_with_fallback`] when only display paths are
+/// left: resolves and renders under the writer mutex, like [`states_locked`].
+fn entries_locked_paths(
+    service: &Service,
+    paths: Vec<String>,
+    active: &HashSet<String>,
+) -> io::Result<Vec<PathState>> {
+    let store = service.bridge.store.lock().unwrap();
+    store
+        .ensure_fs_root(&service.profile.scope.file_id)
+        .map_err(|_| other())?;
+    let resolved = resolve_all(&store, service, paths);
+    let mut tree = load_tree(&store, &resolved)?;
+    let guard = if tree.is_some() {
+        drop(store);
+        None
+    } else {
+        Some(store)
+    };
+    Ok(render_entries(
+        resolved,
+        active,
+        guard.as_deref(),
+        &mut tree,
+    ))
+}
+fn states_document(entries: Vec<PathState>) -> String {
+    #[cfg(test)]
+    counters::count_serialize();
+    serde_json::json!({"schema":1,"entries":entries}).to_string()
+}
+fn render_states(
+    resolved: Vec<(String, io::Result<Node>)>,
+    active: &HashSet<String>,
+    store: Option<&Store>,
+    tree: &mut Option<status_tree::StatusTree<'_>>,
+) -> String {
+    states_document(render_entries(resolved, active, store, tree))
 }
 pub fn transfers(service: &Service) -> io::Result<String> {
     let entries = service.bridge.transfer_entries();
@@ -923,7 +1056,7 @@ fn release(service: &Service, path: &str) -> io::Result<String> {
 
 /// Read-only browser pages from local metadata, including before network unlock.
 pub fn directory(service: &Service, path: &str, offset: u32) -> io::Result<String> {
-    let (paths, total) = {
+    let (children, total) = {
         let store = service.bridge.store.lock().unwrap();
         if preview::active(&store, &service.profile.scope.file_id)? {
             return preview::directory(
@@ -944,26 +1077,37 @@ pub fn directory(service: &Service, path: &str, offset: u32) -> io::Result<Strin
             path,
         )?;
         let total = store.child_node_count(&node.id).map_err(|_| other())?;
-        let entries = store
+        let children = store
             .child_nodes_page(&node.id, offset as usize, 256)
             .map_err(|_| other())?;
-        let paths = entries
-            .into_iter()
-            .map(|r| {
-                if path.is_empty() {
-                    r.name
-                } else {
-                    format!("{}/{}", path.trim_end_matches('/'), r.name)
-                }
-            })
-            .collect();
-        (paths, total)
+        (children, total)
     };
-    let mut result: serde_json::Value = serde_json::from_str(&states(service, paths)?)?;
-    result["total"] = total.into();
-    result["offset"] = offset.into();
-    result["path"] = path.into();
-    Ok(result.to_string())
+    // The page snapshot already carries every child id, so only the requested
+    // directory path is resolved; the status batch reuses these nodes instead of
+    // resolving the page's 256 display paths again (issue #30).
+    let resolved: Vec<(String, io::Result<Node>)> = children
+        .into_iter()
+        .map(|child| {
+            let name = if path.is_empty() {
+                child.name.clone()
+            } else {
+                format!("{}/{}", path.trim_end_matches('/'), child.name)
+            };
+            (name, Ok(child))
+        })
+        .collect();
+    let active = service.bridge.active_downloads().into_iter().collect();
+    let entries = entries_with_fallback(service, resolved, &active)?;
+    #[cfg(test)]
+    counters::count_serialize();
+    Ok(serde_json::json!({
+        "schema": 1,
+        "entries": entries,
+        "total": total,
+        "offset": offset,
+        "path": path,
+    })
+    .to_string())
 }
 pub fn retry_downloads(service: &Service, path: &str) -> io::Result<String> {
     let mut store = service.bridge.store.lock().unwrap();
@@ -1596,6 +1740,40 @@ mod readpath_tests {
             render_states(resolved_files, &active, Some(&store), &mut projected_files);
         assert_eq!(scoped_files_json, projected_files_json);
         assert!(scoped_files.is_none() && projected_files.is_none());
+    }
+
+    /// Issue #30: one GetDirectory page must reuse its own snapshot - one path
+    /// resolve and one document serialization, no second resolve pass over the
+    /// page, and no parse of its own JSON on the way out.
+    #[test]
+    fn directory_page_reuses_its_snapshot() {
+        let (_dir, service) = fixture();
+        super::counters::reset();
+        let page = directory(&service, "folder", 0).expect("directory page");
+        assert_eq!(
+            super::counters::resolve_calls(),
+            1,
+            "GetDirectory must resolve only the requested path"
+        );
+        assert_eq!(
+            super::counters::serializations(),
+            1,
+            "GetDirectory must serialize its page once"
+        );
+        assert_eq!(
+            super::counters::parses(),
+            0,
+            "GetDirectory must not round-trip its own JSON"
+        );
+        let expected: serde_json::Value =
+            serde_json::from_str(&states(&service, vec!["folder/one".to_string()]).unwrap())
+                .unwrap();
+        let page: serde_json::Value = serde_json::from_str(&page).unwrap();
+        assert_eq!(page["schema"], 1);
+        assert_eq!(page["path"], "folder");
+        assert_eq!(page["offset"], 0);
+        assert_eq!(page["total"], 1);
+        assert_eq!(page["entries"], expected["entries"]);
     }
 
     #[test]

@@ -1,5 +1,8 @@
-//! Bulk read-only seeds for desktop aggregation. No inode allocation or body reads.
+//! Bulk read-only seeds and local details for desktop aggregation. No inode
+//! allocation or body reads.
 use crate::{Result, Store};
+use crate::{download_jobs::DownloadFailure, state::Status};
+use std::collections::{HashMap, HashSet};
 #[derive(Clone)]
 pub struct StatusSeed {
     pub id: String,
@@ -107,6 +110,269 @@ fn seed_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StatusSeed> {
         overlay: row.get(4)?,
         detailed: row.get(5)?,
     })
+}
+
+/// Local detail of one node, as consumed by the desktop status aggregation.
+/// `offline` mirrors a successful `open_cached` or dirty-draft open; `failure`
+/// is the currently effective download failure record.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StatusDetail {
+    pub status: Status,
+    pub offline: bool,
+    pub failure: Option<DownloadFailure>,
+}
+
+struct NodeFacts {
+    blob: Option<String>,
+    dirty_blob: Option<String>,
+    local: Option<String>,
+    remote: String,
+    dirty: bool,
+    conflict: bool,
+    deleted: bool,
+    base_version: Option<String>,
+}
+
+/// Batch equivalent of the per-node desktop detail read: one SELECT family for
+/// a whole status batch instead of three to four point queries per node.
+///
+/// `nodes` is `(id, directory)`. The returned map only contains nodes whose
+/// detail is fully known. An id is absent when the single-node path must run
+/// instead (the node vanished, a blob file is missing, a draft is unopenable, or
+/// a failure record does not parse), so callers keep the single-node error
+/// reporting for those ids and for the whole batch when this call errors.
+///
+/// Query order matters: the recursive walks start from `json_each` so the
+/// `nodes` primary key serves every frontier step, matching the scoped seed
+/// query. Only the requested ids are read; nothing outside the batch is walked.
+pub fn desktop_status_details(
+    store: &Store,
+    nodes: &[(String, bool)],
+) -> Result<HashMap<String, StatusDetail>> {
+    if nodes.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let ids: Vec<&str> = nodes.iter().map(|(id, _)| id.as_str()).collect();
+    let ids = serde_json::to_string(&ids)?;
+
+    let mut facts: HashMap<String, NodeFacts> = HashMap::with_capacity(nodes.len());
+    {
+        let mut q = store.db.prepare(
+            "SELECT n.id,n.blob,n.dirty_blob,n.local_version,n.remote_version,\
+             n.dirty_blob IS NOT NULL,n.conflict,n.deleted,n.base_version \
+             FROM json_each(?1) j CROSS JOIN nodes n ON n.id=j.value",
+        )?;
+        let mut rows = q.query([&ids])?;
+        while let Some(row) = rows.next()? {
+            facts.insert(
+                row.get(0)?,
+                NodeFacts {
+                    blob: row.get(1)?,
+                    dirty_blob: row.get(2)?,
+                    local: row.get(3)?,
+                    remote: row.get(4)?,
+                    dirty: row.get(5)?,
+                    conflict: row.get(6)?,
+                    deleted: row.get(7)?,
+                    base_version: row.get(8)?,
+                },
+            );
+        }
+    }
+
+    // Dirty draft rows. `open_dirty_draft` reads the first row for the node, so
+    // keep the first token per node and ignore any extras.
+    let mut draft_tokens: HashMap<String, String> = HashMap::new();
+    {
+        let mut q = store.db.prepare(
+            "SELECT d.node,d.token FROM json_each(?1) j JOIN drafts d ON d.node=j.value \
+             WHERE d.dirty=1 ORDER BY d.node,d.rowid",
+        )?;
+        let mut rows = q.query([&ids])?;
+        while let Some(row) = rows.next()? {
+            draft_tokens.entry(row.get(0)?).or_insert(row.get(1)?);
+        }
+    }
+    let mut draft_conflict_nodes: HashSet<String> = HashSet::new();
+    {
+        let mut q = store.db.prepare(
+            "SELECT DISTINCT d.node FROM json_each(?1) j JOIN drafts d ON d.node=j.value \
+             JOIN nodes n ON n.id=d.node WHERE d.dirty=1 \
+             AND NOT EXISTS(SELECT 1 FROM local_unlinks WHERE node=d.node) \
+             AND (d.base!=n.remote_version OR n.deleted=1)",
+        )?;
+        let mut rows = q.query([&ids])?;
+        while let Some(row) = rows.next()? {
+            draft_conflict_nodes.insert(row.get(0)?);
+        }
+    }
+
+    // `namespace::blocks_upload` for every requested node: the ids themselves
+    // plus every `nodes.parent` ancestor, then an overlay lookup on that path.
+    let mut blocking_roots: HashSet<String> = HashSet::new();
+    {
+        let mut q = store.db.prepare(
+            "WITH RECURSIVE parents(root,id) AS (\
+             SELECT j.value,j.value FROM json_each(?1) j \
+             UNION \
+             SELECT p.root,n.parent FROM nodes n JOIN parents p ON p.id=n.id WHERE n.parent IS NOT NULL\
+             ) SELECT DISTINCT p.root FROM parents p \
+             WHERE EXISTS(SELECT 1 FROM namespace_overlay o WHERE o.node=p.id)",
+        )?;
+        let mut rows = q.query([&ids])?;
+        while let Some(row) = rows.next()? {
+            blocking_roots.insert(row.get(0)?);
+        }
+    }
+
+    // `Store::is_pinned` for every requested node (ancestor-or-self pinned).
+    let mut pinned_roots: HashSet<String> = HashSet::new();
+    {
+        let mut q = store.db.prepare(
+            "WITH RECURSIVE ancestors(root,id,parent,pinned) AS (\
+             SELECT j.value,n.id,n.parent,n.pinned FROM json_each(?1) j JOIN nodes n ON n.id=j.value \
+             UNION \
+             SELECT a.root,n.id,n.parent,n.pinned FROM nodes n JOIN ancestors a ON n.id=a.parent\
+             ) SELECT root FROM ancestors GROUP BY root HAVING MAX(pinned)=1",
+        )?;
+        let mut rows = q.query([&ids])?;
+        while let Some(row) = rows.next()? {
+            pinned_roots.insert(row.get(0)?);
+        }
+    }
+
+    // `Store::is_inaccessible` for every requested node. The common case has an
+    // empty access_denied table, so skip the ancestor walk entirely.
+    let mut inaccessible_roots: HashSet<String> = HashSet::new();
+    let access_denied: bool =
+        store
+            .db
+            .query_row("SELECT EXISTS(SELECT 1 FROM access_denied)", [], |r| r.get(0))?;
+    if access_denied {
+        let mut q = store.db.prepare(
+            "WITH RECURSIVE ancestors(root,id) AS (\
+             SELECT j.value,n.id FROM json_each(?1) j JOIN nodes n ON n.id=j.value \
+             UNION \
+             SELECT a.root,n.parent FROM nodes n JOIN ancestors a ON n.id=a.id WHERE n.parent IS NOT NULL \
+             UNION \
+             SELECT a.root,json_extract(o.remote,'$.parent') FROM namespace_overlay o \
+             JOIN ancestors a ON o.node=a.id WHERE json_extract(o.remote,'$.parent') IS NOT NULL\
+             ) SELECT DISTINCT a.root FROM ancestors a JOIN access_denied d ON d.node=a.id",
+        )?;
+        let mut rows = q.query([&ids])?;
+        while let Some(row) = rows.next()? {
+            inaccessible_roots.insert(row.get(0)?);
+        }
+    }
+
+    // `Store::download_failure` for every requested node: the first transfer row
+    // is the one the single-node read returns.
+    let mut failure_errors: HashMap<String, String> = HashMap::new();
+    {
+        let mut q = store.db.prepare(
+            "SELECT t.node,t.error FROM transfers t \
+             JOIN json_each(?1) j ON j.value=t.node \
+             JOIN nodes n ON n.id=t.node AND n.remote_version=t.version \
+             WHERE t.direction='download' AND t.error IS NOT NULL AND n.deleted=0 \
+             AND (n.blob IS NULL OR n.local_version!=n.remote_version) ORDER BY t.rowid",
+        )?;
+        let mut rows = q.query([&ids])?;
+        while let Some(row) = rows.next()? {
+            failure_errors.entry(row.get(0)?).or_insert(row.get(1)?);
+        }
+    }
+
+    let blobs = store.root.join("blobs");
+    let drafts = store.root.join("drafts");
+    let mut out: HashMap<String, StatusDetail> = HashMap::with_capacity(facts.len());
+    for (id, directory) in nodes {
+        let Some(facts) = facts.get(id) else {
+            continue;
+        };
+        let conflict = facts.conflict || draft_conflict_nodes.contains(id);
+        let status = if conflict {
+            Status::Conflict
+        } else if facts.deleted {
+            Status::Deleted
+        } else if facts.dirty || draft_tokens.contains_key(id) || blocking_roots.contains(id) {
+            Status::PendingUpload
+        } else {
+            let pinned = pinned_roots.contains(id);
+            match facts.blob.as_deref() {
+                Some(blob) => {
+                    if !blobs.join(blob).is_file() {
+                        continue;
+                    }
+                    if facts.local.as_deref() != Some(facts.remote.as_str()) {
+                        Status::Updating
+                    } else if pinned {
+                        Status::PinnedComplete
+                    } else {
+                        Status::LocalComplete
+                    }
+                }
+                None => {
+                    if pinned {
+                        Status::Pinning
+                    } else {
+                        Status::OnlineOnly
+                    }
+                }
+            }
+        };
+        let offline = if *directory {
+            false
+        } else {
+            let mut offline = false;
+            if let Some(token) = draft_tokens.get(id) {
+                if uuid::Uuid::parse_str(token).is_err()
+                    || std::fs::File::open(drafts.join(token)).is_err()
+                {
+                    // The single-node read turns this into a detail error.
+                    continue;
+                }
+                offline = true;
+            }
+            // `open_cached`: readable coalesced body with a known version, unless
+            // the node is inaccessible or a non-conflicted delete.
+            if !offline && !inaccessible_roots.contains(id) && !(facts.deleted && !facts.conflict) {
+                let body = facts.dirty_blob.as_deref().or(facts.blob.as_deref());
+                let version = facts
+                    .base_version
+                    .as_deref()
+                    .or(facts.local.as_deref());
+                if let (Some(blob), Some(_)) = (body, version) {
+                    if std::fs::File::open(blobs.join(blob)).is_ok() {
+                        offline = true;
+                    }
+                }
+            }
+            offline
+        };
+        let failure = if *directory || matches!(&status, Status::Conflict | Status::PendingUpload) {
+            None
+        } else if let Some(raw) = failure_errors.get(id) {
+            let Ok(failure) = serde_json::from_str::<DownloadFailure>(raw) else {
+                // The single-node read reports unsupported records as errors.
+                continue;
+            };
+            if failure.schema != 1 || failure.attempts == 0 {
+                continue;
+            }
+            Some(failure)
+        } else {
+            None
+        };
+        out.insert(
+            id.clone(),
+            StatusDetail {
+                status,
+                offline,
+                failure,
+            },
+        );
+    }
+    Ok(out)
 }
 
 /// Scoped seed SQL, kept separate so tests can inspect its query plan.
