@@ -192,7 +192,7 @@ impl Drop for ReadHandle {
 }
 
 /// Version of the durable state contract, including journal semantics.
-pub const STATE_SCHEMA_VERSION: i64 = 27;
+pub const STATE_SCHEMA_VERSION: i64 = 28;
 
 /// Automatic read-only reconciliation attempts allowed for one uncertain
 /// upload. The budget is durable so a restart cannot restart an unbounded
@@ -365,9 +365,24 @@ impl Store {
                 ))?;
             }
         }
+        // Schema 28 index candidates. They are created after every `ALTER TABLE`
+        // above because `operations.reconcile_at` only exists on v25+ databases,
+        // and they are idempotent so an interrupted upgrade simply re-creates
+        // them on the next open.
+        //
+        // `operations_countable` is the exact predicate of `pending_operations`
+        // and the cache candidate guard; the previous partial index keyed on
+        // `id` could satisfy existence tests but not this aggregate.
+        db.execute_batch(
+            "CREATE INDEX IF NOT EXISTS operations_countable ON operations(id) WHERE state IN ('pending','inflight','uncertain');
+             CREATE INDEX IF NOT EXISTS operations_node_active ON operations(node) WHERE state IN ('pending','inflight','uncertain','conflict');
+             CREATE INDEX IF NOT EXISTS operations_blob_active ON operations(blob) WHERE blob IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict');
+             CREATE INDEX IF NOT EXISTS operations_uncertain_reconcile ON operations(reconcile_at) WHERE kind='upload' AND state='uncertain';
+             CREATE INDEX IF NOT EXISTS inbox_pending ON inbox(seq) WHERE done=0;",
+        )?;
         crate::initialization_store::migrate(&db)?;
         crate::preview::migrate(&db)?;
-        sync_history::migrate(&db)?;
+        sync_history::migrate(&db, version < STATE_SCHEMA_VERSION)?;
         crate::write_permissions::migrate(&db)?;
         db.pragma_update(None, "user_version", STATE_SCHEMA_VERSION)?;
         db.execute_batch("COMMIT;")?;
@@ -389,7 +404,7 @@ impl Store {
         // epoch keep the durable schema and external readers unchanged.
         crate::status_changes::install(&db)?;
         crate::removals::install_barrier_versions(&db)?;
-        Ok(Self {
+        let mut store = Self {
             _writer_lock: Some(writer_lock),
             db,
             root,
@@ -399,7 +414,14 @@ impl Store {
             draft_stats: DraftWriteStats::default(),
             permission_cache: Mutex::new(crate::write_permissions::PermissionCache::new()),
             barrier: Default::default(),
-        })
+        };
+        // Bound bookkeeping written before schema 28 (superseded operations,
+        // old terminal namespace history, applied inbox receipts, duplicate
+        // committed generations) once at startup after the upgrade. The durable
+        // marker keeps later opens on a large database from re-scanning history
+        // before the steady-state paths have anything to remove.
+        store.prune_storage_if_due()?;
+        Ok(store)
     }
     /// Second handle for read-only work next to a live writer. Unlike
     /// [`Store::open`] this takes no `writer.lock`, creates no files and never
@@ -773,7 +795,11 @@ impl Store {
             )?;
             sync_history::record_remote_event(&tx, event)?;
         }
-        tx.execute("UPDATE inbox SET done=1 WHERE seq=?1", [seq])?;
+        // An applied receipt is never read again: deleting it in the same
+        // transaction keeps the inbox bounded (the `inbox_pending` index only
+        // ever walks unapplied rows). Resent bodies cannot reappear here because
+        // the cursor contract rejects a regressed batch before insertion.
+        tx.execute("DELETE FROM inbox WHERE seq=?1", [seq])?;
         tx.execute(
             "UPDATE metadata SET value=?1 WHERE key='committed_cursor'",
             [batch.to],
@@ -1305,6 +1331,11 @@ impl Store {
             }
         }
         tx.execute("UPDATE operations SET state='committed' WHERE id=?1", [op])?;
+        // Only the newest committed generation per node is observable (the
+        // `unsubmitted` predicate is an existence check), so the previous
+        // generation is retired in the same transaction instead of being kept
+        // forever. The delete is bookkeeping: the journal does not publish it.
+        crate::retention::drop_committed_generations(&tx, &id, op)?;
         tx.execute("UPDATE node_metadata SET mtime=(SELECT mtime FROM upload_times WHERE operation=?1) WHERE node=?2 AND EXISTS(SELECT 1 FROM upload_times WHERE operation=?1)",params![op,id])?;
         tx.commit()?;
         Ok(())
@@ -1546,9 +1577,14 @@ impl Store {
 
     /// Uncertain uploads that may take one more read-only reconciliation pass.
     /// Exhausted rows stay uncertain for safety but are not selected again.
+    ///
+    /// Ordered by the durable retry clock, not `rowid`: the v28 partial index on
+    /// `reconcile_at` can then answer the range scan without a table scan and
+    /// without a temporary sort. The clock is the fairness signal anyway — the
+    /// oldest due operation is reconciled first.
     pub fn upload_reconcile_operations(&self, now: i64) -> Result<Vec<String>> {
         let mut q = self.db.prepare(
-            "SELECT id FROM operations WHERE kind='upload' AND node NOT IN (SELECT id FROM access_blocked) AND state='uncertain' AND reconcile_attempts < ?1 AND reconcile_at <= ?2 ORDER BY rowid",
+            "SELECT id FROM operations WHERE kind='upload' AND node NOT IN (SELECT id FROM access_blocked) AND state='uncertain' AND reconcile_attempts < ?1 AND reconcile_at <= ?2 ORDER BY reconcile_at",
         )?;
         Ok(q.query_map(params![i64::from(MAX_UPLOAD_RECONCILE_ATTEMPTS), now], |r| {
             r.get::<_, String>(0)
@@ -1773,7 +1809,7 @@ mod cache_availability_tests {
     #[test]
     fn reports_empty_online_only_partial_complete_and_pinned() {
         let d = tempfile::tempdir().unwrap();
-        let mut s = Store::open(d.path()).unwrap();
+        let s = Store::open(d.path()).unwrap();
         assert_eq!(
             s.cache_availability().unwrap(),
             CacheAvailability {

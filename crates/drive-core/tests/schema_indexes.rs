@@ -6,7 +6,13 @@ use std::path::Path;
 // cached/stale rows, pinned nodes and per-node verification of unfinished
 // operations. `nodes_cached` carries the version columns so the stale-download
 // branch is answered without touching the wide nodes table.
-const CANDIDATE_INDEXES: [(&str, &str); 5] = [
+//
+// Issue #32 adds the storage-residual indexes: the pending-operation counter
+// must only read active rows, per-node operation probes must target active
+// states, blob protection must find operations by blob, uncertain upload
+// reconciliation must be a range scan, the inbox must skip applied history and
+// sync history filters must stay ordered by sequence.
+const CANDIDATE_INDEXES: [(&str, &str); 12] = [
     ("nodes_conflict", "WHERE conflict=1"),
     ("nodes_pinned", "WHERE pinned=1"),
     (
@@ -15,10 +21,35 @@ const CANDIDATE_INDEXES: [(&str, &str); 5] = [
     ),
     ("operations_node", "ON operations(node)"),
     ("namespace_ops_node", "ON namespace_ops(node)"),
+    (
+        "operations_countable",
+        "ON operations(id) WHERE state IN ('pending','inflight','uncertain')",
+    ),
+    (
+        "operations_node_active",
+        "ON operations(node) WHERE state IN ('pending','inflight','uncertain','conflict')",
+    ),
+    (
+        "operations_blob_active",
+        "ON operations(blob) WHERE blob IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict')",
+    ),
+    (
+        "operations_uncertain_reconcile",
+        "ON operations(reconcile_at) WHERE kind='upload' AND state='uncertain'",
+    ),
+    ("inbox_pending", "ON inbox(seq) WHERE done=0"),
+    (
+        "sync_history_mount_seq",
+        "ON sync_history(mount,seq DESC)",
+    ),
+    (
+        "sync_history_result_seq",
+        "ON sync_history(result,seq DESC)",
+    ),
 ];
 
 /// Index definitions in build order for the upgrade measurement.
-const INDEX_DEFINITIONS: [(&str, &str); 5] = [
+const INDEX_DEFINITIONS: [(&str, &str); 12] = [
     ("nodes_conflict", "ON nodes(id) WHERE conflict=1"),
     ("nodes_pinned", "ON nodes(id) WHERE pinned=1"),
     (
@@ -27,6 +58,31 @@ const INDEX_DEFINITIONS: [(&str, &str); 5] = [
     ),
     ("operations_node", "ON operations(node)"),
     ("namespace_ops_node", "ON namespace_ops(node)"),
+    (
+        "operations_countable",
+        "ON operations(id) WHERE state IN ('pending','inflight','uncertain')",
+    ),
+    (
+        "operations_node_active",
+        "ON operations(node) WHERE state IN ('pending','inflight','uncertain','conflict')",
+    ),
+    (
+        "operations_blob_active",
+        "ON operations(blob) WHERE blob IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict')",
+    ),
+    (
+        "operations_uncertain_reconcile",
+        "ON operations(reconcile_at) WHERE kind='upload' AND state='uncertain'",
+    ),
+    ("inbox_pending", "ON inbox(seq) WHERE done=0"),
+    (
+        "sync_history_mount_seq",
+        "ON sync_history(mount,seq DESC)",
+    ),
+    (
+        "sync_history_result_seq",
+        "ON sync_history(result,seq DESC)",
+    ),
 ];
 
 fn database(root: &Path) -> std::path::PathBuf {
@@ -53,9 +109,41 @@ fn drop_new_indexes(db: &Connection) {
          DROP INDEX IF EXISTS nodes_pinned;
          DROP INDEX IF EXISTS nodes_cached;
          DROP INDEX IF EXISTS operations_node;
-         DROP INDEX IF EXISTS namespace_ops_node;",
+         DROP INDEX IF EXISTS namespace_ops_node;
+         DROP INDEX IF EXISTS operations_countable;
+         DROP INDEX IF EXISTS operations_node_active;
+         DROP INDEX IF EXISTS operations_blob_active;
+         DROP INDEX IF EXISTS operations_uncertain_reconcile;
+         DROP INDEX IF EXISTS inbox_pending;
+         DROP INDEX IF EXISTS sync_history_mount_seq;
+         DROP INDEX IF EXISTS sync_history_result_seq;",
     )
     .unwrap();
+}
+
+fn query_plan(db: &Connection, sql: &str) -> Vec<String> {
+    let mut statement = db.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+    // The production statements carry positional parameters. SQLite refuses to
+    // prepare an unbound parameterised query, so bind NULL for every slot:
+    // parameter values never change the chosen plan, only the affinity does.
+    let parameters = std::iter::repeat(rusqlite::types::Value::Null)
+        .take(statement.parameter_count());
+    statement
+        .query_map(rusqlite::params_from_iter(parameters), |row| {
+            row.get::<_, String>(3)
+        })
+        .unwrap()
+        .map(|row| row.unwrap())
+        .collect()
+}
+
+fn assert_plan_uses(db: &Connection, sql: &str, index: &str) {
+    let plan = query_plan(db, sql);
+    assert!(
+        plan.iter().any(|line| line.contains(index)
+            || line.contains(&format!("sqlite_autoindex_{index}"))),
+        "{index} not used by {sql}: {plan:?}"
+    );
 }
 
 /// Simulates the pre-fix database at `nodes` rows and times the v27 upgrade.
@@ -188,6 +276,81 @@ fn fresh_database_carries_the_candidate_indexes() {
 }
 
 #[test]
+fn queries_select_the_v28_indexes() {
+    let d = tempfile::tempdir().unwrap();
+    let store = Store::open(d.path()).unwrap();
+    let db = Connection::open(database(d.path())).unwrap();
+
+    // The planner needs realistic cardinalities to prefer a partial index over
+    // a table scan, so seed a few thousand terminal rows plus a small active
+    // tail first. The rows are small and the test database is discarded.
+    db.execute_batch(
+        "INSERT INTO operations(id,node,kind,base,generation,state,reconcile_at)
+         WITH RECURSIVE generate(n) AS (SELECT 0 UNION ALL SELECT n+1 FROM generate WHERE n < 4999)
+         SELECT 'op'||n, 'n'||n, 'upload', 'v1', 1,
+                CASE WHEN n % 1000 = 0 THEN 'uncertain' ELSE 'committed' END,
+                n
+         FROM generate;
+         INSERT INTO inbox(seq,body,done)
+         WITH RECURSIVE generate(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM generate WHERE n < 200)
+         SELECT n, '{\"inbox\":'||n||'}', CASE WHEN n < 196 THEN 1 ELSE 0 END FROM generate;
+         INSERT INTO sync_history(seq,mount,name,path_at_event,action,result,completed_at,operation_key)
+         WITH RECURSIVE generate(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM generate WHERE n < 200)
+         SELECT n, 'm', 'name-'||n, '/path-'||n, 'upload',
+                CASE WHEN n % 2 = 0 THEN 'ok' ELSE 'failed' END,
+                n, 'key-'||n
+         FROM generate;",
+    )
+    .unwrap();
+
+    // `pending_operations` must read only active rows, not the terminal history.
+    assert_plan_uses(
+        &db,
+        "SELECT count(*) FROM operations WHERE state IN ('pending','inflight','uncertain')",
+        "operations_countable",
+    );
+    // Per-node operation probes (conflicts, blob protection) target active rows.
+    assert_plan_uses(
+        &db,
+        "SELECT EXISTS(SELECT 1 FROM operations WHERE node=?1 AND state IN ('pending','inflight','uncertain','conflict'))",
+        "operations_node_active",
+    );
+    assert_plan_uses(
+        &db,
+        "SELECT EXISTS(SELECT 1 FROM operations WHERE blob=?1 AND state IN ('pending','inflight','uncertain','conflict'))",
+        "operations_blob_active",
+    );
+    // Uncertain upload reconciliation is a range scan over the retry clock.
+    // The statement intentionally mirrors `upload_reconcile_operations`: the
+    // `ORDER BY reconcile_at` (not `rowid`) is what lets the partial index serve
+    // the range without a table scan or a temporary sort.
+    assert_plan_uses(
+        &db,
+        "SELECT id FROM operations WHERE kind='upload' AND node NOT IN (SELECT id FROM access_blocked) AND state='uncertain' AND reconcile_attempts < ?1 AND reconcile_at <= ?2 ORDER BY reconcile_at",
+        "operations_uncertain_reconcile",
+    );
+    // apply_next must skip the applied inbox prefix.
+    assert_plan_uses(
+        &db,
+        "SELECT seq,body FROM inbox WHERE done=0 ORDER BY seq LIMIT 1",
+        "inbox_pending",
+    );
+    // Sync history filters stay ordered by sequence instead of sorting.
+    assert_plan_uses(
+        &db,
+        "SELECT id FROM sync_history WHERE mount=?1 ORDER BY seq DESC, id DESC LIMIT ?2",
+        "sync_history_mount_seq",
+    );
+    assert_plan_uses(
+        &db,
+        "SELECT id FROM sync_history WHERE result=?1 ORDER BY seq DESC, id DESC LIMIT ?2",
+        "sync_history_result_seq",
+    );
+    drop(db);
+    drop(store);
+}
+
+#[test]
 fn previous_schema_upgrades_to_the_current_version_with_backup_and_indexes() {
     let d = tempfile::tempdir().unwrap();
     drop(Store::open(d.path()).unwrap());
@@ -204,6 +367,16 @@ fn previous_schema_upgrades_to_the_current_version_with_backup_and_indexes() {
     for (name, definition) in CANDIDATE_INDEXES {
         let sql = index_sql(&db, name).unwrap_or_else(|| panic!("missing index {name}"));
         assert!(sql.contains(definition), "{name}: {sql}");
+    }
+    drop(db);
+
+    // Opening again is idempotent: the version and indexes stay in place.
+    drop(store);
+    let store = Store::open(d.path()).unwrap();
+    let db = Connection::open(database(d.path())).unwrap();
+    assert_eq!(user_version(&db), STATE_SCHEMA_VERSION);
+    for (name, _) in CANDIDATE_INDEXES {
+        assert!(index_sql(&db, name).is_some(), "missing index after reopen {name}");
     }
     drop(db);
 

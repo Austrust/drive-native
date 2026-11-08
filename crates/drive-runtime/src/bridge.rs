@@ -108,6 +108,12 @@ const UPLOAD_WAIT_INTERVAL: Duration = Duration::from_secs(1);
 /// every confirmed upload made each write pay that scan. Deferring it keeps
 /// the intent durable and bounds its worst-case latency.
 const UPLOAD_REFRESH_MAX_INTERVAL: Duration = Duration::from_secs(5);
+/// How often the idle upload tick prunes durable bookkeeping (superseded
+/// operations, terminal namespace history, applied inbox receipts). Startup and
+/// operation commits already bound the steady state; this only ages out rows a
+/// long-running mount would otherwise keep until the next restart. Pruning
+/// never publishes a semantic journal change, so it cannot wake the UI.
+const STORAGE_PRUNE_INTERVAL: Duration = Duration::from_secs(300);
 pub struct Bridge {
     pub store: Arc<drive_core::SharedStore>,
     recovery_gate: std::sync::RwLock<()>,
@@ -1361,6 +1367,7 @@ impl Bridge {
         // Set once a cycle confirmed an upload: the next iteration runs it
         // back-to-back without waiting for a wake or the poll timeout.
         let mut drain = false;
+        let mut last_storage_prune = Instant::now();
         while !stop.load(Ordering::Acquire) {
             let mut wake = self.upload_signal.0.lock().unwrap();
             if !*wake && !drain && !stop.load(Ordering::Acquire) {
@@ -1403,6 +1410,13 @@ impl Bridge {
             if !signaled && !retry_due && !auto {
                 // Idle poll: settle a deferred hydration refresh now that the
                 // queue is quiet, without competing with upload progress.
+                if last_storage_prune.elapsed() >= STORAGE_PRUNE_INTERVAL {
+                    last_storage_prune = Instant::now();
+                    // Bounded bookkeeping cleanup; failures keep the old rows
+                    // and are retried on the next interval.
+                    let mut store = self.store.lock().unwrap();
+                    let _ = store.prune_storage();
+                }
                 if refresh_pending && self.connection().is_connected() {
                     refresh_pending = false;
                     self.refresh_cached();

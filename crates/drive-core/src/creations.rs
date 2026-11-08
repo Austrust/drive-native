@@ -98,15 +98,33 @@ impl Store {
         Ok(())
     }
     pub(crate) fn mapped_snapshot(&self, nodes: &[Node]) -> Result<Vec<Node>> {
-        nodes
+        // Remote aliases only exist for locally created identities, so the whole
+        // map is one small scan. Looking it up per node (and again per parent)
+        // cost two point queries for every node of a 210k snapshot even though
+        // the table is usually empty.
+        let mut aliases = std::collections::HashMap::new();
+        {
+            let mut query = self.db.prepare("SELECT remote,node FROM remote_aliases")?;
+            let mut rows = query.query([])?;
+            while let Some(row) = rows.next()? {
+                aliases.insert(row.get::<_, String>(0)?, row.get::<_, String>(1)?);
+            }
+        }
+        let local = |id: &str| {
+            aliases
+                .get(id)
+                .cloned()
+                .unwrap_or_else(|| id.to_owned())
+        };
+        Ok(nodes
             .iter()
-            .map(
-                |n| match map_change(&self.db, &Change::Upsert(n.clone()))? {
-                    Change::Upsert(n) => Ok(n),
-                    _ => unreachable!(),
-                },
-            )
-            .collect()
+            .map(|n| {
+                let mut n = n.clone();
+                n.id = local(&n.id);
+                n.parent = n.parent.as_deref().map(|parent| local(parent));
+                n
+            })
+            .collect())
     }
 }
 /// Called inside the same transaction as version/blob confirmation.

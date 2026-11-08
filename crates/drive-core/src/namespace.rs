@@ -168,14 +168,17 @@ pub(crate) fn rebase_jobs(db: &Connection, id: &str, base: &str, version: &str) 
 /// Keep server evidence even when its path is hidden by a local pending move.
 /// Returning None preserves the local object when a remote delete conflicts.
 pub(crate) fn overlay_change(db: &Connection, change: &Change) -> Result<Option<Change>> {
+    // One read answers both questions the overlay needs for an upsert: the
+    // previously installed version (stale-echo suppression) and whether a local
+    // overlay row exists. A 210k first-install snapshot used to spend two point
+    // lookups per node here, plus more on version mismatch.
     if let Change::Upsert(n) = change {
-        let current: Option<String> = db
-            .query_row(
-                "SELECT remote_version FROM nodes WHERE id=?1",
-                [&n.id],
-                |r| r.get(0),
-            )
-            .optional()?;
+        let (current, overlay): (Option<String>, bool) = db.query_row(
+            "SELECT (SELECT remote_version FROM nodes WHERE id=?1),
+                    EXISTS(SELECT 1 FROM namespace_overlay WHERE node=?1)",
+            [&n.id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
         if let Some(current) = current {
             if n.version != current && normalized_version(db, &n.id, &n.version)? == current {
                 return Ok(None);
@@ -185,6 +188,21 @@ pub(crate) fn overlay_change(db: &Connection, change: &Change) -> Result<Option<
                 return Ok(None);
             }
         }
+        if !overlay {
+            return Ok(Some(change.clone()));
+        }
+        db.execute(
+            "UPDATE namespace_overlay SET remote=?2 WHERE node=?1",
+            params![&n.id, serde_json::to_string(&Some(n))?],
+        )?;
+        let (parent, name): (Option<String>, String) =
+            db.query_row("SELECT parent,name FROM nodes WHERE id=?1", [&n.id], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })?;
+        let mut visible = n.clone();
+        visible.parent = parent;
+        visible.name = name;
+        return Ok(Some(Change::Upsert(visible)));
     }
 
     if let Change::Delete { id } = change {
@@ -203,20 +221,7 @@ pub(crate) fn overlay_change(db: &Connection, change: &Change) -> Result<Option<
         return Ok(Some(change.clone()));
     }
     match change {
-        Change::Upsert(n) => {
-            db.execute(
-                "UPDATE namespace_overlay SET remote=?2 WHERE node=?1",
-                params![id, serde_json::to_string(&Some(n))?],
-            )?;
-            let (parent, name): (Option<String>, String) =
-                db.query_row("SELECT parent,name FROM nodes WHERE id=?1", [id], |r| {
-                    Ok((r.get(0)?, r.get(1)?))
-                })?;
-            let mut visible = n.clone();
-            visible.parent = parent;
-            visible.name = name;
-            Ok(Some(Change::Upsert(visible)))
-        }
+        Change::Upsert(_) => unreachable!("upserts return above"),
         Change::Delete { .. } => {
             db.execute(
                 "UPDATE namespace_overlay SET remote='null' WHERE node=?1",

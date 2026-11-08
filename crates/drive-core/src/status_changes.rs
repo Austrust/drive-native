@@ -222,7 +222,8 @@ pub(crate) fn install(db: &Connection) -> Result<()> {
         bytes INTEGER NOT NULL, overflows INTEGER NOT NULL,
         max_entries INTEGER NOT NULL, max_bytes INTEGER NOT NULL,
         bulk INTEGER NOT NULL DEFAULT 0 CHECK(bulk IN (0,1)),
-        snapshot_resets INTEGER NOT NULL DEFAULT 0);
+        snapshot_resets INTEGER NOT NULL DEFAULT 0,
+        prune INTEGER NOT NULL DEFAULT 0 CHECK(prune IN (0,1)));
         CREATE TEMP TABLE dn_status_changes (
         seq INTEGER PRIMARY KEY, source TEXT NOT NULL, operation TEXT NOT NULL,
         subtree INTEGER NOT NULL, old_node TEXT, new_node TEXT,
@@ -231,7 +232,7 @@ pub(crate) fn install(db: &Connection) -> Result<()> {
     )?;
     let budget = JournalBudget::default();
     db.execute(
-        "INSERT INTO dn_status_meta VALUES(1,?1,0,0,0,0,0,?2,?3,0,0)",
+        "INSERT INTO dn_status_meta VALUES(1,?1,0,0,0,0,0,?2,?3,0,0,0)",
         params![
             uuid::Uuid::new_v4().to_string(),
             budget.entries as i64,
@@ -306,7 +307,8 @@ pub(crate) fn install(db: &Connection) -> Result<()> {
             db.execute_batch(&format!(
                 "CREATE TEMP TRIGGER dn_status_{table}_{operation}
                 AFTER {operation} ON main.{table}
-                WHEN (SELECT bulk FROM dn_status_meta)=0 {when} BEGIN
+                WHEN (SELECT bulk FROM dn_status_meta)=0
+                 AND (SELECT prune FROM dn_status_meta)=0 {when} BEGIN
                 UPDATE dn_status_meta SET head=head+1;
                 INSERT INTO dn_status_changes
                 SELECT head,'{table}','{operation}',({subtree}),{old},{new},
@@ -354,6 +356,47 @@ pub(crate) fn install(db: &Connection) -> Result<()> {
         UPDATE dn_namespace_meta SET attributes=attributes+1; END;",
     )?;
     Ok(())
+}
+
+/// Retention deletes whole rows that no consumer can still reference, so the
+/// journal must not publish them as semantic changes. Suppression is a TEMP
+/// flag toggled inside the cleanup transaction: every journal trigger tests it
+/// and skips the row entirely, the journal cursor does not move, and a
+/// rollback restores the previous flag with the rows. One transaction, no
+/// public begin/end pair, and no trigger is rebuilt.
+///
+/// The flag lives on the writer connection. Read-only connections have no TEMP
+/// journal at all, and cleanup is never attempted there.
+pub(crate) fn without_journal<T>(
+    db: &mut Connection,
+    write: impl FnOnce(&Transaction<'_>) -> Result<T>,
+) -> Result<T> {
+    let tx = db.transaction()?;
+    let value = without_journal_in(&tx, || write(&tx))?;
+    tx.commit()?;
+    Ok(value)
+}
+
+/// [`without_journal`] for a caller that already owns the transaction (for
+/// example, a commit that also removes the previous generation). The
+/// suppression is enabled and disabled inside that transaction, so an error
+/// anywhere rolls it back together with the rows.
+pub(crate) fn without_journal_in<T>(
+    tx: &Transaction<'_>,
+    write: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    if tx.execute(
+        "UPDATE dn_status_meta SET prune=1 WHERE singleton=1 AND prune=0",
+        [],
+    )? != 1
+    {
+        return Err(Error::State(
+            "status journal prune suppression is unavailable".into(),
+        ));
+    }
+    let value = write()?;
+    tx.execute("UPDATE dn_status_meta SET prune=0 WHERE singleton=1 AND prune=1", [])?;
+    Ok(value)
 }
 
 /// Only a complete snapshot replacement uses this path. It already invalidates
