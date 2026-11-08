@@ -71,8 +71,10 @@ pub struct SharedStore {
     permission_denials: AtomicBool,
     permission_publication: RwLock<()>,
     // Captured before the Store moves behind the mutex so read-only handles can
-    // be opened beside a live writer without acquiring either lock.
-    root: PathBuf,
+    // be opened beside a live writer without acquiring either lock. A whole
+    // Store replacement (DerefMut) may move the root, so the publication is
+    // refreshed from the writer boundary before readers may trust it.
+    root: Mutex<PathBuf>,
     // Shared with the writer's Store: off-lock readers must see the same open
     // handle set the writer protects in `cache_usage`.
     handles: Arc<Mutex<HashMap<String, (String, usize)>>>,
@@ -168,7 +170,7 @@ impl SharedStore {
             projection_word: AtomicU64::new(if unverified { 1 } else { 0 }),
             permission_denials: AtomicBool::new(permission_denials),
             permission_publication: RwLock::new(()),
-            root,
+            root: Mutex::new(root),
             handles,
             namespace_runtime,
             local_revision: AtomicU64::new(total_changes),
@@ -177,7 +179,10 @@ impl SharedStore {
     /// The state directory this handle owns. Answered from the captured path;
     /// it never acquires the Store or projection lock.
     pub fn root(&self) -> PathBuf {
-        self.root.clone()
+        self.root
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
     /// Read-only connection beside the live writer that shares the writer's
     /// handle map and scheduler observations. The SQLite side still observes
@@ -327,8 +332,21 @@ impl StoreGuard<'_> {
         let poisoned = self.poisoned || std::thread::panicking();
         let before = self.shared.change_state();
         let projection_before = self.shared.projection_state();
-        let mut projection_changed = poisoned;
-        let mut changed = false;
+        // A Store replaced through DerefMut may point at a different directory:
+        // publish the new root and invalidate every projection derived from the
+        // old namespace before releasing the write lease.
+        let root_changed = {
+            let current = guard.store.root();
+            let mut published = self.shared.root.lock().unwrap_or_else(PoisonError::into_inner);
+            if published.as_path() != current {
+                *published = current.to_owned();
+                true
+            } else {
+                false
+            }
+        };
+        let mut projection_changed = poisoned || root_changed;
+        let mut changed = root_changed;
         if hint != guard.total_changes
             || self.mutable_access
             || guard.unverified
@@ -370,6 +388,7 @@ impl StoreGuard<'_> {
             }
             guard.unverified = !verified || poisoned;
         }
+        changed |= root_changed;
         let sql_changed = hint != guard.total_changes || self.mutable_access || poisoned;
         guard.total_changes = hint;
         // Publish the same value `Store::local_revision` would answer under this

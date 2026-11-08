@@ -2,7 +2,7 @@
 //! release use immutable views. Warm continuations avoid Store; preview
 //! continuations validate their revocable capability while sending one reply.
 use super::*;
-use drive_core::filesystem::{DirectorySnapshot, DirectoryViewStamp};
+use drive_core::filesystem::DirectorySnapshot;
 use drive_core::{namespace_index::{DirBlock, FileKind}, shared_store::CommitState};
 use std::sync::{
     Weak,
@@ -14,6 +14,22 @@ const MAX_HANDLES: usize = 4096;
 const HOT_VIEWS: usize = 256;
 const HOT_BYTES: usize = 8 * 1024 * 1024;
 const HOT_VIEW_BYTES: usize = 128 * 1024;
+const BUILD_ATTEMPTS: usize = 3;
+/// Waits for an in-flight writer to publish its commit, then returns the
+/// semantic generation under which the read-only projection can be trusted.
+/// This only ever waits for the commit boundary, never for the projection: the
+/// writer lock is released by its owner before SQL is built here (issue #23).
+fn settle(store: &drive_core::SharedStore) -> CommitState {
+    if let Some(lease) = store.try_projection_read() {
+        let token = store.change_state();
+        drop(lease);
+        return token;
+    }
+    let guard = store.lock().unwrap_or_else(|poison| poison.into_inner());
+    let token = store.change_state();
+    drop(guard);
+    token
+}
 
 enum ViewOrigin {
     Authority,
@@ -119,15 +135,15 @@ struct Table {
 }
 #[derive(Default)]
 struct Hot {
-    views: std::collections::VecDeque<(u64, DirectoryViewStamp, Arc<View>)>,
+    views: std::collections::VecDeque<(u64, CommitState, Arc<View>)>,
     bytes: usize,
-    revision: Option<DirectoryViewStamp>,
+    revision: Option<CommitState>,
 }
 pub(super) struct Views {
     table: Mutex<Table>,
     // Semantic commits conservatively invalidate all directories. Candidate
     // receipts and pure inode allocation leave reusable views alone.
-    cached: Mutex<HashMap<u64, (DirectoryViewStamp, Weak<View>)>>,
+    cached: Mutex<HashMap<u64, (CommitState, Weak<View>)>>,
     hot: Mutex<Hot>,
     builder: Mutex<()>,
     charged: Arc<AtomicUsize>,
@@ -189,13 +205,13 @@ impl Views {
             reclaim(snapshot, &view.reclaimer.charged, &view.reclaimer.allocated);
         }
     }
-    fn trim_hot(&self, revision: Option<&DirectoryViewStamp>) {
+    fn trim_hot(&self, revision: Option<&CommitState>) {
         let removed = {
-            let mut hot = self.hot.lock().unwrap();
+            let mut hot = self.hot.lock().unwrap_or_else(|poison| poison.into_inner());
             if revision.is_some() && hot.revision.as_ref() == revision {
                 return;
             }
-            hot.revision = revision.cloned();
+            hot.revision = revision.copied();
             let mut removed = Vec::new();
             let mut i = 0;
             while i < hot.views.len() {
@@ -213,7 +229,7 @@ impl Views {
             Self::evict(view);
         }
     }
-    fn retain_hot(&self, ino: u64, revision: DirectoryViewStamp, view: Arc<View>) {
+    fn retain_hot(&self, ino: u64, revision: CommitState, view: Arc<View>) {
         if view.snapshot().bytes > HOT_VIEW_BYTES {
             return;
         }
@@ -238,97 +254,71 @@ impl Views {
             Self::evict(view);
         }
     }
+    /// Projects a directory without ever running SQL under the writer guard.
+    /// The guard is only observed for a bounded moment so a rename committed by
+    /// an in-flight writer is not hidden by a cached view; a held lock without
+    /// a commit must not stall the projection (the #23 regression).
     fn open(&self, store: &drive_core::SharedStore, ino: u64) -> Result<u64, i32> {
-        let wait = diagnostics::span(diagnostics::Stage::DirectoryBuilderWait);
-        let _building = self.builder.lock().unwrap();
-        drop(wait);
         {
-            let table = self.table.lock().unwrap();
+            let table = self.table.lock().unwrap_or_else(|poison| poison.into_inner());
             if table.handles.len() >= MAX_HANDLES || table.next == u64::MAX {
                 return Err(libc::EMFILE);
             }
         }
-        let view = {
-            // The stamp and cache selection must share one Store guard. Reading
-            // an atomic stamp after dropping Store could race an ACL/namespace
-            // commit whose publication has not reached that atomic yet.
-            let wait = diagnostics::span(diagnostics::Stage::DirectoryStoreWait);
-            let store = store.lock().unwrap();
-            drop(wait);
-            // One indexed preview lookup; do not compute file status on each
-            // warm opendir/cache hit. Promotion removes the preview reservation.
-            let authority = match store.preview_record_by_inode(ino) {
-                Ok(_) => false,
-                Err(e) if e.is_not_found() => true,
-                Err(e) => return Err(errno(&e)),
+        let token = settle(store);
+        if token.verified {
+            self.trim_hot(Some(&token));
+            let cached = {
+                let cached = self.cached.lock().unwrap_or_else(|poison| poison.into_inner());
+                cached.get(&ino).and_then(|(revision, view)| {
+                    (revision == &token).then(|| view.upgrade()).flatten()
+                })
             };
-            if authority {permissions::inode(&store,ino,permissions::Action::List).map_err(|e|errno(&e))?;}
-            let revision = store.directory_view_stamp().map_err(|e| errno(&e))?;
-            self.trim_hot(Some(&revision));
-            let cached = self
-                .cached
-                .lock()
-                .unwrap()
-                .get(&ino)
-                .and_then(|(rev, view)| {
-                    (authority && rev == &revision)
-                        .then(|| view.upgrade())
-                        .flatten()
-                });
-            match cached {
-                Some(view) => {
-                    diagnostics::count(diagnostics::Stage::DirectoryCacheHit);
-                    self.retain_hot(ino, revision, view.clone());
-                    view
-                }
-                None => {
-                    diagnostics::count(diagnostics::Stage::DirectoryCacheMiss);
-                    // Cached closed views cannot deny capacity to a new wide
-                    // directory. Only bounded hot objects are synchronously freed.
-                    if self.allocated.load(Ordering::Acquire) >= MAX_HANDLES
-                        || self.charged.load(Ordering::Acquire) > MAX_BYTES - HOT_BYTES
-                    {
-                        self.trim_hot(None);
+            if let Some(view) = cached {
+                diagnostics::count(diagnostics::Stage::DirectoryCacheHit);
+                self.retain_hot(ino, token, view.clone());
+                return self.attach(view);
+            }
+        }
+        diagnostics::count(diagnostics::Stage::DirectoryCacheMiss);
+        let wait = diagnostics::span(diagnostics::Stage::DirectoryBuilderWait);
+        let building = self.builder.lock().unwrap_or_else(|poison| poison.into_inner());
+        drop(wait);
+        let mut attempt = 0;
+        loop {
+            if self.allocated.load(Ordering::Acquire) >= MAX_HANDLES {
+                return Err(libc::ENOMEM);
+            }
+            if self.charged.load(Ordering::Acquire) > MAX_BYTES - HOT_BYTES {
+                self.trim_hot(None);
+            }
+            let token = store.change_state();
+            if !token.verified {
+                break;
+            }
+            let budget = MAX_BYTES.saturating_sub(self.charged.load(Ordering::Acquire));
+            let projection = diagnostics::span(diagnostics::Stage::DirectoryProjection);
+            let built = Self::build_readonly(store, ino, budget);
+            drop(projection);
+            match built {
+                Ok(Some((snapshot, origin))) => {
+                    attempt += 1;
+                    let after = store.change_state();
+                    if after != token || !after.verified {
+                        if attempt < BUILD_ATTEMPTS {
+                            continue;
+                        }
+                        break;
                     }
-                    // The builder lock reserves the remaining slot/bytes across
-                    // projection: no other builder can consume them. Failed builds
-                    // roll back without publishing either a view or its charge.
-                    if self.allocated.load(Ordering::Acquire) >= MAX_HANDLES {
+                    let bytes = snapshot.bytes;
+                    if bytes > MAX_BYTES.saturating_sub(self.charged.load(Ordering::Acquire)) {
+                        if self.hot_nonempty() && attempt < BUILD_ATTEMPTS {
+                            self.trim_hot(None);
+                            continue;
+                        }
                         return Err(libc::ENOMEM);
                     }
-                    let remaining = MAX_BYTES.saturating_sub(self.charged.load(Ordering::Acquire));
-                    let projection = diagnostics::span(diagnostics::Stage::DirectoryProjection);
-                    let project = |budget| -> Result<_, i32> {
-                        if authority {
-                            let snapshot = if diagnostics::enabled() {
-                                let (snapshot, timings) = store
-                                    .directory_snapshot_measured(ino, budget)
-                                    .map_err(|e| errno(&e))?;
-                                diagnostics::directory(&timings);
-                                snapshot
-                            } else {
-                                store
-                                    .directory_snapshot(ino, budget)
-                                    .map_err(|e| errno(&e))?
-                            };
-                            Ok((snapshot, ViewOrigin::Authority))
-                        } else {
-                            let v = store
-                                .preview_directory_snapshot(ino, budget)
-                                .map_err(|e| errno(&e))?;
-                            Ok((v.snapshot, ViewOrigin::Preview(v.stamp)))
-                        }
-                    };
-                    let (snapshot, origin) = match project(remaining) {
-                        Err(libc::ENOMEM) if !self.hot.lock().unwrap().views.is_empty() => {
-                            self.trim_hot(None);
-                            project(MAX_BYTES.saturating_sub(self.charged.load(Ordering::Acquire)))?
-                        }
-                        result => result?,
-                    };
-                    drop(projection);
-                    let revision = store.directory_view_stamp().map_err(|e| errno(&e))?;
-                    self.charged.fetch_add(snapshot.bytes, Ordering::AcqRel);
+                    self.charged.fetch_add(bytes, Ordering::AcqRel);
                     self.allocated.fetch_add(1, Ordering::AcqRel);
                     let view = Arc::new(View {
                         origin,
@@ -336,24 +326,159 @@ impl Views {
                         snapshot: Some(snapshot),
                         reclaimer: self.reclaimer.clone(),
                     });
-                    let mut cache = self.cached.lock().unwrap();
-                    cache.retain(|_, (_, view)| view.strong_count() != 0);
-                    if authority {
-                        cache.insert(ino, (revision.clone(), Arc::downgrade(&view)));
+                    self.publish(ino, after, view.clone());
+                    let handle = self.attach(view);
+                    drop(building);
+                    return handle;
+                }
+                Ok(None) => break,
+                Err(number) => {
+                    attempt += 1;
+                    if number == libc::ENOMEM
+                        && self.hot_nonempty()
+                        && attempt < BUILD_ATTEMPTS
+                    {
+                        self.trim_hot(None);
+                        continue;
                     }
-                    drop(cache);
-                    if authority {
-                        self.retain_hot(ino, revision, view.clone());
-                    }
-                    view
+                    return Err(number);
                 }
             }
+        }
+        drop(building);
+        let (handle, view) = self.open_locked(store, ino)?;
+        if let Some(view) = view {
+            let token = store.change_state();
+            if token.verified {
+                self.publish(ino, token, view);
+            }
+        }
+        Ok(handle)
+    }
+    /// Publishes an authoritative view for reuse. The token is the semantic
+    /// generation the projection was built under, not a local `total_changes`
+    /// counter, so inode allocation alone never invalidates it.
+    fn publish(&self, ino: u64, token: CommitState, view: Arc<View>) {
+        {
+            let mut cached = self.cached.lock().unwrap_or_else(|poison| poison.into_inner());
+            cached.retain(|_, (_, view)| view.strong_count() != 0);
+            cached.insert(ino, (token, Arc::downgrade(&view)));
+        }
+        self.retain_hot(ino, token, view);
+    }
+    /// One read-only projection attempt. `Ok(None)` asks the caller to fall back
+    /// to the locked writer path (preview mounts, unmapped inodes, read-only
+    /// open failure); errors are the errno the locked projection would return.
+    fn build_readonly(
+        store: &drive_core::SharedStore,
+        ino: u64,
+        budget: usize,
+    ) -> Result<Option<(DirectorySnapshot, ViewOrigin)>, i32> {
+        let root = store.root();
+        let Ok(readonly) = drive_core::Store::open_read_only(&root) else {
+            return Ok(None);
         };
-        let mut table = self.table.lock().unwrap();
-        let fh = table.next;
+        match readonly.preview_record_by_inode(ino) {
+            Ok(_) => return Ok(None),
+            Err(error) if error.is_not_found() => {}
+            Err(_) => return Ok(None),
+        }
+        if permissions::inode(&readonly, ino, permissions::Action::List).is_err() {
+            return Ok(None);
+        }
+        match readonly.directory_snapshot_read(ino, budget) {
+            Ok(Some(snapshot)) => Ok(Some((snapshot, ViewOrigin::Authority))),
+            Ok(None) => Ok(None),
+            Err(error) => Err(errno(&error)),
+        }
+    }
+    /// Locked fallback for projections that need the writer: preview mounts,
+    /// unconfirmed boundaries and namespaces whose inodes are not mapped yet.
+    /// Mirrors the pre-#23 behavior and never publishes into the cheap cache.
+    fn open_locked(
+        &self,
+        store: &drive_core::SharedStore,
+        ino: u64,
+    ) -> Result<(u64, Option<Arc<View>>), i32> {
+        let wait = diagnostics::span(diagnostics::Stage::DirectoryBuilderWait);
+        let _building = self.builder.lock().unwrap_or_else(|poison| poison.into_inner());
+        drop(wait);
+        let store = store.lock().unwrap_or_else(|poison| poison.into_inner());
+        let authority = match store.preview_record_by_inode(ino) {
+            Ok(_) => false,
+            Err(error) if error.is_not_found() => true,
+            Err(error) => return Err(errno(&error)),
+        };
+        if authority {
+            permissions::inode(&store, ino, permissions::Action::List)
+                .map_err(|error| errno(&error))?;
+        }
+        let _revision = store.directory_view_stamp().map_err(|error| errno(&error))?;
+        if self.allocated.load(Ordering::Acquire) >= MAX_HANDLES
+            || self.charged.load(Ordering::Acquire) > MAX_BYTES - HOT_BYTES
+        {
+            self.trim_hot(None);
+        }
+        if self.allocated.load(Ordering::Acquire) >= MAX_HANDLES {
+            return Err(libc::ENOMEM);
+        }
+        let remaining = MAX_BYTES.saturating_sub(self.charged.load(Ordering::Acquire));
+        let projection = diagnostics::span(diagnostics::Stage::DirectoryProjection);
+        let project = |budget| -> Result<_, i32> {
+            if authority {
+                let snapshot = if diagnostics::enabled() {
+                    let (snapshot, timings) = store
+                        .directory_snapshot_measured(ino, budget)
+                        .map_err(|error| errno(&error))?;
+                    diagnostics::directory(&timings);
+                    snapshot
+                } else {
+                    store.directory_snapshot(ino, budget).map_err(|error| errno(&error))?
+                };
+                Ok((snapshot, ViewOrigin::Authority))
+            } else {
+                let view = store
+                    .preview_directory_snapshot(ino, budget)
+                    .map_err(|error| errno(&error))?;
+                Ok((view.snapshot, ViewOrigin::Preview(view.stamp)))
+            }
+        };
+        let (snapshot, origin) = match project(remaining) {
+            Err(libc::ENOMEM) if self.hot_nonempty() => {
+                self.trim_hot(None);
+                project(MAX_BYTES.saturating_sub(self.charged.load(Ordering::Acquire)))?
+            }
+            result => result?,
+        };
+        drop(projection);
+        self.charged.fetch_add(snapshot.bytes, Ordering::AcqRel);
+        self.allocated.fetch_add(1, Ordering::AcqRel);
+        let view = Arc::new(View {
+            origin,
+            ino,
+            snapshot: Some(snapshot),
+            reclaimer: self.reclaimer.clone(),
+        });
+        let handle = self.attach(view.clone())?;
+        Ok((handle, authority.then_some(view)))
+    }
+    fn hot_nonempty(&self) -> bool {
+        !self
+            .hot
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .views
+            .is_empty()
+    }
+    fn attach(&self, view: Arc<View>) -> Result<u64, i32> {
+        let mut table = self.table.lock().unwrap_or_else(|poison| poison.into_inner());
+        if table.handles.len() >= MAX_HANDLES || table.next == u64::MAX {
+            return Err(libc::EMFILE);
+        }
+        let handle = table.next;
         table.next += 1;
-        table.handles.insert(fh, view);
-        Ok(fh)
+        table.handles.insert(handle, view);
+        Ok(handle)
     }
     fn get(&self, ino: u64, fh: u64) -> Result<Arc<View>, i32> {
         self.table
@@ -695,7 +820,7 @@ pub(super) fn read(
                             }
                             Err(std::sync::TryLockError::Poisoned(_)) => { reply.error(libc::EIO); return; }
                         };
-                        match guard.directory_snapshot(ino, MAX_BYTES) {
+                        match guard.directory_identity(ino) {
                             Ok(_) => send_index_page(block, offset, reply),
                             Err(e) => reply.error(errno(&e)),
                         }
@@ -757,7 +882,7 @@ fn send_index_plus_sql(store: &drive_core::SharedStore, notify: &NotifyHub,
         Err(std::sync::TryLockError::Poisoned(_)) => { reply.error(libc::EIO); return; }
     };
     // Includes EOF: revocation cannot be bypassed with an empty page.
-    match guard.directory_snapshot(block.ino, MAX_BYTES) {
+    match guard.directory_identity(block.ino) {
         Ok(_) => (),
         Err(e) => { reply.error(errno(&e)); return; },
     };
@@ -821,6 +946,10 @@ pub(super) fn release(fs: &mut CacheFilesystem, ino: u64, fh: u64, reply: ReplyE
 #[cfg(test)]
 #[path = "directory_view_stamp_tests.rs"]
 mod stamp_tests;
+
+#[cfg(test)]
+#[path = "directory_bench_tests.rs"]
+mod bench_tests;
 
 #[cfg(test)]
 mod index_tests {
