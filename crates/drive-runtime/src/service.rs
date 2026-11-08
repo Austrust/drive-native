@@ -207,6 +207,9 @@ pub struct Service {
     pub bridge: Arc<Bridge>,
     /// Committed desktop status projection published off the global lock.
     status_cache: std::sync::OnceLock<Arc<crate::status_cache::StatusCache>>,
+    /// Expensive overview counters keyed by the committed Store generation;
+    /// only read and written off the Store lock (issue #21).
+    overview_cache: Mutex<Option<crate::desktop::OverviewDerived>>,
     pub control: Mutex<Control>,
     changed: Condvar,
     pub stop: AtomicBool,
@@ -293,6 +296,7 @@ impl Service {
             profile,
             bridge,
             status_cache: std::sync::OnceLock::new(),
+            overview_cache: Mutex::new(None),
             control: Mutex::new(Control {
                 state: if paused {
                     ConnectionState::Paused
@@ -475,6 +479,23 @@ impl Service {
         &self,
     ) -> Option<Arc<crate::status_cache::StatusProjection>> {
         self.status_cache.get().and_then(|cache| cache.snapshot())
+    }
+    /// Derived overview counters captured for one committed Store generation.
+    pub(crate) fn overview_derived(
+        &self,
+        key: drive_core::shared_store::CommitState,
+    ) -> Option<crate::desktop::OverviewDerived> {
+        self.overview_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .filter(|derived| derived.key == key)
+    }
+    /// Publish derived counters for a generation this projection just read.
+    pub(crate) fn cache_overview_derived(&self, derived: crate::desktop::OverviewDerived) {
+        *self
+            .overview_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(derived);
     }
     pub fn cache_policy_changed(&self) {
         self.cache_policy_dirty.store(true, Ordering::Release);
