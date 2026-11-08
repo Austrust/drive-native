@@ -56,7 +56,7 @@ export CARGO_TARGET_DIR=/tmp/p032-targets/t0
    cargo test -p drive-runtime --release --all-features --locked --lib status_cache -- --ignored --nocapture
    ```
 
-6. **#6 ACL 闭包（实现合入后启用）**
+6. **#6 ACL 闭包（#26 已合入）**
    ```sh
    cargo test -p drive-core --all-features --locked access_denied
    cargo test -p drive-fs --all-features --locked --test permissions_kernel -- --ignored --nocapture
@@ -69,13 +69,13 @@ export CARGO_TARGET_DIR=/tmp/p032-targets/t0
    cargo test -p drive-fs --all-features --locked namespace_index_tests
    ```
 
-8. **#8 remove barrier（实现合入后启用）**
+8. **#8 remove barrier（#28 已合入）**
    ```sh
    cargo test -p drive-fs --all-features --locked --test mounted -- --ignored --nocapture
    cargo test -p drive-runtime --all-features --locked upload
    ```
 
-9. **#9 GUI 读放大（fix 分支合入后启用）**
+9. **#9 GUI 读放大（#29 已合入）**
    ```sh
    GUI_PYTHON=$HOME/dn/.venv-build/bin/python bash scripts/test-gui.sh
    ```
@@ -87,9 +87,21 @@ export CARGO_TARGET_DIR=/tmp/p032-targets/t0
     cargo test -p drive-core --all-features --locked desktop_status
     ```
 
-11. **#11 运行时信号/命令背压**：尚无 fix 分支，暂无可执行验收命令（实现合入后补）。
+11. **#11 运行时信号/命令背压（#31 已合入）**
+    ```sh
+    cargo test -p drive-runtime --all-features --locked --lib status_events
+    cargo test -p drive-runtime --all-features --locked --lib worker_queue_tests
+    cargo test -p drive-runtime --all-features --locked --test status_index_oracle
+    ```
+    重点断言：空闲 StatusChanged=0、StatusChanged2 带 revision/变更集、>32 命令不中断会话、reset 粘滞与背压常量有界。
 
-12. **#12 存储残留（1M operations / retention / schema v28）**：尚无 fix 分支；schema v28 随 #32 落地后补迁移与 EXPLAIN 验收命令。
+12. **#12 存储残留（1M operations / retention / schema v28；#32 已合入）**
+    ```sh
+    cargo test -p drive-core --all-features --locked --test schema_indexes
+    cargo test -p drive-core --all-features --locked --lib retention::tests
+    cargo test -p drive-core --release --all-features --locked --test schema_indexes -- --ignored --nocapture v27_upgrade_cost_on_a_294k_node_database
+    ```
+    `queries_select_the_v28_indexes` 断言 pending_operations/冲突/下载候选命中 operations_countable 等新索引；`retention_tests` 覆盖历史裁剪上界；1M 历史 operations 下 `pending_operations` <1 ms 为 #32 微基准（未入库，debug 实测 103.6 ms 全表扫描 → 约 5 µs 索引扫描）。
 
 13. **#13 远程初始化恢复/池/事件证据**
     ```sh
@@ -104,9 +116,9 @@ export CARGO_TARGET_DIR=/tmp/p032-targets/t0
     ```sh
     cargo test --workspace --all-features --locked
     bash scripts/verify.sh
-    rg -n -g '*.md' "6\.35|477-532|487-532|schema 26" docs/*.md
+    rg -n -g '*.md' "6\.35|477-532|487-532|schema 26|STATE_SCHEMA_VERSION=27" docs/*.md
     ```
-    第一条覆盖代码-文档引用不被破坏；grep 只扫描顶层 docs/*.md（排除 docs/validation 证据文件），用于确认过时口径（6.35 ms、旧持锁行号、schema 26 当前版）没有残留。
+    第一条覆盖代码-文档引用不被破坏；grep 只扫描顶层 docs/*.md（排除 docs/validation 证据文件），用于确认过时口径（6.35 ms、旧持锁行号、schema 26 当前版、旧 v27 当前版）没有残留；当前契约 schema 为 v28（`STATE_SCHEMA_VERSION=28`）。
 
 ## 与 issue #8 三树数字的关系
 
