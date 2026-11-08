@@ -156,9 +156,12 @@ impl Client {
             },
         );
         // Bound setup separately; queueing must not consume the response budget.
-        let mut guard = tokio::time::timeout(Duration::from_secs(30), self.pool.acquire())
-            .await
-            .map_err(|_| Error::Timeout("notification channel acquisition"))??;
+        // Long polls use the dedicated lane: a multi-minute notification wait
+        // must not hold one of the shared metadata channels.
+        let mut guard =
+            tokio::time::timeout(Duration::from_secs(30), self.pool.acquire_long_poll())
+                .await
+                .map_err(|_| Error::Timeout("notification channel acquisition"))??;
         let result = async {
             let r = guard
                 .channel()

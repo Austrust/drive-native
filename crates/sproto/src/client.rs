@@ -264,6 +264,8 @@ impl Client {
             port: config.port.0,
             session: session.clone(),
             max_channels: config.max_channels.0,
+            max_waiters: config.max_channels.0.saturating_mul(8),
+            queue_wait_timeout: std::time::Duration::from_secs(30),
         })?);
 
         tracing::debug!("donating auth channel to pool");

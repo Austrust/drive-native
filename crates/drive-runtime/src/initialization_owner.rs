@@ -989,6 +989,12 @@ impl Bridge {
                     let _writes = self.initialization_writer();
                     self.current(rpc)?;
                     let mut store = self.initialization_store();
+                    // Every receipt is persisted inside this serialized section.
+                    // Count the rounds so a large tree's commit pipeline is
+                    // distinguishable from its read concurrency without logs.
+                    self.initialization
+                        .work
+                        .count(Counter::DirectoryCommitRounds, 1);
                     let _span = self.initialization.work.span(Stage::DirectoryCommit);
                     if !store
                         .initialization_directory_ticket_current(&ticket)

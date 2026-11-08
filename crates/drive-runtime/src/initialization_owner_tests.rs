@@ -1021,6 +1021,83 @@ fn cold_owner_uses_reliable_steps_and_commits_only_after_separate_fence() {
 }
 
 #[test]
+fn initialization_metrics_expose_serial_receipt_commits_and_event_pipeline() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = snapshot("server", 7);
+    let replies = data.clone();
+    let mut sent = false;
+    let peer = Peer::new(data, move |request| {
+        if matches!(request, Command::Initialization(Request::Pull { .. })) && !sent {
+            sent = true;
+            let mut added = replies.nodes[1].clone();
+            added.id = "150".into();
+            added.parent = Some("100".into());
+            added.name = "New.txt".into();
+            let mut token: serde_json::Value = serde_json::from_str(&added.version).unwrap();
+            token["file"] = "150".into();
+            token["sync"] = 8.into();
+            token["max"] = 8.into();
+            added.version = token.to_string();
+            Answer::Body(Body::Events(Some(fixture_page(
+                &replies,
+                Batch {
+                    from: "native-v1:7".into(),
+                    to: "native-v1:8".into(),
+                    events: vec![drive_core::Event {
+                        id: "pipeline-event".into(),
+                        change: drive_core::Change::Upsert(added),
+                    }],
+                },
+            ))))
+        } else {
+            standard(&replies, request)
+        }
+    });
+    let bridge = bridge(Store::open(dir.path()).unwrap(), &peer, "server");
+    assert!(bridge.initial_pull().unwrap());
+    let counter = |wanted: Counter| {
+        bridge
+            .initialization
+            .work
+            .snapshot()
+            .counters
+            .iter()
+            .find(|(counter, _)| *counter == wanted)
+            .map(|(_, value)| *value)
+            .unwrap_or(0)
+    };
+    let stage = |wanted: Stage| {
+        bridge
+            .initialization
+            .work
+            .snapshot()
+            .stages
+            .iter()
+            .find(|(stage, _)| *stage == wanted)
+            .map(|(_, total)| total.clone())
+    };
+    assert_eq!(counter(Counter::PullPages), 1);
+    assert_eq!(counter(Counter::PullEvents), 1);
+    assert_eq!(counter(Counter::AppliedPages), 1, "event page must apply");
+    assert_eq!(counter(Counter::DirectoryCommitted), 2);
+    // Two directory receipts are persisted one after another under the owner's
+    // writer; the round counter makes that serialization visible without logs.
+    assert_eq!(counter(Counter::DirectoryCommitRounds), 2);
+    let commit = stage(Stage::DirectoryCommit).expect("directory commit stage");
+    assert_eq!(commit.count, 2);
+    assert!(commit.total_us >= commit.max_us);
+    let collect = stage(Stage::EventCollect).expect("event collect stage");
+    assert_eq!(collect.count, 1);
+    assert!(collect.total_us >= collect.max_us);
+    let apply = stage(Stage::EventApply).expect("event apply stage");
+    // The loop also probes for a pending receipt after the page is applied, so
+    // this is at least one round per applied page, not exactly one.
+    assert!(apply.count >= counter(Counter::AppliedPages));
+    assert!(apply.total_us >= apply.max_us);
+    peer.finish();
+}
+
+#[test]
 fn deferred_file_parent_pauses_pull_while_multiple_directory_rounds_make_progress() {
     let dir = tempfile::tempdir().unwrap();
     let mut data = snapshot("server", 7);

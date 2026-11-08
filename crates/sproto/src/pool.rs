@@ -1,4 +1,5 @@
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
@@ -21,6 +22,14 @@ pub struct Config {
     pub restore_id: String,
     pub device_uuid: String,
     pub max_channels: usize,
+    /// Upper bound on callers queued for a shared metadata channel.
+    ///
+    /// Dispatch concurrency can exceed the channel budget (initially 32 vs 6),
+    /// so without a bound the wait queue would grow without limit. Rejecting
+    /// with [`Error::Timeout`] keeps metadata latency observable and bounded.
+    pub max_waiters: usize,
+    /// Maximum time a caller may wait for a shared channel permit.
+    pub queue_wait_timeout: Duration,
     pub tls_config: Option<Arc<rustls::ClientConfig>>,
 }
 
@@ -28,6 +37,10 @@ pub struct Pool {
     config: Arc<Config>,
     semaphore: Arc<Semaphore>,
     channels: Arc<Mutex<Vec<Channel>>>,
+    waiters: Arc<Semaphore>,
+    long_poll: Arc<Semaphore>,
+    long_poll_channel: Arc<Mutex<Option<Channel>>>,
+    transfers: Arc<Semaphore>,
 }
 
 impl Pool {
@@ -40,10 +53,19 @@ impl Pool {
         }
 
         let max = config.max_channels;
+        let max_waiters = config.max_waiters;
+        // Keep metadata capacity for every transfer: with `max` shared
+        // channels, at most `max - 2` transfers may hold one at a time. A
+        // smaller pool still allows one transfer.
+        let transfer_lanes = max.saturating_sub(2).max(1);
         Ok(Self {
             config: Arc::new(config),
             channels: Arc::new(Mutex::new(Vec::new())),
             semaphore: Arc::new(Semaphore::new(max)),
+            waiters: Arc::new(Semaphore::new(max_waiters)),
+            long_poll: Arc::new(Semaphore::new(1)),
+            long_poll_channel: Arc::new(Mutex::new(None)),
+            transfers: Arc::new(Semaphore::new(transfer_lanes)),
         })
     }
 
@@ -115,21 +137,95 @@ impl Pool {
     }
 
     /// Acquire a channel from the pool, creating a new one if none are idle.
+    ///
+    /// The wait is bounded twice: at most [`Config::max_waiters`] callers may
+    /// queue, and a queued caller gives up after [`Config::queue_wait_timeout`].
+    /// Both limits fail with [`Error::Timeout`] so callers can surface a
+    /// bounded-latency failure instead of queueing forever.
     #[allow(
         clippy::missing_panics_doc,
         reason = "mutex is never held across a panic"
     )]
     pub async fn acquire(&self) -> Result<Guard> {
+        let waiter = self
+            .waiters
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| Error::Timeout("native pool queue full"))?;
+
         let mut waiting = crate::diagnostics::pool_wait();
+        let permit = match tokio::time::timeout(
+            self.config.queue_wait_timeout,
+            self.semaphore.clone().acquire_owned(),
+        )
+        .await
+        {
+            Ok(Ok(permit)) => permit,
+            Ok(Err(_)) => return Err(Error::ConnectionClosed),
+            Err(_) => return Err(Error::Timeout("native pool queue wait")),
+        };
+        waiting.acquired = true;
+        drop(waiting);
+        drop(waiter);
+
+        self.take_channel(permit).await
+    }
+
+    /// Acquire a channel for a file transfer.
+    ///
+    /// Transfers hold a channel for the whole download/upload, so they get
+    /// their own lane: at most `max_channels - 2` transfers run concurrently,
+    /// leaving metadata channels available even while transfers are saturated.
+    pub async fn acquire_transfer(&self) -> Result<Guard> {
+        let transfer = match tokio::time::timeout(
+            self.config.queue_wait_timeout,
+            self.transfers.clone().acquire_owned(),
+        )
+        .await
+        {
+            Ok(Ok(permit)) => permit,
+            Ok(Err(_)) => return Err(Error::ConnectionClosed),
+            Err(_) => return Err(Error::Timeout("native transfer lane wait")),
+        };
+        let mut guard = self.acquire().await?;
+        guard._transfer = Some(transfer);
+        Ok(guard)
+    }
+
+    /// Acquire the dedicated long-poll lane.
+    ///
+    /// A long poll blocks server-side for several minutes (`long_poll` timeout
+    /// 400s plus 600s read idle). Sharing a metadata channel for that duration
+    /// would silently remove one of `max_channels` from the metadata budget, so
+    /// the lane owns one separate connection that never counts against the
+    /// shared pool permits.
+    pub async fn acquire_long_poll(&self) -> Result<LongPollGuard> {
         let permit = self
-            .semaphore
+            .long_poll
             .clone()
             .acquire_owned()
             .await
             .map_err(|_| Error::ConnectionClosed)?;
-        waiting.acquired = true;
-        drop(waiting);
+        let existing = self.long_poll_channel.lock().unwrap().take();
+        let channel = match existing {
+            Some(ch) if !ch.is_expired() => {
+                tracing::debug!("pool: reusing dedicated long-poll channel");
+                ch
+            }
+            _ => {
+                tracing::debug!("pool: creating dedicated long-poll channel");
+                connect_channel(&self.config).await?
+            }
+        };
+        Ok(LongPollGuard {
+            reusable: false,
+            channel: Some(channel),
+            _permit: permit,
+            slot: Arc::clone(&self.long_poll_channel),
+        })
+    }
 
+    async fn take_channel(&self, permit: OwnedSemaphorePermit) -> Result<Guard> {
         // Pop channels until we find one that hasn't expired, discarding stale ones.
         let existing = {
             let mut channels = self.channels.lock().unwrap();
@@ -161,6 +257,7 @@ impl Pool {
         Ok(Guard {
             reusable: false,
             _permit: permit,
+            _transfer: None,
             channel: Some(channel),
             channels: Arc::clone(&self.channels),
         })
@@ -172,6 +269,7 @@ pub struct Guard {
     reusable: bool,
     channel: Option<Channel>,
     _permit: OwnedSemaphorePermit,
+    _transfer: Option<OwnedSemaphorePermit>,
     channels: Arc<Mutex<Vec<Channel>>>,
 }
 
@@ -202,6 +300,48 @@ impl Drop for Guard {
             && let Some(ch) = self.channel.take()
         {
             self.channels.lock().unwrap().push(ch);
+        }
+    }
+}
+
+/// Guard for the dedicated long-poll channel.
+///
+/// Mirrors [`Guard`]'s fail-closed reuse policy but hands the channel back to
+/// the long-poll slot instead of the shared channel list.
+pub struct LongPollGuard {
+    reusable: bool,
+    channel: Option<Channel>,
+    _permit: OwnedSemaphorePermit,
+    slot: Arc<Mutex<Option<Channel>>>,
+}
+
+impl LongPollGuard {
+    /// Get a mutable reference to the underlying channel.
+    ///
+    /// # Panics
+    /// Panics if the channel has been poisoned.
+    pub const fn channel(&mut self) -> &mut Channel {
+        self.reusable = false;
+        self.channel.as_mut().unwrap()
+    }
+
+    /// Poison the channel if `result` is an error, then return the result.
+    pub fn poison_on_err<T>(&mut self, result: Result<T>) -> Result<T> {
+        self.reusable = result.is_ok();
+        if result.is_err() {
+            self.channel = None;
+        }
+
+        result
+    }
+}
+
+impl Drop for LongPollGuard {
+    fn drop(&mut self) {
+        if self.reusable
+            && let Some(ch) = self.channel.take()
+        {
+            *self.slot.lock().unwrap() = Some(ch);
         }
     }
 }
@@ -278,10 +418,12 @@ async fn handshake(ch: &mut Channel, config: &Config) -> Result<()> {
 mod tests {
     use super::*;
 
-    fn test_config(max_channels: usize) -> Config {
+    pub(super) fn test_config(max_channels: usize) -> Config {
         Config {
             port: 0,
             max_channels,
+            max_waiters: max_channels.saturating_mul(8).max(1),
+            queue_wait_timeout: Duration::from_millis(200),
             tls_config: None,
             tls: TlsMode::None,
             host: String::new(),
@@ -292,7 +434,7 @@ mod tests {
         }
     }
 
-    fn dummy_channel() -> Channel {
+    pub(super) fn dummy_channel() -> Channel {
         let (a, _b) = tokio::io::duplex(1);
         Channel::from_stream(a)
     }
@@ -364,6 +506,130 @@ mod tests {
 }
 
 #[cfg(test)]
+mod lane_tests {
+    use super::tests::{dummy_channel, test_config};
+    use super::*;
+
+    async fn wait_until(mut condition: impl FnMut() -> bool) {
+        for _ in 0..1_000 {
+            if condition() {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+        panic!("condition was not reached");
+    }
+
+    /// Excess callers are rejected immediately instead of extending the queue.
+    #[tokio::test]
+    async fn queue_bound_rejects_excess_waiters() {
+        let mut config = test_config(1);
+        config.max_waiters = 1;
+        let pool = Arc::new(Pool::new(config).unwrap());
+        let held = pool.semaphore.clone().try_acquire_owned().unwrap();
+
+        let task_pool = Arc::clone(&pool);
+        let queued = tokio::spawn(async move { task_pool.acquire().await.map(|_| ()) });
+        wait_until(|| pool.waiters.available_permits() == 0).await;
+
+        let Err(error) = pool.acquire().await else {
+            panic!("expected acquire rejection");
+        };
+        assert!(
+            matches!(error, Error::Timeout("native pool queue full")),
+            "unexpected error: {error}"
+        );
+
+        queued.abort();
+        drop(held);
+    }
+
+    /// A queued caller never blocks forever: the wait itself times out.
+    #[tokio::test(start_paused = true)]
+    async fn queue_wait_times_out_instead_of_blocking_forever() {
+        let mut config = test_config(1);
+        config.queue_wait_timeout = Duration::from_millis(50);
+        let pool = Pool::new(config).unwrap();
+        let _held = pool.semaphore.clone().try_acquire_owned().unwrap();
+
+        let Err(error) = pool.acquire().await else {
+            panic!("expected acquire rejection");
+        };
+        assert!(
+            matches!(error, Error::Timeout("native pool queue wait")),
+            "unexpected error: {error}"
+        );
+    }
+
+    /// The long-poll lane uses its own connection and leaves every shared
+    /// metadata permit available.
+    #[tokio::test]
+    async fn long_poll_lane_does_not_consume_metadata_channels() {
+        let pool = Pool::new(test_config(2)).unwrap();
+        {
+            let mut channels = pool.channels.lock().unwrap();
+            channels.push(dummy_channel());
+            channels.push(dummy_channel());
+        }
+        *pool.long_poll_channel.lock().unwrap() = Some(dummy_channel());
+
+        let mut long_poll = pool.acquire_long_poll().await.unwrap();
+        let _ = long_poll.channel();
+        assert_eq!(
+            pool.semaphore.available_permits(),
+            2,
+            "long poll must not consume shared permits"
+        );
+
+        let metadata = pool.acquire().await.unwrap();
+        assert_eq!(pool.semaphore.available_permits(), 1);
+        drop(metadata);
+
+        long_poll.poison_on_err(Ok(())).unwrap();
+        drop(long_poll);
+        assert!(
+            pool.long_poll_channel.lock().unwrap().is_some(),
+            "completed long-poll channel is reused"
+        );
+        assert_eq!(pool.long_poll.available_permits(), 1);
+    }
+
+    /// Transfers reserve metadata capacity: a full transfer lane still leaves
+    /// at least two shared channels for metadata calls.
+    #[tokio::test]
+    async fn transfer_lane_reserves_metadata_capacity() {
+        let pool = Pool::new(test_config(3)).unwrap();
+        {
+            let mut channels = pool.channels.lock().unwrap();
+            for _ in 0..3 {
+                channels.push(dummy_channel());
+            }
+        }
+
+        let transfer = pool.acquire_transfer().await.unwrap();
+        assert_eq!(
+            pool.semaphore.available_permits(),
+            2,
+            "one transfer may hold one of three channels"
+        );
+        let first = pool.acquire().await.unwrap();
+        let second = pool.acquire().await.unwrap();
+        assert_eq!(pool.semaphore.available_permits(), 0);
+
+        // The transfer lane caps transfers below max_channels.
+        let Err(error) = pool.acquire_transfer().await else {
+            panic!("expected transfer-lane timeout");
+        };
+        assert!(
+            matches!(error, Error::Timeout("native transfer lane wait")),
+            "unexpected error: {error}"
+        );
+
+        drop((first, second, transfer));
+    }
+}
+
+#[cfg(test)]
 mod cancellation_tests {
     use super::*;
     #[tokio::test]
@@ -376,6 +642,7 @@ mod cancellation_tests {
             reusable: false,
             channel: Some(Channel::from_stream(stream)),
             _permit: permits.clone().acquire_owned().await.unwrap(),
+            _transfer: None,
             channels: channels.clone(),
         };
         let server = tokio::spawn(async move {
@@ -429,6 +696,7 @@ mod cancellation_tests {
             reusable: false,
             channel: Some(Channel::from_stream(stream)),
             _permit: permits.clone().acquire_owned().await.unwrap(),
+            _transfer: None,
             channels: channels.clone(),
         };
         let task = tokio::spawn(async move {
@@ -460,6 +728,7 @@ mod cancellation_tests {
             reusable: false,
             channel: Some(Channel::from_stream(stream)),
             _permit: Arc::new(Semaphore::new(1)).acquire_owned().await.unwrap(),
+            _transfer: None,
             channels: channels.clone(),
         };
         (guard, channels)

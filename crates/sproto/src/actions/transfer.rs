@@ -248,7 +248,7 @@ impl Client {
             );
         }
         let request = self.build_request("download", fields);
-        let mut guard = self.pool.acquire().await?;
+        let mut guard = self.pool.acquire_transfer().await?;
         let response = crate::flow::idle_timeout(Duration::from_secs(1800), async {
             let ch = guard.channel();
             ch.send(frame::SCMD_REQUEST, &request).await?;
@@ -263,6 +263,9 @@ impl Client {
         let sha256 = format!("{:x}", sink.sha256.finalize());
         let remote =
             guard.poison_on_err(check_content(&response, expected, &checksum, sink.count))?;
+        // The protocol exchange is complete; fsync/persist below can take a long
+        // time and must not keep a transfer (or metadata) permit occupied.
+        drop(guard);
         sink.inner.sync_all().await?;
         drop(sink.inner);
         tmp.persist(dest).map_err(|e| e.error)?;
@@ -468,7 +471,7 @@ impl Client {
             path: path.into(),
         })
         .await?;
-        let mut guard = self.pool.acquire().await?;
+        let mut guard = self.pool.acquire_transfer().await?;
         let result = crate::flow::idle_timeout(Duration::from_secs(1800), async {
             let ch = guard.channel();
             crate::flow::phase(crate::flow::Phase::Transferring);

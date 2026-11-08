@@ -15,6 +15,8 @@ async fn two_directory_pages_share_one_channel_and_count_actual_validated_nodes(
                 restore_id: "private-restore".into(),
                 device_uuid: "private-device".into(),
                 max_channels: 1,
+                max_waiters: 8,
+                queue_wait_timeout: std::time::Duration::from_secs(30),
                 tls_config: None,
             })
             .unwrap(),
