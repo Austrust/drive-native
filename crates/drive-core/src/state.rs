@@ -120,8 +120,9 @@ pub struct Store {
     pub(crate) namespace_runtime: Mutex<crate::namespace_schedule::NamespaceRuntime>,
     /// Deferred LRU recency for cached file opens. The FUSE open path must not
     /// append WAL frames or fsync; entries are merged into `cache_access` in
-    /// one transaction before a budget/trim decision and on drop.
-    pub(crate) cache_recency: Mutex<Vec<String>>,
+    /// one transaction before a budget/trim decision and on drop. Maintained as
+    /// an amortized O(1) ledger because this is the hottest FUSE path.
+    pub(crate) cache_recency: Mutex<crate::cache_policy::CacheRecency>,
     // Fields drop in order: close SQLite before releasing writer ownership.
     // Read-only handles own no lock and therefore carry None.
     _writer_lock: Option<WriterLock>,
@@ -367,7 +368,7 @@ impl Store {
             root,
             handles: Arc::new(Mutex::new(HashMap::new())),
             namespace_runtime: Mutex::new(Default::default()),
-            cache_recency: Mutex::new(Vec::new()),
+            cache_recency: Mutex::new(crate::cache_policy::CacheRecency::new()),
         })
     }
     /// Second handle for read-only work next to a live writer. Unlike
@@ -412,7 +413,7 @@ impl Store {
             root,
             handles: Arc::new(Mutex::new(HashMap::new())),
             namespace_runtime: Mutex::new(Default::default()),
-            cache_recency: Mutex::new(Vec::new()),
+            cache_recency: Mutex::new(crate::cache_policy::CacheRecency::new()),
         })
     }
     /// The state directory, including `state.sqlite` and `blobs`.

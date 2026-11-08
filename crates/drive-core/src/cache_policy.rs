@@ -2,14 +2,79 @@
 use crate::{Error, Result, Store};
 use rusqlite::OptionalExtension;
 use serde::Serialize;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet, VecDeque};
 pub const RECENT_DOWNLOAD_SECONDS: u64 = 60;
 pub const MAX_CACHE_LIMIT: u64 = 1024 * 1024 * 1024 * 1024 * 1024;
-/// Bound for the deferred recency ring. Eviction order only needs to be exact
+/// Bound for the deferred recency ledger. Eviction order only needs to be exact
 /// for the working set a budget decision can actually see; dropping the oldest
 /// hints keeps one long session from pinning unbounded memory, and the next
 /// flush re-seeds rows that are still cached.
 const CACHE_RECENCY_CAPACITY: usize = 65_536;
+/// Deferred `cache_access` recency, keyed by node with a monotonic last-use
+/// sequence. `note_cache_use` is the hottest FUSE path, so recording a hit is
+/// two hash operations; the previous `Vec` ring scanned the whole list per hit
+/// and degraded quadratically for large working sets. `order` is a lazy
+/// deletion queue for eviction (superseded entries are skipped), compacted
+/// when stale frames dominate, which keeps memory bounded and the amortized
+/// cost O(1).
+pub(crate) struct CacheRecency {
+    sequence: u64,
+    last_use: HashMap<String, u64>,
+    order: VecDeque<(String, u64)>,
+}
+impl CacheRecency {
+    pub(crate) fn new() -> Self {
+        Self {
+            sequence: 0,
+            last_use: HashMap::new(),
+            order: VecDeque::new(),
+        }
+    }
+    fn note(&mut self, id: &str) {
+        self.sequence += 1;
+        let sequence = self.sequence;
+        match self.last_use.get_mut(id) {
+            Some(slot) => *slot = sequence,
+            None => {
+                self.last_use.insert(id.to_owned(), sequence);
+            }
+        }
+        self.order.push_back((id.to_owned(), sequence));
+        while self.last_use.len() > CACHE_RECENCY_CAPACITY {
+            let Some((candidate, recorded)) = self.order.pop_front() else {
+                break;
+            };
+            if self.last_use.get(&candidate) == Some(&recorded) {
+                self.last_use.remove(&candidate);
+            }
+        }
+        if self.order.len() > CACHE_RECENCY_CAPACITY * 2 + 64 {
+            self.compact();
+        }
+    }
+    fn compact(&mut self) {
+        let mut entries: Vec<(String, u64)> = self.last_use.drain().collect();
+        entries.sort_unstable_by_key(|(_, sequence)| *sequence);
+        self.order.clear();
+        self.order.extend(entries.iter().cloned());
+        self.last_use = entries.into_iter().collect();
+    }
+    /// Drain the ledger oldest-use-first. `INSERT OR REPLACE` assigns increasing
+    /// `cache_access.seq` in that order, reproducing the LRU a synchronous
+    /// per-open write used to persist.
+    fn take(&mut self) -> Vec<String> {
+        if self.last_use.is_empty() {
+            self.order.clear();
+            self.sequence = 0;
+            return Vec::new();
+        }
+        let mut entries: Vec<(String, u64)> = self.last_use.drain().collect();
+        entries.sort_unstable_by_key(|(_, sequence)| *sequence);
+        self.order.clear();
+        self.sequence = 0;
+        entries.into_iter().map(|(id, _)| id).collect()
+    }
+}
 /// Candidate discovery with every structural protection evaluated once as a
 /// set instead of once per cached row. The previous correlated `NOT EXISTS`
 /// forms rescanned `nodes` for each candidate (GB-scale page reads); the
@@ -111,17 +176,10 @@ impl Store {
     /// list is merged into `cache_access` in one transaction before the next
     /// budget decision and when the store closes.
     pub fn note_cache_use(&self, id: &str) -> Result<()> {
-        let mut recency = self
-            .cache_recency
+        self.cache_recency
             .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        if let Some(position) = recency.iter().position(|seen| seen == id) {
-            recency.remove(position);
-        }
-        recency.push(id.to_owned());
-        if recency.len() > CACHE_RECENCY_CAPACITY {
-            recency.remove(0);
-        }
+            .unwrap_or_else(|poison| poison.into_inner())
+            .note(id);
         Ok(())
     }
     /// Merge deferred open recency into `cache_access` with a single commit.
@@ -129,23 +187,22 @@ impl Store {
     /// `seq`), so a restart preserves the same LRU result as before without
     /// paying a synchronous write per open.
     pub(crate) fn flush_cache_recency(&self) -> Result<()> {
-        let pending = {
-            let mut recency = self
-                .cache_recency
-                .lock()
-                .unwrap_or_else(|poison| poison.into_inner());
-            if recency.is_empty() {
-                return Ok(());
-            }
-            std::mem::take(&mut *recency)
-        };
-        let transaction = self.db.unchecked_transaction()?;
-        for id in &pending {
-            transaction.execute(
-                "INSERT OR REPLACE INTO cache_access(node) SELECT id FROM nodes WHERE id=?1",
-                [id],
-            )?;
+        let pending = self
+            .cache_recency
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .take();
+        if pending.is_empty() {
+            return Ok(());
         }
+        let transaction = self.db.unchecked_transaction()?;
+        let mut insert = transaction.prepare_cached(
+            "INSERT OR REPLACE INTO cache_access(node) SELECT id FROM nodes WHERE id=?1",
+        )?;
+        for id in &pending {
+            insert.execute([id])?;
+        }
+        drop(insert);
         transaction.commit()?;
         Ok(())
     }
