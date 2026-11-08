@@ -1220,6 +1220,57 @@ impl Store {
     ) -> Result<()> {
         self.install_remote_snapshot_with_access(nodes, cursor, server, &[])
     }
+    /// Replace the access-denied set without installing a snapshot.
+    ///
+    /// This is the incremental counterpart of the `inaccessible` argument of
+    /// [`Store::install_remote_snapshot_with_access`]: the difference against the
+    /// rows already stored is applied in one transaction, so the status journal
+    /// records one `access_denied` subtree change per edge instead of resetting
+    /// the journal for a whole snapshot.
+    ///
+    /// Test/diagnostic support only: production code changes access through the
+    /// sync snapshot path, and other crates must not treat this as a stable
+    /// contract.
+    pub fn set_access_denied(&mut self, denied: &[String]) -> Result<()> {
+        use std::collections::HashSet;
+        let mut wanted = HashSet::new();
+        for id in denied {
+            if id.is_empty() {
+                return Err(Error::State("invalid access denied identity".into()));
+            }
+            if !wanted.insert(id.as_str()) {
+                return Err(Error::State("duplicate access denied identity".into()));
+            }
+        }
+        let tx = self.db.transaction()?;
+        let stored = tx
+            .prepare("SELECT node FROM access_denied ORDER BY node")?
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let stored_set = stored.iter().map(String::as_str).collect::<HashSet<_>>();
+        for id in &stored {
+            if !wanted.contains(id.as_str()) {
+                tx.execute("DELETE FROM access_denied WHERE node=?1", [id])?;
+            }
+        }
+        let mut insert = tx.prepare("INSERT OR IGNORE INTO access_denied(node) VALUES(?1)")?;
+        for id in denied {
+            if !stored_set.contains(id.as_str()) {
+                insert.execute([id])?;
+            }
+        }
+        drop(insert);
+        tx.commit()?;
+        Ok(())
+    }
+    /// Install a recovery snapshot together with the set of subtrees whose access
+    /// was denied.
+    ///
+    /// The snapshot itself replaces the status journal (see
+    /// [`crate::status_changes::replace_snapshot`]), so consumers rebuild from it;
+    /// the `inaccessible` set is stored in the same transaction. `inaccessible`
+    /// must name directory nodes that are present in `nodes`, have a parent, and
+    /// are unique.
     pub(crate) fn install_remote_snapshot_with_access(
         &mut self,
         nodes: &[Node],

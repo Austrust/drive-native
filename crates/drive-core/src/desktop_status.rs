@@ -1,5 +1,6 @@
 //! Bulk read-only seeds for desktop aggregation. No inode allocation or body reads.
 use crate::{Result, Store};
+use rusqlite::params;
 #[derive(Clone)]
 pub struct StatusSeed {
     pub id: String,
@@ -8,6 +9,17 @@ pub struct StatusSeed {
     pub pinned: bool,
     pub overlay: bool,
     pub detailed: bool,
+}
+/// Result of [`Store::desktop_status_acl_refresh`]: the scoped re-read an
+/// `access_denied` journal change needs.
+#[derive(Clone)]
+pub struct AclRefresh {
+    /// Every id whose visibility may have changed, i.e. the closure of the
+    /// denied rows under the `access_blocked` edges.
+    pub affected: Vec<String>,
+    /// Currently visible seeds inside `affected`, plus the ancestor chains that
+    /// keep inherited flags resolvable.
+    pub seeds: Vec<StatusSeed>,
 }
 /// Projection shared by the full and scoped reads so both report identical rules.
 const SEED_COLUMNS: &str = "n.id,n.parent,n.directory,n.pinned,EXISTS(SELECT 1 FROM namespace_overlay o WHERE o.node=n.id), (n.blob IS NOT NULL OR n.dirty_blob IS NOT NULL OR n.conflict!=0 OR EXISTS(SELECT 1 FROM drafts d WHERE d.node=n.id) OR EXISTS(SELECT 1 FROM transfers t WHERE t.node=n.id AND t.direction='download'))";
@@ -61,6 +73,49 @@ impl Store {
             Some(row) => Ok(Some(row?)),
             None => Ok(None),
         }
+    }
+    /// Scoped re-read for `access_denied` journal invalidations.
+    ///
+    /// `access_blocked` is a recursive view over three edges: a denied id, the
+    /// local `nodes.parent` edge and the overlay `remote.parent` edge. A denial
+    /// therefore changes visibility only inside the closure below the named id
+    /// in exactly that graph, plus the ancestor chains whose inherited flags may
+    /// change. Re-reading that scope keeps an ACL edit proportional to the
+    /// affected subtree instead of the namespace size.
+    ///
+    /// Returns `Ok(None)` when the closure is wider than `limit` ids. The outer
+    /// `LIMIT` also stops the recursive expansion early, so an oversized ACL
+    /// change never materialises the whole namespace; callers must then fall back
+    /// to a full rebuild. `seeds` is never wider than `affected` plus its
+    /// ancestor chains.
+    pub fn desktop_status_acl_refresh(
+        &self,
+        denied: &[String],
+        limit: usize,
+    ) -> Result<Option<AclRefresh>> {
+        if denied.is_empty() {
+            return Ok(Some(AclRefresh {
+                affected: Vec::new(),
+                seeds: Vec::new(),
+            }));
+        }
+        let denied = serde_json::to_string(denied)?;
+        let cap = limit.saturating_add(1) as i64;
+        let affected = {
+            let mut q = self.db.prepare_cached(ACL_SCOPE_SQL)?;
+            q.query_map(params![&denied, cap], |row| row.get::<_, String>(0))?
+                .collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        if affected.len() > limit {
+            return Ok(None);
+        }
+        let seeds = {
+            let sql = acl_seed_sql();
+            let mut q = self.db.prepare_cached(&sql)?;
+            q.query_map(params![&denied], seed_from_row)?
+                .collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        Ok(Some(AclRefresh { affected, seeds }))
     }
     /// Ids of every live node at exactly `(parent, name)`, without the
     /// visibility rules.
@@ -117,6 +172,26 @@ fn scoped_seed_sql() -> String {
          up(id) AS (SELECT id FROM roots UNION SELECT n.parent FROM up u CROSS JOIN nodes n ON n.id=u.id WHERE n.parent IS NOT NULL), \
          scope(id) AS MATERIALIZED (SELECT id FROM down UNION SELECT id FROM up) \
          SELECT {SEED_COLUMNS} FROM scope s CROSS JOIN nodes n ON n.id=s.id WHERE {SEED_FILTERS}"
+    )
+}
+
+/// Closure of the named denial rows under the two edges `access_blocked` propagates
+/// over (local `nodes.parent`, overlay `remote.parent`). The outer `LIMIT` caps the
+/// output so an oversized denial is detected without first materialising the whole
+/// namespace.
+const ACL_SCOPE_SQL: &str = "WITH RECURSIVE affected(id) AS (SELECT value FROM json_each(?1) \
+     UNION SELECT n.id FROM affected a CROSS JOIN nodes n ON n.parent=a.id \
+     UNION SELECT o.node FROM affected a CROSS JOIN namespace_overlay o ON json_extract(o.remote,'$.parent')=a.id) \
+     SELECT id FROM affected LIMIT ?2";
+
+/// Visible seeds inside the ACL closure plus their ancestor chains.
+fn acl_seed_sql() -> String {
+    format!(
+        "WITH RECURSIVE affected(id) AS (SELECT value FROM json_each(?1) \
+         UNION SELECT n.id FROM affected a CROSS JOIN nodes n ON n.parent=a.id \
+         UNION SELECT o.node FROM affected a CROSS JOIN namespace_overlay o ON json_extract(o.remote,'$.parent')=a.id), \
+         up(id) AS (SELECT id FROM affected UNION SELECT n.parent FROM up u CROSS JOIN nodes n ON n.id=u.id WHERE n.parent IS NOT NULL) \
+         SELECT {SEED_COLUMNS} FROM up s CROSS JOIN nodes n ON n.id=s.id WHERE {SEED_FILTERS}"
     )
 }
 
