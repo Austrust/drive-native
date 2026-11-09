@@ -1,6 +1,6 @@
-# 未发布：issue #50 按任务正则排除（阶段 1/2）
+# 未发布：issue #50 按任务正则排除（阶段 1–3）
 
-profile 新增可选 `exclude_patterns`：初始化导入对匹配路径整棵子树剪枝、非法正则拒绝并报出 pattern 与编译错误，GUI 保存时做同样校验；详见 [EXCLUDE_PATTERNS.md](EXCLUDE_PATTERNS.md)。
+profile 新增可选 `exclude_patterns`：初始化导入对匹配路径整棵子树剪枝、FUSE 读路径对排除路径返回 ENOENT 且 readdir 不显示、远端事件与恢复快照过滤、GetDirectory/GetStates 列表过滤；索引随挂载、初始化完成与快照安装刷新。非法正则拒绝并报出 pattern 与编译错误，GUI 保存时做同样校验；详见 [EXCLUDE_PATTERNS.md](EXCLUDE_PATTERNS.md)。
 
 # 0.1.0~dev20261108.1：上传终态、数据库热点与统一桌面
 

@@ -85,10 +85,24 @@ pub(super) fn states(
     root: &str,
     mount: &Path,
     paths: Vec<String>,
+    rules: Option<&drive_core::exclude::ExcludeRules>,
 ) -> io::Result<String> {
     let entries: Vec<_> = paths
         .into_iter()
         .map(|path| match resolve_preview(store, root, mount, &path) {
+            // Issue #50: excluded candidate nodes stay invisible even while the
+            // namespace is still initializing.
+            Ok(record)
+                if rules.is_some_and(|rules| {
+                    path_excluded(rules, mount, &path, record.directory)
+                }) =>
+            {
+                PathState {
+                    path,
+                    entry: None,
+                    error: Some("preview_not_available"),
+                }
+            }
             Ok(record) => row(path, record),
             Err(_) => PathState {
                 path,
@@ -105,8 +119,12 @@ pub(super) fn directory(
     mount: &Path,
     path: &str,
     offset: u32,
+    rules: Option<&drive_core::exclude::ExcludeRules>,
 ) -> io::Result<String> {
     let page = resolve_preview(store, root, mount, path).and_then(|node| {
+        if rules.is_some_and(|rules| path_excluded(rules, mount, path, node.directory)) {
+            return Err(excluded_error());
+        }
         store
             .preview_children_page(node.ino, offset as usize, 256)
             .map_err(preview_error)
@@ -116,12 +134,18 @@ pub(super) fn directory(
             let entries: Vec<_> = page
                 .entries
                 .into_iter()
+                .filter(|record| {
+                    !rules.is_some_and(|rules| {
+                        path_excluded(
+                            rules,
+                            mount,
+                            &child_path(path, &record.name),
+                            record.directory,
+                        )
+                    })
+                })
                 .map(|record| {
-                    let child_path = if path.is_empty() {
-                        record.name.clone()
-                    } else {
-                        format!("{}/{}", path.trim_end_matches('/'), record.name)
-                    };
+                    let child_path = child_path(path, &record.name);
                     row(child_path, record)
                 })
                 .collect();
@@ -219,7 +243,7 @@ rules_digest: String::new(),
     fn unready_permission_and_preview_status_remain_distinct_from_authoritative_empty_state() {
         let (_temp, mut store, run) = setup();
         let mount = Path::new("/tmp/preview-desktop");
-        let pending = data(directory(&store, "100", mount, "", 0));
+        let pending = data(directory(&store, "100", mount, "", 0, None));
         assert_eq!(pending["directory_state"], "pending");
         assert!(pending["total"].is_null());
         list(
@@ -230,7 +254,7 @@ rules_digest: String::new(),
                 node("101", Some("100"), "A.doc", false),
             ],
         );
-        let received = data(directory(&store, "100", mount, "", 0));
+        let received = data(directory(&store, "100", mount, "", 0, None));
         assert_eq!(received["total"], 2);
         assert_eq!(received["directory_state"], "received");
         for entry in received["entries"].as_array().unwrap() {
@@ -239,11 +263,11 @@ rules_digest: String::new(),
         }
         assert!(store.node("100").is_err());
         assert_eq!(store.pending_operations().unwrap(), 0);
-        let child = data(directory(&store, "100", mount, "Dir", 0));
+        let child = data(directory(&store, "100", mount, "Dir", 0, None));
         assert!(child["total"].is_null());
         let ticket = store.begin_initialization_directory(&run, "200").unwrap();
         store.store_initialization_denied(&ticket, 1).unwrap();
-        let denied = data(directory(&store, "100", mount, "Dir", 0));
+        let denied = data(directory(&store, "100", mount, "Dir", 0, None));
         assert_eq!(denied["directory_state"], "denied");
         assert!(denied["total"].is_null());
         let paths = data(states(
@@ -255,13 +279,14 @@ rules_digest: String::new(),
                 "../outside".into(),
                 "/tmp/preview-desktop-other/A.doc".into(),
             ],
+            None,
         ));
         assert_eq!(paths["entries"][0]["status"], "initializing");
         assert!(paths["entries"][1]["error"].is_string());
         assert!(paths["entries"][2]["error"].is_string());
         store.revoke_initialization_preview_root(&run).unwrap();
         assert!(active(&store, "100").unwrap());
-        let denied_root = data(directory(&store, "100", mount, "", 0));
+        let denied_root = data(directory(&store, "100", mount, "", 0, None));
         assert_eq!(denied_root["directory_state"], "denied");
         assert!(denied_root["total"].is_null());
         assert!(denied_root["entries"].as_array().unwrap().is_empty());
@@ -282,13 +307,13 @@ rules_digest: String::new(),
             })
             .collect::<Vec<_>>();
         list(&mut store, &run, nodes.clone());
-        let first = data(directory(&store, "100", mount, "", 0));
-        let second = data(directory(&store, "100", mount, "", 256));
+        let first = data(directory(&store, "100", mount, "", 0, None));
+        let second = data(directory(&store, "100", mount, "", 256, None));
         assert_eq!(first["entries"].as_array().unwrap().len(), 256);
         assert_eq!(second["entries"].as_array().unwrap().len(), 44);
         assert_eq!(first["preview_generation"], second["preview_generation"]);
         list(&mut store, &run, nodes);
-        let newer = data(directory(&store, "100", mount, "", 256));
+        let newer = data(directory(&store, "100", mount, "", 256, None));
         assert_ne!(first["preview_generation"], newer["preview_generation"]);
         assert!(store.node("100").is_err());
         assert_eq!(store.cursor().unwrap(), "");

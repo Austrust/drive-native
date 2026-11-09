@@ -336,7 +336,13 @@ impl Service {
             store,
         )))?);
         bridge.enable_initialization_owner(&profile.task_id)?;
-        bridge.set_exclude_rules(profile.exclude_rules()?);
+        // Issue #50: compile the exclusion rules once and share the state with
+        // both the initialization owner (import pruning) and the mount (read
+        // path filtering). Empty rules never build or consult an index.
+        let exclusion = Arc::new(drive_core::exclude::ExclusionState::new(
+            profile.exclude_rules()?,
+        ));
+        bridge.set_exclusion_state(exclusion);
         Ok(Arc::new(Self {
             profile,
             bridge,
@@ -823,7 +829,8 @@ impl Service {
             Err(e) => return Err(io::Error::other(e)),
         }
         .with_hydrator(self.bridge.clone())
-        .with_notify_hub(notify.clone());
+        .with_notify_hub(notify.clone())
+        .with_exclusion_state(self.bridge.exclusion_state());
         // `new` has now backfilled inodes. Index construction is local metadata
         // only; previews, budget exhaustion and any load error keep the SQL path.
         if drive_fs::namespace_index_enabled() {
@@ -846,6 +853,17 @@ impl Service {
         if writable && !cfg!(feature="native-research"){return Err(io::Error::other("writable native protocol release gate is closed"));}
         if writable {
             fs = fs.with_writes_enabled();
+        }
+        // Build the exclusion index from the committed namespace before the
+        // mount is visible. Empty rules keep this a no-op. Later namespace
+        // swaps rebuild it from the bridge (pull, recovery snapshot, owner
+        // initialization), so this initial build only covers pre-existing data.
+        let exclusion = self.bridge.exclusion_state();
+        if exclusion.is_active() {
+            let store = self.bridge.store.lock().unwrap();
+            exclusion
+                .refresh(&store, &self.profile.scope.file_id)
+                .map_err(io::Error::other)?;
         }
         let session = fuser::spawn_mount2(
             fs,

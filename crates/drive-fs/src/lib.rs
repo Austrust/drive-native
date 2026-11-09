@@ -4,6 +4,8 @@
 //! No callback waits for the NAS, and unsupported writes are never acknowledged.
 #[cfg(test)]
 mod cached_close_tests;
+#[cfg(test)]
+mod exclude_read_tests;
 pub mod diagnostics;
 mod directory;
 #[cfg(test)]
@@ -157,6 +159,9 @@ pub struct CacheFilesystem {
     // keeps the plain READDIR profile (e.g. kernel tests that never install a
     // notifier).
     readdirplus: bool,
+    /// Issue #50: shared exclusion rules and derived namespace index. `None`
+    /// (or empty rules) keeps every read-path check a constant-time no-op.
+    exclusion: Option<Arc<drive_core::exclude::ExclusionState>>,
     uid: u32,
     gid: u32,
 }
@@ -196,6 +201,42 @@ impl CacheFilesystem {
         // session exists, which is the earliest point the API allows.
         self.readdirplus = true;
         self
+    }
+
+    /// Install the shared exclusion state (issue #50). Empty rules stay inert;
+    /// the index is rebuilt by the runtime after every namespace swap.
+    pub fn with_exclusion_state(
+        mut self,
+        state: Arc<drive_core::exclude::ExclusionState>,
+    ) -> Self {
+        self.exclusion = Some(state);
+        self
+    }
+
+    /// Snapshot of the exclusion index for a read-path reply, or `None` when
+    /// rules are inactive. Matching runs after the Store lock is released.
+    pub(crate) fn exclusion_index(
+        &self,
+    ) -> Option<Arc<drive_core::exclude::ExclusionIndex>> {
+        self.exclusion.as_ref().and_then(|state| {
+            if state.is_active() {
+                Some(state.current())
+            } else {
+                None
+            }
+        })
+    }
+
+    /// True when `ino` belongs to an excluded subtree and must answer ENOENT.
+    fn inode_excluded(&self, ino: u64) -> bool {
+        self.exclusion_index()
+            .is_some_and(|index| index.inode_excluded(ino))
+    }
+
+    /// True when the directory entry `(parent, name)` is excluded.
+    fn entry_excluded(&self, parent: u64, name: &str) -> bool {
+        self.exclusion_index()
+            .is_some_and(|index| index.entry_excluded(parent, name))
     }
 
     /// Override the metadata TTL (0 disables caching). The default comes from
@@ -256,6 +297,7 @@ impl CacheFilesystem {
             hydrator: None,
             notify: NotifyHub::from_env(),
             readdirplus: false,
+            exclusion: None,
             uid,
             gid,
         })
@@ -483,6 +525,13 @@ impl Filesystem for CacheFilesystem {
             reply.error(libc::ENOENT);
             return;
         };
+        // Issue #50: excluded entries and subtrees must be indistinguishable
+        // from missing ones for every read path.
+        if self.entry_excluded(parent, name) {
+            drive_core::exclude::trace_hit("lookup");
+            reply.error(libc::ENOENT);
+            return;
+        }
         // G3 permission hook: any effective ACL cache must share this lease and
         // token, or disable the index for this request before entering here.
         if let Some(binding) = &self.namespace_index {
@@ -569,6 +618,12 @@ impl Filesystem for CacheFilesystem {
         // Handle-relative attributes, mutable drafts and unlinked objects retain
         // their original descriptor-aware SQL path.
         if fh.is_none() {
+            // Issue #50: an excluded inode has no observable metadata.
+            if self.inode_excluded(ino) {
+                drive_core::exclude::trace_hit("getattr");
+                reply.error(libc::ENOENT);
+                return;
+            }
             if let Some(binding) = &self.namespace_index {
                 let _index_time = diagnostics::span(diagnostics::Stage::IndexReadUs);
                 if let Some(lease) = binding.lease(&self.store, &self.notify) {
@@ -703,6 +758,11 @@ impl Filesystem for CacheFilesystem {
         }));
     }
     fn opendir(&mut self, _req: &Request<'_>, ino: u64, flags: i32, reply: ReplyOpen) {
+        if self.inode_excluded(ino) {
+            drive_core::exclude::trace_hit("opendir");
+            reply.error(libc::ENOENT);
+            return;
+        }
         directory::open(self, ino, flags, reply)
     }
     fn readdir(
@@ -713,6 +773,11 @@ impl Filesystem for CacheFilesystem {
         offset: i64,
         reply: ReplyDirectory,
     ) {
+        if self.inode_excluded(ino) {
+            drive_core::exclude::trace_hit("readdir");
+            reply.error(libc::ENOENT);
+            return;
+        }
         directory::read(self, ino, fh, offset, reply)
     }
     fn readdirplus(
@@ -723,6 +788,11 @@ impl Filesystem for CacheFilesystem {
         offset: i64,
         reply: ReplyDirectoryPlus,
     ) {
+        if self.inode_excluded(ino) {
+            drive_core::exclude::trace_hit("readdirplus");
+            reply.error(libc::ENOENT);
+            return;
+        }
         directory::read_plus(self, ino, fh, offset, reply)
     }
     fn releasedir(
@@ -736,6 +806,11 @@ impl Filesystem for CacheFilesystem {
         directory::release(self, ino, fh, reply)
     }
     fn open(&mut self, _req: &Request<'_>, ino: u64, flags: i32, reply: ReplyOpen) {
+        if self.inode_excluded(ino) {
+            drive_core::exclude::trace_hit("open");
+            reply.error(libc::ENOENT);
+            return;
+        }
         writable::open(self, ino, flags, reply)
     }
     fn write(

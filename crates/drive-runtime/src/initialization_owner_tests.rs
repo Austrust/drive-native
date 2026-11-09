@@ -2215,6 +2215,7 @@ fn latency_profile(scope: Scope) -> crate::service::Profile {
         writable: false,
         local_policy: None,
         writable_source: None,
+        exclude_patterns: Vec::new(),
     }
 }
 

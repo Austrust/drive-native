@@ -148,9 +148,11 @@ pub struct Bridge {
     pub upload_block: Mutex<Option<String>>,
     pub cache_error: Mutex<Option<String>>,
     pub initialization: Arc<crate::initialization::Tracker>,
-    /// Issue #50: task-scoped exclusion patterns compiled once at profile load.
-    /// Empty rules keep matching a constant-time no-op.
-    exclusion: std::sync::RwLock<drive_core::exclude::ExcludeRules>,
+    /// Issue #50: task-scoped exclusion rules plus the derived namespace
+    /// index. The index is rebuilt after every namespace swap (initialization
+    /// install, recovery snapshot, applied pull). Empty rules keep every check
+    /// a constant-time no-op.
+    exclusion: std::sync::RwLock<Arc<drive_core::exclude::ExclusionState>>,
 }
 impl Bridge {
     pub fn transfer_entries(&self) -> Vec<crate::transfers::TransferEntry> {
@@ -336,7 +338,11 @@ impl Bridge {
             upload_block: Mutex::new(None),
             cache_error: Mutex::new(None),
             initialization: Arc::new(crate::initialization::Tracker::default()),
-            exclusion: std::sync::RwLock::new(drive_core::exclude::ExcludeRules::default()),
+            exclusion: std::sync::RwLock::new(Arc::new(
+                drive_core::exclude::ExclusionState::new(
+                    drive_core::exclude::ExcludeRules::default(),
+                ),
+            )),
         })
     }
     /// Every upstream queue failure must suspend cacheable publication, not
@@ -354,11 +360,53 @@ impl Bridge {
     /// Install the profile's exclusion rules. Must be called before
     /// initialization enumerates the namespace (see `Service::new`, #50).
     pub(crate) fn set_exclude_rules(&self, rules: drive_core::exclude::ExcludeRules) {
-        *self.exclusion.write().unwrap() = rules;
+        self.set_exclusion_state(Arc::new(drive_core::exclude::ExclusionState::new(rules)));
+    }
+    /// Share the exclusion state built by `Service` with the mount and the
+    /// namespace refresh points. The state keeps rules and index together, so a
+    /// rebuild never races a reader between two locks.
+    pub(crate) fn set_exclusion_state(
+        &self,
+        state: Arc<drive_core::exclude::ExclusionState>,
+    ) {
+        *self.exclusion.write().unwrap() = state;
+    }
+    /// Current exclusion state (rules plus index snapshot).
+    pub(crate) fn exclusion_state(&self) -> Arc<drive_core::exclude::ExclusionState> {
+        self.exclusion.read().unwrap().clone()
     }
     /// Snapshot the current rules so a worker can match without holding a lock.
     pub(crate) fn exclude_rules(&self) -> drive_core::exclude::ExcludeRules {
-        self.exclusion.read().unwrap().clone()
+        self.exclusion_state().rules().clone()
+    }
+    /// Rebuild the exclusion index after the committed namespace changed.
+    ///
+    /// Called after every namespace swap (owner initialization, recovery
+    /// snapshot install, applied pull). Empty rules return before touching the
+    /// store; a missing binding is a normal pre-attach state.
+    fn refresh_exclusion(&self) {
+        let state = self.exclusion_state();
+        if !state.is_active() {
+            return;
+        }
+        let root = match self.store.lock() {
+            Ok(store) => match store.native_scope_root() {
+                Ok(root) => root,
+                Err(error) => {
+                    eprintln!("drive-native exclude: cannot read scope root: {error}");
+                    return;
+                }
+            },
+            Err(_) => return,
+        };
+        let Some(root) = root else {
+            return;
+        };
+        if let Err(error) = state.refresh_shared(&self.store, &root) {
+            // Keep the previous index: an unavailable namespace is retried on
+            // the next namespace swap rather than hiding every path.
+            eprintln!("drive-native exclude: index refresh failed: {error}");
+        }
     }
     /// Above this many per-node invalidations one generation message is cheaper
     /// and bounded: a snapshot commit touches every node, and one message per
@@ -436,8 +484,12 @@ impl Bridge {
             .phase(crate::initialization::Phase::CatchingUp);
         let _event = self.event_gate.lock().unwrap();
         if self.owner_candidate_pending()? {
-            return self
+            let result = self
                 .run_initialization_owner(crate::initialization::RecoveryReason::InitialIndex);
+            if result.is_ok() {
+                self.refresh_exclusion();
+            }
+            return result;
         }
         let cursor = self
             .store
@@ -479,10 +531,37 @@ impl Bridge {
             self.finish_session_catchup(&rpc)?;
             return Ok(false);
         };
+        let mut batch = batch;
         let event_count = batch.events.len();
+        let rules = self.exclude_rules();
         let mut invalidations = Vec::new();
         let mut invalidated_inodes = Vec::new();
         let mut store = self.store.lock().unwrap();
+        // Drop events that belong to excluded subtrees before they reach the
+        // committed namespace. Parent/child consistency is resolved from the
+        // same batch first (see drive_core::exclude), so a batch that creates
+        // an excluded directory and its children cannot leak the children.
+        if !rules.is_empty() {
+            match store.native_scope_root() {
+                Ok(Some(root)) => {
+                    let dropped = drive_core::exclude::retain_unexcluded_events(
+                        &store,
+                        &root,
+                        &rules,
+                        &mut batch.events,
+                    );
+                    if dropped > 0 {
+                        drive_core::exclude::trace_hit(&format!(
+                            "pull batch ({dropped} events)"
+                        ));
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    eprintln!("drive-native exclude: cannot filter pull events: {error}");
+                }
+            }
+        }
         for event in &batch.events {
             let id = match &event.change {
                 Change::Upsert(n) => &n.id,
@@ -524,6 +603,10 @@ impl Bridge {
         }
         drop(store);
         drop(receipt);
+        // The committed namespace may have gained or lost excluded paths;
+        // rebuild before publishing invalidations so the mount sees ENOENT for
+        // the same snapshot the invalidations describe.
+        self.refresh_exclusion();
         self.initialization
             .pulled(true, event_count, changed_notification);
         for ino in invalidated_inodes {
@@ -538,7 +621,11 @@ impl Bridge {
     }
     fn rebuild_snapshot(&self, reason: crate::initialization::RecoveryReason) -> io::Result<bool> {
         if self.initialization_task.lock().unwrap().is_some() {
-            return self.run_initialization_owner(reason);
+            let result = self.run_initialization_owner(reason);
+            if result.is_ok() {
+                self.refresh_exclusion();
+            }
+            return result;
         }
         use std::io::Read;
         self.initialization.recovery(reason);
@@ -577,6 +664,18 @@ impl Bridge {
             return Err(io::Error::other("snapshot integrity mismatch"));
         }
         let snapshot: drive_core::native::RemoteSnapshot = serde_json::from_slice(&bytes)?;
+        let mut snapshot = snapshot;
+        let rules = self.exclude_rules();
+        if !rules.is_empty() {
+            let dropped = drive_core::exclude::retain_unexcluded_snapshot_nodes(
+                &snapshot.scope.file_id,
+                &rules,
+                &mut snapshot.nodes,
+            );
+            if dropped > 0 {
+                drive_core::exclude::trace_hit(&format!("recovery snapshot ({dropped} nodes)"));
+            }
+        }
         if !rpc.is_connected() || !Arc::ptr_eq(&rpc, &self.connection()) {
             return Err(io::ErrorKind::NotConnected.into());
         }
@@ -590,6 +689,9 @@ impl Bridge {
             invalidations
         };
         self.enqueue_snapshot_invalidations(invalidations);
+        // The snapshot install replaced the whole namespace: rebuild the
+        // exclusion index before any reader observes the new generation.
+        self.refresh_exclusion();
         self.signal_upload();
         self.initialization.activity();
         Ok(true)
