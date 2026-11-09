@@ -1371,6 +1371,68 @@ impl Bridge {
         self.signal_upload();
         Ok(result)
     }
+    /// Recover a bound directory whose remote identity disappeared: the local
+    /// tree is preserved and requeued as a local creation (issue #54). The
+    /// token is the same CAS token returned by GetIssues.
+    pub fn keep_directory_local(
+        &self,
+        root: &str,
+        id: &str,
+        token: &str,
+    ) -> io::Result<(drive_core::Node, String)> {
+        let mut store = self.store.lock().unwrap();
+        let issue = store
+            .sync_issue(root, id)
+            .map_err(io::Error::other)?
+            .ok_or_else(|| io::Error::other("recovery unavailable; issue list is stale"))?;
+        if issue.token != token || !issue.can_keep_local {
+            return Err(io::Error::other(
+                "recovery unavailable; reload the issue center",
+            ));
+        }
+        let path = issue.path;
+        let node = store
+            .keep_directory_local(root, id, token)
+            .map_err(io::Error::other)?;
+        // The directory was a tombstone before this call, so ordinary lookups
+        // have no record for it; the parent entry is what readers must refresh.
+        if let Some(parent_id) = node.parent.as_deref() {
+            if let Ok(parent) = store.record(parent_id) {
+                self.enqueue_invalidation(Invalidation::Entry(parent.ino, node.name.clone()));
+                self.enqueue_invalidation(Invalidation::Inode(parent.ino));
+            }
+        }
+        drop(store);
+        self.signal_upload();
+        Ok((node, path))
+    }
+
+    /// Accept the server deletion of a bound directory without resurrecting any
+    /// local content. Refused when surviving local-only content would be lost.
+    pub fn keep_directory_remote(
+        &self,
+        root: &str,
+        id: &str,
+        token: &str,
+    ) -> io::Result<String> {
+        let mut store = self.store.lock().unwrap();
+        let issue = store
+            .sync_issue(root, id)
+            .map_err(io::Error::other)?
+            .ok_or_else(|| io::Error::other("recovery unavailable; issue list is stale"))?;
+        if issue.token != token || !issue.can_keep_remote {
+            return Err(io::Error::other(
+                "recovery unavailable; reload the issue center",
+            ));
+        }
+        let path = issue.path;
+        store
+            .keep_directory_remote(root, id, token)
+            .map_err(io::Error::other)?;
+        drop(store);
+        self.signal_upload();
+        Ok(path)
+    }
     /// Abandon one unconfirmed local creation (user action from the issue
     /// center). The token is the same CAS token returned by GetIssues, so a
     /// stale dialog can never retire a newer issue. Only the local-only file is

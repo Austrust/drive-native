@@ -1506,6 +1506,76 @@ fn profile_reads_valid_exclude_patterns_and_matches_relative_paths() {
     assert!(!rules.matches("A.txt", false));
 }
 
+/// issue #54: a bound directory tombstoned by the server while local-only
+/// children survive is visible through GetIssues and recoverable through the
+/// additive KeepDirectoryLocal IPC method.
+#[test]
+fn bound_directory_recovery_round_trips_through_ipc() {
+    let (_d, service) = fixture();
+    let (folder, child) = {
+        let mut store = service.bridge.store.lock().unwrap();
+        drive_core::write_permissions::set_local_policy(
+            &store, "root", drive_core::write_permissions::LocalPolicy::FollowRemote).unwrap();
+        let directory = store.create_local_directory("root", "bound", 0o755).unwrap();
+        let queued = store.next_directory().unwrap().unwrap();
+        let job = store.mark_directory_started(&queued.job.operation).unwrap();
+        let mut confirmed = job.node.clone();
+        confirmed.version = "v-bound".into();
+        store
+            .confirm_directory(&queued.job.operation, &confirmed, "900")
+            .unwrap();
+        let child = store.create_local_file(&directory.id, "new", 0o600).unwrap();
+        store.save_local(&child.id, b"local creation").unwrap();
+        store.creation_saved(&child.id).unwrap();
+        store
+            .install_remote_snapshot(&[node("root", None, true)], "2", "server")
+            .unwrap();
+        (directory.id, child.id)
+    };
+    let overview: serde_json::Value =
+        serde_json::from_str(&desktop::overview(&service).unwrap()).unwrap();
+    assert_eq!(
+        overview["recovery_actions"]["bound_directory_recovery"],
+        serde_json::json!(true)
+    );
+    let issues: serde_json::Value =
+        serde_json::from_str(&desktop::issues(&service, "").unwrap()).unwrap();
+    let entry = issues["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["id"] == serde_json::json!(folder))
+        .expect("bound deleted directory must be listed in the issue center")
+        .clone();
+    assert_eq!(entry["reason"], "bound_directory_conflict");
+    assert_eq!(entry["can_keep_local"], serde_json::json!(true));
+    assert_eq!(entry["can_keep_remote"], serde_json::json!(false));
+    let token = entry["token"].as_str().unwrap().to_owned();
+    let kept: serde_json::Value =
+        serde_json::from_str(&desktop::keep_directory_local(&service, &folder, &token).unwrap())
+            .unwrap();
+    assert_eq!(kept["schema"], 1);
+    assert_eq!(kept["kept_local"], serde_json::json!(true));
+    assert_eq!(kept["directory_id"], serde_json::json!(folder));
+    assert_eq!(kept["path"], "bound");
+    let issues: serde_json::Value =
+        serde_json::from_str(&desktop::issues(&service, "").unwrap()).unwrap();
+    assert!(issues["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|entry| entry["id"] != serde_json::json!(folder)));
+    let store = service.bridge.store.lock().unwrap();
+    assert!(store.node(&child).is_ok());
+    let queued = store.next_directory().unwrap().unwrap();
+    assert_eq!(queued.job.node.id, folder);
+    assert_eq!(queued.job.parent.id, "root");
+    drop(store);
+    // keep-remote is refused while local-only content would be lost, even when
+    // the caller presents the pre-keep-local token.
+    assert!(desktop::keep_directory_remote(&service, &folder, &token).is_err());
+}
+
 fn write_profile(
     dir: &tempfile::TempDir,
     modify: impl FnOnce(&mut serde_json::Value),

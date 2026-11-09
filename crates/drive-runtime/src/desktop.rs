@@ -836,7 +836,8 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
     let background_error_since_ms = background.as_ref().map(|failure| failure.since_ms);
     // Extracted from the big literal below: the macro expands the nested object
     // one level per key, and the overview is already close to the recursion cap.
-    let recovery_actions = serde_json::json!({"recheck_issues":true,"abandon_upload":true});
+    let recovery_actions = serde_json::json!({"recheck_issues":true,"abandon_upload":true,
+        "bound_directory_recovery":true});
     // Issue #31: the status journal epoch lets a GUI tell a same-daemon delta
     // from a restarted writer (its cursor epoch differs after a restart).
     let status_epoch = ro
@@ -1527,6 +1528,24 @@ pub fn keep_directory_both(
             .to_string(),
     )
 }
+pub fn keep_directory_local(service: &Service, id: &str, token: &str) -> io::Result<String> {
+    let (node, path) =
+        service
+            .bridge
+            .keep_directory_local(&service.profile.scope.file_id, id, token)?;
+    Ok(serde_json::json!({"schema":1,"directory_id":node.id,"path":path,"kept_local":true})
+        .to_string())
+}
+/// Accept the remote deletion of a bound directory. Only advertised when no
+/// surviving local-only content would be lost (`can_keep_remote`).
+pub fn keep_directory_remote(service: &Service, id: &str, token: &str) -> io::Result<String> {
+    let path =
+        service
+            .bridge
+            .keep_directory_remote(&service.profile.scope.file_id, id, token)?;
+    Ok(serde_json::json!({"schema":1,"directory_id":id,"path":path,
+        "kept_remote":true,"deleted_local":false}).to_string())
+}
 /// Abandon one unconfirmed local creation: the operation moves to the persistent
 /// `abandoned` terminal state and the local-only file is retired. The remote
 /// side is never touched, so the reply always reports `server_changed: false`.
@@ -1697,6 +1716,17 @@ impl Desktop {
     ) -> zbus::fdo::Result<String> {
         let s = self.0.clone();
         local(move || keep_directory_both(&s, &id, &token, &name)).await
+    }
+    /// Additive bound-directory recovery (issue #54), advertised by
+    /// `GetOverview.recovery_actions` and per-row flags. Older backends lack
+    /// the methods; the GUI keeps offering recheck instead.
+    async fn keep_directory_local(&self, id: String, token: String) -> zbus::fdo::Result<String> {
+        let s = self.0.clone();
+        local(move || keep_directory_local(&s, &id, &token)).await
+    }
+    async fn keep_directory_remote(&self, id: String, token: String) -> zbus::fdo::Result<String> {
+        let s = self.0.clone();
+        local(move || keep_directory_remote(&s, &id, &token)).await
     }
     /// Additive issue-center action advertised by
     /// `GetOverview.recovery_actions.abandon_upload`. It only retires a local
