@@ -147,7 +147,7 @@ G3 追加两个 JSON-string IPC：`GetDirectoryPermissions({path})` 返回 `{tas
 
 任务为进程内单槽、内存态（重启后 `available:false`，不持久化，不迁移 schema）；每 32 个文件及结束时执行一次 GC 并累计回收字节。取消只停止后续文件，已释放文件不回滚。GUI 以 250ms 轮询 GetReleaseJob 显示「正在释放 n/m」与已回收字节。
 
-GetOverview 与 GetCacheSettings 追加 additive 字段 `release_job`（`null` 或 `{job_id,total,done,reclaimed_bytes,finished,cancelled}`），`schema` 仍为 1，旧 GUI 忽略即可；未改 worker 帧协议，故 `version.ipc` 仍为 21、state_schema 仍为 28。旧 GUI 在旧后台（无新方法）上调用 Begin* 会得到方法错误并显示失败提示，不会误报成功。
+GetOverview 与 GetCacheSettings 追加 additive 字段 `release_job`（`null` 或 `{job_id,total,done,reclaimed_bytes,finished,cancelled}`），`schema` 仍为 1，旧 GUI 忽略即可；未改 worker 帧协议，故 `version.ipc` 仍为 21、state_schema 为 29。旧 GUI 在旧后台（无新方法）上调用 Begin* 会得到方法错误并显示失败提示，不会误报成功。
 
 ## C4 FUSE 集成点、TTL 与权限门禁
 
