@@ -379,6 +379,16 @@ impl Bridge {
     pub(crate) fn exclude_rules(&self) -> drive_core::exclude::ExcludeRules {
         self.exclusion_state().rules().clone()
     }
+    /// True when the scheduler must keep `node_id` out of upload, download and
+    /// cache passes. The FUSE read/write paths already answer ENOENT; this is
+    /// the defense in depth for work that was queued before the rules applied.
+    fn node_excluded(&self, node_id: &str) -> bool {
+        let state = self.exclusion_state();
+        if !state.is_active() {
+            return false;
+        }
+        state.current().node_excluded(node_id)
+    }
     /// Rebuild the exclusion index after the committed namespace changed.
     ///
     /// Called after every namespace swap (owner initialization, recovery
@@ -407,6 +417,49 @@ impl Bridge {
             // the next namespace swap rather than hiding every path.
             eprintln!("drive-native exclude: index refresh failed: {error}");
         }
+    }
+    /// Issue #50 (phase 4): hide the indexed excluded subtrees from the local
+    /// view before the mount becomes visible. Purging only touches local rows;
+    /// it never creates a remote delete journal entry. The caller has already
+    /// built the index from the committed namespace.
+    pub(crate) fn purge_excluded_from_store(&self) -> io::Result<()> {
+        let state = self.exclusion_state();
+        if !state.is_active() {
+            return Ok(());
+        }
+        let ids = state.current().excluded_node_ids();
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let _mutation = self.recovery_gate.write().unwrap();
+        let mut store = self.store.lock().unwrap();
+        let purged = store
+            .purge_excluded_nodes(&ids)
+            .map_err(io::Error::other)?;
+        if purged > 0 {
+            store.collect_garbage().map_err(io::Error::other)?;
+            drive_core::exclude::trace_hit("mount-cleanup");
+        }
+        Ok(())
+    }
+
+    /// Issue #50 (phase 4): after the rules are removed, unhide the rows a
+    /// previous purge hid so the mount shows the full namespace again.
+    pub(crate) fn restore_excluded_from_store(&self) -> io::Result<()> {
+        let state = self.exclusion_state();
+        if state.is_active() {
+            return Ok(());
+        }
+        let _mutation = self.recovery_gate.write().unwrap();
+        let mut store = self.store.lock().unwrap();
+        if store
+            .restore_excluded_nodes()
+            .map_err(io::Error::other)?
+            > 0
+        {
+            drive_core::exclude::trace_hit("mount-restore");
+        }
+        Ok(())
     }
     /// Above this many per-node invalidations one generation message is cheaper
     /// and bounded: a snapshot commit touches every node, and one message per
@@ -534,6 +587,7 @@ impl Bridge {
         let mut batch = batch;
         let event_count = batch.events.len();
         let rules = self.exclude_rules();
+        let exclusion_state = self.exclusion_state();
         let mut invalidations = Vec::new();
         let mut invalidated_inodes = Vec::new();
         let mut store = self.store.lock().unwrap();
@@ -601,12 +655,30 @@ impl Bridge {
                 }
             }
         }
+        let affects_index = if rules.is_empty() {
+            false
+        } else {
+            match store.native_scope_root() {
+                Ok(Some(root)) => drive_core::exclude::events_may_affect_index(
+                    &store,
+                    &root,
+                    &rules,
+                    &exclusion_state.current(),
+                    &batch.events,
+                ),
+                _ => true,
+            }
+        };
         drop(store);
         drop(receipt);
         // The committed namespace may have gained or lost excluded paths;
         // rebuild before publishing invalidations so the mount sees ENOENT for
-        // the same snapshot the invalidations describe.
-        self.refresh_exclusion();
+        // the same snapshot the invalidations describe. Skipped when the batch
+        // cannot change exclusion visibility: on a 210k-node namespace one
+        // projection costs ~550 ms (see exclude_index_build_bench).
+        if affects_index {
+            self.refresh_exclusion();
+        }
         self.initialization
             .pulled(true, event_count, changed_notification);
         for ino in invalidated_inodes {
@@ -681,6 +753,45 @@ impl Bridge {
         }
         let invalidations = {
             let mut store = self.store.lock().unwrap();
+            // Issue #50 phase 4 (R2): nodes hidden by the rules must not become
+            // recovery tombstones. The snapshot below deliberately omits them,
+            // and the install sweeps every committed id that is not in the
+            // snapshot into `deleted=1` (dirty content would flip to
+            // `conflict=1`). Purge them first so that sweep only re-confirms the
+            // local hide: no conflict is raised, no upload stays eligible and no
+            // remote delete is queued.
+            if !rules.is_empty() {
+                match store.native_scope_root() {
+                    Ok(Some(root)) => {
+                        match drive_core::exclude::ExclusionIndex::build(&store, &root, &rules) {
+                            Ok(index) => {
+                                let ids = index.excluded_node_ids();
+                                if !ids.is_empty() {
+                                    match store.purge_excluded_nodes(&ids) {
+                                        Ok(purged) if purged > 0 => {
+                                            let _ = store.collect_garbage();
+                                            drive_core::exclude::trace_hit(&format!(
+                                                "recovery snapshot purge ({purged} nodes)"
+                                            ));
+                                        }
+                                        Ok(_) => {}
+                                        Err(error) => eprintln!(
+                                            "drive-native exclude: recovery purge failed: {error}"
+                                        ),
+                                    }
+                                }
+                            }
+                            Err(error) => eprintln!(
+                                "drive-native exclude: recovery index build failed: {error}"
+                            ),
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        eprintln!("drive-native exclude: cannot read scope root for recovery: {error}");
+                    }
+                }
+            }
             let mut invalidations = store.snapshot_invalidations().map_err(io::Error::other)?;
             store
                 .install_native_snapshot(&snapshot, &cursor)
@@ -704,6 +815,11 @@ impl Bridge {
             Err(_) => return,
         };
         for ticket in tickets {
+            // Issue #50: an excluded path never becomes a cache download, even
+            // when a stale transfer intent survived the rule change.
+            if self.node_excluded(&ticket.id) {
+                continue;
+            }
             let now = unix_seconds();
             let node = {
                 let store = self.store.lock().unwrap();
@@ -1287,6 +1403,12 @@ impl drive_fs::Hydrator for Bridge {
         node: &Node,
         cancel: &drive_fs::ReadCancellation,
     ) -> Result<Arc<ReadHandle>, i32> {
+        // Issue #50: a defense-in-depth check; the FUSE open path already hides
+        // excluded inodes, but a stale handle must not start a download.
+        if self.node_excluded(&node.id) {
+            drive_core::exclude::trace_hit("download");
+            return Err(libc::ENOENT);
+        }
         self.ensure_cancellable(node, Some(cancel))?;
         let h = self
             .store
@@ -1300,6 +1422,10 @@ impl drive_fs::Hydrator for Bridge {
         Ok(Arc::new(h))
     }
     fn hydrate(&self, node: &Node) -> Result<Arc<ReadHandle>, i32> {
+        if self.node_excluded(&node.id) {
+            drive_core::exclude::trace_hit("download");
+            return Err(libc::ENOENT);
+        }
         self.ensure(node)?;
         let h = self
             .store
@@ -1692,6 +1818,13 @@ impl Bridge {
                 )
             };
             let permission_targets=drive_core::write_permissions::upload_targets(&job.node);
+            // Issue #50: an excluded path must never be uploaded. A stale
+            // pending operation is removed by the restart cleanup; skipping it
+            // here is the defense-in-depth guard for work queued before the
+            // rules applied.
+            if self.node_excluded(&job.node.id) {
+                continue;
+            }
             if !reconcile && drive_core::write_permissions::targets_denied(&self.store.lock().unwrap(),&permission_targets).map_err(io::Error::other)? {
                 blocked=Some("permission_denied".into());continue;
             }

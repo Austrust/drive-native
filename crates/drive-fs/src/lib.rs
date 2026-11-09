@@ -6,6 +6,8 @@
 mod cached_close_tests;
 #[cfg(test)]
 mod exclude_read_tests;
+#[cfg(test)]
+mod exclude_write_tests;
 pub mod diagnostics;
 mod directory;
 #[cfg(test)]
@@ -239,6 +241,22 @@ impl CacheFilesystem {
             .is_some_and(|index| index.entry_excluded(parent, name))
     }
 
+    /// True when a not-yet-created entry below `parent` matches the rules.
+    ///
+    /// The parent directory is mapped to its scope-relative path by the
+    /// exclusion index, so a name that does not exist in the namespace can
+    /// still be rejected before any local operation is recorded.
+    fn child_excluded(&self, parent: u64, name: &str, is_dir: bool) -> bool {
+        let Some(state) = self.exclusion.as_ref() else {
+            return false;
+        };
+        if !state.is_active() {
+            return false;
+        }
+        let index = state.current();
+        state.child_matches(&index, parent, name, is_dir) || index.inode_excluded(parent)
+    }
+
     /// Override the metadata TTL (0 disables caching). The default comes from
     /// `DRIVE_NATIVE_FS_TTL_MS` (1000 ms).
     pub fn with_metadata_ttl_ms(mut self, ttl_ms: u64) -> Self {
@@ -417,6 +435,14 @@ impl Filesystem for CacheFilesystem {
             reply.error(libc::EINVAL);
             return;
         };
+        // Issue #50: creating below an excluded directory or re-creating an
+        // excluded name must look like a missing path and never leave a local
+        // creation or upload operation behind.
+        if self.child_excluded(parent, &name, true) {
+            drive_core::exclude::trace_hit("mkdir");
+            reply.error(libc::ENOENT);
+            return;
+        }
         let store = self.store.clone();
         let hydrator = self.hydrator.clone();
         let notify = self.notify.clone();
@@ -475,9 +501,25 @@ impl Filesystem for CacheFilesystem {
     }
 
     fn unlink(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEmpty) {
+        // Issue #50: removing an excluded entry is a missing path, not a local
+        // tombstone that would later become an upload.
+        if name.to_str().is_some_and(|name| self.entry_excluded(parent, name))
+            || self.inode_excluded(parent)
+        {
+            drive_core::exclude::trace_hit("unlink");
+            reply.error(libc::ENOENT);
+            return;
+        }
         namespace::remove(self, parent, name, false, reply)
     }
     fn rmdir(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEmpty) {
+        if name.to_str().is_some_and(|name| self.entry_excluded(parent, name))
+            || self.inode_excluded(parent)
+        {
+            drive_core::exclude::trace_hit("rmdir");
+            reply.error(libc::ENOENT);
+            return;
+        }
         namespace::remove(self, parent, name, true, reply)
     }
     fn rename(
@@ -490,6 +532,22 @@ impl Filesystem for CacheFilesystem {
         flags: u32,
         reply: ReplyEmpty,
     ) {
+        // Issue #50: both the excluded source and the excluded target behave
+        // like missing paths so no local rename operation is queued. The target
+        // name does not exist yet, so the full relative path is matched.
+        let source_excluded = name
+            .to_str()
+            .is_some_and(|name| self.entry_excluded(parent, name))
+            || self.inode_excluded(parent);
+        let target_excluded = newname.to_str().is_some_and(|name| {
+            self.child_excluded(newparent, name, true)
+                || self.child_excluded(newparent, name, false)
+        });
+        if source_excluded || target_excluded {
+            drive_core::exclude::trace_hit("rename");
+            reply.error(libc::ENOENT);
+            return;
+        }
         namespace::rename(self, parent, name, newparent, newname, flags, reply)
     }
 
@@ -517,6 +575,16 @@ impl Filesystem for CacheFilesystem {
         flags: i32,
         reply: fuser::ReplyCreate,
     ) {
+        // Issue #50: an excluded target or excluded parent directory answers
+        // ENOENT before any local creation is recorded.
+        if name
+            .to_str()
+            .is_some_and(|name| self.child_excluded(parent, name, false))
+        {
+            drive_core::exclude::trace_hit("create");
+            reply.error(libc::ENOENT);
+            return;
+        }
         writable::create(self, parent, name, mode, umask, flags, reply)
     }
     fn lookup(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEntry) {
@@ -825,6 +893,13 @@ impl Filesystem for CacheFilesystem {
         _lock_owner: Option<u64>,
         reply: fuser::ReplyWrite,
     ) {
+        // Issue #50: writes to an excluded inode are ENOENT and never promote a
+        // handle into a draft upload operation.
+        if self.inode_excluded(ino) {
+            drive_core::exclude::trace_hit("write");
+            reply.error(libc::ENOENT);
+            return;
+        }
         writable::write(self, ino, fh, offset, data, reply)
     }
     fn fsync(&mut self, _req: &Request<'_>, ino: u64, fh: u64, _datasync: bool, reply: ReplyEmpty) {
@@ -858,6 +933,13 @@ impl Filesystem for CacheFilesystem {
         flags: Option<u32>,
         reply: ReplyAttr,
     ) {
+        // Issue #50: metadata/size changes on an excluded inode are missing-path
+        // errors and must not create dirty drafts or upload operations.
+        if self.inode_excluded(ino) {
+            drive_core::exclude::trace_hit("setattr");
+            reply.error(libc::ENOENT);
+            return;
+        }
         writable::setattr(
             self, ino, mode, uid, gid, size, atime, mtime, ctime, fh, crtime, chgtime, bkuptime,
             flags, reply,

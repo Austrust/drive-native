@@ -357,3 +357,117 @@ fn empty_rules_never_drop_events_or_snapshot_nodes() {
     );
     assert_eq!(nodes.len(), 2);
 }
+
+#[test]
+fn event_gate_skips_batches_that_cannot_change_exclusions() {
+    let fixture = fixture();
+    let store = &fixture.store;
+    insert_node(store, "100", None, "Lab", true);
+    insert_node(store, "101", Some("100"), "A.txt", false);
+    insert_node(store, "110", Some("100"), "src", true);
+    allocate_inodes(store, "100");
+    let rules = rules(&[r"(^|/)node_modules/"]);
+    let index = ExclusionIndex::build(store, "100", &rules).expect("index");
+    let events = vec![
+        upsert("101", Some("100"), "A.txt", false),
+        upsert("110", Some("100"), "src", true),
+    ];
+
+    assert!(!events_may_affect_index(
+        store, "100", &rules, &index, &events
+    ));
+}
+
+#[test]
+fn event_gate_detects_excluded_paths_and_indexed_nodes() {
+    let fixture = fixture();
+    let store = &fixture.store;
+    insert_node(store, "100", None, "Lab", true);
+    insert_node(store, "200", Some("100"), "Pinned", true);
+    insert_node(store, "201", Some("200"), "keep.txt", false);
+    allocate_inodes(store, "100");
+    let rules = rules(&[r"^Pinned$"]);
+    let index = ExclusionIndex::build(store, "100", &rules).expect("index");
+    assert!(index.parent_has_excluded_children("100"));
+
+    // A delete of a node that is currently indexed changes the index.
+    assert!(events_may_affect_index(
+        store,
+        "100",
+        &rules,
+        &index,
+        &[delete("200")],
+    ));
+    // An event whose resolved path matches the rules changes the index too.
+    assert!(events_may_affect_index(
+        store,
+        "100",
+        &rules,
+        &index,
+        &[upsert("201", Some("200"), "keep.txt", false)],
+    ));
+}
+
+#[test]
+fn event_gate_detects_renames_of_directories_with_excluded_children() {
+    let fixture = fixture();
+    let store = &fixture.store;
+    insert_node(store, "100", None, "Lab", true);
+    insert_node(store, "110", Some("100"), "src", true);
+    insert_node(store, "111", Some("110"), "node_modules", true);
+    insert_node(store, "112", Some("111"), "x.js", false);
+    allocate_inodes(store, "100");
+    let rules = rules(&[r"(^|/)node_modules/"]);
+    let index = ExclusionIndex::build(store, "100", &rules).expect("index");
+    assert!(index.parent_has_excluded_children("110"));
+
+    // Renaming "src" changes the relative paths of its excluded children even
+    // though "src" itself does not match the rules.
+    assert!(events_may_affect_index(
+        store,
+        "100",
+        &rules,
+        &index,
+        &[upsert("110", Some("100"), "renamed", true)],
+    ));
+}
+
+#[test]
+fn event_gate_is_conservative_for_unresolvable_events() {
+    let fixture = fixture();
+    let store = &fixture.store;
+    insert_node(store, "100", None, "Lab", true);
+    allocate_inodes(store, "100");
+    let rules = rules(&[r"\.iso$"]);
+    let index = ExclusionIndex::build(store, "100", &rules).expect("index");
+
+    assert!(events_may_affect_index(
+        store,
+        "100",
+        &rules,
+        &index,
+        &[upsert("999", Some("missing-parent"), "x.iso", false)],
+    ));
+}
+
+#[test]
+fn empty_rules_or_events_never_affect_the_index() {
+    let fixture = fixture();
+    let store = &fixture.store;
+    insert_node(store, "100", None, "Lab", true);
+    allocate_inodes(store, "100");
+    let index = ExclusionIndex::default();
+    let events = vec![upsert("101", Some("100"), "x.iso", false)];
+    let empty = ExcludeRules::default();
+
+    assert!(!events_may_affect_index(
+        store, "100", &empty, &index, &events
+    ));
+    assert!(!events_may_affect_index(
+        store,
+        "100",
+        &rules(&[r"\.iso$"]),
+        &index,
+        &[],
+    ));
+}

@@ -406,6 +406,18 @@ pub(crate) fn retire_creation_tx(
         u32::try_from(attempts).unwrap_or(u32::MAX),
         reason,
     )?;
+    // Issue #50 phase 4 (R5): every upload operation superseded above may still
+    // have staging rows in `upload_paths`/`upload_origins`. A superseded upload
+    // is never replayed, so keep no orphaned staging metadata behind; this also
+    // covers the pending upload that used to survive the tombstone.
+    tx.execute(
+        "DELETE FROM upload_paths WHERE operation IN (SELECT id FROM operations WHERE node=?1 AND kind='upload' AND state='superseded')",
+        [node],
+    )?;
+    tx.execute(
+        "DELETE FROM upload_origins WHERE operation IN (SELECT id FROM operations WHERE node=?1 AND kind='upload' AND state='superseded')",
+        [node],
+    )?;
     tx.execute("DELETE FROM local_creations WHERE node=?1", [node])?;
     tx.execute("UPDATE namespace_ops SET state='superseded' WHERE node=?1 AND kind='remove' AND state IN ('pending','cleanup_pending','uncertain','cleanup_uncertain')", [node])?;
     tx.execute("DELETE FROM namespace_overlay WHERE node=?1", [node])?;
@@ -631,3 +643,7 @@ mod upload_remove_scope_tests {
 #[cfg(test)]
 #[path = "removals_barrier_tests.rs"]
 mod barrier_tests;
+
+#[cfg(test)]
+#[path = "removals_retire_tests.rs"]
+mod retire_tests;

@@ -37,15 +37,18 @@
 
 ## 索引构建时机
 
-- 挂载前在 store 锁内一次性读取 `nodes ⋈ fs_inodes` 投影，释放锁后再做正则匹配；FUSE 读路径只按 inode/目录项查预计算索引，不取 store 锁。
-- 索引在以下时机重建：挂载启动时；初始化 owner 完成命名空间安装后；`Pull` 事件应用后；断连恢复快照（`recovery snapshot`）安装后。
+- 挂载前在调用方 Store 锁内一次性读取 `nodes ⋈ fs_inodes` 投影；正则匹配在该投影读出后、本模块内执行，不额外获取锁（调用方传锁边界见 `ExclusionState::refresh_shared`）。FUSE 读路径只按 inode/目录项查预计算索引，不取 store 锁。
+- 索引在以下时机重建：挂载启动时；初始化 owner 完成命名空间安装后；断连恢复快照（`recovery snapshot`）安装后；`Pull` 事件应用后仅在 `events_may_affect_index` 判定本批事件可能改变排除集合时重建。正常批次中被排除的事件已在应用前丢弃，因此通常不会触发重建，避免 210k 命名空间每次 Pull 都做约 550 ms 的全量投影（基准见 `crates/drive-core/tests/exclude_index_build_bench.rs`，以 `--ignored` 显式运行）。
 - 初始化 preview 阶段（committed root 尚未出现、只能挂载 preview 根）例外：此时排除索引为空，不读取 committed 命名空间；初始化完成或恢复快照安装后由上述 bridge 刷新路径建立索引。
 - 因此「挂载时 store 为空、初始化随后才导入」的场景仍然正确：被排除路径在索引刷新后保持不可见；相应的 mounted 回归测试会显式验证这一点。
 - 事件过滤在同一批事件内解析父子链：父目录事件被丢弃时，其子节点的 Upsert/Delete 也一并丢弃；批内顺序不影响结果。
 
-## 生效方式、GUI 与 total 语义
+## 写路径、调度防御与规则变更清理（阶段 4）
 
-- 规则变更需要停止并重新启动该挂载才能完全生效（初始化候选与读路径索引都会按新规则重建；已有视图的存量清理属于阶段 4）。
-- GUI 目前没有单独的排除规则编辑页（阶段 4 补充）；保存 profile 时若含 `exclude_patterns`，会先用 Python `re` 做与 worker 等价的合法性校验，非法规则拒绝保存并在窗口内提示 pattern 与错误原因。
-- `GetDirectory` 返回的 `total` 仍是权威子节点计数：初始化导入与事件入口已剪枝后通常一致；规则变更后、阶段 4 清理前，历史遗留的被排除节点可能仍计入 `total`，但不会出现在 `entries` 中。
+- 写路径：`create`/`mkdir` 的目标名、`rename` 的源与目标、`unlink`/`rmdir`、`write`/`setattr`、`open` 命中排除路径或排除子树时返回 `ENOENT`，且不写入本地节点、不产生上传或命名空间 operation。判定使用索引里父目录的 scope 相对路径加目标名称，因此尚不存在的新名字也能被规则命中。
+- 调度入口防御：缓存下载候选（`refresh_cached`/hydrate）、上传 pending、命名空间 rename/remove/replace/mkdir 队列遇到被排除节点时跳过，不发送任何 RPC。
+- 规则变更清理在启动挂载时执行：把规则排除的已导入节点在本地标记为隐藏（与远端删除的本地视图语义相同），取消其上传/下载/草稿/本地创建/命名空间 operation，清掉 dirty 与缓存正文引用并让 `collect_garbage` 回收 blob；节点行本身保留，被排除的 id 记录在 `excluded_purged` metadata 中。**绝不**写入远端删除：测试断言 remove 队列为空、没有 `remove` namespace_ops，冲突节点也保留本地副本不清理。
+- 恢复快照安装前会先按规则清理被排除节点，避免「快照未包含该节点 → 被当成 recovery tombstone/conflict」；隐藏节点保持隐藏，兄弟节点正常更新。
+- 移除规则后重启：`restore_excluded_nodes` 恢复此前隐藏的节点行，但已回收的正文需按需重新下载。
+- 规则变更必须停止并重新启动该挂载才能完全生效；清理后 `GetDirectory` 的 `total` 与 `entries` 一致。GUI 目前没有单独的排除规则编辑页（由其他任务跟踪）；保存 profile 时若含 `exclude_patterns`，会先用 Python `re` 做与 worker 等价的合法性校验，非法规则拒绝保存并在窗口内提示 pattern 与错误原因。
 - 旧 profile 不含该字段时仍可正常读取、保存和挂载。

@@ -815,6 +815,38 @@ impl Service {
                 Err(_) => return Err(io::Error::other("cached root cannot be loaded")),
             }
         }
+        // Issue #50 (phase 4): reconcile the committed namespace with the active
+        // exclusion rules before the mount becomes visible, so the FUSE inode
+        // map is backfilled from the reconciled namespace. With rules, excluded
+        // subtrees are hidden and their local cache/scheduling state is dropped
+        // (never a remote delete); without rules, rows hidden by a previous rule
+        // set come back. Preview mounts have no committed rows yet.
+        let exclusion = self.bridge.exclusion_state();
+        if committed_root {
+            {
+                let store = self.bridge.store.lock().unwrap();
+                refresh_exclusion_before_mount(
+                    &exclusion,
+                    &store,
+                    &self.profile.scope.file_id,
+                    true,
+                )?;
+            }
+            if exclusion.is_active() {
+                self.bridge.purge_excluded_from_store()?;
+                // The purge changed the committed namespace; rebuild before the
+                // mount and the inode backfill observe it.
+                let store = self.bridge.store.lock().unwrap();
+                refresh_exclusion_before_mount(
+                    &exclusion,
+                    &store,
+                    &self.profile.scope.file_id,
+                    true,
+                )?;
+            } else {
+                self.bridge.restore_excluded_from_store()?;
+            }
+        }
         // One hub owns the publication gate and invalidation delivery for both
         // the FUSE replies and the runtime's state-change notifications.
         let notify = drive_fs::NotifyHub::from_env();
@@ -860,22 +892,9 @@ impl Service {
         if writable {
             fs = fs.with_writes_enabled();
         }
-        // Build the exclusion index from the committed namespace before the
-        // mount is visible. Empty rules keep this a no-op. Later namespace
-        // swaps rebuild it from the bridge (pull, recovery snapshot, owner
-        // initialization), so this initial build only covers pre-existing data.
-        // Preview-phase mounts skip it: their root is not committed yet and the
-        // bridge refresh path builds the index once the namespace is installed.
-        let exclusion = self.bridge.exclusion_state();
-        {
-            let store = self.bridge.store.lock().unwrap();
-            refresh_exclusion_before_mount(
-                &exclusion,
-                &store,
-                &self.profile.scope.file_id,
-                committed_root,
-            )?;
-        }
+        // The exclusion index was built (and rebuilt after the phase-4 purge)
+        // above, before the FUSE inode map was backfilled; later namespace swaps
+        // rebuild it from the bridge.
         let session = fuser::spawn_mount2(
             fs,
             &self.profile.mount,

@@ -1,6 +1,6 @@
-# 未发布：issue #50 按任务正则排除（阶段 1–3）
+# 未发布：issue #50 按任务正则排除（阶段 1–4）
 
-profile 新增可选 `exclude_patterns`：初始化导入对匹配路径整棵子树剪枝、FUSE 读路径对排除路径返回 ENOENT 且 readdir 不显示、远端事件与恢复快照过滤、GetDirectory/GetStates 列表过滤；索引随挂载、初始化完成与快照安装刷新。非法正则拒绝并报出 pattern 与编译错误，GUI 保存时做同样校验；详见 [EXCLUDE_PATTERNS.md](EXCLUDE_PATTERNS.md)。
+profile 新增可选 `exclude_patterns`：初始化导入对匹配路径整棵子树剪枝、FUSE 读/写路径对排除路径返回 ENOENT 且 readdir 不显示、远端事件与恢复快照过滤、GetDirectory/GetStates 列表过滤；规则生效时把已导入/已缓存的排除子树在本地隐藏并回收正文（复用 #19 GC，绝不向远端提交删除），移除规则后重启可恢复本地视图。索引随挂载、初始化完成与快照安装刷新，Pull 仅在事件可能影响排除集合时重建。非法正则拒绝并报出 pattern 与编译错误，GUI 保存时做同样校验；详见 [EXCLUDE_PATTERNS.md](EXCLUDE_PATTERNS.md)。
 
 # 0.1.0~dev20261109.2：上传终态处理、缓存释放与 schema v29（候选）
 
@@ -14,7 +14,7 @@ profile 新增可选 `exclude_patterns`：初始化导入对匹配路径整棵�
 - **#6**：已绑定目录在快照安装、mkdir/rename 确认成功后自动清除残留的 conflict 标志；真实冲突（远端删除、本地脏内容、未终态操作等）保留，规则见 [STALE_CONFLICTS.md](STALE_CONFLICTS.md)。
 - **#9 TB1**：schema v29 只追加 `outcome`/诊断列、`schema_migrations`/`recovery_runs`/`platform_state_changes` 表与 `commit_diagnostics` 视图，并对历史 uncertain/inflight 行做幂等回填；本批只建抽象，不改变提交行为。
 - **#2 2a**：托盘不可用或 showMessage 失败时，通过 freedesktop D-Bus 发送系统通知；jeepney/会话总线缺失时安静降级，不影响主流程。
-- **#50 P1/P2**：profile 新增可选 `exclude_patterns`，初始化导入对匹配路径整棵子树剪枝，非法正则拒绝并报出 pattern 与编译错误，GUI 保存时做同样校验；详见 [EXCLUDE_PATTERNS.md](EXCLUDE_PATTERNS.md)。FUSE 视图过滤与存量清理属 P3/P4；本分支已含 P3（见顶部未发布段），P4 待做。
+- **#50 P1/P2**：profile 新增可选 `exclude_patterns`，初始化导入对匹配路径整棵子树剪枝，非法正则拒绝并报出 pattern 与编译错误，GUI 保存时做同样校验；详见 [EXCLUDE_PATTERNS.md](EXCLUDE_PATTERNS.md)。本分支已含 P3（读路径/事件/列表过滤）与 P4（写路径与调度防御、规则变更本地清理），见顶部未发布段。
 
 验证状态：本批候选树为 `integration/fixes3`（HEAD 以 final-validate 日志首行为准）；正式计数、48 路与性能结论待 final-validate 完成后回填，本文不宣称最终验收通过。发布前必修的 task-21（abandoned 残留 pending op）须并入冻结树后再发布。
 
