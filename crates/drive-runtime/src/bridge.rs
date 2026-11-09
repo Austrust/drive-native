@@ -3,7 +3,7 @@ use crate::{rpc::Rpc, wire::*};
 #[cfg(test)]
 use drive_core::Store;
 use drive_core::download_jobs::DownloadFailureKind;
-use drive_core::{Change, DownloadTicket, Node, ReadHandle};
+use drive_core::{Change, CommitCategory, DownloadTicket, Node, ReadHandle};
 use std::{
     collections::HashMap,
     io,
@@ -1823,10 +1823,20 @@ impl Bridge {
                     Response::Created { node, remote } => {
                         if let Err(e) = s.validate_upload_mtime(&op, &node) {
                             if !reconcile {
-                                s.mark_upload_uncertain(&op).map_err(io::Error::other)?;
+                                s.mark_upload_uncertain_diagnosed(
+                                    &op,
+                                    CommitCategory::Protocol,
+                                    Some("server confirmation failed local mtime validation"),
+                                )
+                                .map_err(io::Error::other)?;
                             } else {
-                                s.note_upload_reconcile_attempt(&op, unix_seconds() as i64)
-                                    .map_err(io::Error::other)?;
+                                s.note_upload_reconcile_attempt_diagnosed(
+                                    &op,
+                                    unix_seconds() as i64,
+                                    CommitCategory::Protocol,
+                                    Some("reconcile confirmation failed local mtime validation"),
+                                )
+                                .map_err(io::Error::other)?;
                             }
                             return Err(io::Error::other(e));
                         }
@@ -1838,10 +1848,20 @@ impl Bridge {
                     Response::Committed { node } => {
                         if let Err(e) = s.validate_upload_mtime(&op, &node) {
                             if !reconcile {
-                                s.mark_upload_uncertain(&op).map_err(io::Error::other)?;
+                                s.mark_upload_uncertain_diagnosed(
+                                    &op,
+                                    CommitCategory::Protocol,
+                                    Some("server confirmation failed local mtime validation"),
+                                )
+                                .map_err(io::Error::other)?;
                             } else {
-                                s.note_upload_reconcile_attempt(&op, unix_seconds() as i64)
-                                    .map_err(io::Error::other)?;
+                                s.note_upload_reconcile_attempt_diagnosed(
+                                    &op,
+                                    unix_seconds() as i64,
+                                    CommitCategory::Protocol,
+                                    Some("reconcile confirmation failed local mtime validation"),
+                                )
+                                .map_err(io::Error::other)?;
                             }
                             return Err(io::Error::other(e));
                         }
@@ -1858,8 +1878,13 @@ impl Bridge {
                             // The server still has not acted. A read-only
                             // reconciliation spends one bounded attempt and
                             // writes no denial or ACL evidence.
-                            s.note_upload_reconcile_attempt(&op, unix_seconds() as i64)
-                                .map_err(io::Error::other)?;
+                            s.note_upload_reconcile_attempt_diagnosed(
+                                &op,
+                                unix_seconds() as i64,
+                                CommitCategory::PermissionUncertain,
+                                Some("server denied the mutation while reconciling; commit not observed"),
+                            )
+                            .map_err(io::Error::other)?;
                             if s.is_locally_deleted(&node).map_err(io::Error::other)? {
                                 s.retire_unconfirmed_creation(&op).map_err(io::Error::other)?;
                             }
@@ -1870,8 +1895,13 @@ impl Bridge {
                             drive_core::write_permissions::mutation_permission_uncertain(&s,&op,false,code).map_err(io::Error::other)?;
                             blocked=Some("permission_commit_uncertain".into());
                         } else {
-                            s.note_upload_reconcile_attempt(&op, unix_seconds() as i64)
-                                .map_err(io::Error::other)?;
+                            s.note_upload_reconcile_attempt_diagnosed(
+                                &op,
+                                unix_seconds() as i64,
+                                CommitCategory::PermissionUncertain,
+                                Some("permission response during reconcile; commit unconfirmed"),
+                            )
+                            .map_err(io::Error::other)?;
                             if s.is_locally_deleted(&node_id).map_err(io::Error::other)? {
                                 s.retire_unconfirmed_creation(&op).map_err(io::Error::other)?;
                             }
@@ -1888,8 +1918,13 @@ impl Bridge {
                             // attempt and retire the intent instead of
                             // parking the operation behind a conflict that
                             // can never be resolved.
-                            s.note_upload_reconcile_attempt(&op, unix_seconds() as i64)
-                                .map_err(io::Error::other)?;
+                            s.note_upload_reconcile_attempt_diagnosed(
+                                &op,
+                                unix_seconds() as i64,
+                                CommitCategory::ServerRejected,
+                                Some("conflict during reconcile; local creation already deleted"),
+                            )
+                            .map_err(io::Error::other)?;
                             s.retire_unconfirmed_creation(&op).map_err(io::Error::other)?;
                         } else {
                             s.conflict_upload(&op).map_err(io::Error::other)?;
@@ -1897,15 +1932,25 @@ impl Bridge {
                     }
                     _ => {
                         if !reconcile {
-                            s.mark_upload_uncertain(&op).map_err(io::Error::other)?;
+                            s.mark_upload_uncertain_diagnosed(
+                                &op,
+                                CommitCategory::Protocol,
+                                Some("server returned an unexpected reply; commit unconfirmed"),
+                            )
+                            .map_err(io::Error::other)?;
                         } else {
                             // The server replied, but not with a confirmation.
                             // This is still an unconfirmed observation, so it
                             // spends one bounded attempt and never fabricates
                             // a terminal state. A locally deleted creation is
                             // retired instead of waiting for more replies.
-                            s.note_upload_reconcile_attempt(&op, unix_seconds() as i64)
-                                .map_err(io::Error::other)?;
+                            s.note_upload_reconcile_attempt_diagnosed(
+                                &op,
+                                unix_seconds() as i64,
+                                CommitCategory::Protocol,
+                                Some("server returned an unexpected reply during reconcile"),
+                            )
+                            .map_err(io::Error::other)?;
                             if s
                                 .is_locally_deleted(&node_id)
                                 .map_err(io::Error::other)?
@@ -1916,14 +1961,34 @@ impl Bridge {
                     }
                 },
                 Err(error) => {
+                    let message = format!("upload commit unknown: {error}");
                     if !reconcile {
-                        s.mark_upload_uncertain(&op).map_err(io::Error::other)?;
+                        s.mark_upload_uncertain_diagnosed(
+                            &op,
+                            CommitCategory::Transport,
+                            Some(&message),
+                        )
+                        .map_err(io::Error::other)?;
                     } else if !transient_reconcile_error(&error) {
                         // Transport loss does not spend the visible retry
                         // budget; reconnect recovery keeps the original
-                        // bounded allowance intact.
-                        s.note_upload_reconcile_attempt(&op, unix_seconds() as i64)
-                            .map_err(io::Error::other)?;
+                        // bounded allowance intact. The reason is still
+                        // persisted so the queue is never unexplained.
+                        s.note_upload_reconcile_attempt_diagnosed(
+                            &op,
+                            unix_seconds() as i64,
+                            CommitCategory::Transport,
+                            Some(&message),
+                        )
+                        .map_err(io::Error::other)?;
+                    } else {
+                        s.record_upload_commit_diagnostic(
+                            &op,
+                            CommitCategory::Transport,
+                            Some("transport lost during reconcile; waiting for reconnect"),
+                            0,
+                        )
+                        .map_err(io::Error::other)?;
                     }
                     return Err(io::Error::other("commit unknown; reconciliation required"));
                 }

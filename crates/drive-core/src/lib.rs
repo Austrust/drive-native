@@ -7,6 +7,7 @@
 pub mod backend;
 pub mod commit_outcome;
 pub use commit_outcome::*;
+pub mod commit_diagnostics;
 pub mod filesystem;
 #[cfg(feature = "native")]
 pub mod native;
