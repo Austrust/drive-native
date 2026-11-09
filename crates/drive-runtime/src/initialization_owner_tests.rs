@@ -2222,6 +2222,22 @@ fn initialization_counter(snapshot: &crate::initialization::Snapshot, counter: C
         .map_or(0, |(_, count)| *count)
 }
 
+fn latency_stats(mut millis: Vec<u128>) -> (u128, u128, u128) {
+    assert!(!millis.is_empty());
+    millis.sort_unstable();
+    let rank = |percent: usize| {
+        let index = (millis.len() * percent + 99) / 100;
+        millis[index - 1]
+    };
+    (rank(50), rank(95), *millis.last().unwrap())
+}
+
+fn system_load() -> String {
+    std::fs::read_to_string("/proc/loadavg")
+        .map(|load| load.trim().to_string())
+        .unwrap_or_else(|_| "unknown".into())
+}
+
 #[test]
 fn initialization_keeps_browsing_and_status_reads_responsive_under_concurrent_queries() {
     let directory = tempfile::tempdir().unwrap();
@@ -2286,8 +2302,9 @@ fn initialization_keeps_browsing_and_status_reads_responsive_under_concurrent_qu
     let before = service.bridge.initialization.snapshot();
     assert!(before.active);
     assert!(before.units > 0 && before.items > 0);
-    // (elapsed, active before, active after, directory commits before, after)
-    let records: Mutex<Vec<(Duration, bool, bool, u64, u64)>> = Mutex::new(Vec::new());
+    let load_start = system_load();
+    // (kind, elapsed, active before, active after, directory commits before, after)
+    let records: Mutex<Vec<(usize, Duration, bool, bool, u64, u64)>> = Mutex::new(Vec::new());
     std::thread::scope(|scope| {
         for _ in 0..LATENCY_THREADS {
             scope.spawn(|| {
@@ -2351,6 +2368,7 @@ fn initialization_keeps_browsing_and_status_reads_responsive_under_concurrent_qu
                         }
                     }
                     local.push((
+                        kind,
                         elapsed,
                         snapshot_before.active,
                         snapshot_after.active,
@@ -2363,21 +2381,22 @@ fn initialization_keeps_browsing_and_status_reads_responsive_under_concurrent_qu
         }
     });
     let after = service.bridge.initialization.snapshot();
+    let load_end = system_load();
     let records = records.into_inner().unwrap();
     assert_eq!(records.len(), LATENCY_QUERIES);
     let active_throughout = records
         .iter()
-        .all(|(_, before_active, after_active, ..)| *before_active && *after_active);
+        .all(|(_, _, before_active, after_active, ..)| *before_active && *after_active);
     assert!(active_throughout, "a query ran outside the live import window");
     let overlapping = records
         .iter()
-        .filter(|(_, _, _, commits_before, commits_after)| commits_after > commits_before)
+        .filter(|(_, _, _, _, commits_before, commits_after)| commits_after > commits_before)
         .count();
-    let mut millis: Vec<u128> = records.iter().map(|(elapsed, ..)| elapsed.as_millis()).collect();
-    millis.sort_unstable();
-    let rank = (millis.len() * 95 + 99) / 100;
-    let p95 = millis[rank - 1];
-    let max = *millis.last().unwrap();
+    let millis: Vec<u128> = records
+        .iter()
+        .map(|(_, elapsed, ..)| elapsed.as_millis())
+        .collect();
+    let (p50, p95, max) = latency_stats(millis);
     let committed_before = initialization_counter(&before, Counter::DirectoryCommitted);
     let committed_after = initialization_counter(&after, Counter::DirectoryCommitted);
     assert!(after.active, "the import finished while the queries were running");
@@ -2427,11 +2446,33 @@ fn initialization_keeps_browsing_and_status_reads_responsive_under_concurrent_qu
         max < 5_000,
         "a desktop query blocked for {max}ms during initialization"
     );
+    for (kind, call) in [
+        "GetDirectory",
+        "GetStates",
+        "GetOverview",
+        "GetInitialization",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let kind_millis: Vec<u128> = records
+            .iter()
+            .filter(|(record_kind, ..)| *record_kind == kind)
+            .map(|(_, elapsed, ..)| elapsed.as_millis())
+            .collect();
+        let count = kind_millis.len();
+        let (kind_p50, kind_p95, kind_max) = latency_stats(kind_millis);
+        println!(
+            "#8 INIT-QUERIES-KIND call={call} count={count} p50_ms={kind_p50} \
+             p95_ms={kind_p95} max_ms={kind_max}"
+        );
+    }
     println!(
-        "#8 INIT-QUERIES total={} threads={} p95_ms={p95} max_ms={max} \
+        "#8 INIT-QUERIES total={} threads={} p50_ms={p50} p95_ms={p95} max_ms={max} \
          import_ms={import_ms} directories={} nodes={} items_before={} items_after={} \
          directory_commits_delta={} overlapping_queries={overlapping} \
-         active_throughout={active_throughout}",
+         active_throughout={active_throughout} loadavg_start=\"{load_start}\" \
+         loadavg_end=\"{load_end}\"",
         records.len(),
         LATENCY_THREADS,
         LATENCY_IMPORT_DIRECTORIES,
