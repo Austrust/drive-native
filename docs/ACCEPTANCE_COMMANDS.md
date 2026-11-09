@@ -1,11 +1,11 @@
-# 性能 issue 验收命令（P032 / issue #34）
+# 验收命令（P032 / integration/fixes3 批次）
 
-本页是性能复核 issue [#1](https://github.com/Austrust/drive-native/issues/1)–[#14](https://github.com/Austrust/drive-native/issues/14) 的可复制验收命令。命令以最终合并树 `integration/fixes2`（`work/integ2/src`）为准。最终验收的验证代码树 = `integration/fixes2` @ `9cb6b1c`（clean checkout；`docs merge 7fd7f2f` 仅文档，不改变代码/二进制），`final-<tag>.log` 首行记录该真实 HEAD。重负载必须在远端 Linux 构建机执行，不要在 WSL 或开发机跑长基准。
+本页是性能复核 issue [#1](https://github.com/Austrust/drive-native/issues/1)–[#14](https://github.com/Austrust/drive-native/issues/14) 与本批修复（#6/#8/#9 TB1/#14/#18/#19/#2 2a/#50 P1-P2/#53）的可复制验收命令。命令以最终合并树 `integration/fixes3`（`work/integ3/src`）为准；最终验收的验证代码树 = `integration/fixes3` 冻结 HEAD（`final-<tag>.log` 首行记录该真实 HEAD；本页编写时的复核树为 `aa36099`，task-21 修复并入后重冻结）。重负载必须在远端 Linux 构建机执行，不要在 WSL 或开发机跑长基准。
 
 ## 共同前提
 
 ```sh
-cd work/integ2/src
+cd work/integ3/src
 export CARGO_TARGET_DIR=/tmp/p032-targets/t0
 # 重负载与计时类测试加 flock，避免与其它 agent 的构建/基准互相干扰：
 #   flock ~/p032/test.lock cargo test ...
@@ -15,7 +15,7 @@ export CARGO_TARGET_DIR=/tmp/p032-targets/t0
 - 内核测试（`--test mounted`、`permissions_kernel` 等）需要普通 Linux 用户 + `/dev/fuse`；WSL/容器不满足。FUSE 测试二进制之间并行执行会用错误的 OnceLock 顺序初始化 `DRIVE_NATIVE_FS_DIAGNOSTICS` 采样，必须逐二进制串行并显式传 `DRIVE_NATIVE_FS_DIAGNOSTICS=1`（最终验收脚本已按 `--test-threads=1` 执行；测试隔离 follow-up 见 #24）。
 - GUI 测试要求 `GUI_PYTHON` 指向锁定 venv 的 python：`GUI_PYTHON=$HOME/dn/.venv-build/bin/python bash scripts/test-gui.sh`。
 - `status_latency_210k` / `namespace_index_budget` / `scale_perf*` 在测试内自建合成夹具，无需外部 fixture 路径；需要数 GiB 临时盘与 `/dev/fuse`（210k 用例）；`LAT_CURVE_DIRS` / `LAT_CURVE_WARM_ITERS` 可控制规模曲线。
-- 当前合入状态（2026-11-09）：性能修复 `#21–#33` 的代码提交已全部合入 `integration/fixes2`（含 `#26/#28/#29/#31/#32/#33`；#26/#28 的 verifier 收尾不影响代码树）；`#11/#12` 的 fix 分支分别以 `#31/#32` 身份落地。最终计数以最终验收日志的 SUMMARY 为准，本文件命令可直接在冻结树执行（验证树内容见本页开头）。
+- 当前合入状态（2026-11-09）：性能修复 `#21–#33` 已合入 `integration/fixes2`；本批 `#14/#19/#18/#53/#8/#6/#2 2a/#50 P1-P2/#9 TB1` 已合入 `integration/fixes3`（`22ba761` 之后，105 files +6388/−165，HEAD 复核于 `aa36099`）。task-21（abandoned 残留 pending op）为发布前必修，修复并入后重冻结。最终计数以最终验收日志的 SUMMARY 为准，本文件命令可直接在冻结树执行（验证树内容见本页开头）。
 
 ## 按 issue
 
@@ -127,6 +127,61 @@ export CARGO_TARGET_DIR=/tmp/p032-targets/t0
     cargo test -p drive-core --all-features --locked --test schema_v29
     ```
     重点断言：v28 真实结构（operations/namespace_ops/transfers 的 pending/inflight/uncertain/committed 行）升级到 29 后 outcome/outcome_category/last_error/next_retry_at 回填正确、生成 `state-before-v29-*` 备份、二次 open 幂等、`upload_reconcile_operations`/`pending_operations` 查询不受新列影响；`commit_diagnostics` 视图、`recovery_runs`、`platform_state_changes`、`nodes.in_sync` 只建结构，消费逻辑由 TB2/TB3 接入。
+
+16. **#14 未确认上传 abandoned 终态与放弃入口**
+    ```sh
+    cargo test -p drive-core --all-features --locked --test abandoned_upload
+    cargo test -p drive-runtime --all-features --locked --test desktop abandon
+    GUI_PYTHON=$HOME/dn/.venv-build/bin/python desktop/tests/issue_recovery_gui_tests.py
+    ```
+    重点断言：预算耗尽后 op 进入 `abandoned`、`pending_operations` 不再计入、GetIssues 带 `can_abandon_upload`、AbandonUpload 只删本地文件且不改服务器条目、RecheckIssues 重新武装、重启后终态保持；绑定/仍在上传的条目拒绝放弃。
+
+17. **#19 缓存释放后台作业与 GC**
+    ```sh
+    cargo test -p drive-runtime --all-features --locked --test release_job
+    GUI_PYTHON=$HOME/dn/.venv-build/bin/python desktop/tests/release_gui_tests.py
+    ```
+    重点断言：`BeginReleaseSpace`/`GetReleaseJob`/`CancelReleaseSpace` 契约、skipped（已在线）不报假成功、protected 不下发释放、每 32 个文件触发 GC、服务重启后未知 job 返回 `available:false`、同步 `ReleaseSpace` 新增 `skipped` 且形状兼容。
+
+18. **#18 FUSE 硬链接拒绝码**
+    ```sh
+    cargo test -p drive-fs --all-features --locked --lib hard_link
+    DRIVE_NATIVE_FS_DIAGNOSTICS=1 cargo test -p drive-fs --all-features --locked --test mounted -- --ignored --nocapture kernel_hard_link_is_rejected_with_operation_not_supported
+    ```
+    内核用例需要普通 Linux 用户 + `/dev/fuse`；断言 `EOPNOTSUPP`（等于 `ENOTSUP`）、目标不存在、源 `nlink==1`、二次调用同样返回、符号链接仍为 `EPERM`，并在卸载后确认 Store 中无目标记录。
+
+19. **#53 已提交水位推进后的 overview 刷新**
+    ```sh
+    cargo test -p drive-runtime --all-features --locked --lib status_watch
+    GUI_PYTHON=$HOME/dn/.venv-build/bin/python desktop/tests/unified_manager_tests.py
+    ```
+    重点断言：`commit_revision` 前进触发 `overview_changed`、GUI 重查 GetOverview 后陈旧托盘 attention 被清除，纯语义水位变化不伪造其它计数。
+
+20. **#8 初始化期间桌面读响应性（仅测试验收，无运行时变化）**
+    ```sh
+    cargo test -p drive-runtime --all-features --locked --lib initialization_owner::tests
+    cargo test -p drive-runtime --all-features --locked --test desktop initialization_remains_available
+    ```
+    用例自建 210k 合成夹具并在共享构建机上对负载敏感；p95 门槛与分段统计以用例输出为准。该批只增测试，不改变运行时行为。
+
+21. **#6 已绑定目录 stale conflict 自愈**
+    ```sh
+    cargo test -p drive-core --all-features --locked --test conflicts -- stale
+    ```
+    重点断言：mkdir/rename 确认成功后与快照安装时清除已绑定目录的陈旧 conflict；远端删除、本地脏内容、未终态操作等真实冲突保留。
+
+22. **#2 2a freedesktop 系统通知回退**
+    ```sh
+    GUI_PYTHON=$HOME/dn/.venv-build/bin/python desktop/tests/notification_dbus_tests.py
+    ```
+    覆盖托盘优先、托盘缺失/失败回退 freedesktop、jeepney/会话总线缺失安静降级、ActionInvoked 点击路由、通知 id 复用与 32 条映射淘汰。`scripts/test-gui.sh` 会一次性跑全部 25 个 GUI 模块，脚本没有单模块参数；单模块按上面直接执行，所需环境变量见 `scripts/test-gui.sh`。
+
+23. **#50 P1/P2 按任务正则排除**
+    ```sh
+    cargo test -p drive-core --all-features --locked --lib exclude_tests
+    GUI_PYTHON=$HOME/dn/.venv-build/bin/python desktop/tests/gui_unit_tests.py
+    ```
+    重点断言：初始化候选按规则整棵子树剪枝、祖先规则排除后代、root 永不被排除、非法正则报出 pattern 与编译错误、GUI 保存时用等价校验；FUSE 视图过滤、上传下载防御与存量清理属后续 P3/P4。
 
 ## 与 issue #8 三树数字的关系
 
