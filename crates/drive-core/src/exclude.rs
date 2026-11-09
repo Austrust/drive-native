@@ -174,6 +174,20 @@ pub fn trace_hit(operation: &str) {
 pub struct ExclusionIndex {
     entries: std::collections::HashSet<(u64, String)>,
     inodes: std::collections::HashSet<u64>,
+    /// Node ids of the excluded subtrees. Used by the scheduler defense
+    /// (upload/download/cache passes) and by the restart cleanup, which must
+    /// cancel local work by node id rather than by inode.
+    nodes: std::collections::HashSet<String>,
+    /// Node ids of visible directories that directly contain at least one
+    /// excluded entry. Renames/moves of such a directory change the scope
+    /// relative paths used to match its excluded children, so the pull path
+    /// must rebuild the index when one of them is touched.
+    parents: std::collections::HashSet<String>,
+    /// Scope-relative path of every visible directory inode. New entries below
+    /// a directory (create/mkdir/rename) are matched against the full relative
+    /// path even though the name does not exist yet; this map makes that lookup
+    /// a hash probe during FUSE dispatch.
+    directories: std::collections::HashMap<u64, String>,
 }
 
 impl ExclusionIndex {
@@ -192,6 +206,11 @@ impl ExclusionIndex {
         self.inodes.contains(&ino)
     }
 
+    /// Scope-relative path of a visible directory inode.
+    pub fn directory_path(&self, ino: u64) -> Option<&str> {
+        self.directories.get(&ino).map(String::as_str)
+    }
+
     /// Number of excluded direct entries (diagnostics/tests).
     pub fn entries_len(&self) -> usize {
         self.entries.len()
@@ -202,18 +221,42 @@ impl ExclusionIndex {
         self.inodes.len()
     }
 
+    /// True when `node_id` belongs to an excluded subtree.
+    pub fn node_excluded(&self, node_id: &str) -> bool {
+        self.nodes.contains(node_id)
+    }
+
+    /// True when `node_id` is a visible directory with excluded direct
+    /// children. Moving such a directory changes those children's paths.
+    pub fn parent_has_excluded_children(&self, node_id: &str) -> bool {
+        self.parents.contains(node_id)
+    }
+
+    /// Excluded node ids (the whole subtree, including the matched entries).
+    /// The scheduler defense and the restart cleanup consume this list.
+    pub fn excluded_node_ids(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self.nodes.iter().cloned().collect();
+        ids.sort();
+        ids
+    }
+
+    /// Number of excluded nodes (diagnostics/tests).
+    pub fn nodes_len(&self) -> usize {
+        self.nodes.len()
+    }
+
     /// Build the index in one pass over the committed namespace.
     ///
-    /// The store is queried once for every visible node and inode; matching runs
-    /// on the caller's thread after the SQL rows were collected, so no lock is
-    /// held while regular expressions run.
+    /// The store projection is read while the caller still holds its store
+    /// lock; the regular expressions then run on the owned rows without taking
+    /// any additional lock.
     pub fn build(store: &crate::Store, root: &str, rules: &ExcludeRules) -> crate::Result<Self> {
         if rules.is_empty() {
             return Ok(Self::default());
         }
-        // One projection of the committed namespace. Matching happens after the
-        // rows are owned by this thread, so the caller's store lock can be
-        // released before regular expressions run.
+        // One projection of the committed namespace. Matching runs on the owned
+        // rows: the SQL statement does not take a second lock and the caller's
+        // lock is not held by this module beyond the row collection.
         struct Row {
             id: String,
             parent: Option<String>,
@@ -258,6 +301,7 @@ impl ExclusionIndex {
             }
         }
         let mut index = Self::default();
+        index.directories.insert(root_ino, String::new());
         let mut queue: Vec<(&str, String, u64)> = vec![(root, String::new(), root_ino)];
         while let Some((directory, relative, ino)) = queue.pop() {
             let Some(kids) = children.get(directory) else {
@@ -268,17 +312,22 @@ impl ExclusionIndex {
                 let child_relative = join_relative(&relative, &row.name);
                 if rules.matches(&child_relative, row.directory) {
                     index.entries.insert((ino, row.name.clone()));
+                    index.parents.insert(directory.to_owned());
                     // Exclude the whole subtree: every descendant inode must
                     // answer ENOENT even without a path walk.
                     let mut pending = vec![kid];
                     while let Some(current) = pending.pop() {
                         let row = &rows[current];
                         index.inodes.insert(row.ino);
+                        index.nodes.insert(row.id.clone());
                         if let Some(grandchildren) = children.get(row.id.as_str()) {
                             pending.extend(grandchildren.iter().copied());
                         }
                     }
                 } else if row.directory {
+                    index
+                        .directories
+                        .insert(row.ino, child_relative.clone());
                     queue.push((row.id.as_str(), child_relative, row.ino));
                 }
             }
@@ -327,6 +376,27 @@ impl ExclusionState {
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
+    }
+
+    /// True when a not-yet-created entry below `parent_ino` matches the rules.
+    ///
+    /// Write paths call this before recording anything locally. The parent's
+    /// scope-relative path comes from the index, so the full path is matched
+    /// without taking the store lock during FUSE dispatch.
+    pub fn child_matches(
+        &self,
+        index: &ExclusionIndex,
+        parent_ino: u64,
+        name: &str,
+        is_dir: bool,
+    ) -> bool {
+        if self.rules.is_empty() {
+            return false;
+        }
+        let Some(parent) = index.directory_path(parent_ino) else {
+            return false;
+        };
+        self.rules.matches(&join_relative(parent, name), is_dir)
     }
 
     /// Rebuild the index from the committed namespace. Called at mount time and
@@ -477,9 +547,90 @@ pub fn retain_unexcluded_events(
     dropped
 }
 
+/// True when applying `events` could change the exclusion index.
+///
+/// The pull path rebuilds the index only when this returns true. Excluded
+/// events never reach the committed namespace (`retain_unexcluded_events` drops
+/// them first), so a normal batch cannot change exclusion visibility; the walk
+/// below detects the remaining cases that can: a touched node is itself
+/// excluded or indexed, a touched visible directory directly contains excluded
+/// entries (a rename changes their relative paths), or the node's path matches
+/// the rules. Unresolvable nodes are treated conservatively as affecting the
+/// index.
+pub fn events_may_affect_index(
+    store: &crate::Store,
+    root: &str,
+    rules: &ExcludeRules,
+    index: &ExclusionIndex,
+    events: &[crate::Event],
+) -> bool {
+    if rules.is_empty() || events.is_empty() {
+        return false;
+    }
+    let batch: std::collections::HashMap<String, crate::Node> = events
+        .iter()
+        .filter_map(|event| match &event.change {
+            crate::Change::Upsert(node) => Some((node.id.clone(), node.clone())),
+            crate::Change::Delete { .. } => None,
+        })
+        .collect();
+    for event in events {
+        let id = match &event.change {
+            crate::Change::Upsert(node) => node.id.as_str(),
+            crate::Change::Delete { id } => id.as_str(),
+        };
+        if event_touches_exclusion(store, &batch, root, rules, index, id) {
+            return true;
+        }
+    }
+    false
+}
+
+fn event_touches_exclusion(
+    store: &crate::Store,
+    batch: &std::collections::HashMap<String, crate::Node>,
+    root: &str,
+    rules: &ExcludeRules,
+    index: &ExclusionIndex,
+    id: &str,
+) -> bool {
+    let mut names = Vec::new();
+    let mut directory = true;
+    let mut current = id.to_owned();
+    for _ in 0..256 {
+        if index.node_excluded(&current) || index.parent_has_excluded_children(&current) {
+            return true;
+        }
+        if current == root {
+            let relative = names.iter().rev().cloned().collect::<Vec<_>>().join("/");
+            return rules.matches(&relative, directory);
+        }
+        let Some(node) = batch
+            .get(&current)
+            .cloned()
+            .or_else(|| store.node(&current).ok())
+        else {
+            return true;
+        };
+        if names.is_empty() {
+            directory = node.directory;
+        }
+        names.push(node.name);
+        let Some(parent) = node.parent else {
+            return true;
+        };
+        current = parent;
+    }
+    true
+}
+
 #[cfg(test)]
 #[path = "exclude_index_tests.rs"]
 mod index_tests;
+
+#[cfg(test)]
+#[path = "exclude_purge_tests.rs"]
+mod purge_tests;
 
 #[cfg(test)]
 mod tests {

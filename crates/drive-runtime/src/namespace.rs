@@ -53,6 +53,12 @@ impl Bridge {
             else {
                 return Ok(done);
             };
+            // Issue #50: never send a rename for an excluded path. The restart
+            // cleanup drops the stale row; this guard covers work queued before
+            // the rules applied.
+            if self.node_excluded(&queued.job.node.id) {
+                return Ok(done);
+            }
             let reconcile = match queued.state.as_str() {
                 "pending" => false,
                 "uncertain" => true,
@@ -275,6 +281,11 @@ impl Bridge {
         else {
             return Ok(0);
         };
+        // Issue #50: never send a remote delete for an excluded path (the
+        // cleanup removes the local row instead).
+        if self.node_excluded(&queued.job.node.id) {
+            return Ok(0);
+        }
         let reconcile = match queued.state.as_str() {
             "pending" => false,
             "uncertain" => true,
@@ -380,6 +391,13 @@ impl Bridge {
         else {
             return Ok(0);
         };
+        // Issue #50: never send upload/replace/cleanup work for an excluded
+        // source or target.
+        if self.node_excluded(&queued.job.source.id)
+            || self.node_excluded(&queued.job.target.id)
+        {
+            return Ok(0);
+        }
         let permission_targets=drive_core::write_permissions::namespace_targets("replace",&serde_json::to_string(&queued.job)?).map_err(io::Error::other)?;
         let op = queued.job.operation.clone();
         let mut target_remote = queued.job.target_remote.clone();
@@ -568,6 +586,10 @@ impl Bridge {
         else {
             return Ok(0);
         };
+        // Issue #50: never send a remote mkdir for an excluded path.
+        if self.node_excluded(&q.job.node.id) {
+            return Ok(0);
+        }
         let reconcile = match q.state.as_str() {
             "pending" => false,
             "uncertain" => true,

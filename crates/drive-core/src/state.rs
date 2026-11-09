@@ -1408,6 +1408,121 @@ impl Store {
         Ok(removed)
     }
 
+    /// Issue #50 (phase 4): hide a rule-excluded subtree locally and drop its
+    /// cached content and local scheduling state. This never queues a remote
+    /// delete: no `namespace_ops` row is written here. Callers run
+    /// [`Self::collect_garbage`] afterwards so the now-unreferenced blobs are
+    /// reclaimed from disk.
+    ///
+    /// Conflicted nodes are left untouched: dropping them could destroy the only
+    /// local copy of user data. The purged ids are recorded under the
+    /// `excluded_purged` metadata key so removing the rules restores the local
+    /// view on the next mount (see [`Self::restore_excluded_nodes`]).
+    pub fn purge_excluded_nodes(&mut self, ids: &[String]) -> Result<u64> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let tx = self.db.transaction()?;
+        let mut purged = 0u64;
+        let mut persisted: Vec<String> = Vec::new();
+        for id in ids {
+            let row: Option<(bool, bool)> = tx
+                .query_row(
+                    "SELECT deleted,conflict FROM nodes WHERE id=?1",
+                    [id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            let Some((_deleted, conflict)) = row else {
+                continue;
+            };
+            if conflict {
+                continue;
+            }
+            tx.execute(
+                "UPDATE nodes SET deleted=1,pinned=0,dirty_blob=NULL WHERE id=?1",
+                [id],
+            )?;
+            // Local scheduling state for this node no longer has a namespace to
+            // reach; leaving it would upload/rename content the rules hide.
+            tx.execute("DELETE FROM operations WHERE node=?1", [id])?;
+            tx.execute("DELETE FROM transfers WHERE node=?1", [id])?;
+            tx.execute("DELETE FROM drafts WHERE node=?1", [id])?;
+            tx.execute("DELETE FROM local_creations WHERE node=?1", [id])?;
+            tx.execute(
+                "DELETE FROM namespace_ops WHERE node=?1 AND state NOT IN ('committed','superseded')",
+                [id],
+            )?;
+            tx.execute("DELETE FROM local_unlinks WHERE node=?1", [id])?;
+            tx.execute("DELETE FROM cache_access WHERE node=?1", [id])?;
+            tx.execute("DELETE FROM cache_published WHERE node=?1", [id])?;
+            tx.execute("DELETE FROM local_atimes WHERE node=?1", [id])?;
+            // A pending namespace overlay entry would make a later recovery
+            // snapshot flag the hidden node as a stale conflict (see
+            // install_remote_snapshot_with_initialization). The local rename is
+            // dropped together with the rest of the node's local work.
+            tx.execute("DELETE FROM namespace_overlay WHERE node=?1", [id])?;
+            tx.execute("DELETE FROM fs_inodes WHERE node=?1", [id])?;
+            purged += 1;
+            persisted.push(id.clone());
+        }
+        if purged > 0 {
+            let previous: Vec<String> = tx
+                .query_row(
+                    "SELECT value FROM metadata WHERE key='excluded_purged'",
+                    [],
+                    |r| r.get::<_, String>(0),
+                )
+                .optional()?
+                .and_then(|raw| serde_json::from_str(&raw).ok())
+                .unwrap_or_default();
+            let mut merged = previous;
+            for id in persisted {
+                if !merged.contains(&id) {
+                    merged.push(id);
+                }
+            }
+            tx.execute(
+                "INSERT OR REPLACE INTO metadata(key,value) VALUES('excluded_purged',?1)",
+                [serde_json::to_string(&merged)?],
+            )?;
+            // The inode map is derived state; force a rebuild on the next mount.
+            tx.execute("DELETE FROM metadata WHERE key='fs_inodes_complete'", [])?;
+        }
+        tx.commit()?;
+        Ok(purged)
+    }
+
+    /// Issue #50 (phase 4): undo a previous exclusion purge after the rules are
+    /// removed. Restores the rows and marks the derived inode map stale so the
+    /// next mount backfills it again. Returns the number of restored nodes.
+    pub fn restore_excluded_nodes(&mut self) -> Result<u64> {
+        let Some(raw) = self
+            .db
+            .query_row(
+                "SELECT value FROM metadata WHERE key='excluded_purged'",
+                [],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?
+        else {
+            return Ok(0);
+        };
+        let ids: Vec<String> = serde_json::from_str(&raw).unwrap_or_default();
+        let tx = self.db.transaction()?;
+        let mut restored = 0u64;
+        for id in &ids {
+            restored += tx.execute(
+                "UPDATE nodes SET deleted=0 WHERE id=?1 AND deleted=1 AND conflict=0",
+                [id],
+            )? as u64;
+        }
+        tx.execute("DELETE FROM metadata WHERE key='excluded_purged'", [])?;
+        tx.execute("DELETE FROM metadata WHERE key='fs_inodes_complete'", [])?;
+        tx.commit()?;
+        Ok(restored)
+    }
+
     /// Persist scheduler intent before starting network I/O. Duplicate tickets coalesce.
     pub fn queue_download(&mut self, ticket: &DownloadTicket) -> Result<String> {
         let id = uuid::Uuid::new_v4().to_string();
