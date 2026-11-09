@@ -211,6 +211,19 @@ impl Store {
                 "DELETE FROM namespace_overlay WHERE node=?1",
                 [&confirmed.id],
             )?;
+            // Stale-flag heal (issue #6 follow-up): a snapshot install may have
+            // flagged this directory while the mkdir was in flight. Confirming
+            // the last pending namespace operation binds the remote identity and
+            // leaves no conflict behind; keep the flag only for genuinely
+            // unresolved state (real conflicts keep their recovery entry).
+            tx.execute(
+                "UPDATE nodes SET conflict=0
+                 WHERE id=?1 AND deleted=0 AND dirty_blob IS NULL
+                   AND id NOT IN (SELECT node FROM local_unlinks)
+                   AND NOT EXISTS(SELECT 1 FROM drafts WHERE node=?1)
+                   AND NOT EXISTS(SELECT 1 FROM operations WHERE node=?1 AND state NOT IN ('committed','superseded'))",
+                [&confirmed.id],
+            )?;
         }
         tx.commit()?;
         Ok(())
