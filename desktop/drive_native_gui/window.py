@@ -1567,6 +1567,20 @@ class MainWindow(QMainWindow):
         # A failed poll is retried; the last known progress stays visible.
         if error or not isinstance(data, dict) or data.get("schema") != 1:
             return
+        if data.get("available") is False:
+            # The job table only lives in service memory: after a restart the
+            # id is unknown and the backend reports available:false (see
+            # docs/CACHE_RELEASE.md). Stop polling and return the window to the
+            # idle state instead of leaving a fake progress row behind.
+            self.release_timer.stop()
+            self.release_job_id = None
+            self.release_total = 0
+            self.release_label.hide()
+            self.release_cancel.hide()
+            self.show_error(
+                "后台服务已重启，上一次释放任务已结束；文件仍受保护，可重新发起释放。")
+            self.schedule_refresh()
+            return
         if data.get("job_id") != job_id:
             return
         done = data.get("done")
