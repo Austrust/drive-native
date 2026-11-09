@@ -1,3 +1,30 @@
+drive-native (0.1.0~dev20261109.2) unstable; urgency=medium
+
+  * Merge the #14/#19/#18/#53/#8/#6/#9 TB1/#2 2a/#50 P1-P2 release batch:
+    park unconfirmed uploads in an explicit abandoned state after the
+    reconciliation budget is exhausted and offer an AbandonUpload action
+    that removes only the local file, with paused_uploads surfaced in the
+    overview and issue center; run cache release as a cancellable
+    background job with progress, released/skipped/protected results and
+    garbage collection every 32 files; return EOPNOTSUPP instead of EPERM
+    for hard links so tools fall back to copy/rename; refresh the overview
+    when the committed status watermark advances so tray badges and
+    navigation counts do not go stale; heal stale directory conflict flags
+    after snapshot installs and successful mkdir/rename confirmations while
+    keeping real conflicts; raise STATE_SCHEMA_VERSION to 29 with
+    outcome/diagnostic columns, schema_migrations, recovery_runs,
+    platform_state_changes, a commit_diagnostics view and idempotent
+    backfill, keeping IPC at 21; fall back to freedesktop D-Bus notifications
+    when the tray is unavailable; add opt-in profile exclude_patterns that
+    prune initialization subtrees and are validated on save.
+  * #8 is acceptance-test coverage only (initialization responsiveness under
+    concurrent desktop reads); it changes no runtime behavior.
+  * v28 -> v29 is the only migration path; FSD and worker must be updated
+    together and old programs cannot read the new schema. Store::open keeps
+    a VACUUM INTO state-before-v29-* backup before migrating.
+
+ -- Drive Native contributors <noreply@example.invalid>  Mon, 09 Nov 2026 13:40:00 +0800
+
 drive-native (0.1.0~dev20261109.1) unstable; urgency=medium
 
   * Merge the #21-#34 read-path, write-path, storage and desktop

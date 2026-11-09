@@ -124,7 +124,13 @@ fn cancelling_in_backoff_removes_only_read_intent_and_survives_restart() {
         token.cancel();
         let started = Instant::now();
         assert_eq!(owner.join().unwrap(), Err(libc::EINTR));
-        assert!(started.elapsed() < Duration::from_millis(500));
+        // Cancellation must win immediately rather than waiting for the next
+        // retry slot (the download backoff is at least two seconds). The bound
+        // is deliberately loose because this test also runs together with the
+        // whole workspace on a loaded machine: 1.5s still proves the join did
+        // not block for a retry, while the old 500ms bound produced flaky
+        // failures on high-load test hosts (e.g. loadavg ~20).
+        assert!(started.elapsed() < Duration::from_millis(1500));
         bridge.refresh_cached();
         assert_eq!(bridge.downloads.load(Ordering::Relaxed), 1);
         assert_eq!(bridge.download_failures_seen.load(Ordering::Relaxed), 1);

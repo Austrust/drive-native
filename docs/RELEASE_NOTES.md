@@ -2,6 +2,24 @@
 
 profile 新增可选 `exclude_patterns`：初始化导入对匹配路径整棵子树剪枝、FUSE 读路径对排除路径返回 ENOENT 且 readdir 不显示、远端事件与恢复快照过滤、GetDirectory/GetStates 列表过滤；索引随挂载、初始化完成与快照安装刷新。非法正则拒绝并报出 pattern 与编译错误，GUI 保存时做同样校验；详见 [EXCLUDE_PATTERNS.md](EXCLUDE_PATTERNS.md)。
 
+# 0.1.0~dev20261109.2：上传终态处理、缓存释放与 schema v29（候选）
+
+本批把 #14 未确认上传预算耗尽后的 `abandoned` 终态与「放弃本地文件」入口、#19 缓存释放后台作业与 GC 回收、#18 FUSE 硬链接拒绝语义、#53 后台提交推进后的托盘/导航计数刷新、#8 初始化期间桌面读响应性验收、#6 已绑定目录 stale conflict 标志自愈、#9 TB1 的 schema v29 诊断列与迁移回填、#2 2a 托盘不可用时的 freedesktop 系统通知回退、#50 P1/P2 的按任务正则排除合入 `integration/fixes3`（`22ba761` 之后的候选树）。schema29、IPC21：FSD 与 worker 必须成对更新，旧程序不能读取新 schema；升级前会自动 `VACUUM INTO` `state-before-v29-*.sqlite` 备份。
+
+- **#14**：未确认上传在 5 次核对后进入 `abandoned` 暂停态，不再无限占用 `pending_operations`；GetIssues 提供「放弃本地文件」（只删本地、不改服务器条目）与重新核对入口，overview 用 `paused_uploads` 单独提示。
+- **#19**：释放空间改为后台作业，带进度、取消与 released/skipped/protected 分类；每 32 个文件触发一次 GC 回收已删除节点的正文；已在线文件不再报假成功。
+- **#18**：FUSE `link(2)` 现在返回 `EOPNOTSUPP`（Linux 上等同 `ENOTSUP`）而非 `EPERM`，工具可按标准语义降级为复制/改名；硬链接仍不支持，符号链接行为不变，详见 [FUSE_HARDLINK.md](FUSE_HARDLINK.md)。
+- **#53**：后台提交/安装推进已提交状态水位时，现在会刷新 overview，托盘「需要检查」徽标与导航计数不再过期。
+- **#8**：新增初始化期间桌面读响应性验收测试（210k 合成库、并发查询），本批无运行时行为变化；#8 全量门槛仍以 final-validate 为准。
+- **#6**：已绑定目录在快照安装、mkdir/rename 确认成功后自动清除残留的 conflict 标志；真实冲突（远端删除、本地脏内容、未终态操作等）保留，规则见 [STALE_CONFLICTS.md](STALE_CONFLICTS.md)。
+- **#9 TB1**：schema v29 只追加 `outcome`/诊断列、`schema_migrations`/`recovery_runs`/`platform_state_changes` 表与 `commit_diagnostics` 视图，并对历史 uncertain/inflight 行做幂等回填；本批只建抽象，不改变提交行为。
+- **#2 2a**：托盘不可用或 showMessage 失败时，通过 freedesktop D-Bus 发送系统通知；jeepney/会话总线缺失时安静降级，不影响主流程。
+- **#50 P1/P2**：profile 新增可选 `exclude_patterns`，初始化导入对匹配路径整棵子树剪枝，非法正则拒绝并报出 pattern 与编译错误，GUI 保存时做同样校验；详见 [EXCLUDE_PATTERNS.md](EXCLUDE_PATTERNS.md)。FUSE 视图过滤与存量清理属 P3/P4；本分支已含 P3（见顶部未发布段），P4 待做。
+
+验证状态：本批候选树为 `integration/fixes3`（HEAD 以 final-validate 日志首行为准）；正式计数、48 路与性能结论待 final-validate 完成后回填，本文不宣称最终验收通过。发布前必修的 task-21（abandoned 残留 pending op）须并入冻结树后再发布。
+
+以下保留此前发布记录。
+
 # 0.1.0~dev20261108.1：上传终态、数据库热点与统一桌面
 
 本版把 #14/#17 的未确认上传终态与背景错误清理、#15/#16 的本地 SQLite 索引与去全局锁读、#8 的已提交状态投影、#2 的统一窗口/托盘/持久同步历史与 #5 的 NamespaceIndex 精简投影合入主线（`8646766` 之后的候选发布版）。schema27、IPC21：FSD 与 worker 必须成对更新，旧程序不能读取新 schema。正目录项 entry TTL 恒 0，attr 默认 1000 ms。

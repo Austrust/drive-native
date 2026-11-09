@@ -2,14 +2,14 @@
 
 面向 **Linux Mint 22.x Cinnamon / Nemo** 的群晖 Drive 按需同步客户端。使用 Rust、FUSE、SQLite、Qt/PySide6 和 Nemo/GIO 扩展实现，直接以原生协议连接 Drive Server，不依赖 WebDAV，也不依赖官方客户端进程。
 
-当前状态：**开发版（Pre-release），持续开发中**。最新开发包为 [`0.1.0~dev20261109.1`](https://github.com/Austrust/drive-native/releases/tag/dev20261109.1)，数据库 schema **28**、IPC **21**；发布源码提交 `da68c15`（与验证代码树 `9cb6b1c` 内容一致，仅 changelog 与发布说明不同）。本版是开发包，不是 rc1，候选版所需验收尚未全部完成。
+当前状态：**开发版（Pre-release），持续开发中**。最新开发包为 [`0.1.0~dev20261109.1`](https://github.com/Austrust/drive-native/releases/tag/dev20261109.1)，数据库 schema **28**、IPC **21**；发布源码提交 `da68c15`（与验证代码树 `9cb6b1c` 内容一致，仅 changelog 与发布说明不同）。本版是开发包，不是 rc1，候选版所需验收尚未全部完成。源码树下一候选为 `0.1.0~dev20261109.2`（`integration/fixes3`，schema **29**），待 final-validate 后冻结发布。
 
 ## 核心能力
 
 - **按需同步**：目录按需列出、文件按需下载；已缓存文件在后台保鲜；支持固定与释放缓存，大目录释放走可取消的后台任务并显示进度。
 - **多挂载**：可挂载个人空间或团队空间下的任意子目录，自定义挂载名称，多个挂载并行工作。
 - **本地写入**：写入走离线队列，支持草稿持久化、冲突保留与重启/断线恢复。
-- **桌面集成**：Qt 配置界面、Nemo 状态图标与右键菜单、systemd 用户服务、GIO 元数据探针。
+- **桌面集成**：Qt 配置界面、Nemo 状态图标与右键菜单、systemd 用户服务、GIO 元数据探针、托盘不可用时回退 freedesktop 系统通知。
 - **权限与规模**：分层目录权限（ACL）过滤、大目录枚举、符号链接过滤，以及面向 20 万级以上节点的分页与增量视图。
 - **可观测与可恢复**：各阶段诊断计数、失败降级与自动恢复、数据库 schema 迁移前自动备份。
 

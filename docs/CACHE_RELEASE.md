@@ -13,7 +13,7 @@
 - 固定（pinned）的节点；
 - 有未同步修改（dirty）或冲突（conflict）的节点，以及冲突恢复行保留的 body；
 - 有打开句柄的节点；
-- 正在上传/下载、或处于 `pending`/`inflight`/`uncertain`/`conflict` 操作中的 body；
+- 正在上传/下载、或处于 `pending`/`inflight`/`uncertain`/`conflict` 操作中的 body（合并 #14 后还包括 `abandoned` 终态的 upload）；
 - 命名空间替换暂存（`namespace_ops`）引用的 body。
 
 ## 结果分类
@@ -23,7 +23,7 @@
 | 字段 | 含义 |
 | --- | --- |
 | `released` | 有本地 body，已删除并清除指针。 |
-| `skipped` | 已经是 `online_only`、没有本地 body。**这不是成功释放**，调用方不应把它计入已回收。 |
+| `skipped` | 已经是 `online_only`、没有本地 body。**这不是成功释放**，调用方不应把它计入已回收；不过仍会撤回该文件待重试/失败的下载意图（`transfers`），避免释放后又被后台下载。 |
 | `protected_or_failed` | 受保护、打开中、写入中或释放失败，本地 body 保留。 |
 
 释放针对的是节点本身；对目录调用会递归覆盖其下所有文件。重复释放同一目录时，
@@ -97,7 +97,9 @@ CancelReleaseSpace(s job_id) -> s json   # 请求取消
 
 journal 引用同样是 keep 集的来源：`operations` 中 `pending`/`inflight`/`uncertain`/
 `conflict` 的 `blob`、未提交 `namespace_ops` replace 的 `body.blob`、以及打开句柄
-都在删除前加入保护。`drafts` 与 `cache_releases` 表没有 `blob` 列，不可能直接钉住
+都在删除前加入保护。若与 #14 合并后出现 `abandoned` 终态，其 `blob` 也要保留：
+该状态只终止自动 reconcile，显式重试会重新武装为 `uncertain`，body 仍需上传。
+`drafts` 与 `cache_releases` 表没有 `blob` 列，不可能直接钉住
 `blobs/` 中的 body 文件：草稿 body 位于 `drafts/` 目录并由 dirty/open 规则保留，
 `cache_releases` 只记录远端所有权交接。测试
 `garbage_collection_keeps_a_deleted_nodes_blob_while_an_upload_operation_references_it`、

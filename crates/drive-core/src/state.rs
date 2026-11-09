@@ -1274,8 +1274,14 @@ impl Store {
             return Err(Error::State("content is dirty, conflicted, or absent".into()));
         }
         if !has_blob {
-            // There is no local body left to reclaim. Reporting success here was
-            // the fake release behind issue #19; keep the state untouched.
+            // There is no local body left to reclaim, so report the no-op as
+            // skipped instead of the fake success behind issue #19. Releasing an
+            // online-only path still withdraws a pending or failed local read
+            // intent, matching the body path below and keeping the queue clean.
+            self.db.execute(
+                "DELETE FROM transfers WHERE node=?1 AND direction='download'",
+                [id],
+            )?;
             return Ok(ReleaseOutcome::Skipped);
         }
         let tx = self.db.transaction()?;
@@ -1298,6 +1304,9 @@ impl Store {
             "UPDATE nodes SET blob=NULL,local_version=NULL WHERE deleted=1 AND conflict=0 AND dirty_blob IS NULL AND blob IS NOT NULL",
             [],
         )?;
+        // `abandoned` is #14's terminal upload state, but it is only terminal for
+        // automatic reconcile: an explicit retry re-arms it as `uncertain`, so its
+        // body still has to survive garbage collection.
         let mut q=self.db.prepare("SELECT blob FROM nodes WHERE blob IS NOT NULL AND (deleted=0 OR conflict=1) UNION SELECT dirty_blob FROM nodes WHERE dirty_blob IS NOT NULL UNION SELECT blob FROM operations WHERE blob IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict','abandoned') UNION SELECT json_extract(body,'$.blob') FROM namespace_ops WHERE kind='replace' AND state NOT IN ('committed','superseded')")?;
         let mut keep = q
             .query_map([], |r| r.get::<_, String>(0))?
@@ -1828,6 +1837,30 @@ impl Store {
                     metadata.write(&n)?;
                 }
             }
+            // Stale-flag heal (issue #6 follow-up): a snapshot installed while a
+            // namespace operation was in flight marks its overlay member as
+            // conflicted, and the later mkdir/rename commit binds the remote
+            // identity without clearing the flag. A bound, live, untouched
+            // directory with no overlay row, local creation, unlink, pending
+            // operation or draft has nothing left to resolve, so the flag cannot
+            // describe a real conflict. This is not conflict resolution: real
+            // conflicts keep both their flag and their recovery entry (see
+            // docs/STALE_CONFLICTS.md).
+            tx.execute(
+                "UPDATE nodes SET conflict=0
+                 WHERE directory=1 AND conflict=1 AND deleted=0
+                   AND id IN (SELECT id FROM recovery_ids)
+                   AND id IN (SELECT node FROM remote_aliases)
+                   AND remote_version != ?1
+                   AND dirty_blob IS NULL
+                   AND id NOT IN (SELECT node FROM local_creations)
+                   AND id NOT IN (SELECT node FROM namespace_overlay)
+                   AND id NOT IN (SELECT node FROM local_unlinks)
+                   AND NOT EXISTS(SELECT 1 FROM namespace_ops WHERE node=nodes.id AND state NOT IN ('committed','superseded'))
+                   AND NOT EXISTS(SELECT 1 FROM operations WHERE node=nodes.id AND state NOT IN ('committed','superseded'))
+                   AND NOT EXISTS(SELECT 1 FROM drafts WHERE node=nodes.id)",
+                params![crate::creations::CREATE_VERSION],
+            )?;
             tx.execute(
                 "UPDATE operations SET state='uncertain' WHERE state='inflight'",
                 [],
