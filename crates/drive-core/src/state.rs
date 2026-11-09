@@ -43,6 +43,13 @@ impl Error {
         matches!(self, Self::Db(rusqlite::Error::QueryReturnedNoRows))
             || matches!(self, Self::Io(e) if e.kind() == std::io::ErrorKind::NotFound)
     }
+
+    /// The event journal reported a gap between the committed cursor and the
+    /// next batch. The native runtime must rebuild its snapshot instead of
+    /// surfacing a human-attention error (#10).
+    pub fn is_cursor_gap(&self) -> bool {
+        matches!(self, Self::State(message) if message.starts_with("event cursor gap"))
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

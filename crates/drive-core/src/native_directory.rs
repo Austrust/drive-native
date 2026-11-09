@@ -73,10 +73,8 @@ impl NativeReadSession {
         let mut events = Vec::new();
         for _ in 0..32 {
             let batch = self.scoped_events(&watch).await?;
-            if batch.recovery_required {
-                return Err(Error::Unsupported(
-                    "directory recovery needs a valid event history",
-                ));
+            if let Some(token) = super::recovery_token(&batch) {
+                return Err(Error::Unsupported(token));
             }
             if events.len() + batch.events.len() > 65536 {
                 return Err(Error::State(

@@ -35,6 +35,10 @@ pub enum RecoveryReason {
     PermissionRecheck,
     CursorInvalidated,
     FilteredTypeChanged,
+    SnapshotChanged,
+    RescanLater,
+    MergeMode,
+    RootUnavailable,
 }
 #[derive(Clone, Serialize)]
 pub struct Span {

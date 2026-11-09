@@ -298,8 +298,8 @@ impl NativeReadSession {
                 return Err(Error::State("snapshot seed time budget exceeded".into()));
             }
             let batch = self.scoped_events(&watch).await?;
-            if batch.recovery_required {
-                return Err(Error::Unsupported("unverified native merge/rescan mode"));
+            if let Some(token) = super::recovery_token(&batch) {
+                return Err(Error::Unsupported(token));
             }
             events += batch.events.len() as u64;
             emit(Progress {
@@ -526,8 +526,8 @@ where
             return Err(Error::State("snapshot seed time budget exceeded".into()));
         }
         let batch = fetch(cursor).await?;
-        if batch.recovery_required {
-            return Err(Error::Unsupported("unverified native merge/rescan mode"));
+        if let Some(token) = super::recovery_token(&batch) {
+            return Err(Error::Unsupported(token));
         }
         if batch.next.0 < cursor.0 {
             return Err(Error::State("snapshot seed cursor moved backwards".into()));
@@ -570,6 +570,8 @@ where
                     events: vec![event.clone()],
                     next: batch.next,
                     recovery_required: false,
+                    rescan_later: false,
+                    merge_mode: false,
                 },
             )?
             .ok_or_else(|| Error::State("root event missing".into()))?;

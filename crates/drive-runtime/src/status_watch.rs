@@ -23,6 +23,9 @@ pub struct StatusSample {
     pub commit_revision: u64,
     /// Whether the committed status projection is verified.
     pub commit_verified: bool,
+    /// Revision of the automatic recovery journal (#10). A change forces the
+    /// desktop to re-read the additive `recovery` overview object.
+    pub recovery_revision: u64,
 }
 
 impl StatusSample {
@@ -47,6 +50,7 @@ impl StatusSample {
             || self.transfer_revision != previous.transfer_revision
             || self.commit_revision != previous.commit_revision
             || self.commit_verified != previous.commit_verified
+            || self.recovery_revision != previous.recovery_revision
     }
 
     /// Whether the committed status journal watermark moved; only then does the
@@ -70,6 +74,7 @@ mod tests {
             transfer_revision: 11,
             commit_revision: 7,
             commit_verified: true,
+            recovery_revision: 0,
         }
     }
 
@@ -132,5 +137,18 @@ mod tests {
         current.commit_verified = false;
         assert!(current.semantic_changed(&previous));
         assert!(current.overview_changed(&previous));
+    }
+
+    #[test]
+    fn recovery_revision_refreshes_overview_without_a_semantic_delta() {
+        // #10: automatic recovery begins/retries/ends without changing the
+        // committed status watermark, so the sample must carry its own revision
+        // or the GUI keeps a stale "recovering"/"needs attention" object.
+        let previous = sample();
+        let mut current = sample();
+        current.recovery_revision += 1;
+        assert!(current.differs(&previous));
+        assert!(current.overview_changed(&previous));
+        assert!(!current.semantic_changed(&previous));
     }
 }

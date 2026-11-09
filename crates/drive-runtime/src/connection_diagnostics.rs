@@ -78,6 +78,12 @@ impl Cause {
     }
 }
 
+/// Whether `error` means "rebuild locally" rather than "ask the user"; the
+/// supervisor treats it as a retry while the bridge drives the rebuild (#10).
+pub(crate) fn recovery_cause(error: &io::Error) -> Option<&'static str> {
+    crate::bridge::recovery_cause(error)
+}
+
 /// This is the existing supervisor policy, shared by the diagnostic classification.
 pub(crate) fn retryable(error: &io::Error) -> bool {
     matches!(

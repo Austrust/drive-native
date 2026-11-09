@@ -902,6 +902,11 @@ fn worker_error_category(error: &drive_core::Error) -> String {
         drive_core::Error::Unsupported("native symlink target contract") => {
             "native_filtered_type_changed".into()
         }
+        drive_core::Error::Unsupported(token)
+            if token.starts_with(drive_core::recovery_runs::TOKEN_PREFIX) =>
+        {
+            (*token).into()
+        }
         _ => "native_recovery_required".into(),
     }
 }

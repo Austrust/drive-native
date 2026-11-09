@@ -231,6 +231,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     transfer_revision:s.bridge.transfer_revision(),
                     commit_revision:commit.revision,
                     commit_verified:commit.verified,
+                    recovery_revision:s.bridge.recovery_revision(),
                 }
             }).await?;
             if last.as_ref()!=Some(&current) {

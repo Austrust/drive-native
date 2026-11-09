@@ -142,3 +142,25 @@ fn worker_observation_distinguishes_live_cleanup_from_an_existing_exit() {
     child.stop();
     assert_eq!(child.before_cleanup(), status);
 }
+
+// #10: a RecoveryRequired marker is a retry, never human attention; the
+// exhausted terminal error is a plain attention-eligible InvalidData.
+#[test]
+fn recovery_required_marker_is_retried_instead_of_attention() {
+    let error = crate::bridge::recovery_test_error("rescan_later");
+    assert_eq!(
+        crate::connection_diagnostics::recovery_cause(&error),
+        Some("rescan_later")
+    );
+    assert!(!crate::connection_diagnostics::retryable(&error));
+    assert!(
+        crate::connection_diagnostics::retryable(&error)
+            || crate::connection_diagnostics::recovery_cause(&error).is_some()
+    );
+    let exhausted = io::Error::new(
+        io::ErrorKind::InvalidData,
+        "native_state_recovery_required:rescan_later",
+    );
+    assert!(crate::connection_diagnostics::recovery_cause(&exhausted).is_none());
+    assert!(!crate::connection_diagnostics::retryable(&exhausted));
+}

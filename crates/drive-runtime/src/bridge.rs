@@ -133,6 +133,10 @@ pub struct Bridge {
     /// Non-zero means the mount suspended cacheable publication for one quiet
     /// lease window and then resumed; it never needs a restart (#27).
     notification_overflows: AtomicU64,
+    /// Bumped whenever the automatic recovery journal changes (#10); the
+    /// desktop status sample includes it so recovery progress refreshes the
+    /// overview without a control-plane revision.
+    recovery_revision: AtomicU64,
     pub downloads: AtomicUsize,
     pub download_failures_seen: AtomicUsize,
     pub last_download_failure: Mutex<Option<(DownloadFailureKind, Option<u32>)>>,
@@ -327,6 +331,7 @@ impl Bridge {
             notify_hub,
             notifications,
             notification_overflows: AtomicU64::new(0),
+            recovery_revision: AtomicU64::new(0),
             downloads: AtomicUsize::new(0),
             download_failures_seen: AtomicUsize::new(0),
             last_download_failure: Mutex::new(None),
@@ -511,6 +516,18 @@ impl Bridge {
         let batch = match response.body {
             Response::Events(batch) => batch,
             Response::Failed { category }
+                if category.starts_with(drive_core::recovery_runs::TOKEN_PREFIX) =>
+            {
+                drop(receipt);
+                let cause = drive_core::recovery_runs::reason_cause(
+                    category
+                        .strip_prefix(drive_core::recovery_runs::TOKEN_PREFIX)
+                        .unwrap_or_default(),
+                )
+                .unwrap_or(drive_core::recovery_runs::CAUSE_RESCAN_LATER);
+                return self.recover(recovery_reason(cause), cause);
+            }
+            Response::Failed { category }
                 if matches!(
                     category.as_str(),
                     "native_cursor_reset" | "native_filtered_type_changed"
@@ -579,7 +596,21 @@ impl Bridge {
                 }
             }
         }
-        store.receive(&batch).map_err(io::Error::other)?;
+        match store.receive(&batch) {
+            Ok(()) => {}
+            Err(error) if error.is_cursor_gap() => {
+                // A gap means the durable snapshot no longer matches the event
+                // journal. Recovery must not publish a partially applied batch:
+                // drop every lock and rebuild from a fresh snapshot (#10).
+                drop(store);
+                drop(receipt);
+                return self.recover(
+                    crate::initialization::RecoveryReason::CursorInvalidated,
+                    drive_core::recovery_runs::CAUSE_CURSOR_INVALIDATED,
+                );
+            }
+            Err(error) => return Err(io::Error::other(error)),
+        }
         store.drain().map_err(io::Error::other)?;
         for event in &batch.events {
             match &event.change {
@@ -619,7 +650,24 @@ impl Bridge {
         self.finish_session_catchup(&rpc)?;
         Ok(true)
     }
+    /// Recovery entry point (#10): recoverable causes run the bounded automatic
+    /// loop; the historical one-shot rebuilds stay single-attempt so existing
+    /// error contracts (integrity failures, owner rechecks) are unchanged.
     fn rebuild_snapshot(&self, reason: crate::initialization::RecoveryReason) -> io::Result<bool> {
+        match reason {
+            crate::initialization::RecoveryReason::CursorInvalidated
+            | crate::initialization::RecoveryReason::SnapshotChanged
+            | crate::initialization::RecoveryReason::RescanLater
+            | crate::initialization::RecoveryReason::MergeMode => {
+                self.recover(reason, recovery_cause_for_reason(reason))
+            }
+            _ => self.rebuild_snapshot_once(reason),
+        }
+    }
+    fn rebuild_snapshot_once(
+        &self,
+        reason: crate::initialization::RecoveryReason,
+    ) -> io::Result<bool> {
         if self.initialization_task.lock().unwrap().is_some() {
             let result = self.run_initialization_owner(reason);
             if result.is_ok() {
@@ -696,6 +744,183 @@ impl Bridge {
         self.initialization.activity();
         Ok(true)
     }
+
+    /// Monotonic revision of the automatic recovery journal (#10).
+    pub fn recovery_revision(&self) -> u64 {
+        self.recovery_revision.load(Ordering::Relaxed)
+    }
+
+    /// Additive desktop projection of the recovery journal.
+    ///
+    /// Reads only committed state, never blocks on the writer mutex, and keeps
+    /// the `sync_state` value set unchanged; recovery exhaustion is the only
+    /// recovery state that still requires human action.
+    pub fn recovery_status(&self) -> serde_json::Value {
+        use crate::initialization::Phase;
+        let revision = self.recovery_revision();
+        let snapshot = self.initialization.snapshot();
+        let (open, latest) = {
+            let store = match self.store.try_lock() {
+                Ok(store) => store,
+                Err(_) => {
+                    return serde_json::json!({
+                        "state": "recovering",
+                        "cause": serde_json::Value::Null,
+                        "attempts": 0,
+                        "max_attempts": drive_core::recovery_runs::MAX_RECOVERY_ATTEMPTS,
+                        "started_at_ms": 0,
+                        "updated_at_ms": 0,
+                        "next_retry_at_ms": 0,
+                        "last_error": serde_json::Value::Null,
+                        "recovery_exhausted": false,
+                        "revision": revision,
+                    });
+                }
+            };
+            let open = store.open_recovery_runs().unwrap_or_default();
+            let latest = store.latest_recovery_run().ok().flatten();
+            (open, latest)
+        };
+        let open = open.into_iter().max_by_key(|run| run.id);
+        let exhausted = open.is_none()
+            && latest.as_ref().is_some_and(|run| {
+                run.status == drive_core::recovery_runs::STATUS_NEEDS_ATTENTION
+            });
+        let initialization_recovering = snapshot.active
+            && snapshot.phase != Phase::Waiting
+            && snapshot.recovery_reason.is_some();
+        let state = if exhausted {
+            "needs_attention"
+        } else if open
+            .as_ref()
+            .is_some_and(|run| run.status == drive_core::recovery_runs::STATUS_RETRYING)
+        {
+            "retrying"
+        } else if open.as_ref().is_some_and(|run| {
+            run.status == drive_core::recovery_runs::STATUS_RECOVERING
+        }) || initialization_recovering
+        {
+            "recovering"
+        } else {
+            "idle"
+        };
+        let run = open.as_ref().or(latest.as_ref());
+        serde_json::json!({
+            "state": state,
+            "cause": run.map(|run| run.cause.clone()),
+            "attempts": run.map_or(0, |run| run.attempts),
+            "max_attempts": drive_core::recovery_runs::MAX_RECOVERY_ATTEMPTS,
+            "started_at_ms": run.map_or(0, |run| run.started_at),
+            "updated_at_ms": run.map_or(0, |run| run.updated_at),
+            "next_retry_at_ms": run.map_or(0, |run| run.next_retry_at),
+            "last_error": run.and_then(|run| run.last_error.clone()),
+            "recovery_exhausted": exhausted,
+            "revision": revision,
+        })
+    }
+
+    fn begin_recovery(
+        &self,
+        cause: &'static str,
+    ) -> io::Result<drive_core::recovery_runs::RecoveryRun> {
+        let run = self
+            .store
+            .lock()
+            .unwrap()
+            .begin_recovery_run(cause)
+            .map_err(io::Error::other)?;
+        self.recovery_revision.fetch_add(1, Ordering::Relaxed);
+        Ok(run)
+    }
+
+    fn record_recovery_failure(
+        &self,
+        id: i64,
+        attempts: u32,
+        reason: &'static str,
+        delay: Duration,
+    ) -> io::Result<()> {
+        let next_retry_at = unix_millis() + delay.as_millis() as i64;
+        self.store
+            .lock()
+            .unwrap()
+            .update_recovery_run(
+                id,
+                drive_core::recovery_runs::STATUS_RETRYING,
+                attempts,
+                Some(reason),
+                next_retry_at,
+            )
+            .map_err(io::Error::other)?;
+        self.recovery_revision.fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }
+
+    fn finish_recovery(&self, id: i64, status: &'static str) -> io::Result<()> {
+        self.store
+            .lock()
+            .unwrap()
+            .finish_recovery_run(id, status)
+            .map_err(io::Error::other)?;
+        self.recovery_revision.fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }
+
+    /// Bounded automatic recovery: rebuild from a fresh snapshot, persisting
+    /// every attempt in the v29 `recovery_runs` journal. Success keeps the
+    /// session online; exhaustion becomes a human-visible attention error.
+    fn recover(
+        &self,
+        reason: crate::initialization::RecoveryReason,
+        cause: &'static str,
+    ) -> io::Result<bool> {
+        let run = self.begin_recovery(cause)?;
+        for attempt in 1..=drive_core::recovery_runs::MAX_RECOVERY_ATTEMPTS {
+            match self.rebuild_snapshot_once(reason) {
+                Ok(installed) => {
+                    self.finish_recovery(run.id, drive_core::recovery_runs::STATUS_RECOVERED)?;
+                    return Ok(installed);
+                }
+                Err(error) => {
+                    let delay = recovery_delay(cause, attempt);
+                    self.record_recovery_failure(
+                        run.id,
+                        attempt,
+                        recovery_failure_reason(&error),
+                        delay,
+                    )?;
+                    if attempt < drive_core::recovery_runs::MAX_RECOVERY_ATTEMPTS {
+                        self.recovery_wait(delay)?;
+                    }
+                }
+            }
+        }
+        self.finish_recovery(run.id, drive_core::recovery_runs::STATUS_NEEDS_ATTENTION)?;
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("native_state_recovery_required:{cause}"),
+        ))
+    }
+
+    /// Wait between attempts in small slices so a disconnect stops recovery
+    /// promptly instead of sleeping through the whole backoff.
+    fn recovery_wait(&self, delay: Duration) -> io::Result<()> {
+        let rpc = self.connection();
+        let mut remaining = delay;
+        while !remaining.is_zero() {
+            if !rpc.is_connected() {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotConnected,
+                    "connection closed during recovery backoff",
+                ));
+            }
+            let slice = remaining.min(RETRY_WAIT_SLICE);
+            std::thread::sleep(slice);
+            remaining -= slice;
+        }
+        Ok(())
+    }
+
     pub fn refresh_cached(&self) {
         #[cfg(test)]
         self.refresh_runs.fetch_add(1, Ordering::Relaxed);
@@ -1973,6 +2198,91 @@ pub(crate) fn capacity_error(error: &io::Error) -> Option<&'static str> {
         _ => None,
     }
 }
+/// Marks a recoverable upstream signal: the runtime rebuilds locally instead of
+/// asking a human (#10). Kept as an `io::Error` payload so the existing channel
+/// plumbing and content-free diagnostics stay unchanged.
+#[derive(Debug)]
+struct RecoveryRequired {
+    cause: &'static str,
+}
+impl std::fmt::Display for RecoveryRequired {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "native recovery required: {}", self.cause)
+    }
+}
+impl std::error::Error for RecoveryRequired {}
+fn recovery_required_error(cause: &'static str) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, RecoveryRequired { cause })
+}
+pub(crate) fn recovery_cause(error: &io::Error) -> Option<&'static str> {
+    error
+        .get_ref()
+        .and_then(|inner| inner.downcast_ref::<RecoveryRequired>())
+        .map(|marker| marker.cause)
+}
+#[cfg(test)]
+pub(crate) fn recovery_test_error(cause: &'static str) -> io::Error {
+    recovery_required_error(cause)
+}
+fn recovery_cause_for_reason(reason: crate::initialization::RecoveryReason) -> &'static str {
+    use crate::initialization::RecoveryReason;
+    use drive_core::recovery_runs as runs;
+    match reason {
+        RecoveryReason::InitialIndex => runs::CAUSE_INITIAL_INDEX,
+        RecoveryReason::PermissionRecheck => runs::CAUSE_PERMISSION_RECHECK,
+        RecoveryReason::CursorInvalidated => runs::CAUSE_CURSOR_INVALIDATED,
+        RecoveryReason::FilteredTypeChanged => runs::CAUSE_FILTERED_TYPE_CHANGED,
+        RecoveryReason::SnapshotChanged => runs::CAUSE_SNAPSHOT_CHANGED,
+        RecoveryReason::RescanLater => runs::CAUSE_RESCAN_LATER,
+        RecoveryReason::MergeMode => runs::CAUSE_MERGE_MODE,
+        RecoveryReason::RootUnavailable => runs::CAUSE_ROOT_UNAVAILABLE,
+    }
+}
+fn recovery_reason(cause: &'static str) -> crate::initialization::RecoveryReason {
+    use crate::initialization::RecoveryReason;
+    use drive_core::recovery_runs as runs;
+    match cause {
+        runs::CAUSE_RESCAN_LATER => RecoveryReason::RescanLater,
+        runs::CAUSE_MERGE_MODE => RecoveryReason::MergeMode,
+        runs::CAUSE_SNAPSHOT_CHANGED => RecoveryReason::SnapshotChanged,
+        runs::CAUSE_CURSOR_INVALIDATED => RecoveryReason::CursorInvalidated,
+        _ => RecoveryReason::InitialIndex,
+    }
+}
+fn recovery_failure_reason(error: &io::Error) -> &'static str {
+    if recovery_cause(error).is_some() {
+        return "recovery_rebootstrap_requested";
+    }
+    match error.kind() {
+        io::ErrorKind::NotConnected => "transport_unavailable",
+        io::ErrorKind::TimedOut => "timeout",
+        io::ErrorKind::InvalidData => "invalid_recovery_response",
+        io::ErrorKind::Interrupted => "interrupted",
+        _ => "recovery_failed",
+    }
+}
+#[cfg(test)]
+fn recovery_delay(_cause: &'static str, _attempt: u32) -> Duration {
+    // Unit tests assert the bounded loop, not the wall-clock ladder.
+    Duration::ZERO
+}
+#[cfg(not(test))]
+fn recovery_delay(cause: &'static str, attempt: u32) -> Duration {
+    use drive_core::recovery_runs as runs;
+    let index = attempt.saturating_sub(1) as usize;
+    let millis = if matches!(cause, runs::CAUSE_RESCAN_LATER | runs::CAUSE_MERGE_MODE) {
+        [0u64, 5_000, 15_000][index.min(2)]
+    } else {
+        [2_000u64, 5_000, 10_000][index.min(2)]
+    };
+    Duration::from_millis(millis)
+}
+fn unix_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX))
+        .unwrap_or(0)
+}
 fn operation_error(body: Response) -> io::Error {
     use crate::connection_diagnostics::Cause;
     if let Response::Failed { category } = &body {
@@ -2016,6 +2326,12 @@ fn operation_error(body: Response) -> io::Error {
         }
         if category == "native_cursor_reset" {
             return io::Error::new(io::ErrorKind::InvalidData, Cause::NativeCursorReset);
+        }
+        if let Some(cause) = category
+            .strip_prefix(drive_core::recovery_runs::TOKEN_PREFIX)
+            .and_then(drive_core::recovery_runs::reason_cause)
+        {
+            return recovery_required_error(cause);
         }
     }
     let kind = match body {

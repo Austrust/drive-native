@@ -84,10 +84,8 @@ impl NativeReadSession {
         let mut watch = self.watch("")?;
         watch.cursor = EventCursor(self.root_hint.load(Ordering::Acquire));
         let batch = self.scoped_events(&watch).await?;
-        if batch.recovery_required {
-            return Err(Error::Unsupported(
-                "native root verification needs event recovery",
-            ));
+        if let Some(token) = super::recovery_token(&batch) {
+            return Err(Error::Unsupported(token));
         }
         Ok(())
     }
