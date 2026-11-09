@@ -131,6 +131,22 @@ G3 追加两个 JSON-string IPC：`GetDirectoryPermissions({path})` 返回 `{tas
 
 内部 worker IPC21 的 `Notification` 保留原生 `profile_changed`（与当前 view 文件变化 `changed` 分开）。该通知使当前挂载根的全部逐节点来源回 unknown、清除验证时间并递增 revision，即使没有文件事件；不改变用户策略、明确空间禁止或未确认写入意图。普通通知不清权限。属性仍受既定 1000ms 上限约束，须配套更新 fsd/worker，拒绝 IPC20 混用。
 
+### C3.1 缓存释放后台任务（issue #19）
+
+`ReleaseSpace({path})` 保持同步语义与既有返回结构（`{schema:1,released,protected_or_failed,reclaimed_bytes}`），并追加 additive 字段 `skipped`：对已 `online_only`（`blob IS NULL`）的节点返回 skipped，不再假报 released。旧 GUI/nemo 继续按同步完成语义调用。
+
+批量释放新增三个 JSON-string D-Bus 方法（均 additive，旧客户端不调用即不受影响，无需 `version.ipc` bump）：
+
+| 方法 | 参数 | 成功返回 |
+|---|---|---|
+| BeginReleaseSpace | `{paths:[string...]}` | `{schema:1,job_id:string,total:integer}`；已有未完成任务时快速返回错误，不阻塞排队 |
+| GetReleaseJob | `{job_id:string}` | `{schema:1,job_id,available:bool,total,done,released_count,skipped_count,protected_count,reclaimed_bytes,finished,cancelled,error}`；仅 `finished=true` 时追加 `released`/`skipped`/`protected_or_failed` 数组 |
+| CancelReleaseSpace | `{job_id:string}` | 上述快照 + `cancel_requested:bool`；未知 job 或已完成时 false |
+
+任务为进程内单槽、内存态（重启后 `available:false`，不持久化，不迁移 schema）；每 32 个文件及结束时执行一次 GC 并累计回收字节。取消只停止后续文件，已释放文件不回滚。GUI 以 250ms 轮询 GetReleaseJob 显示「正在释放 n/m」与已回收字节。
+
+GetOverview 与 GetCacheSettings 追加 additive 字段 `release_job`（`null` 或 `{job_id,total,done,reclaimed_bytes,finished,cancelled}`），`schema` 仍为 1，旧 GUI 忽略即可；未改 worker 帧协议，故 `version.ipc` 仍为 21、state_schema 仍为 28。旧 GUI 在旧后台（无新方法）上调用 Begin* 会得到方法错误并显示失败提示，不会误报成功。
+
 ## C4 FUSE 集成点、TTL 与权限门禁
 
 ```rust

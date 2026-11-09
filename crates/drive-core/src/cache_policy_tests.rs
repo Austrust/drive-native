@@ -2,7 +2,7 @@
 //! cache policy query. The legacy per-candidate pipeline is only compiled in
 //! tests (`cache_candidates_legacy`).
 use super::{CACHE_CANDIDATES_SQL, CACHE_RECENCY_CAPACITY, CacheRecency};
-use crate::{DownloadTicket, Node, Store, sha256};
+use crate::{DownloadTicket, Node, Status, Store, sha256};
 use std::collections::HashSet;
 
 fn unix_now() -> u64 {
@@ -397,4 +397,190 @@ fn recency_ledger_orders_deduplicates_and_evicts_in_bounded_space() {
         pending.last().unwrap(),
         &format!("n{:06}", CACHE_RECENCY_CAPACITY + 1)
     );
+}
+
+fn cached_live_and_deleted() -> (tempfile::TempDir, Store) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = Store::open(dir.path()).unwrap();
+    s.install_remote_snapshot(
+        &[
+            node("root", None, true),
+            node("live", Some("root"), false),
+            node("gone", Some("root"), false),
+        ],
+        "1",
+        "server",
+    )
+    .unwrap();
+    publish(&mut s, "live", b"live-body");
+    publish(&mut s, "gone", b"gone-body");
+    s.db.execute("UPDATE nodes SET deleted=1 WHERE id='gone'", [])
+        .unwrap();
+    (dir, s)
+}
+
+fn node_blob(s: &Store, id: &str) -> Option<String> {
+    s.db.query_row("SELECT blob FROM nodes WHERE id=?1", [id], |r| r.get(0))
+        .unwrap()
+}
+
+#[test]
+fn garbage_collection_reclaims_deleted_node_blob_and_leaves_live_content_reclaimable() {
+    let (dir, mut s) = cached_live_and_deleted();
+    let blobs = dir.path().join("blobs");
+    let live_blob = blob_of(&s, "live");
+    let gone_blob = blob_of(&s, "gone");
+    assert!(blobs.join(&live_blob).is_file());
+    assert!(blobs.join(&gone_blob).is_file());
+
+    let reclaimed = s.collect_garbage().unwrap();
+    assert_eq!(reclaimed, b"gone-body".len() as u64);
+    assert!(
+        !blobs.join(&gone_blob).exists(),
+        "a blob only referenced by a deleted node must be reclaimed"
+    );
+    assert!(blobs.join(&live_blob).is_file(), "live content must survive");
+    assert!(
+        node_blob(&s, "gone").is_none(),
+        "the deleted node must not keep a dangling blob pointer"
+    );
+
+    // Every byte left in the cache is a clean, complete body the policy may
+    // reclaim; nothing is stranded as permanent protection.
+    let usage = s.cache_usage(unix_now() + 120, &HashSet::new()).unwrap();
+    assert_eq!(usage.content_bytes, b"live-body".len() as u64);
+    assert_eq!(usage.reclaimable_bytes, b"live-body".len() as u64);
+    assert_eq!(usage.protected_bytes, 0);
+    assert_eq!(s.status("live").unwrap(), Status::LocalComplete);
+
+    // No orphan files, and another pass finds nothing to collect.
+    assert_eq!(std::fs::read_dir(&blobs).unwrap().count(), 1);
+    assert_eq!(s.collect_garbage().unwrap(), 0);
+}
+
+#[test]
+fn garbage_collection_never_reclaims_a_blob_still_referenced_by_a_live_node() {
+    let (dir, mut s) = cached_live_and_deleted();
+    let blobs = dir.path().join("blobs");
+    let live_blob = blob_of(&s, "live");
+    let gone_blob = blob_of(&s, "gone");
+    // Simulate a shared pointer: the row being retired also references the
+    // body that a live node still owns.
+    s.db.execute(
+        "UPDATE nodes SET blob=?1 WHERE id='gone'",
+        [live_blob.as_str()],
+    )
+    .unwrap();
+    s.db
+        .execute("UPDATE nodes SET deleted=1 WHERE id='gone'", [])
+        .unwrap();
+
+    let reclaimed = s.collect_garbage().unwrap();
+    // Only the former, now-unreferenced body of the deleted row is collected.
+    assert_eq!(reclaimed, b"gone-body".len() as u64);
+    assert!(
+        blobs.join(&live_blob).is_file(),
+        "a blob shared with a live node must never be reclaimed"
+    );
+    assert!(!blobs.join(&gone_blob).exists());
+    assert!(node_blob(&s, "gone").is_none());
+
+    assert_eq!(s.status("live").unwrap(), Status::LocalComplete);
+    use std::io::Read;
+    let mut body = Vec::new();
+    s.open_cached("live").unwrap().read_to_end(&mut body).unwrap();
+    assert_eq!(body, b"live-body");
+}
+
+#[test]
+fn garbage_collection_keeps_the_body_of_a_deleted_conflicted_recovery_row() {
+    let (_dir, mut s) = cached_live_and_deleted();
+    s.db
+        .execute("UPDATE nodes SET deleted=1, conflict=1 WHERE id='gone'", [])
+        .unwrap();
+    let gone_blob = blob_of(&s, "gone");
+    assert_eq!(s.collect_garbage().unwrap(), 0);
+    assert_eq!(node_blob(&s, "gone").as_deref(), Some(gone_blob.as_str()));
+    // A deleted-but-conflicted row is still readable for recovery.
+    use std::io::Read;
+    let mut body = Vec::new();
+    s.open_cached("gone").unwrap().read_to_end(&mut body).unwrap();
+    assert_eq!(body, b"gone-body");
+}
+
+#[test]
+fn garbage_collection_keeps_a_deleted_nodes_blob_while_an_upload_operation_references_it() {
+    let (dir, mut s) = cached_live_and_deleted();
+    let blobs = dir.path().join("blobs");
+    let gone_blob = blob_of(&s, "gone");
+    // A deleted row can still be named by an unfinished upload operation; the
+    // journal owns the body until it retires.
+    s.db.execute(
+        "INSERT INTO operations(id,node,kind,base,blob,generation,state) VALUES('op_pending','gone','upload','1',?1,1,'pending')",
+        [gone_blob.as_str()],
+    )
+    .unwrap();
+
+    assert_eq!(s.collect_garbage().unwrap(), 0);
+    assert!(
+        blobs.join(&gone_blob).is_file(),
+        "a blob pinned by a pending operation must survive garbage collection"
+    );
+    assert!(node_blob(&s, "gone").is_none());
+
+    s.db.execute("DELETE FROM operations WHERE id='op_pending'", [])
+        .unwrap();
+    assert_eq!(s.collect_garbage().unwrap(), b"gone-body".len() as u64);
+    assert!(!blobs.join(&gone_blob).exists());
+}
+
+#[test]
+fn garbage_collection_keeps_a_deleted_nodes_blob_while_a_namespace_replace_references_it() {
+    let (dir, mut s) = cached_live_and_deleted();
+    let blobs = dir.path().join("blobs");
+    let gone_blob = blob_of(&s, "gone");
+    let body = serde_json::json!({"blob": gone_blob});
+    s.db.execute(
+        "INSERT INTO namespace_ops(id,node,body,state,kind) VALUES('ns_pending','root',?1,'pending','replace')",
+        [body.to_string()],
+    )
+    .unwrap();
+
+    assert_eq!(s.collect_garbage().unwrap(), 0);
+    assert!(
+        blobs.join(&gone_blob).is_file(),
+        "a blob pinned by a pending namespace replace must survive"
+    );
+
+    s.db.execute(
+        "UPDATE namespace_ops SET state='committed' WHERE id='ns_pending'",
+        [],
+    )
+    .unwrap();
+    assert_eq!(s.collect_garbage().unwrap(), b"gone-body".len() as u64);
+    assert!(!blobs.join(&gone_blob).exists());
+}
+
+#[test]
+fn draft_and_cache_release_journals_carry_no_body_pointer() {
+    // Neither table can pin a body file: draft bodies live in drafts/ and are
+    // kept by the dirty/open-draft rules, while cache_releases only tracks a
+    // remote ownership hand-off and never references a cache blob.
+    let (_dir, s) = cached_live_and_deleted();
+    for table in ["drafts", "cache_releases"] {
+        let mut statement = s
+            .db
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .unwrap();
+        let columns: HashSet<String> = statement
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .map(|column| column.unwrap())
+            .collect();
+        assert!(!columns.is_empty(), "{table} must exist");
+        assert!(
+            !columns.contains("blob"),
+            "{table} must not point at cache body files"
+        );
+    }
 }

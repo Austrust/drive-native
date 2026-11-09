@@ -6,7 +6,7 @@
 
 ## 核心能力
 
-- **按需同步**：目录按需列出、文件按需下载；已缓存文件在后台保鲜；支持固定与释放缓存。
+- **按需同步**：目录按需列出、文件按需下载；已缓存文件在后台保鲜；支持固定与释放缓存，大目录释放走可取消的后台任务并显示进度。
 - **多挂载**：可挂载个人空间或团队空间下的任意子目录，自定义挂载名称，多个挂载并行工作。
 - **本地写入**：写入走离线队列，支持草稿持久化、冲突保留与重启/断线恢复。
 - **桌面集成**：Qt 配置界面、Nemo 状态图标与右键菜单、systemd 用户服务、GIO 元数据探针。
@@ -51,6 +51,7 @@ docs/             设计契约、验收状态、历史报告与发布说明
 - 验收目录与阶段状态：[DELIVERY_GATES.md](DELIVERY_GATES.md) · 完整目标：[GOAL.md](GOAL.md)
 - 实现契约与版本边界：[docs/CONTRACTS.md](docs/CONTRACTS.md)
 - 当前验证范围与已知问题：[docs/STATUS.md](docs/STATUS.md)
+- 缓存释放语义、进度与 `limit_bytes=0`：[docs/CACHE_RELEASE.md](docs/CACHE_RELEASE.md)
 - 最新性能修复证据：[docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md) · [docs/PERFORMANCE.md](docs/PERFORMANCE.md) · [docs/ISSUES_20261107.md](docs/ISSUES_20261107.md)
 - 历史发布与实验记录：各版 `docs/RELEASE_*.md`、`docs/validation/`
 

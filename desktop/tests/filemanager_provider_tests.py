@@ -143,6 +143,70 @@ class Tests(unittest.TestCase):
         self.task._changed()
         self.assertEqual(file.invalidations, 1)
 
+    def test_release_uses_background_job_and_polls_progress(self):
+        calls = []
+        notifications = []
+        replies = {
+            'BeginReleaseSpace': {'schema': 1, 'job_id': 'release-2', 'total': 2},
+            'GetReleaseJob': {'schema': 1, 'job_id': 'release-2', 'available': True,
+                              'total': 2, 'done': 2, 'released_count': 1,
+                              'skipped_count': 1, 'protected_count': 0,
+                              'reclaimed_bytes': 1024, 'finished': True,
+                              'cancelled': False, 'released': ['a'],
+                              'skipped': ['b'], 'protected_or_failed': []},
+        }
+
+        def call(method, args, callback):
+            calls.append((method, args))
+            callback(replies[method], False)
+
+        self.task._call = call
+        self.task._notify = notifications.append
+        self.task._release([self.task.root + '/folder'])
+        # One begin plus one finished poll: never a blocking synchronous release.
+        self.assertEqual([method for method, _ in calls],
+                         ['BeginReleaseSpace', 'GetReleaseJob'])
+        self.assertEqual(calls[0][1].unpack(),
+                         ([self.task.root + '/folder'],))
+        self.assertEqual(calls[1][1].unpack(), ('release-2',))
+        self.assertIn('正在释放 2 个文件', notifications[0])
+        self.assertIn('已释放 1 个文件', notifications[-1])
+        self.assertIn('跳过 1', notifications[-1])
+        self.assertIn('1.00 KiB', notifications[-1])
+
+    def test_release_notifies_failure_when_begin_is_rejected(self):
+        notifications = []
+        calls = []
+
+        def call(method, args, callback):
+            calls.append(method)
+            callback(None, True)
+
+        self.task._call = call
+        self.task._notify = notifications.append
+        self.task._release([self.task.root + '/folder'])
+        self.assertEqual(calls, ['BeginReleaseSpace'])
+        self.assertIn('操作未完成', notifications[0])
+
+    def test_release_stops_polling_when_job_disappears_after_restart(self):
+        notifications = []
+        calls = []
+        replies = {
+            'BeginReleaseSpace': {'schema': 1, 'job_id': 'release-3', 'total': 2},
+            'GetReleaseJob': {'schema': 1, 'job_id': 'release-3',
+                              'available': False},
+        }
+
+        def call(method, args, callback):
+            calls.append(method)
+            callback(replies[method], False)
+
+        self.task._call = call
+        self.task._notify = notifications.append
+        self.task._release([self.task.root + '/folder'])
+        self.assertEqual(calls, ['BeginReleaseSpace', 'GetReleaseJob'])
+        self.assertIn('释放未完成', notifications[-1])
+
     def test_status_signal_storm_issues_single_overview(self):
         calls = []
 

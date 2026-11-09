@@ -18,7 +18,7 @@ use std::{
     time::{Duration, Instant},
 };
 #[cfg(test)]
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicU64, AtomicUsize};
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -202,6 +202,30 @@ pub struct Control {
     trust: crate::trust::TrustSettings,
     trust_pending_durability: bool,
 }
+/// Memory-only snapshot of one background release job. It lives only for the
+/// lifetime of the service process: a restart has no job to resume or report.
+pub(crate) struct ReleaseJob {
+    pub(crate) id: String,
+    pub(crate) total: usize,
+    pub(crate) done: usize,
+    pub(crate) released_count: usize,
+    pub(crate) skipped_count: usize,
+    pub(crate) protected_count: usize,
+    pub(crate) released: Vec<String>,
+    pub(crate) skipped: Vec<String>,
+    pub(crate) protected: Vec<String>,
+    pub(crate) reclaimed_bytes: u64,
+    pub(crate) finished: bool,
+    pub(crate) cancelled: bool,
+    pub(crate) error: Option<String>,
+}
+pub(crate) struct ReleaseState {
+    pub(crate) seq: u64,
+    pub(crate) job: Option<ReleaseJob>,
+    /// Cancellation flag of the running job; cloning it out keeps the worker
+    /// independent of the state lock while it reclaims files.
+    pub(crate) cancel: Option<Arc<AtomicBool>>,
+}
 pub struct Service {
     pub profile: Profile,
     pub bridge: Arc<Bridge>,
@@ -213,6 +237,12 @@ pub struct Service {
     pub control: Mutex<Control>,
     changed: Condvar,
     pub stop: AtomicBool,
+    /// Single-slot background release job polled through the desktop bus.
+    pub(crate) release: Mutex<ReleaseState>,
+    /// Test-only spacing between released files, so progress and cancel can be
+    /// observed without racing a job that finishes instantly.
+    #[cfg(test)]
+    pub(crate) release_step_delay: AtomicU64,
     /// Set by `cache_policy_changed()` so a policy edit runs a trim even when
     /// it did not change `local_revision` (the cache limit lives in metadata).
     cache_policy_dirty: AtomicBool,
@@ -317,6 +347,13 @@ impl Service {
             }),
             changed: Condvar::new(),
             stop: AtomicBool::new(false),
+            release: Mutex::new(ReleaseState {
+                seq: 0,
+                job: None,
+                cancel: None,
+            }),
+            #[cfg(test)]
+            release_step_delay: AtomicU64::new(0),
             cache_policy_dirty: AtomicBool::new(false),
             #[cfg(test)]
             cache_trim_runs: AtomicUsize::new(0),
@@ -501,6 +538,11 @@ impl Service {
         self.cache_policy_dirty.store(true, Ordering::Release);
         self.control.lock().unwrap().revision += 1;
         self.changed.notify_all();
+    }
+    /// Slow down each released file so tests can observe a running job.
+    #[cfg(test)]
+    pub(crate) fn set_release_step_delay(&self, ms: u64) {
+        self.release_step_delay.store(ms, Ordering::Release);
     }
     fn cache_loop(&self) {
         self.cache_loop_with(CACHE_LOOP_INTERVAL);
