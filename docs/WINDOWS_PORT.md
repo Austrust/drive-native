@@ -3,7 +3,7 @@
 本文是 issue #11 的落地摘要，不是完整设计论证。目标是固定三个平台接口、给出去 POSIX 的最小改动顺序，并让「核心可在无 POSIX 依赖下编译」变成可执行的回归门禁。完整论证、代码事实与逐行清单见 #11 讨论与评审记录。
 
 - 基线：`integration/fixes3`（#9 TB1 之后，schema **v29**：`nodes.in_sync`、`platform_state_changes`、`commit_outcome` 已存在）
-- 本阶段（step 0）只新增脚本与文档：`scripts/check-core-posix.sh`、`scripts/core-posix-allowlist.txt`、本文；**不改 Rust 代码、不改 schema、不改 Linux 行为**。
+- 本阶段（step 0）只改脚本与文档：新增 `scripts/check-core-posix.sh`、`scripts/core-posix-allowlist.txt`、本文，并在 `scripts/verify.sh` 接入一行调用；**不改 Rust 代码、不改 schema、不改 Linux 行为**。
 - 证据等级：本文的仓库路径与行号均为当前树实测（P0）；CFAPI 调用面、Windows 文件 ID 生命周期、watcher 自事件竞争为待原型验证的推断（P1，见 §6）。
 
 ## 0. 结论摘要
@@ -153,7 +153,7 @@ pub trait LocalChangeSource: Send {
 - Linux 上可立即执行：`cargo test --workspace --all-features --locked`、`cargo check -p drive-platform`、`cargo check -p drive-platform --features cfapi`（验证 feature gating）、`bash scripts/check-core-posix.sh`。
 - Linux 交叉 check Windows target 只能做到 `cargo check -p drive-platform --target x86_64-pc-windows-msvc`（纯 Rust、无链接；需 `rustup target add`）。`drive-core` 因 `rusqlite bundled`（C 工具链）、`fuser`/`nix`（Linux only）无法在 Linux 上完整 check。
 - **唯一真验收**是 Windows 原生 runner：`cargo check --workspace --all-features --locked`（后续再加 `cargo test -p drive-core -p drive-platform`，前提是测试模块先做 `#[cfg(unix)]` 门控）。建议本阶段之后单独提交 `.github/workflows/ci.yml`（ubuntu + windows 双 matrix）。
-- 本分支不修改 `scripts/verify.sh`；是否在末尾加一行调用 `check-core-posix.sh` 由 Lead 决定。
+- 本分支不新增 `.github`；门禁已接入 `scripts/verify.sh`：`cargo test` 之后、`--tests-only` 早退之前执行 `bash scripts/check-core-posix.sh 2>&1 | tee evidence/core-posix.log`，默认模式失败即阻断整条门禁；`--strict` 仅供收紧基线时评审用，不接入 CI。
 
 ## 4. CFAPI 骨架：可编译范围
 
