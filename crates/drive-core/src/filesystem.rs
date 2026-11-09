@@ -1,4 +1,5 @@
 //! Local filesystem metadata. No method in this module performs network I/O.
+use crate::file_identity::{FileIdentitySource, PlatformFileId, StoreFileIdentity};
 use crate::{Error, Node, NodeMetadata, Result, Status, Store};
 use rusqlite::{OptionalExtension, params};
 use serde::Serialize;
@@ -412,14 +413,16 @@ impl Store {
                 "mount root is not the indexed directory root".into(),
             ));
         }
-        let existing: Option<String> = self
-            .db
-            .query_row("SELECT node FROM fs_inodes WHERE ino=1", [], |r| r.get(0))
-            .optional()?;
+        // Issue #11 step 1 replacement point: the kernel-facing root probe now
+        // goes through the platform identity contract. On Linux this delegates
+        // to the same `fs_inodes` read; step 2 persists the platform id.
+        let existing = StoreFileIdentity::new(self).node_for_id(PlatformFileId::ROOT)?;
         if existing.as_deref().is_some_and(|n| n != id) {
             return Err(Error::State("mount root identity changed".into()));
         }
         if existing.is_none() {
+            // Step 2 replacement point: id pinning/allocation moves behind the
+            // platform FileIdentity adapter together with the v30 table.
             self.db
                 .execute("INSERT INTO fs_inodes(ino,node) VALUES(1,?1)", [id])?;
         }
@@ -539,6 +542,9 @@ impl Store {
             unlinked: self.locally_unlinked(id)?,
         })
     }
+    /// Issue #11 step 1 keeps this u64 entry point direct: the FUSE
+    /// getattr/read path must keep its exact SQL count and error shape, so it
+    /// moves behind `FileIdentitySource` only in step 2 (v30 + Windows adapter).
     pub fn record_by_inode(&self, ino: u64) -> Result<FileRecord> {
         let id: String = self.db.query_row(
             "SELECT node FROM fs_inodes WHERE ino=?1",

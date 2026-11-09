@@ -77,6 +77,18 @@ pub trait FileIdentity: Send + Sync {
   `fs_inodes` 表保留给 Linux 适配器；`record_impl` 对 `platform_file_ids` 做 `LEFT JOIN`（仍是一条 SQL），首次分配才写入。`FileRecord.ino` 分两步废弃（先加 `platform_id`，再移除入参）。
 - 风险：重启/升级后 inode 稳定性；预览保留 inode 与 CFAPI 占位符身份不兼容（首轮 `cfg(unix)` 门控）；Windows `open_by_id` 在卷不支持 FILE_ID_128 时需回退。
 
+### 2.1.1 Step 1 已落地（本分支：契约骨架，pre-v30）
+
+`fix/11b-fileidentity`（base `1825452`）先落地契约与等价 Linux 适配器，**不建 v30 表**（v30 与 Windows adapter 一起放 step 2，避免两次迁移）：
+
+- 契约位置 `crates/drive-core/src/file_identity.rs`：
+  - `PlatformFileId`：`#[repr(transparent)]` 的 `u64` 名称类型（`ROOT = 1`、`as_u64`/`From<u64>`、serde transparent）。step 1 的数值与现网 `fs_inodes` ino 完全一致；step 2 切到 16 字节持久表示时，`as_u64()` 仍作为 Linux/FUSE 投影。
+  - `trait FileIdentitySource`：`id_for_node(&str) -> Result<Option<PlatformFileId>>`、`node_for_id(PlatformFileId) -> Result<Option<String>>`、`root_id() -> Result<Option<PlatformFileId>>`；全部只读、不分配、错误走现有 `Error`。
+  - `StoreFileIdentity<'a>`（Linux adapter）：只读镜像现有 `fs_inodes` SQL，另有 `ensure_namespace_identities`（转发 `Store::ensure_filesystem_inodes`）、`pin_root_identity`（转发 `Store::ensure_fs_root`）；`Store::file_identity()` 为便捷入口。
+- 最小接线（行为不变，源码注释 `Issue #11 step 1 replacement point`）：`Store::ensure_fs_root` 的根身份探测与 `Store::ensure_filesystem_inodes` 的 root 回填探测改为经 adapter。
+- 保留直连（step 2 迁移）：`Store::record_by_inode`/`record_impl`（FUSE getattr/read 的 SQL 次数与错误形状）、`filesystem_posix` 投影、`namespace_index` 的 `by_ino`、`preview`（`preview_inodes.ino` 外键）、`native_snapshot` 的 ino/parent JOIN。
+- step 2 待办：v30 `platform_file_ids` 迁移与回填（`INSERT ... SELECT node, ino, 0, 'inode' FROM fs_inodes`）、`record`/JOIN 的 `LEFT JOIN` 改造、Windows CFAPI `FileIdentity` 实现、上述直连点迁移、`schema_v30`/preview 冲突测试与 `metadata_performance` 回归。
+
 ### 2.2 StatePush（第二步）
 
 ```rust
@@ -176,7 +188,8 @@ pub trait LocalChangeSource: Send {
 | 步 | 内容 | 验收 | 主要回归风险 |
 | --- | --- | --- | --- |
 | 0 | `drive-platform` 骨架 + 本文 + `check-core-posix.sh`（本阶段） | workspace 全绿；三模式脚本结果符合预期；文档完整 | 与 #9/#31 并行分支的 Cargo/workspace 冲突 |
-| 1 | **FileIdentity**：v30 + Store helper + Linux inode 适配 + JOIN + drive-fs 数字映射 | workspace 测试；`metadata_performance`；mounted 内核测试；v29→v30 回填/迁移测试；`status_latency_210k --ignored` | inode 稳定性（重启/旧句柄/目录 cookie）；预览保留 inode；每请求 SQL 次数；`FileRecord.ino` 大规模改动漏改 |
+| 1a | **FileIdentity 契约骨架**（已落地于 `fix/11b-fileidentity`）：trait + `PlatformFileId` + Linux adapter + 2 处只读接线；不建 v30 | workspace 全绿；core/runtime-lib/drive-fs 回归；posix guard 默认模式 0 violation；契约测试覆盖往返/幂等/根/preview/未知 | 与 #9 TB2 的 `lib.rs`/`state.rs` 邻接改动冲突；契约命名过早固化 |
+| 1b | **FileIdentity 持久化**：v30 + Store helper + Linux inode 适配 + JOIN + drive-fs 数字映射 | workspace 测试；`metadata_performance`；mounted 内核测试；v29→v30 回填/迁移测试；`status_latency_210k --ignored` | inode 稳定性（重启/旧句柄/目录 cookie）；预览保留 inode；每请求 SQL 次数；`FileRecord.ino` 大规模改动漏改 |
 | 2 | **StatePush**：core 同事务入队 + runtime pump + Linux no-op + Windows 骨架 | 队列回滚/重放/顺序/上限测试；Linux invalidation 行为零变化；崩溃重启重发 | 双通道重复通知；`nodes.in_sync` 与 CFAPI 镜像语义混淆；队列增长 |
 | 3 | **LocalChangeSource**：Windows watcher + 启动对账 + 自事件抑制；Linux 注册到现有 journal 边界 | Windows 原型（spike）+ fake FS 对账/溢出/fencing 单测；Linux 行为零变化；mounted 写路径回归 | **水合自事件**（最大未知）；watcher 溢出丢事件；启动窗口竞争；与 `namespace_overlay`/`local_creations` 的遮蔽规则冲突 |
 | 4 | NamePolicy / SecureIo / errno 语义化（可与 1–3 交错，schema/身份先不动） | core 测试 + drive-fs errno 映射；Windows skeleton 单测 | 18 文件替换面大；Linux 错误文案/类别变化导致 GUI/测试断言变化 |
