@@ -127,6 +127,7 @@ fn candidate_receipts_and_inode_housekeeping_reuse_the_same_held_view() {
             restore: "server".into(),
             start_cursor: "native-v1:100".into(),
             expected_cursor: "native-v1:7".into(),
+rules_digest: String::new(),
         };
         let root = store.node("100").unwrap();
         let run = store

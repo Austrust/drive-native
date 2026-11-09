@@ -1784,6 +1784,7 @@ mod readpath_tests {
             writable: false,
             local_policy: None,
             writable_source: None,
+            exclude_patterns: Vec::new(),
         }
     }
     fn fixture() -> (tempfile::TempDir, Arc<Service>) {

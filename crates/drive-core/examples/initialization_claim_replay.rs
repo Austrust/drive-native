@@ -32,6 +32,7 @@ fn run(mode: &str, context: usize) -> Result<serde_json::Value, Box<dyn std::err
         restore: "synthetic-server".into(),
         start_cursor: "native-v1:100".into(),
         expected_cursor: String::new(),
+rules_digest: String::new(),
     };
     let run = store.begin_initialization(
         &binding,

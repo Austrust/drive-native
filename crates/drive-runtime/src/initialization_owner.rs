@@ -439,8 +439,13 @@ impl Bridge {
             .initialization_store()
             .initialization_status()
             .map_err(io::Error::other)?;
+        let rules = self.exclude_rules();
+        let rules_digest = rules.fingerprint();
         let resume = existing.as_ref().is_some_and(|state| {
-            state.state != "ready" && !restart && state.binding.restore == session.restore
+            state.state != "ready"
+                && !restart
+                && state.binding.restore == session.restore
+                && state.binding.rules_digest == rules_digest
         });
         let (run, resumed) = if resume {
             let _writes = self.initialization_writer();
@@ -477,6 +482,7 @@ impl Bridge {
                 restore: session.restore.clone(),
                 start_cursor: cursor,
                 expected_cursor,
+                rules_digest: rules_digest.clone(),
             };
             match store.initialization_status().map_err(io::Error::other)? {
                 Some(status) if status.state != "ready" => {
@@ -556,6 +562,18 @@ impl Bridge {
                 Ok(_) => return Err(invalid("lower watermark without verified native reset")),
                 Err(error) => return Err(error),
             }
+        }
+        if !rules.is_empty() {
+            // Issue #50: rules only take effect on a restart, but the durable
+            // candidate may have been built before the rule set changed. Drop
+            // excluded subtrees before enumerating so the final install never
+            // imports them.
+            let _writes = self.initialization_writer();
+            self.current(rpc)?;
+            let mut store = self.initialization_store();
+            store
+                .prune_initialization_excluded(&run, &rules)
+                .map_err(io::Error::other)?;
         }
         if resumed {
             self.initialization.work.count(Counter::Resumed, 1);
@@ -803,6 +821,7 @@ impl Bridge {
         mut priority: Option<InitializationDirectoryClaim>,
     ) -> io::Result<bool> {
         use drive_core::initialization_store::InitializationDirectoryClaim;
+        let rules = self.exclude_rules();
         let mut coverage_race = false;
         let mut first_error = None;
         std::thread::scope(|threads| {
@@ -1033,7 +1052,9 @@ impl Bridge {
                         self.initialization.work.count(Counter::DirectoryDenied, 1);
                     } else {
                         store
-                            .store_initialization_native_directory(&ticket, 1, &children)
+                            .store_initialization_native_directory_filtered(
+                                &ticket, 1, &children, &rules,
+                            )
                             .map_err(io::Error::other)?;
                     }
                     self.initialization

@@ -9,7 +9,7 @@ async fn run()->support::Result<()> {
  let client=Client::connect(Config::builder().host("192.0.2.10").tls_server_name("nas.example.invalid".to_string()).credentials(Credentials::Password{username:"test-user".into(),password:password.clone(),otp:None}).build()).await?;
  let share=client.list_shares().await?.into_iter().find(|s|s.view_id==12).ok_or("authorized view absent")?;
  let scratch=tempfile::tempdir()?;let mount=scratch.path().join("mount");
- let profile=Profile{schema:1,task_id:uuid::Uuid::new_v4().to_string(),host:"192.0.2.10".into(),tls_name:"nas.example.invalid".into(),trusted_ca_pem:vec![],username:"test-user".into(),device_id:uuid::Uuid::new_v4().to_string(),scope:drive_core::native::Scope{view_id:12,node_id:share.node_id.ok_or("root identity absent")?,file_id:share.file_id,path:"/".into()},mount:mount.clone(),writable: false, local_policy: None, writable_source: None};
+ let profile=Profile{schema:1,task_id:uuid::Uuid::new_v4().to_string(),host:"192.0.2.10".into(),tls_name:"nas.example.invalid".into(),trusted_ca_pem:vec![],username:"test-user".into(),device_id:uuid::Uuid::new_v4().to_string(),scope:drive_core::native::Scope{view_id:12,node_id:share.node_id.ok_or("root identity absent")?,file_id:share.file_id,path:"/".into()},mount:mount.clone(),writable: false, local_policy: None, writable_source: None,exclude_patterns: Vec::new()};
  let config=scratch.path().join("profile.json");std::fs::write(&config,serde_json::to_vec(&profile)?)?;std::fs::set_permissions(&config,std::fs::Permissions::from_mode(0o600))?;
  let executable=PathBuf::from(std::env::args().nth(1).ok_or("fsd executable required")?);
  let mut daemon=support::spawn(&executable,&config,&scratch.path().join("data"),&mount,&scratch.path().join("daemon.log"))?;
