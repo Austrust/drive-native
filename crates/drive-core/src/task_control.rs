@@ -105,7 +105,11 @@ mod tests {
             .stderr(std::process::Stdio::null())
             .spawn()
             .unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        // The child must start a test binary and open SQLite before it can
+        // reject the FIFO intent; on a loaded shared build host that can take
+        // longer than 5s. A real regression blocks forever (or far past 30s),
+        // so a wider budget keeps the assertion meaningful.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
         loop {
             if let Some(status) = child.try_wait().unwrap() {
                 assert!(status.success(), "FIFO rejection child failed");
