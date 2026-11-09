@@ -11,6 +11,7 @@ pub mod rpc;
 pub mod service;
 mod status_cache;
 pub mod status_events;
+pub mod status_watch;
 pub mod transport;
 mod wait_activity;
 pub mod wire;
