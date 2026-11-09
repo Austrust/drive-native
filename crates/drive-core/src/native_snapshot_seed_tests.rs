@@ -6,6 +6,8 @@ fn empty(next: u64) -> EventBatch {
         events: vec![],
         next: EventCursor(next),
         recovery_required: false,
+        rescan_later: false,
+        merge_mode: false,
     }
 }
 fn root(next: u64, version: u64) -> EventBatch {
@@ -127,6 +129,8 @@ async fn interrupted_or_invalid_reseed_cannot_publish_partial_root_and_cursor() 
         root(15, 9),
         EventBatch {
             recovery_required: true,
+            rescan_later: false,
+            merge_mode: false,
             ..empty(20)
         },
     ] {

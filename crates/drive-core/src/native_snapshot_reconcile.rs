@@ -371,8 +371,8 @@ where
                 "snapshot convergence time budget exceeded".into(),
             ));
         }
-        if batch.recovery_required {
-            return Err(Error::Unsupported("unverified native merge/rescan mode"));
+        if let Some(token) = super::recovery_token(&batch) {
+            return Err(Error::Unsupported(token));
         }
         if batch.next.0 < cursor.0 || (batch.next == cursor && !batch.events.is_empty()) {
             return Err(Error::State(

@@ -61,6 +61,10 @@ pub struct EventBatch {
     pub next: EventCursor,
     /// Rescan/merge signals must be handled before advancing any durable cursor.
     pub recovery_required: bool,
+    /// The server asked for a rescan (#10); rebuild before advancing.
+    pub rescan_later: bool,
+    /// The server entered merge mode (#10); rebuild and label the cause.
+    pub merge_mode: bool,
 }
 
 #[derive(Debug)]
@@ -326,12 +330,14 @@ fn parse_events(r: &PObject, cursor: EventCursor) -> Result<EventBatch> {
             removed,
         });
     }
+    let rescan_later = !matches!(r.get("rescan_later"), None | Some(PObject::Integer(0)));
+    let merge_mode = !matches!(r.get("merge_mode"), None | Some(PObject::Integer(0)));
     let batch = EventBatch {
         events,
         next: EventCursor(next),
-        recovery_required: ["rescan_later", "merge_mode"]
-            .iter()
-            .any(|key| !matches!(r.get(key), None | Some(PObject::Integer(0)))),
+        recovery_required: rescan_later || merge_mode,
+        rescan_later,
+        merge_mode,
     };
     crate::diagnostics::record_pull_response(
         batch.events.len(),

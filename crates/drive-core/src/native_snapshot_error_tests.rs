@@ -26,7 +26,9 @@ fn empty_global_advance_and_unrelated_events_cannot_explain_collision() {
         &EventBatch {
             events: vec![],
             next: EventCursor(11),
-            recovery_required: false
+            recovery_required: false,
+            rescan_later: false,
+            merge_mode: false,
         }
     ));
     let mut unrelated = event();
@@ -174,6 +176,8 @@ async fn related_event_on_later_page_is_not_lost_after_empty_global_advancement(
                     events: vec![],
                     next: EventCursor(11),
                     recovery_required: false,
+                    rescan_later: false,
+                    merge_mode: false,
                 }
             } else {
                 batch(event(), 12)
@@ -206,6 +210,8 @@ async fn unrelated_pages_stop_at_boundary_and_never_authorize_retry() {
                     events: vec![],
                     next: cursor,
                     recovery_required: false,
+                    rescan_later: false,
+                    merge_mode: false,
                 }
             };
             std::future::ready(Ok(observed))
@@ -231,6 +237,8 @@ async fn incomplete_collision_probe_is_bounded_and_keeps_original_failure() {
                 events: vec![],
                 next: EventCursor(cursor.0 + 1),
                 recovery_required: false,
+                rescan_later: false,
+                merge_mode: false,
             }))
         },
     )

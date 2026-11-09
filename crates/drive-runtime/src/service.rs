@@ -1034,7 +1034,8 @@ impl Service {
             c.active = None;
             self.bridge.disconnect();
             if let Err(error) = result {
-                let retry = crate::connection_diagnostics::retryable(&error);
+                let retry = crate::connection_diagnostics::retryable(&error)
+                    || crate::connection_diagnostics::recovery_cause(&error).is_some();
                 c.attention = !retry;
                 c.state = if retry {
                     ConnectionState::Offline
@@ -1049,6 +1050,11 @@ impl Service {
                     "native_root_unavailable"
                 } else {
                     match error.kind() {
+                        _ if crate::connection_diagnostics::recovery_cause(&error).is_some() => {
+                            // The runtime rebuilds this session automatically;
+                            // it is a retry, never a request for human action.
+                            "network_unavailable"
+                        }
                         io::ErrorKind::PermissionDenied => "authentication_or_protocol_rejected",
                         io::ErrorKind::InvalidInput => "certificate_or_configuration",
                         io::ErrorKind::InvalidData => "native_state_recovery_required",

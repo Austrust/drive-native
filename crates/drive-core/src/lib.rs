@@ -13,6 +13,7 @@ pub mod native;
 pub mod preview;
 pub mod state;
 pub use state::*;
+pub mod recovery_runs;
 pub mod exclude;
 pub mod shared_store;
 pub mod write_permissions;
