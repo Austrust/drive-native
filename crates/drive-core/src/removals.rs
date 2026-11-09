@@ -383,6 +383,16 @@ pub(crate) fn retire_creation_tx(
         [operation],
         |r| r.get(0),
     )?;
+    // A local edit after the permission-uncertain commit can queue a second,
+    // still-pending upload for the same node. It must not outlive the tombstone:
+    // otherwise it keeps `pending_operations` at 1 and the upload gate reports a
+    // permanent block with no issue entry left to act on. `inflight` is left to
+    // the bridge, which resolves it from the in-flight response and then fails
+    // against the deleted node instead of leaving a dangling row.
+    tx.execute(
+        "UPDATE operations SET state='superseded' WHERE node=?1 AND kind='upload' AND id<>?2 AND state IN ('pending','uncertain')",
+        [node, operation],
+    )?;
     tx.execute(
         "UPDATE operations SET state='superseded' WHERE id=?1 AND state IN ('uncertain','abandoned')",
         [operation],

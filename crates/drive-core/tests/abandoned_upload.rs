@@ -286,3 +286,70 @@ fn abandon_action_refuses_bound_or_still_uploading_entries() {
         b"not sent yet".len() as u64
     );
 }
+
+/// Regression for issue #14 release blocker: after a permission-uncertain
+/// upload, editing again used to queue a second pending upload for the same
+/// node. Abandoning the exhausted (older) operation left that pending row
+/// behind on a tombstoned node, so `pending_operations` stayed at 1 forever
+/// and the upload gate reported a permanent block with no issue entry to act
+/// on. Abandoning must supersede the node's residual non-terminal upload rows
+/// in the same transaction.
+#[test]
+fn abandoning_after_resave_supersedes_the_residual_pending_upload() {
+    let (_d, mut s) = fixture();
+    let (n, old) = uncertain_creation(&mut s);
+    let new_op = s.save_local(&n.id, b"edited after uncertainty").unwrap();
+    assert_ne!(new_op, old);
+    assert_eq!(s.upload_operations("pending").unwrap(), vec![new_op.clone()]);
+    let (_, _) = exhaust_budget(&mut s, &old);
+    assert_eq!(s.upload_job(&old).unwrap().state, "abandoned");
+    assert_eq!(s.pending_operations().unwrap(), 1);
+    assert!(s.abandon_unconfirmed_creation(&n.id).unwrap());
+    assert_eq!(s.pending_operations().unwrap(), 0);
+    assert!(s.upload_operations("pending").unwrap().is_empty());
+    assert!(s.upload_operations("uncertain").unwrap().is_empty());
+    assert!(s.upload_operations("abandoned").unwrap().is_empty());
+    assert_eq!(s.upload_job(&new_op).unwrap().state, "superseded");
+    assert!(s.next_remove().unwrap().is_none());
+    assert!(s.lookup("1", "new").is_err());
+}
+
+/// The same residual-pending shape resolved by deleting the local file: the
+/// unlink retirement path must clear both the uncertain/abandoned evidence and
+/// the newer pending upload, leaving no server remove behind.
+#[test]
+fn deleting_after_resave_supersedes_the_residual_pending_upload() {
+    let (_d, mut s) = fixture();
+    let (n, old) = uncertain_creation(&mut s);
+    let new_op = s.save_local(&n.id, b"edited after uncertainty").unwrap();
+    exhaust_budget(&mut s, &old);
+    assert_eq!(s.pending_operations().unwrap(), 1);
+    s.unlink_local("1", "new", &n.id, false).unwrap();
+    assert_eq!(s.pending_operations().unwrap(), 0);
+    assert_eq!(s.pending_namespace_operations().unwrap(), 0);
+    assert!(s.upload_operations("pending").unwrap().is_empty());
+    assert!(s.upload_operations("uncertain").unwrap().is_empty());
+    assert_eq!(s.upload_job(&new_op).unwrap().state, "superseded");
+    assert!(s.next_remove().unwrap().is_none());
+    assert_eq!(s.status(&n.id).unwrap(), Status::Deleted);
+}
+
+/// The abandoned/resaved cleanup is durable: reopening the store must not
+/// resurrect pending work or a paused upload row.
+#[test]
+fn abandoned_resave_work_remains_clean_after_restart() {
+    let (d, mut s) = fixture();
+    let (n, old) = uncertain_creation(&mut s);
+    let new_op = s.save_local(&n.id, b"edited after uncertainty").unwrap();
+    exhaust_budget(&mut s, &old);
+    assert!(s.abandon_unconfirmed_creation(&n.id).unwrap());
+    assert_eq!(s.upload_job(&new_op).unwrap().state, "superseded");
+    drop(s);
+    let s = Store::open(d.path()).unwrap();
+    assert_eq!(s.pending_operations().unwrap(), 0);
+    assert_eq!(s.pending_namespace_operations().unwrap(), 0);
+    assert!(s.upload_operations("pending").unwrap().is_empty());
+    assert!(s.upload_operations("uncertain").unwrap().is_empty());
+    assert!(s.upload_operations("abandoned").unwrap().is_empty());
+    assert!(s.lookup("1", "new").is_err());
+}
