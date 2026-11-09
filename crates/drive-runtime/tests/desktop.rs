@@ -589,6 +589,83 @@ fn abandon_upload_ipc_retires_only_the_local_creation() {
     assert!(desktop::abandon_upload(&service, &creation_id, "stale-token").is_err());
 }
 
+/// Regression for the issue #14 release blocker: a local edit after the
+/// permission-uncertain commit queues a second pending upload for the same
+/// node. Abandoning the exhausted upload must retire that residual row too;
+/// otherwise it survives the tombstone and leaves `pending_operations` at 1
+/// with a permanent upload block and an empty issue center.
+#[test]
+fn abandon_upload_clears_a_pending_upload_queued_after_the_uncertain_commit() {
+    let (_d, service) = fixture();
+    let creation_id;
+    let resaved_op;
+    let token;
+    {
+        let mut store = service.bridge.store.lock().unwrap();
+        drive_core::write_permissions::set_local_policy(
+            &store,
+            "root",
+            drive_core::write_permissions::LocalPolicy::FollowRemote,
+        )
+        .unwrap();
+        let creation = store.create_local_file("folder", "new", 0o600).unwrap();
+        let op = store.save_local(&creation.id, b"new creation").unwrap();
+        store.creation_saved(&creation.id).unwrap();
+        store.mark_upload_started(&op).unwrap();
+        store.mark_upload_uncertain(&op).unwrap();
+        resaved_op = store
+            .save_local(&creation.id, b"edited after uncertainty")
+            .unwrap();
+        for i in 0..drive_core::MAX_UPLOAD_RECONCILE_ATTEMPTS {
+            store
+                .note_upload_reconcile_attempt(&op, 1_700_000_000 + i64::from(i))
+                .unwrap();
+        }
+        creation_id = creation.id;
+        assert_eq!(store.pending_operations().unwrap(), 1);
+    }
+
+    let page: serde_json::Value =
+        serde_json::from_str(&desktop::issues(&service, "").unwrap()).unwrap();
+    let entry = page["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == creation_id.as_str())
+        .unwrap()
+        .clone();
+    assert_eq!(entry["can_abandon_upload"], true);
+    token = entry["token"].as_str().unwrap().to_owned();
+
+    let reply: serde_json::Value =
+        serde_json::from_str(&desktop::abandon_upload(&service, &creation_id, &token).unwrap())
+            .unwrap();
+    assert_eq!(reply["abandoned"], true);
+    {
+        let store = service.bridge.store.lock().unwrap();
+        assert_eq!(store.pending_operations().unwrap(), 0);
+        assert_eq!(store.pending_namespace_operations().unwrap(), 0);
+        assert_eq!(store.paused_upload_operations().unwrap(), 0);
+        assert!(store.upload_operations("pending").unwrap().is_empty());
+        assert!(store.upload_operations("uncertain").unwrap().is_empty());
+        assert!(store.upload_operations("abandoned").unwrap().is_empty());
+        assert_eq!(store.upload_job(&resaved_op).unwrap().state, "superseded");
+        assert!(store.lookup("folder", "new").is_err());
+        assert!(store.next_remove().unwrap().is_none());
+    }
+    // No pending upload survives, so the upload pass has nothing to fail on:
+    // the bridge never leaves a sticky block for a tombstoned node.
+    assert!(service.bridge.upload_block.lock().unwrap().is_none());
+    let overview: serde_json::Value =
+        serde_json::from_str(&desktop::overview(&service).unwrap()).unwrap();
+    assert_eq!(overview["pending_operations"], 0);
+    assert_eq!(overview["paused_uploads"], 0);
+    assert_eq!(overview["upload_block"], serde_json::Value::Null);
+    assert_eq!(overview["queue_health"]["upload_uncertain"], 0);
+    assert_eq!(overview["queue_health"]["upload_unfinished"], 0);
+    assert_eq!(overview["issue_count"], 0);
+}
+
 #[test]
 fn initialization_remains_available_while_store_and_control_are_held() {
     let (_root, service) = fixture();
