@@ -1837,6 +1837,30 @@ impl Store {
                     metadata.write(&n)?;
                 }
             }
+            // Stale-flag heal (issue #6 follow-up): a snapshot installed while a
+            // namespace operation was in flight marks its overlay member as
+            // conflicted, and the later mkdir/rename commit binds the remote
+            // identity without clearing the flag. A bound, live, untouched
+            // directory with no overlay row, local creation, unlink, pending
+            // operation or draft has nothing left to resolve, so the flag cannot
+            // describe a real conflict. This is not conflict resolution: real
+            // conflicts keep both their flag and their recovery entry (see
+            // docs/STALE_CONFLICTS.md).
+            tx.execute(
+                "UPDATE nodes SET conflict=0
+                 WHERE directory=1 AND conflict=1 AND deleted=0
+                   AND id IN (SELECT id FROM recovery_ids)
+                   AND id IN (SELECT node FROM remote_aliases)
+                   AND remote_version != ?1
+                   AND dirty_blob IS NULL
+                   AND id NOT IN (SELECT node FROM local_creations)
+                   AND id NOT IN (SELECT node FROM namespace_overlay)
+                   AND id NOT IN (SELECT node FROM local_unlinks)
+                   AND NOT EXISTS(SELECT 1 FROM namespace_ops WHERE node=nodes.id AND state NOT IN ('committed','superseded'))
+                   AND NOT EXISTS(SELECT 1 FROM operations WHERE node=nodes.id AND state NOT IN ('committed','superseded'))
+                   AND NOT EXISTS(SELECT 1 FROM drafts WHERE node=nodes.id)",
+                params![crate::creations::CREATE_VERSION],
+            )?;
             tx.execute(
                 "UPDATE operations SET state='uncertain' WHERE state='inflight'",
                 [],

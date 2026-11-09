@@ -232,3 +232,170 @@ fn committed_directory_with_remote_alias_is_not_a_namespace_conflict_issue() {
         "bound committed directory must not need namespace recovery"
     );
 }
+
+fn named(id: &str, parent: Option<&str>, name: &str, version: &str, directory: bool) -> Node {
+    Node {
+        id: id.into(),
+        parent: parent.map(str::to_owned),
+        name: name.into(),
+        version: version.into(),
+        directory,
+        metadata: Some(NodeMetadata {
+            size: if directory { 5 } else { 3 },
+            mtime: 1,
+            mode: if directory { 0o755 } else { 0o644 },
+        }),
+    }
+}
+
+fn bound_folder_snapshot() -> Vec<Node> {
+    vec![
+        node("root", None, "r"),
+        node("a", Some("root"), "v1"),
+        named("900", Some("root"), "folder", "v-folder", true),
+    ]
+}
+
+/// #6 follow-up: a snapshot installed while a mkdir is in flight marks the
+/// overlay member as conflicted. Once the mkdir commits, the directory is bound
+/// to its remote identity and has no namespace work left, so the flag is stale:
+/// it must not keep `status()` at Conflict and `release()` refusing forever.
+#[test]
+fn mkdir_commit_heals_stale_directory_conflict() {
+    let (_d, mut s) = fixture();
+    let directory = s.create_local_directory("root", "folder", 0o755).unwrap();
+    let queued = s.next_directory().unwrap().unwrap();
+    let job = s.mark_directory_started(&queued.job.operation).unwrap();
+    // The install below does not observe the in-flight directory and flags it
+    // until the pending operation is confirmed.
+    s.install_remote_snapshot(
+        &[node("root", None, "r"), node("a", Some("root"), "v1")],
+        "2",
+        "server",
+    )
+    .unwrap();
+    assert_eq!(s.status(&directory.id).unwrap(), Status::Conflict);
+    let mut confirmed = job.node;
+    confirmed.version = "v-folder".into();
+    s.confirm_directory(&queued.job.operation, &confirmed, "900")
+        .unwrap();
+    assert_eq!(
+        s.status(&directory.id).unwrap(),
+        Status::OnlineOnly,
+        "committed directory must not keep the stale conflict flag"
+    );
+    assert!(
+        s.release(&directory.id).is_ok(),
+        "healed directory must be releasable"
+    );
+    assert!(s.sync_issue("root", &directory.id).unwrap().is_none());
+}
+
+/// Directory renames are confirmed without content comparison; a successful
+/// rename acknowledgement leaves the directory bound and conflict-free even if
+/// a snapshot install flagged it while the rename was in flight.
+#[test]
+fn rename_commit_heals_stale_directory_conflict() {
+    let (d, mut s) = fixture();
+    {
+        let db = rusqlite::Connection::open(d.path().join("state.sqlite")).unwrap();
+        db.execute("INSERT INTO nodes(id,parent,name,remote_version,directory) VALUES('folder','root','folder','v-folder',1)", []).unwrap();
+        db.execute(
+            "INSERT INTO remote_aliases(remote,node) VALUES('900','folder')",
+            [],
+        )
+        .unwrap();
+        db.execute("UPDATE nodes SET conflict=1 WHERE id='folder'", [])
+            .unwrap();
+    }
+    s.rename_local("root", "folder", "root", "folder2", false)
+        .unwrap();
+    let queued = s.next_rename().unwrap().unwrap();
+    s.mark_rename_started(&queued.job.operation).unwrap();
+    let confirmed = named("folder", Some("root"), "folder2", "v-folder2", true);
+    s.confirm_rename(&queued.job.operation, &confirmed, false)
+        .unwrap();
+    assert_eq!(
+        s.status("folder").unwrap(),
+        Status::OnlineOnly,
+        "committed directory rename must not keep the stale conflict flag"
+    );
+    assert!(s.release("folder").is_ok());
+}
+
+/// Existing databases carry the stale flag on directories that are already
+/// bound and live. A snapshot install that observes such a directory has enough
+/// evidence to heal it: alias present, no overlay/creation/unlink, no pending
+/// operation or draft, and no dirty content.
+#[test]
+fn install_heals_stale_conflict_on_bound_directory() {
+    let (d, mut s) = fixture();
+    {
+        let db = rusqlite::Connection::open(d.path().join("state.sqlite")).unwrap();
+        db.execute("INSERT INTO nodes(id,parent,name,remote_version,directory) VALUES('folder','root','folder','v-folder',1)", []).unwrap();
+        db.execute(
+            "INSERT INTO remote_aliases(remote,node) VALUES('900','folder')",
+            [],
+        )
+        .unwrap();
+        db.execute("UPDATE nodes SET conflict=1 WHERE id='folder'", [])
+            .unwrap();
+    }
+    assert_eq!(s.status("folder").unwrap(), Status::Conflict);
+    assert!(s.release("folder").is_err());
+    s.install_remote_snapshot(&bound_folder_snapshot(), "2", "server")
+        .unwrap();
+    assert_eq!(s.status("folder").unwrap(), Status::OnlineOnly);
+    assert!(s.release("folder").is_ok());
+    assert!(s.sync_issue("root", "folder").unwrap().is_none());
+    // Installing the same namespace again must keep the flag cleared.
+    s.install_remote_snapshot(&bound_folder_snapshot(), "3", "server")
+        .unwrap();
+    assert_eq!(s.status("folder").unwrap(), Status::OnlineOnly);
+}
+
+/// The heal is not conflict resolution: a bound directory with an unresolved
+/// namespace operation keeps its flag, and dirty file conflicts are untouched.
+#[test]
+fn stale_heal_does_not_clear_real_conflicts() {
+    let (d, mut s) = fixture();
+    {
+        let db = rusqlite::Connection::open(d.path().join("state.sqlite")).unwrap();
+        db.execute("INSERT INTO nodes(id,parent,name,remote_version,directory) VALUES('folder','root','folder','v-folder',1)", []).unwrap();
+        db.execute(
+            "INSERT INTO remote_aliases(remote,node) VALUES('900','folder')",
+            [],
+        )
+        .unwrap();
+        db.execute("UPDATE nodes SET conflict=1 WHERE id='folder'", [])
+            .unwrap();
+        db.execute(
+            "INSERT INTO namespace_ops(id,node,body,state) VALUES('op-pending','folder','{}','pending')",
+            [],
+        )
+        .unwrap();
+    }
+    s.install_remote_snapshot(&bound_folder_snapshot(), "2", "server")
+        .unwrap();
+    assert_eq!(
+        s.status("folder").unwrap(),
+        Status::Conflict,
+        "an unresolved namespace operation must keep the flag"
+    );
+
+    let (_d2, mut files) = fixture();
+    conflict(&mut files);
+    assert_eq!(files.status("a").unwrap(), Status::Conflict);
+    files
+        .install_remote_snapshot(
+            &[node("root", None, "r"), node("a", Some("root"), "v2")],
+            "3",
+            "server",
+        )
+        .unwrap();
+    assert_eq!(
+        files.status("a").unwrap(),
+        Status::Conflict,
+        "dirty file conflicts must not be healed"
+    );
+}

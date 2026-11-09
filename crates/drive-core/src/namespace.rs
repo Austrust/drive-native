@@ -454,7 +454,8 @@ impl Store {
             [&confirmed.id],
             |r| r.get(0),
         )?;
-        if remote == job.node.version || remote == confirmed.version {
+        let identity_updated = remote == job.node.version || remote == confirmed.version;
+        if identity_updated {
             tx.execute("UPDATE nodes SET remote_version=?2,local_version=CASE WHEN ?4 AND local_version=?3 THEN ?2 ELSE local_version END,
                 base_version=CASE WHEN ?4 AND base_version=?3 THEN ?2 ELSE base_version END,
                 conflict=CASE WHEN ?4 AND (base_version IS NULL OR base_version=?3) THEN 0 ELSE conflict END WHERE id=?1",
@@ -508,6 +509,21 @@ impl Store {
                 "DELETE FROM namespace_overlay WHERE node=?1",
                 [&confirmed.id],
             )?;
+            if confirmed.directory && identity_updated {
+                // Stale-flag heal (issue #6 follow-up): the acknowledgement
+                // resolved the rename, so a flag raised while it was in flight is
+                // stale once no namespace work remains. Real conflicts (dirty
+                // content, unresolved operations or drafts) keep their flag.
+                tx.execute(
+                    "UPDATE nodes SET conflict=0
+                     WHERE id=?1 AND deleted=0 AND dirty_blob IS NULL
+                       AND id NOT IN (SELECT node FROM local_creations)
+                       AND id NOT IN (SELECT node FROM local_unlinks)
+                       AND NOT EXISTS(SELECT 1 FROM drafts WHERE node=?1)
+                       AND NOT EXISTS(SELECT 1 FROM operations WHERE node=?1 AND state NOT IN ('committed','superseded'))",
+                    [&confirmed.id],
+                )?;
+            }
         }
         tx.commit()?;
         Ok(())
