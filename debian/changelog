@@ -1,3 +1,30 @@
+drive-native (0.1.0~dev20261109.1) unstable; urgency=medium
+
+  * Merge the #21-#34 read-path, write-path, storage and desktop
+    performance series: move GetOverview off the global store lock onto a
+    private read-only snapshot and cache expensive counters by committed
+    generation (48-way mixed timeouts 28 -> 0); stop persisting read-only
+    cache-recency rows and drive NamespaceIndex freshness from a namespace
+    watermark; build directory projections outside the store lock; batch
+    draft metadata commits and move the draft-file fsync outside the lock
+    (100 MiB sequential write 817 -> 18 fsync); bound status-cache lock
+    holds and publish sparse projection deltas with recoverable degraded
+    states; bound the ACL blocked closure, batch READDIRPLUS permission
+    work and cache permission decisions; index the pending-remove barrier;
+    collapse first-install cache invalidation into one generation message;
+    coalesce GUI polling and consume revisioned StatusChanged2 change sets;
+    share native parent listings and bound native pool queueing.
+  * Raise STATE_SCHEMA_VERSION to 28 with partial indexes for operation
+    counting, active node/blob and uncertain reconciliation, inbox pending
+    rows and sync_history cursors, plus bounded retention for operations,
+    namespace_ops and inbox and batched snapshot/upload lookups. v27 -> v28
+    is the only migration path; FSD and worker must be updated together and
+    old programs cannot read the new schema.
+  * Expect state schema v28 in the GUI backend handover check and keep IPC
+    at 21.
+
+ -- Drive Native contributors <noreply@example.invalid>  Mon, 09 Nov 2026 10:30:00 +0800
+
 drive-native (0.1.0~dev20261108.1) unstable; urgency=medium
 
   * Merge the #14/#17 uncertain-upload and background-error work: bound
