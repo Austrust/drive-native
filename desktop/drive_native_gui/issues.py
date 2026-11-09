@@ -149,6 +149,15 @@ class IssuesDialog(QDialog):
         self.abandon.clicked.connect(self.abandon_upload)
         self.abandon.setEnabled(False)
         actions.addWidget(self.abandon)
+        # Destructive companion of keep-local; enabled only when the backend
+        # explicitly reports that no local-only content would be lost.
+        self.accept_remote = QPushButton("接受远端删除")
+        self.accept_remote.setToolTip(
+            "仅当该已绑定文件夹下没有任何仅存在于本地的内容时可用。"
+            "接受服务器已删除该文件夹：不会上传或恢复旧身份，也不会删除服务器上的其他条目。")
+        self.accept_remote.clicked.connect(self.keep_directory_remote)
+        self.accept_remote.setEnabled(False)
+        actions.addWidget(self.accept_remote)
         self.keep = QPushButton("保留双方版本")
         self.keep.setObjectName("primary")
         self.keep.clicked.connect(self.keep_both)
@@ -250,9 +259,13 @@ class IssuesDialog(QDialog):
         item = self.table.currentItem()
         row = item.data(0, Qt.UserRole) if item else None
         self.update_actions(row)
-        enabled = bool(row and (row.get("can_keep_both") or row.get("can_keep_directory")) and not self.busy)
+        enabled = bool(row and (row.get("can_keep_both") or row.get("can_keep_directory")
+                                or row.get("can_keep_local") is True) and not self.busy)
         self.keep.setEnabled(enabled)
-        self.name.setEnabled(enabled)
+        self.keep.setText(
+            "保留本地目录（重新上传）" if row and row.get("can_keep_local") is True
+            else "保留双方版本")
+        self.name.setEnabled(enabled and not (row and row.get("can_keep_local") is True))
         if not row:
             self.selected_id = None
             self.explanation.setText("选择一个文件查看处理方式。若没有列出上传阻塞项，可先请求重新核对或复制诊断。")
@@ -273,6 +286,15 @@ class IssuesDialog(QDialog):
             self.explanation.setText("整个本地文件夹将改用新名称，保留所有子文件，并在联网后上传。同名远端条目及其内容保持不变。")
         elif row.get("can_keep_both") and row.get("reason") == "creation_conflict":
             self.explanation.setText("本地文件将以新名称保留，并在联网后上传。同名远端条目保持不变，取得其元数据后会在原位置显示。")
+        elif row.get("reason") == "bound_directory_conflict":
+            message = ("服务器已删除该已绑定文件夹，但其下仍有本地内容。"
+                       "“保留本地目录（重新上传）”会保留本地树并以本地新建身份重新排队；"
+                       "已绑定的子项保持原远端身份。")
+            if row.get("can_keep_remote") is True:
+                message += "若确认本地没有需要保留的内容，可用“接受远端删除”结束恢复。"
+            else:
+                message += "该文件夹下仍有仅存在于本地的内容，因此不会提供“接受远端删除”。"
+            self.explanation.setText(reason_label(row, "需要进一步核对") + "。" + message)
         elif row.get("can_abandon_upload") is True:
             self.explanation.setText(
                 reason_label(row, "需要进一步核对")
@@ -318,6 +340,7 @@ class IssuesDialog(QDialog):
         # Capability is per row and must be a literal JSON true from the backend;
         # a missing/legacy field never enables a destructive local action.
         self.abandon.setEnabled(bool(row and row.get("can_abandon_upload") is True and not self.busy))
+        self.accept_remote.setEnabled(bool(row and row.get("can_keep_remote") is True and not self.busy))
         self.pause_sync.setEnabled(not self.busy and self.overview.get("connection") in ("online", "offline", "connecting", "needs_attention"))
         self.login.setEnabled(not self.busy and self.configure is not None)
 
@@ -467,7 +490,16 @@ class IssuesDialog(QDialog):
     def keep_both(self):
         item = self.table.currentItem()
         row = item.data(0, Qt.UserRole) if item else None
-        if not row or not (row.get("can_keep_both") or row.get("can_keep_directory")) or self.busy:
+        local_directory = bool(row and row.get("can_keep_local") is True)
+        if not row or not (row.get("can_keep_both") or row.get("can_keep_directory")
+                           or local_directory) or self.busy:
+            return
+        if local_directory:
+            self.busy = True
+            self.selection_changed()
+            self.message.setText("正在保留本地目录并重新排队上传…")
+            self.bus.call("KeepDirectoryLocal", [row["id"], row["token"]],
+                          self.completed_local_directory)
             return
         name = self.name.text()
         if not name or name in (".", "..") or "/" in name or "\0" in name or len(name.encode("utf-8")) > 255:
@@ -478,6 +510,34 @@ class IssuesDialog(QDialog):
         self.message.setText("正在保存本地副本…")
         method = "KeepDirectoryBoth" if row.get("can_keep_directory") else "KeepBoth"
         self.bus.call(method, [row["id"], row["token"], name], self.completed)
+
+    def completed_local_directory(self, data, error):
+        self.busy = False
+        self.selection_changed()
+        if error or not isinstance(data, dict) or data.get("schema") != 1 or data.get("kept_local") is not True:
+            self.message.setText("未更改恢复状态。目录或子项状态可能已变化，请刷新后重试。")
+        else:
+            self.message.setText("本地目录已保留，将以本地新建身份重新排队上传；子文件内容保持不变。")
+            self.resolved.emit()
+            self.refresh()
+
+    def keep_directory_remote(self):
+        row = self.selected_row()
+        if not row or row.get("can_keep_remote") is not True or self.busy:
+            return
+        self.busy = True
+        self.selection_changed()
+        self.message.setText("正在接受远端删除…")
+        def done(data, error):
+            self.busy = False
+            self.selection_changed()
+            if error or not isinstance(data, dict) or data.get("schema") != 1 or data.get("kept_remote") is not True:
+                self.message.setText("未更改恢复状态。目录或子项状态可能已变化，请刷新后重试。")
+            else:
+                self.message.setText("已接受远端删除；本地没有仅存在于本地的内容被移除。")
+                self.resolved.emit()
+                self.refresh()
+        self.bus.call("KeepDirectoryRemote", [row["id"], row["token"]], done)
 
     def completed(self, data, error):
         self.busy = False
