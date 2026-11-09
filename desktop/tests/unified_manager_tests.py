@@ -592,6 +592,48 @@ class UnifiedTests(unittest.TestCase):
         stop.assert_any_call(A)
         stop.assert_any_call(B)
 
+    def test_stopping_one_mount_leaves_the_other_mount_running(self):
+        from PySide6.QtWidgets import QMessageBox
+        self.complete_overview(A)
+        self.complete_overview(B)
+        with patch.object(QMessageBox, 'question', return_value=QMessageBox.Yes):
+            self.assertTrue(self.window.stop_task(A))
+        self.assertEqual(self.window.buses[A].calls.count('StopMount'), 1)
+        self.assertNotIn('StopMount', self.window.buses[B].calls)
+        self.assertEqual(list(self.window.stop_pending), [A])
+        self.assertNotIn('正在停止', self.window.items[B].text(1))
+        self.window.shutdown_watchers[A].value = {'phase': 'complete'}
+        self.window.shutdown_watchers[A].mounted = False
+        self.window.poll_stop_tasks()
+        self.assertIn('已停止并卸载', self.window.message.text())
+        # A stop is scoped to one mount and stays cooperative: it never frees
+        # cache or forgets history, and the sibling mount keeps its page.
+        destructive = ('Terminate', 'Kill', 'ReleaseSpace', 'ClearSyncHistory',
+                       'RemoveCache', 'ClearCache')
+        for slot, bus in self.window.buses.items():
+            for method in bus.calls:
+                self.assertNotIn(method, destructive, slot)
+        self.assertIn(B, self.window.records)
+        self.window.activate_task(B)
+        self.assertIs(self.window.stack.currentWidget(), self.window.pages[B])
+        self.assertTrue(self.window.pages[B].stop_mount.isEnabled())
+        self.assertTrue(self.window.isVisible())
+
+    def test_complete_phase_with_mount_still_present_is_not_reported_as_unmounted(self):
+        from PySide6.QtWidgets import QMessageBox
+        self.complete_overview(A)
+        with patch.object(QMessageBox, 'question', return_value=QMessageBox.Yes):
+            self.assertTrue(self.window.stop_task(A))
+        watcher = self.window.shutdown_watchers[A]
+        # "complete" alone must not turn a stop with a still-present mount into
+        # a successful unmount; the UI keeps waiting instead of claiming success.
+        watcher.value = {'phase': 'complete'}
+        watcher.mounted = True
+        self.window.poll_stop_tasks()
+        self.assertIn(A, self.window.stop_pending)
+        self.assertTrue(self.window.stop_timer.isActive())
+        self.assertNotIn('已停止并卸载', self.window.message.text())
+
     def test_notification_click_reopens_the_mount_and_missing_tray_stays_silent(self):
         method, callback = self.window.buses[A].waiting.pop(0)
         self.assertEqual(method, 'GetOverview')
@@ -607,9 +649,31 @@ class UnifiedTests(unittest.TestCase):
         self.assertTrue(self.window.isVisible())
         self.assertIs(self.window.stack.currentWidget(), self.window.pages[A])
         with patch.object(self.window.tray, 'available', return_value=False), \
-                patch.object(self.window.tray, 'show_message') as silent:
+                patch.object(self.window.tray, 'show_message') as silent, \
+                patch.object(self.window.freedesktop_notifications, 'available',
+                             return_value=False):
             self.window.notifications.observe_overview('other', 'Other', {'connection': 'locked'})
         silent.assert_not_called()
+        self.assertFalse(self.window.notifications.log[-1]['shown'])
+
+    def test_missing_tray_falls_back_to_system_notifications_with_click_target(self):
+        method, callback = self.window.buses[B].waiting.pop(0)
+        self.assertEqual(method, 'GetOverview')
+        with patch.object(self.window.tray, 'available', return_value=False), \
+                patch.object(self.window.freedesktop_notifications, 'available',
+                             return_value=True), \
+                patch.object(self.window.freedesktop_notifications, 'show_message') as fallback:
+            callback({'task_id': 'task-' + B, 'connection': 'locked', 'mounted': True}, None)
+        fallback.assert_called_once()
+        self.assertIn('需要登录', fallback.call_args.args[0])
+        # The click target travels with the delivered notice so a click on an
+        # older system notification reopens its own mount, not the newest one.
+        self.assertEqual(fallback.call_args.kwargs.get('target'), B)
+        self.assertEqual(self.window.notifications.last_target, B)
+        self.window.hide()
+        self.window.freedesktop_notifications.clicked.emit(B)
+        self.assertTrue(self.window.isVisible())
+        self.assertIs(self.window.stack.currentWidget(), self.window.pages[B])
 
     def test_keyboard_shortcuts_switch_tabs_and_navigation_enter_opens_mounts(self):
         self.window.activate_task(A)
