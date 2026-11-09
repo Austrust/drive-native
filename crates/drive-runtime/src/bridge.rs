@@ -926,6 +926,9 @@ impl Bridge {
             "next_retry_at_ms": run.map_or(0, |run| run.next_retry_at),
             "last_error": run.and_then(|run| run.last_error.clone()),
             "recovery_exhausted": exhausted,
+            // Compatibility alias for the task contract: exhaustion is the only
+            // recovery state that needs a human.
+            "attention": exhausted,
             "revision": revision,
         })
     }
