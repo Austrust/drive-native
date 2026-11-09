@@ -2,7 +2,7 @@
 
 面向 **Linux Mint 22.x Cinnamon / Nemo** 的群晖 Drive 按需同步客户端。使用 Rust、FUSE、SQLite、Qt/PySide6 和 Nemo/GIO 扩展实现，直接以原生协议连接 Drive Server，不依赖 WebDAV，也不依赖官方客户端进程。
 
-当前状态：**开发版（Pre-release），持续开发中**。最新开发包为 [`0.1.0~dev20261109.1`](https://github.com/Austrust/drive-native/releases/tag/dev20261109.1)，数据库 schema **28**、IPC **21**；发布源码提交 `da68c15`（与验证代码树 `9cb6b1c` 内容一致，仅 changelog 与发布说明不同）。本版是开发包，不是 rc1，候选版所需验收尚未全部完成。源码树下一候选为 `0.1.0~dev20261109.2`（`integration/fixes3`，schema **29**），待 final-validate 后冻结发布。
+当前状态：**开发版（Pre-release），持续开发中**。最新开发包为 [`0.1.0~dev20261109.2`](https://github.com/Austrust/drive-native/releases/tag/dev20261109.2)，数据库 schema **29**、IPC **21**；发布源码提交 `73ab2b3`（PR #55 合并 `integration/fixes3`，发布准备提交 `be25869`）。本版是开发包，不是 rc1；真实 NAS 复核、真实 dpkg 安装／升级与 Mint／Cinnamon 桌面验收仍未完成。
 
 ## 核心能力
 
