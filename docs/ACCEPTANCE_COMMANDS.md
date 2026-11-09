@@ -199,6 +199,29 @@ export CARGO_TARGET_DIR=/tmp/p032-targets/t0
     ```
     默认模式扫描 `crates/drive-core` 的 POSIX 依赖，新增未列入 allowlist 的命中即失败（`scripts/verify.sh` 已接入，发生在 `--tests-only` 早退之前）；`--list` 输出扫描文件/命中/allowlist 清单；`--strict` 当前会把 allowlist 项也报为违规，仅用于收紧基线，不接入 CI。当前基线：63 个文件、108 处命中全部在 allowlist（0 violations）。迁移计划与三接口见 [WINDOWS_PORT.md](WINDOWS_PORT.md)。
 
+26. **#50 P4 写路径/调度防御与规则变更本地清理**
+    `sh
+    DRIVE_NATIVE_FS_DIAGNOSTICS=1 cargo test -p drive-fs --all-features --locked --lib exclude_write_tests -- --ignored --nocapture
+    cargo test -p drive-core --all-features --locked --lib exclude_purge_tests
+    cargo test -p drive-core --all-features --locked --lib exclude_index_tests
+    `
+    重点断言：排除路径的 create/mkdir/unlink/rmdir/rename/write/setattr 返回 ENOENT 且不落库、不留 pending 操作；上传/下载/缓存与 namespace 调度跳过被排除对象；规则变更或重启把已导入/已缓存子树本地隐藏并回收正文，断言不发远端删除、移除规则后可 restore；恢复快照 install 前 purge 排除节点，历史行不会被 tombstone 标成 conflict（conflict=0/dirty NULL/operations 0）。
+
+27. **#10 恢复分类与自动恢复**
+    `sh
+    cargo test -p drive-runtime --all-features --locked --lib recovery
+    cargo test -p drive-core --all-features --locked --test recovery_runs
+    cargo test -p drive-runtime --all-features --locked --test desktop -- recovery
+    `
+    重点断言：rescan_later / merge_mode / 游标缺口在 3 次自动恢复内完成（2/5/10 秒或 0/5/15 秒退避），耗尽才 
+eeds_attention；GetOverview/GetIssues 的 ecovery{state,cause,attempts,next_retry_at,revision,attention} 能区分重试中/恢复中/需人工；ecovery_revision 推进触发 overview 刷新；IPC 21 不变。
+
+28. **#11 step1 文件身份契约**
+    `sh
+    cargo test -p drive-core --all-features --locked --lib file_identity
+    bash scripts/check-core-posix.sh
+    `
+    重点断言：PlatformFileId 往返/根=1/未知映射返回 None 且不写库/adapter 只读镜像 s_inodes；行为与 ino 语义不变；POSIX 门禁仍 0 violations。
 ## 与 issue #8 三树数字的关系
 
 ISSUES_20261107.md 的三树表与 verifier 数字测于 fix-7/#8 分支线（`58724a0` 等），**未含 #2 `3dd03a1`**；RELEASE_20261108_1.md 的 28 次 48 路超时测于 `.1` 树 `f6f48ea`（含 #2）。最终树（`integration/fixes2` @ `9cb6b1c`，release，`latency-clean-driver.log`，loadavg_end 10.88）的同一 210k 验收：48 路 mixed **0 超时**（mixed p95 861.6 ms、max 1.64 s），overview 分段 total p95 **0.708 ms**、lock_hold / lock_wait **0**、read-only calls 40/40、cached 40，GetStates p95 226.95 ms、2000 项目录列举 3.89 ms、classic_timeouts 0；数字均取自 `status_latency_210k` 的 `#8 METRICS` 输出。
