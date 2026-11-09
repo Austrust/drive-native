@@ -1,29 +1,62 @@
 drive-native (0.1.0~dev20261109.2) unstable; urgency=medium
 
-  * Merge the #14/#19/#18/#53/#8/#6/#9 TB1/#2 2a/#50 P1-P2 release batch:
-    park unconfirmed uploads in an explicit abandoned state after the
-    reconciliation budget is exhausted and offer an AbandonUpload action
-    that removes only the local file, with paused_uploads surfaced in the
-    overview and issue center; run cache release as a cancellable
-    background job with progress, released/skipped/protected results and
-    garbage collection every 32 files; return EOPNOTSUPP instead of EPERM
-    for hard links so tools fall back to copy/rename; refresh the overview
-    when the committed status watermark advances so tray badges and
-    navigation counts do not go stale; heal stale directory conflict flags
-    after snapshot installs and successful mkdir/rename confirmations while
-    keeping real conflicts; raise STATE_SCHEMA_VERSION to 29 with
-    outcome/diagnostic columns, schema_migrations, recovery_runs,
-    platform_state_changes, a commit_diagnostics view and idempotent
-    backfill, keeping IPC at 21; fall back to freedesktop D-Bus notifications
-    when the tray is unavailable; add opt-in profile exclude_patterns that
-    prune initialization subtrees and are validated on save.
-  * #8 is acceptance-test coverage only (initialization responsiveness under
-    concurrent desktop reads); it changes no runtime behavior.
+  * Merge the #2/#6/#8/#9/#10/#11/#14/#18/#19/#50/#53 batch:
+    - #14: park permission-uncertain uploads in an explicit local
+      "abandoned" state once the five-attempt reconciliation budget is
+      exhausted, offer AbandonUpload (token CAS, removes only the local
+      unsent file, never a server entry), surface a paused_uploads counter,
+      protect abandoned bodies from cache GC until an explicit retry
+      re-arms them, and supersede residual pending uploads when a creation
+      is abandoned or locally deleted.
+    - #19: run cache release as a cancellable background job with per-file
+      progress and exact reclaimed bytes, return skipped for already
+      online-only entries while withdrawing their failed read intents, and
+      let garbage collection drop dangling blob pointers of deleted nodes
+      without touching bodies still referenced by live, conflicted or
+      journaled rows; stop GUI polling when the service reports the job is
+      gone.
+    - #18: answer hard links with EOPNOTSUPP instead of EPERM so tools fall
+      back to copy/rename; document that Synology Drive has no hard-link
+      identity.
+    - #53: refresh the overview whenever the committed status watermark
+      advances so tray badges and navigation counts cannot go stale.
+    - #8: prove the fourth acceptance criterion with a reproducible test
+      (concurrent desktop reads during real initialization); no runtime
+      behavior change.
+    - #6 and #54: heal stale directory conflict flags after snapshot
+      installs and successful mkdir/rename confirmations while keeping real
+      conflicts, and add keep-local/keep-remote recovery for bound
+      directories deleted by the server (conflict center and D-Bus actions).
+    - #2: deliver problem notifications through freedesktop D-Bus when the
+      tray is unavailable, route clicks to the originating mount, and keep
+      the existing notification policy.
+    - #50: add optional profile exclude_patterns (compiled regex, validated
+      on save) whose subtrees are pruned from initialization, hidden from
+      FUSE/GetDirectory/GetStates and events, and refused on local write and
+      scheduling; switching rules locally hides and purges imported content
+      and recycles blobs without deleting anything remotely, with restore on
+      rule removal; fix preview-phase mounts with active rules; add a GUI
+      rule editor.
+    - #9: raise STATE_SCHEMA_VERSION to 29 with commit outcome/diagnostic
+      columns, schema_migrations, recovery_runs, platform_state_changes and
+      a commit_diagnostics view, plus idempotent backfill and a
+      state-before-v29-* backup; persist commit diagnostics for the upload,
+      rename, mkdir, remove and replace paths and expose additive
+      GetOverview.commit_diagnostics, keeping IPC at 21.
+    - #10: classify required-rebuild signals (rescan_later, merge_mode,
+      snapshot/cursor gaps) separately from retryable and fatal errors,
+      rebuild automatically with at most three backoff attempts, and expose
+      an additive recovery status object; only authentication, certificate,
+      root and exhaustion cases need attention.
+    - #11 step 0/1: add a drive-core POSIX guard wired into verify.sh and
+      the Windows port design, and introduce the FileIdentitySource
+      contract behind a u64 platform id without changing schema, IPC or
+      FUSE behavior.
   * v28 -> v29 is the only migration path; FSD and worker must be updated
     together and old programs cannot read the new schema. Store::open keeps
     a VACUUM INTO state-before-v29-* backup before migrating.
 
- -- Drive Native contributors <noreply@example.invalid>  Mon, 09 Nov 2026 13:40:00 +0800
+ -- Drive Native contributors <noreply@example.invalid>  Mon, 09 Nov 2026 21:30:00 +0800
 
 drive-native (0.1.0~dev20261109.1) unstable; urgency=medium
 
