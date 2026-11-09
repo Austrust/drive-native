@@ -285,6 +285,7 @@ fn profile(mount: PathBuf) -> Profile {
         writable: false,
         local_policy: None,
         writable_source: None,
+        exclude_patterns: Vec::new(),
     }
 }
 

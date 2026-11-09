@@ -500,6 +500,7 @@ fn window_candidate(
         restore: data.restore.clone(),
         start_cursor: data.cursor.clone(),
         expected_cursor: "native-v1:7".into(),
+rules_digest: String::new(),
     };
     let run = store
         .begin_initialization(&binding, &data.nodes[0], InitializationBudget::default())
@@ -855,6 +856,7 @@ fn delayed_directory_race_cannot_reticket_old_path_after_sibling_moves_identity(
         restore: data.restore.clone(),
         start_cursor: data.cursor.clone(),
         expected_cursor: "native-v1:7".into(),
+rules_digest: String::new(),
     };
     let run = store
         .begin_initialization(&binding, &data.nodes[0], InitializationBudget::default())
@@ -1383,6 +1385,7 @@ fn run_deferred_page_directory_race(category: &'static str, expect_success: bool
         restore: "server".into(),
         start_cursor: old.cursor.clone(),
         expected_cursor: old.cursor.clone(),
+rules_digest: String::new(),
     };
     let run = store
         .begin_initialization(&binding, &old.nodes[0], InitializationBudget::default())
@@ -1505,6 +1508,7 @@ fn repeated_coverage_races_exhaust_budget_without_publishing_or_losing_dirty_sta
         restore: "server".into(),
         start_cursor: data.cursor.clone(),
         expected_cursor: data.cursor.clone(),
+rules_digest: String::new(),
     };
     let run = store
         .begin_initialization(&binding, &data.nodes[0], InitializationBudget::default())
@@ -2065,6 +2069,7 @@ fn cold_preview_root_rejection_revokes_but_transport_and_generic_failure_preserv
             restore: "server".into(),
             start_cursor: data.cursor.clone(),
             expected_cursor: "".into(),
+rules_digest: String::new(),
         };
         let run = store
             .begin_initialization(&binding, &data.nodes[0], InitializationBudget::default())
@@ -2105,4 +2110,103 @@ fn cold_preview_root_rejection_revokes_but_transport_and_generic_failure_preserv
         let log = peer.finish();
         assert_eq!(log.len(), 1);
     }
+}
+
+#[test]
+fn initialization_does_not_import_or_query_an_excluded_subtree() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = snapshot("server", 7);
+    let peer = Peer::standard(data.clone());
+    let bridge = bridge(Store::open(dir.path()).unwrap(), &peer, "server");
+    bridge.set_exclude_rules(drive_core::exclude::ExcludeRules::compile(&["^Sub$"]).unwrap());
+    assert!(bridge.initial_pull().unwrap());
+    {
+        let store = bridge.store.lock().unwrap();
+        assert_eq!(store.cursor().unwrap(), data.cursor);
+        assert_eq!(
+            store.initialization_status().unwrap().unwrap().state,
+            "ready"
+        );
+        assert!(!store.initialization_writeback_blocked().unwrap());
+        assert_eq!(store.node("101").unwrap().name, "A.txt");
+        assert!(store.node("200").is_err(), "excluded directory was imported");
+        assert!(store.node("201").is_err(), "excluded subtree was imported");
+    }
+
+    let log = peer.finish();
+    assert_eq!(
+        log,
+        vec![
+            "seed",
+            "candidate-pull:native-v1:7",
+            "directory:100",
+            "candidate-pull:native-v1:7"
+        ]
+    );
+}
+
+#[test]
+fn initialization_keeps_an_unmatched_directory_but_filters_its_children() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = snapshot("server", 7);
+    let peer = Peer::standard(data.clone());
+    let bridge = bridge(Store::open(dir.path()).unwrap(), &peer, "server");
+    bridge.set_exclude_rules(drive_core::exclude::ExcludeRules::compile(&[r"\.txt$"]).unwrap());
+    assert!(bridge.initial_pull().unwrap());
+    {
+        let store = bridge.store.lock().unwrap();
+        assert_eq!(
+            store.initialization_status().unwrap().unwrap().state,
+            "ready"
+        );
+        assert!(store.node("200").unwrap().directory);
+        assert!(store.node("101").is_err());
+        assert!(store.node("102").is_err());
+        assert!(store.node("201").is_err());
+    }
+    let log = peer.finish();
+    assert_eq!(
+        log,
+        vec![
+            "seed",
+            "candidate-pull:native-v1:7",
+            "directory:100",
+            "directory:200",
+            "candidate-pull:native-v1:7"
+        ]
+    );
+}
+
+#[test]
+fn initialization_without_rules_keeps_the_unfiltered_baseline() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = snapshot("server", 7);
+    let peer = Peer::standard(data.clone());
+    let bridge = bridge(Store::open(dir.path()).unwrap(), &peer, "server");
+    bridge.set_exclude_rules(drive_core::exclude::ExcludeRules::default());
+    assert!(bridge.initial_pull().unwrap());
+    {
+        let store = bridge.store.lock().unwrap();
+        assert_eq!(store.cursor().unwrap(), data.cursor);
+        assert_eq!(
+            store.initialization_status().unwrap().unwrap().state,
+            "ready"
+        );
+        assert!(!store.initialization_writeback_blocked().unwrap());
+        assert_eq!(store.node("101").unwrap().name, "A.txt");
+        assert_eq!(store.node("102").unwrap().name, "B.txt");
+        assert!(store.node("200").unwrap().directory);
+        assert_eq!(store.node("201").unwrap().name, "C.txt");
+    }
+    let log = peer.finish();
+    assert_eq!(
+        log,
+        vec![
+            "seed",
+            "candidate-pull:native-v1:7",
+            "directory:100",
+            "directory:200",
+            "candidate-pull:native-v1:7"
+        ]
+    );
 }

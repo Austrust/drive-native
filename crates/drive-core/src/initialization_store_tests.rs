@@ -9,6 +9,8 @@ mod local_recheck;
 mod priority_tests;
 #[path = "initialization_scheduler_tests.rs"]
 mod scheduler_tests;
+#[path = "initialization_exclude_tests.rs"]
+mod exclude_tests;
 use super::*;
 use crate::{
     Event, NodeMetadata,
@@ -67,6 +69,7 @@ fn setup() -> (tempfile::TempDir, Store, InitializationBinding) {
         restore: "server".into(),
         start_cursor: "native-v1:100".into(),
         expected_cursor: "native-v1:7".into(),
+rules_digest: String::new(),
     };
     (temp, store, binding)
 }

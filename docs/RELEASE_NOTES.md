@@ -1,3 +1,7 @@
+# 未发布：issue #50 按任务正则排除（阶段 1/2）
+
+profile 新增可选 `exclude_patterns`：初始化导入对匹配路径整棵子树剪枝、非法正则拒绝并报出 pattern 与编译错误，GUI 保存时做同样校验；详见 [EXCLUDE_PATTERNS.md](EXCLUDE_PATTERNS.md)。
+
 # 0.1.0~dev20261108.1：上传终态、数据库热点与统一桌面
 
 本版把 #14/#17 的未确认上传终态与背景错误清理、#15/#16 的本地 SQLite 索引与去全局锁读、#8 的已提交状态投影、#2 的统一窗口/托盘/持久同步历史与 #5 的 NamespaceIndex 精简投影合入主线（`8646766` 之后的候选发布版）。schema27、IPC21：FSD 与 worker 必须成对更新，旧程序不能读取新 schema。正目录项 entry TTL 恒 0，attr 默认 1000 ms。

@@ -35,6 +35,7 @@ fn profile() -> Profile {
         },
         mount: PathBuf::from("/tmp/drive-native-test-mount"),
         writable: false, local_policy: None, writable_source: None,
+        exclude_patterns: Vec::new(),
     }
 }
 fn fixture() -> (tempfile::TempDir, std::sync::Arc<Service>) {
@@ -1210,4 +1211,66 @@ fn overview_reports_sync_state_cache_availability_and_version() {
     );
     assert_eq!(overview["version"]["ipc"], 21);
     assert_eq!(overview["schema"], 1);
+}
+
+/// Issue #50: a profile written before exclusion rules existed still loads.
+#[test]
+fn profile_without_exclude_patterns_stays_readable() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_profile(&dir, |value| {
+        value.as_object_mut().unwrap().remove("exclude_patterns");
+    });
+    let profile = Profile::read(&path).unwrap();
+    assert!(profile.exclude_patterns.is_empty());
+    assert!(profile.exclude_rules().unwrap().is_empty());
+}
+
+/// Issue #50: an invalid regular expression is rejected with its pattern text
+/// and the compiler reason, so the settings UI can point at the bad rule.
+#[test]
+fn profile_rejects_invalid_exclude_pattern_with_pattern_and_reason() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_profile(&dir, |value| {
+        value.as_object_mut().unwrap().insert(
+            "exclude_patterns".into(),
+            serde_json::json!(["[unclosed"]),
+        );
+    });
+    let error = Profile::read(&path)
+        .err()
+        .expect("invalid exclude pattern must be rejected")
+        .to_string();
+    assert!(error.contains("[unclosed"), "{error}");
+    assert!(error.contains("invalid exclude pattern"), "{error}");
+}
+
+/// Issue #50: compiled rules match scope-relative POSIX paths and exclude whole
+/// directory subtrees.
+#[test]
+fn profile_reads_valid_exclude_patterns_and_matches_relative_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_profile(&dir, |value| {
+        value.as_object_mut().unwrap().insert(
+            "exclude_patterns".into(),
+            serde_json::json!(["^Sub$", r"\.iso$"]),
+        );
+    });
+    let profile = Profile::read(&path).unwrap();
+    let rules = profile.exclude_rules().unwrap();
+    assert!(rules.matches("Sub", true));
+    assert!(rules.matches("Sub/C.txt", false));
+    assert!(rules.matches("install.iso", false));
+    assert!(!rules.matches("A.txt", false));
+}
+
+fn write_profile(
+    dir: &tempfile::TempDir,
+    modify: impl FnOnce(&mut serde_json::Value),
+) -> PathBuf {
+    let mut value = serde_json::to_value(profile()).unwrap();
+    modify(&mut value);
+    let path = dir.path().join("profile.json");
+    std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    path
 }

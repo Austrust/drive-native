@@ -47,9 +47,30 @@ def load_profile(instance=None):
     return profile
 
 
+def _validate_exclude_patterns(profile):
+    """Issue #50: reject invalid exclusion rules before they reach the worker.
+
+    The worker compiles the same patterns with the Rust regex crate; validating
+    here keeps a typo from being saved and then only failing at mount time.
+    """
+    patterns = profile.get("exclude_patterns")
+    if patterns is None:
+        return
+    if not isinstance(patterns, list):
+        raise ValueError("排除规则必须是字符串列表")
+    for pattern in patterns:
+        if not isinstance(pattern, str) or not pattern:
+            raise ValueError("排除规则必须是非空字符串")
+        try:
+            re.compile(pattern)
+        except re.error as error:
+            raise ValueError(f"排除规则 {pattern!r} 不是合法正则：{error}") from error
+
+
 def _save_profile(profile, instance=None):
     if profile.get("schema") != 1 or "password" in profile:
         raise ValueError("配置格式不正确")
+    _validate_exclude_patterns(profile)
     path = config_path(instance)
     path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
     if (

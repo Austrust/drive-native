@@ -70,6 +70,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         restore: "synthetic-server".into(),
         start_cursor: "native-v1:100".into(),
         expected_cursor: String::new(),
+rules_digest: String::new(),
     };
     let run = store.begin_initialization(
         &binding,

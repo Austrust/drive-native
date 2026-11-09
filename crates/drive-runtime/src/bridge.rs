@@ -148,6 +148,9 @@ pub struct Bridge {
     pub upload_block: Mutex<Option<String>>,
     pub cache_error: Mutex<Option<String>>,
     pub initialization: Arc<crate::initialization::Tracker>,
+    /// Issue #50: task-scoped exclusion patterns compiled once at profile load.
+    /// Empty rules keep matching a constant-time no-op.
+    exclusion: std::sync::RwLock<drive_core::exclude::ExcludeRules>,
 }
 impl Bridge {
     pub fn transfer_entries(&self) -> Vec<crate::transfers::TransferEntry> {
@@ -333,6 +336,7 @@ impl Bridge {
             upload_block: Mutex::new(None),
             cache_error: Mutex::new(None),
             initialization: Arc::new(crate::initialization::Tracker::default()),
+            exclusion: std::sync::RwLock::new(drive_core::exclude::ExcludeRules::default()),
         })
     }
     /// Every upstream queue failure must suspend cacheable publication, not
@@ -346,6 +350,15 @@ impl Bridge {
     /// Observable for root diagnostics; the mount recovers without a restart.
     pub fn notification_overflows(&self) -> u64 {
         self.notification_overflows.load(Ordering::Relaxed)
+    }
+    /// Install the profile's exclusion rules. Must be called before
+    /// initialization enumerates the namespace (see `Service::new`, #50).
+    pub(crate) fn set_exclude_rules(&self, rules: drive_core::exclude::ExcludeRules) {
+        *self.exclusion.write().unwrap() = rules;
+    }
+    /// Snapshot the current rules so a worker can match without holding a lock.
+    pub(crate) fn exclude_rules(&self) -> drive_core::exclude::ExcludeRules {
+        self.exclusion.read().unwrap().clone()
     }
     /// Above this many per-node invalidations one generation message is cheaper
     /// and bounded: a snapshot commit touches every node, and one message per

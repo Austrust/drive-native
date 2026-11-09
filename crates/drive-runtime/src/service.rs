@@ -38,12 +38,22 @@ pub struct Profile {
     pub local_policy: Option<drive_core::write_permissions::LocalPolicy>,
     #[serde(default)]
     pub writable_source: Option<String>,
+    /// Issue #50: task-scoped exclusion patterns matched against POSIX paths
+    /// relative to `scope.path`. Absent in old profiles and therefore empty.
+    #[serde(default)]
+    pub exclude_patterns: Vec<String>,
 }
 impl Profile {
     pub fn effective_local_policy(&self) -> drive_core::write_permissions::LocalPolicy {
         self.local_policy.unwrap_or(if self.writable {
             drive_core::write_permissions::LocalPolicy::FollowRemote
         } else { drive_core::write_permissions::LocalPolicy::ExplicitReadOnly })
+    }
+    /// Pre-compile the profile's exclusion patterns. An empty list is a cheap
+    /// constant-time no-op at match time.
+    pub fn exclude_rules(&self) -> io::Result<drive_core::exclude::ExcludeRules> {
+        drive_core::exclude::ExcludeRules::compile(&self.exclude_patterns)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))
     }
     pub fn read(path: &Path) -> io::Result<Self> {
         use std::io::Read;
@@ -105,6 +115,10 @@ impl Profile {
         if self.writable_source.as_deref().is_some_and(|s| !matches!(s,"user"|"legacy")) {
             return Err(io::Error::other("invalid local permission policy source"));
         }
+        // Reject invalid regular expressions at the profile boundary so a typo
+        // is reported with its pattern and compiler error instead of surfacing
+        // as an undefined initialization failure.
+        self.exclude_rules()?;
         if self.effective_local_policy() == drive_core::write_permissions::LocalPolicy::FollowRemote && !cfg!(feature = "native-research") {
             return Err(io::Error::other(
                 "writable native protocol release gate is closed in this build",
@@ -292,6 +306,7 @@ impl Service {
             store,
         )))?);
         bridge.enable_initialization_owner(&profile.task_id)?;
+        bridge.set_exclude_rules(profile.exclude_rules()?);
         Ok(Arc::new(Self {
             profile,
             bridge,

@@ -140,6 +140,7 @@ fn begin(store: &mut Store) -> drive_core::initialization_store::InitializationR
                 restore: snapshot.restore,
                 start_cursor: "native-v1:7".into(),
                 expected_cursor: store.cursor().unwrap(),
+rules_digest: String::new(),
             },
             &snapshot.nodes[0],
             InitializationBudget::default(),

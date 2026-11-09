@@ -12,7 +12,7 @@ fn fixture() -> (tempfile::TempDir, Arc<drive_core::SharedStore>, Initialization
     let scope = serde_json::json!({"view_id":1,"node_id":2,"file_id":"100","path":"/Lab"});
     store.bind_native_scope("server", &scope.to_string()).unwrap();
     let binding = InitializationBinding { task_id:"publication-fixture".into(), scope,
-        restore:"server".into(), start_cursor:"native-v1:100".into(), expected_cursor:"".into() };
+        restore:"server".into(), start_cursor:"native-v1:100".into(), expected_cursor:"".into(), rules_digest: String::new() };
     let run = store.begin_initialization(&binding, &root, InitializationBudget::default()).unwrap();
     let t = store.begin_initialization_directory(&run,"100").unwrap();
     let child = Node { id:"200".into(), parent:Some("100".into()),name:"Child".into(), version:serde_json::json!({"schema":1,"restore":"server","view":1,"root":"100","file":"200","sync":100,"max":100,"size":3,"hash":"synthetic","directory":true}).to_string(), ..root.clone() };

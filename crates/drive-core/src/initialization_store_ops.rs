@@ -85,6 +85,40 @@ impl Store {
             .collect::<Vec<_>>();
         self.store_initialization_listing(ticket, sequence, Some(&children), Some(entries))
     }
+    /// Same receipt as [`Store::store_initialization_native_directory`], but
+    /// drops children whose scope-relative path is excluded before the listing
+    /// is persisted. Excluded directories therefore never enter the candidate
+    /// tree and are never scheduled for enumeration or download.
+    pub fn store_initialization_native_directory_filtered(
+        &mut self,
+        ticket: &InitializationDirectoryTicket,
+        sequence: u64,
+        entries: &[InitializationDirectoryEntry],
+        rules: &crate::exclude::ExcludeRules,
+    ) -> Result<bool> {
+        if rules.is_empty() {
+            return self.store_initialization_native_directory(ticket, sequence, entries);
+        }
+        let scope = checked(&self.db, &ticket.run, false)?
+            .binding
+            .scope
+            .get("path")
+            .and_then(|path| path.as_str())
+            .ok_or_else(|| invalid("missing scope path"))?
+            .to_owned();
+        let absolute = self.initialization_directory_path(&ticket.run, &ticket.directory)?;
+        let relative = crate::exclude::scope_relative(&scope, &absolute)
+            .ok_or_else(|| invalid("directory is outside the scope"))?;
+        let kept: Vec<InitializationDirectoryEntry> = entries
+            .iter()
+            .filter(|entry| {
+                let child = crate::exclude::join_relative(&relative, &entry.node.name);
+                !rules.matches(&child, entry.node.directory)
+            })
+            .cloned()
+            .collect();
+        self.store_initialization_native_directory(ticket, sequence, &kept)
+    }
     pub fn store_initialization_denied(
         &mut self,
         ticket: &InitializationDirectoryTicket,

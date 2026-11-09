@@ -186,6 +186,7 @@ mod tests {
             restore: "server".into(),
             start_cursor: "native-v1:100".into(),
             expected_cursor: "".into(),
+rules_digest: String::new(),
         };
         let run = store
             .begin_initialization(

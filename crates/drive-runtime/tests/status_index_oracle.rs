@@ -135,6 +135,7 @@ fn committed_index_matches_real_desktop_for_cache_pin_update_failure_edit_confli
         },
         mount: temp.path().join("mount"),
         writable: false, local_policy: None, writable_source: None,
+        exclude_patterns: Vec::new(),
     };
     let service: Arc<Service> = Service::new(
         profile,
