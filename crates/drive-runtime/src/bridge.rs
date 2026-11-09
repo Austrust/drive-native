@@ -277,18 +277,18 @@ impl Bridge {
         }
         Ok(result)
     }
-    pub fn release_content(&self, id: &str) -> io::Result<()> {
+    pub fn release_content(&self, id: &str) -> io::Result<drive_core::ReleaseOutcome> {
         let flights = self.flights.lock().unwrap();
         if flights.keys().any(|(active, _)| active == id) {
             return Err(io::Error::other("file is being downloaded"));
         }
         let mut store = self.store.lock().unwrap();
         let ino = store.record(id).map_err(io::Error::other)?.ino;
-        store.release(id).map_err(io::Error::other)?;
+        let outcome = store.release(id).map_err(io::Error::other)?;
         drop(store);
         drop(flights);
         self.enqueue_invalidation(Invalidation::Inode(ino));
-        Ok(())
+        Ok(outcome)
     }
     fn from_connection(store: Arc<drive_core::SharedStore>, rpc: Arc<Rpc>) -> io::Result<Self> {
         let notify_hub: Arc<Mutex<Option<drive_fs::NotifyHub>>> = Arc::new(Mutex::new(None));

@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 from .issues import IssuesDialog
 from .trust import TrustSettingsDialog
 from .transfers import TransfersDialog, transfer_overview_summary, transfer_rows
-from .cache_settings import CacheSettingsDialog
+from .cache_settings import CacheSettingsDialog, byte_text
 from .bus import ClientBus
 from .config import load_profile, config_path, binary, archive_profile, restore_profile
 from .wizard import SetupWizard
@@ -214,6 +214,10 @@ class MainWindow(QMainWindow):
         self.display_limit = 256
         self.view_generation = 0
         self.rows = []
+        # Bulk release runs as a background job so the service is never held by
+        # one long D-Bus call; the window polls a compact progress snapshot.
+        self.release_job_id = None
+        self.release_total = 0
         # Directory page accumulator: a GetDirectory reply may arrive before
         # received_overview creates it for the first time.
         self.page_rows = []
@@ -388,6 +392,15 @@ class MainWindow(QMainWindow):
         self.banner.setObjectName("message")
         self.banner.hide()
         content.addWidget(self.banner)
+        self.release_label = QLabel()
+        self.release_label.setWordWrap(True)
+        self.release_label.setObjectName("message")
+        self.release_label.hide()
+        content.addWidget(self.release_label)
+        self.release_cancel = QPushButton("取消释放")
+        self.release_cancel.clicked.connect(self.cancel_release)
+        self.release_cancel.hide()
+        content.addWidget(self.release_cancel, 0, Qt.AlignLeft)
         self.upload_block_label = QLabel()
         self.upload_block_label.setTextFormat(Qt.PlainText)
         self.upload_block_label.setWordWrap(True)
@@ -488,6 +501,9 @@ class MainWindow(QMainWindow):
         self.transfer_timer = QTimer(self)
         self.transfer_timer.setInterval(2000)
         self.transfer_timer.timeout.connect(self.refresh_transfers)
+        self.release_timer = QTimer(self)
+        self.release_timer.setInterval(250)
+        self.release_timer.timeout.connect(self.poll_release_job)
         self.bus.availability.connect(self.service_availability)
         for label in self.findChildren(QLabel):
             label.setTextFormat(Qt.PlainText)
@@ -1510,6 +1526,87 @@ class MainWindow(QMainWindow):
         self.banner.setText(text)
         self.banner.show()
 
+    def begin_release(self, rows):
+        """Start one cancellable background job for every selected path."""
+        paths = [row["path"] for row in rows]
+        if not paths:
+            return
+        self.bus.call("BeginReleaseSpace", [paths], self.release_started)
+
+    def release_started(self, data, error):
+        total = data.get("total") if isinstance(data, dict) else None
+        job_id = data.get("job_id") if isinstance(data, dict) else None
+        if (error or not isinstance(data, dict) or data.get("schema") != 1
+                or not isinstance(job_id, str) or not job_id
+                or not isinstance(total, int) or total < 0):
+            self.show_error("操作未完成，文件仍由后台服务保护。")
+            return
+        self.release_job_id = job_id
+        self.release_total = total
+        self.release_label.setText(
+            f"正在释放 0/{total} · 已回收 {byte_text(0)}")
+        self.release_label.show()
+        self.release_cancel.setEnabled(True)
+        self.release_cancel.setText("取消释放")
+        self.release_cancel.show()
+        self.release_timer.start()
+
+    def poll_release_job(self):
+        if not self.release_job_id:
+            self.release_timer.stop()
+            return
+        self.bus.call("GetReleaseJob", [self.release_job_id],
+                      self.release_progress)
+
+    def release_progress(self, data, error):
+        job_id = self.release_job_id
+        if not job_id:
+            return
+        # A failed poll is retried; the last known progress stays visible.
+        if error or not isinstance(data, dict) or data.get("schema") != 1:
+            return
+        if data.get("job_id") != job_id:
+            return
+        done = data.get("done")
+        total = data.get("total", self.release_total)
+        reclaimed = data.get("reclaimed_bytes", 0)
+        if not isinstance(done, int) or not isinstance(total, int):
+            return
+        if not data.get("finished"):
+            self.release_label.setText(
+                f"正在释放 {done}/{total} · 已回收 {byte_text(reclaimed)}")
+            return
+        self.release_timer.stop()
+        self.release_job_id = None
+        self.release_label.hide()
+        self.release_cancel.hide()
+        if data.get("cancelled"):
+            self.show_error(
+                f"已取消释放：完成 {done}/{total}，已回收 {byte_text(reclaimed)}。"
+                "已完成的文件不会回滚。")
+        else:
+            protected = data.get("protected_count", 0)
+            message = (f"释放完成：已释放 {data.get('released_count', 0)} 个文件，"
+                       f"跳过 {data.get('skipped_count', 0)} 个，"
+                       f"回收 {byte_text(reclaimed)}。")
+            if isinstance(protected, int) and protected > 0:
+                message += f"另有 {protected} 个文件受保护暂未释放。"
+            self.show_error(message)
+        self.schedule_refresh()
+
+    def cancel_release(self):
+        if not self.release_job_id:
+            return
+        self.release_cancel.setEnabled(False)
+        self.release_cancel.setText("正在取消…")
+        self.show_error("正在取消释放，已完成的文件不会回滚。")
+        self.bus.call("CancelReleaseSpace", [self.release_job_id],
+                      self.release_cancel_done)
+
+    def release_cancel_done(self, data, error):
+        if error or not isinstance(data, dict):
+            self.show_error("操作未完成，文件仍由后台服务保护。")
+
     def action_done(self, data, error):
         if error:
             self.show_error("操作未完成，文件仍由后台服务保护。")
@@ -1540,6 +1637,9 @@ class MainWindow(QMainWindow):
         if (self.overview or {}).get("preview_only") is True or any(
                 row.get("status") == "initializing" for row in rows):
             self.show_error("初始化预览期间暂不能固定、释放或修改文件。")
+            return
+        if method == "ReleaseSpace":
+            self.begin_release(rows)
             return
         for row in rows:
             args = [row["path"]] if value is None else [row["path"], value]

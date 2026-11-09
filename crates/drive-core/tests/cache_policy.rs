@@ -300,3 +300,21 @@ fn cached_read_only_open_bookkeeping_does_not_write_or_fsync_the_store() {
         .unwrap();
     assert_eq!(order, vec!["c", "a", "b", "d"]);
 }
+
+#[test]
+fn release_reports_released_then_skipped_and_keeps_protected_writes() {
+    let (_dir, mut s) = setup();
+    assert_eq!(s.release("a").unwrap(), ReleaseOutcome::Released);
+    assert_eq!(s.status("a").unwrap(), Status::OnlineOnly);
+    // Releasing an already online-only file is a no-op, not a fake release.
+    assert_eq!(s.release("a").unwrap(), ReleaseOutcome::Skipped);
+    assert_eq!(s.status("a").unwrap(), Status::OnlineOnly);
+
+    // Dirty and conflicted bodies keep their established protected-result
+    // semantics; skipping only applies to content that is already absent.
+    let op = s.save_local("b", b"pending").unwrap();
+    s.mark_upload_started(&op).unwrap();
+    assert!(s.release("b").is_err());
+    s.save_local("c", b"conflict").unwrap();
+    assert!(s.release("c").is_err());
+}

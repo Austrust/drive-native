@@ -12,7 +12,10 @@ use std::{
     collections::{HashMap, HashSet},
     io,
     path::{Component, Path},
-    sync::{Arc, atomic::Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Instant,
 };
 pub const BUS_NAME: &str = "org.drivenative.Client1";
@@ -799,6 +802,7 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
         "connection_diagnostics":service.diagnostics.snapshot(),
         "sync_state":sync_state,"active_transfers":active_transfers,"issue_count":issue_count,
         "cache_availability":{"state":cache.state,"total":cache.total,"offline":cache.offline,"pinned":cache.pinned},
+        "release_job":release_job_summary(service),
         "version":{"build":env!("CARGO_PKG_VERSION"),"state_schema":drive_core::STATE_SCHEMA_VERSION,"ipc":crate::wire::VERSION},
         "shutdown":service.shutdown_diagnostics.snapshot(),
         "initialization":initialization,
@@ -1013,17 +1017,15 @@ fn pin(service: &Service, path: &str, value: bool) -> io::Result<()> {
     service.bridge.signal_upload();
     Ok(())
 }
-fn release(service: &Service, path: &str) -> io::Result<String> {
-    let ids = {
-        let store = service.bridge.store.lock().unwrap();
-        let node = resolve(
-            &store,
-            &service.profile.scope.file_id,
-            &service.profile.mount,
-            path,
-        )?;
-        let mut pending = vec![node];
-        let mut ids = Vec::new();
+/// Collect the file ids covered by the selected paths, deduplicated across
+/// overlapping selections. A cycle in the local tree is a hard error: releasing
+/// part of a corrupt tree would make the result look successful.
+fn release_ids(service: &Service, paths: &[String]) -> io::Result<Vec<String>> {
+    let store = service.bridge.store.lock().unwrap();
+    let mut ids = Vec::new();
+    let mut covered = HashSet::new();
+    for (_, resolved) in resolve_all(&store, service, paths.to_vec()) {
+        let mut pending = vec![resolved?];
         let mut seen = HashSet::new();
         while let Some(node) = pending.pop() {
             if !seen.insert(node.id.clone()) {
@@ -1037,29 +1039,265 @@ fn release(service: &Service, path: &str) -> io::Result<String> {
                         .into_iter()
                         .map(|r| r.node),
                 );
-            } else {
+            } else if covered.insert(node.id.clone()) {
                 ids.push(node.id);
             }
         }
-        ids
-    };
-    let mut released = Vec::new();
-    let mut protected = Vec::new();
-    for id in ids {
-        if service.bridge.release_content(&id).is_ok() {
-            released.push(id);
-        } else {
-            protected.push(id);
-        }
     }
-    let bytes = service
+    Ok(ids)
+}
+
+/// Bodies are reclaimed in small batches so a huge directory does not hold the
+/// Store lock for the whole run, and a cancellation keeps the bytes reclaimed
+/// by the files that were already released.
+const RELEASE_GC_BATCH: usize = 32;
+
+struct ReleaseRun {
+    released: Vec<String>,
+    skipped: Vec<String>,
+    protected: Vec<String>,
+    reclaimed_bytes: u64,
+    done: usize,
+    cancelled: bool,
+}
+
+fn collect_release_garbage(service: &Service) -> io::Result<u64> {
+    service
         .bridge
         .store
         .lock()
         .unwrap()
         .collect_garbage()
-        .map_err(|_| other())?;
-    Ok(serde_json::json!({"schema":1,"released":released,"protected_or_failed":protected,"reclaimed_bytes":bytes}).to_string())
+        .map_err(|_| other())
+}
+
+/// Release each id in order. Progress snapshots are published after every file
+/// without holding the Store lock, so a synchronous caller can ignore them and
+/// a background job can update its polled state.
+fn run_release(
+    service: &Service,
+    ids: &[String],
+    cancel: &AtomicBool,
+    mut progress: impl FnMut(&ReleaseRun),
+) -> io::Result<ReleaseRun> {
+    let mut run = ReleaseRun {
+        released: Vec::new(),
+        skipped: Vec::new(),
+        protected: Vec::new(),
+        reclaimed_bytes: 0,
+        done: 0,
+        cancelled: false,
+    };
+    let mut since_gc = 0;
+    for id in ids {
+        if cancel.load(Ordering::Acquire) {
+            run.cancelled = true;
+            break;
+        }
+        match service.bridge.release_content(id) {
+            Ok(drive_core::ReleaseOutcome::Released) => run.released.push(id.clone()),
+            Ok(drive_core::ReleaseOutcome::Skipped) => run.skipped.push(id.clone()),
+            Err(_) => run.protected.push(id.clone()),
+        }
+        run.done += 1;
+        since_gc += 1;
+        if since_gc >= RELEASE_GC_BATCH {
+            run.reclaimed_bytes += collect_release_garbage(service)?;
+            since_gc = 0;
+        }
+        progress(&run);
+        #[cfg(test)]
+        {
+            let delay = service.release_step_delay.load(Ordering::Acquire);
+            if delay > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(delay));
+            }
+        }
+    }
+    run.reclaimed_bytes += collect_release_garbage(service)?;
+    run.cancelled |= cancel.load(Ordering::Acquire);
+    Ok(run)
+}
+
+/// Synchronous release kept for existing clients: it blocks until every
+/// selected file has been attempted and returns the same shape as before, with
+/// an additive `skipped` list for already-released content.
+pub fn release(service: &Service, path: &str) -> io::Result<String> {
+    let ids = release_ids(service, &[path.to_string()])?;
+    let run = run_release(service, &ids, &AtomicBool::new(false), |_| {})?;
+    Ok(serde_json::json!({
+        "schema": 1,
+        "released": run.released,
+        "skipped": run.skipped,
+        "protected_or_failed": run.protected,
+        "reclaimed_bytes": run.reclaimed_bytes,
+    })
+    .to_string())
+}
+
+fn update_release_job(service: &Service, run: &ReleaseRun) {
+    let mut state = service.release.lock().unwrap();
+    let Some(job) = state.job.as_mut() else {
+        return;
+    };
+    job.done = run.done;
+    job.released_count = run.released.len();
+    job.skipped_count = run.skipped.len();
+    job.protected_count = run.protected.len();
+    job.reclaimed_bytes = run.reclaimed_bytes;
+}
+
+fn run_release_job(service: Arc<Service>, ids: Vec<String>, cancel: Arc<AtomicBool>) {
+    let result = run_release(&service, &ids, &cancel, |run| {
+        update_release_job(&service, run);
+    });
+    let mut state = service.release.lock().unwrap();
+    state.cancel = None;
+    let Some(job) = state.job.as_mut() else {
+        return;
+    };
+    match result {
+        Ok(run) => {
+            job.done = run.done;
+            job.released_count = run.released.len();
+            job.skipped_count = run.skipped.len();
+            job.protected_count = run.protected.len();
+            job.released = run.released;
+            job.skipped = run.skipped;
+            job.protected = run.protected;
+            job.reclaimed_bytes = run.reclaimed_bytes;
+            job.finished = true;
+            job.cancelled = run.cancelled;
+        }
+        Err(error) => {
+            job.finished = true;
+            job.error = Some(error.to_string());
+        }
+    }
+}
+
+/// Start releasing the selected paths on a background thread. Only one job may
+/// run at a time; a re-entry fails instead of queueing a second scan.
+pub fn begin_release(service: &Arc<Service>, paths: &[String]) -> io::Result<String> {
+    if paths.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "no paths to release",
+        ));
+    }
+    let ids = release_ids(service, paths)?;
+    let (job_id, total, cancel) = {
+        let mut state = service.release.lock().unwrap();
+        if state.job.as_ref().is_some_and(|job| !job.finished) {
+            return Err(io::Error::other("a release job is already in progress"));
+        }
+        state.seq += 1;
+        let job_id = format!("release-{}", state.seq);
+        let cancel = Arc::new(AtomicBool::new(false));
+        state.job = Some(crate::service::ReleaseJob {
+            id: job_id.clone(),
+            total: ids.len(),
+            done: 0,
+            released_count: 0,
+            skipped_count: 0,
+            protected_count: 0,
+            released: Vec::new(),
+            skipped: Vec::new(),
+            protected: Vec::new(),
+            reclaimed_bytes: 0,
+            finished: false,
+            cancelled: false,
+            error: None,
+        });
+        state.cancel = Some(cancel.clone());
+        (job_id, ids.len(), cancel)
+    };
+    let worker = service.clone();
+    std::thread::spawn(move || run_release_job(worker, ids, cancel));
+    Ok(serde_json::json!({"schema":1,"job_id":job_id,"total":total}).to_string())
+}
+
+/// Compact release summary added to GetOverview/GetCacheSettings. It is purely
+/// additive (`schema` stays 1) so older GUI/client builds ignore it.
+fn release_job_summary(service: &Service) -> Option<serde_json::Value> {
+    let state = service.release.lock().unwrap();
+    let job = state.job.as_ref()?;
+    Some(serde_json::json!({
+        "job_id": job.id,
+        "total": job.total,
+        "done": job.done,
+        "reclaimed_bytes": job.reclaimed_bytes,
+        "finished": job.finished,
+        "cancelled": job.cancelled,
+    }))
+}
+
+fn job_snapshot(job: &crate::service::ReleaseJob) -> serde_json::Value {
+    let mut value = serde_json::json!({
+        "schema": 1,
+        "job_id": job.id,
+        "available": true,
+        "total": job.total,
+        "done": job.done,
+        "released_count": job.released_count,
+        "skipped_count": job.skipped_count,
+        "protected_count": job.protected_count,
+        "reclaimed_bytes": job.reclaimed_bytes,
+        "finished": job.finished,
+        "cancelled": job.cancelled,
+        "error": job.error,
+    });
+    if job.finished {
+        let map = value.as_object_mut().expect("release snapshot object");
+        map.insert("released".into(), serde_json::json!(job.released));
+        map.insert("skipped".into(), serde_json::json!(job.skipped));
+        map.insert(
+            "protected_or_failed".into(),
+            serde_json::json!(job.protected),
+        );
+    }
+    value
+}
+
+/// Poll a release job. Unknown or superseded ids are reported as unavailable
+/// instead of failing the client, so a restarted service degrades gracefully.
+pub fn release_job(service: &Service, job_id: &str) -> io::Result<String> {
+    let state = service.release.lock().unwrap();
+    match state.job.as_ref().filter(|job| job.id == job_id) {
+        Some(job) => Ok(job_snapshot(job).to_string()),
+        None => Ok(
+            serde_json::json!({"schema":1,"job_id":job_id,"available":false}).to_string(),
+        ),
+    }
+}
+
+/// Request cancellation. Files already released stay released; the next idle
+/// poll reports `cancelled: true` with the committed prefix and its bytes.
+pub fn cancel_release(service: &Service, job_id: &str) -> io::Result<String> {
+    let state = service.release.lock().unwrap();
+    let Some(job) = state.job.as_ref().filter(|job| job.id == job_id) else {
+        return Ok(serde_json::json!({
+            "schema": 1,
+            "job_id": job_id,
+            "cancel_requested": false,
+            "available": false,
+        })
+        .to_string());
+    };
+    let requested = if job.finished {
+        false
+    } else if let Some(cancel) = &state.cancel {
+        cancel.store(true, Ordering::Release);
+        true
+    } else {
+        false
+    };
+    let mut value = job_snapshot(job);
+    value
+        .as_object_mut()
+        .expect("release snapshot object")
+        .insert("cancel_requested".into(), serde_json::json!(requested));
+    Ok(value.to_string())
 }
 
 /// Read-only browser pages from local metadata, including before network unlock.
@@ -1253,7 +1491,7 @@ fn cache_settings_with(service: &Service, read_only: Option<&Store>) -> io::Resu
         None => service.bridge.cache_usage()?,
     };
     let state = service.control.lock().unwrap().state;
-    Ok(serde_json::json!({"schema":1,"task_id":service.profile.task_id,"usage":usage,"connection":state,"error":*service.bridge.cache_error.lock().unwrap(),"recent_download_seconds":drive_core::cache_policy::RECENT_DOWNLOAD_SECONDS}).to_string())
+    Ok(serde_json::json!({"schema":1,"task_id":service.profile.task_id,"usage":usage,"connection":state,"error":*service.bridge.cache_error.lock().unwrap(),"recent_download_seconds":drive_core::cache_policy::RECENT_DOWNLOAD_SECONDS,"release_job":release_job_summary(service)}).to_string())
 }
 pub fn set_cache_settings(service: &Service, body: &str) -> io::Result<String> {
     #[derive(serde::Deserialize)]
@@ -1412,6 +1650,18 @@ impl Desktop {
     async fn release_space(&self, path: String) -> zbus::fdo::Result<String> {
         let s = self.0.clone();
         local(move || release(&s, &path)).await
+    }
+    async fn begin_release_space(&self, paths: Vec<String>) -> zbus::fdo::Result<String> {
+        let s = self.0.clone();
+        local(move || begin_release(&s, &paths)).await
+    }
+    async fn get_release_job(&self, job_id: String) -> zbus::fdo::Result<String> {
+        let s = self.0.clone();
+        local(move || release_job(&s, &job_id)).await
+    }
+    async fn cancel_release_space(&self, job_id: String) -> zbus::fdo::Result<String> {
+        let s = self.0.clone();
+        local(move || cancel_release(&s, &job_id)).await
     }
     async fn pause(&self) -> zbus::fdo::Result<()> {
         let s = self.0.clone();
@@ -2079,5 +2329,225 @@ mod readpath_tests {
             service.bridge.store.local_revision()
         );
         assert!(service.bridge.store.local_revision() > before_revision);
+    }
+}
+
+#[cfg(test)]
+mod release_job_tests {
+    //! Deterministic timing hooks for the background release job: when the
+    //! worker commits each file decides whether a cancel may still act.
+    use super::*;
+    use drive_core::{DownloadTicket, Node, NodeMetadata, native::Scope, sha256};
+    use serde_json::Value;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    const MOUNT: &str = "/tmp/drive-native-release-mount";
+
+    fn node(id: &str, parent: Option<&str>, directory: bool) -> Node {
+        Node {
+            id: id.into(),
+            parent: parent.map(str::to_owned),
+            name: id.into(),
+            version: "1".into(),
+            directory,
+            metadata: Some(NodeMetadata {
+                size: 3,
+                mtime: 1,
+                mode: if directory { 0o755 } else { 0o644 },
+            }),
+        }
+    }
+
+    fn profile() -> crate::service::Profile {
+        crate::service::Profile {
+            schema: 1,
+            task_id: "9f6b8a52-5f4c-4c5e-9d0a-2c1b3d4e5f60".into(),
+            host: "example.invalid".into(),
+            tls_name: "example.invalid".into(),
+            trusted_ca_pem: Vec::new(),
+            username: "test".into(),
+            device_id: "1f6b8a52-5f4c-4c5e-9d0a-2c1b3d4e5f61".into(),
+            scope: Scope {
+                view_id: 1,
+                node_id: 1,
+                file_id: "root".into(),
+                path: "/test".into(),
+            },
+            mount: PathBuf::from(MOUNT),
+            writable: false,
+            local_policy: None,
+            writable_source: None,
+        }
+    }
+
+    fn fixture() -> (tempfile::TempDir, Arc<Service>) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(dir.path()).unwrap();
+        store
+            .install_remote_snapshot(
+                &[
+                    node("root", None, true),
+                    node("folder", Some("root"), true),
+                    node("one", Some("folder"), false),
+                    node("two", Some("folder"), false),
+                    node("three", Some("folder"), false),
+                    node("four", Some("folder"), false),
+                ],
+                "1",
+                "server",
+            )
+            .unwrap();
+        store.ensure_fs_root("root").unwrap();
+        for id in ["one", "two", "three", "four"] {
+            store
+                .publish_download(
+                    &DownloadTicket {
+                        id: id.into(),
+                        version: "1".into(),
+                    },
+                    b"abc",
+                    &sha256(b"abc"),
+                )
+                .unwrap();
+        }
+        (
+            dir,
+            Service::new(profile(), store, PathBuf::from("/nonexistent-worker")).unwrap(),
+        )
+    }
+
+    fn path() -> String {
+        format!("{MOUNT}/folder")
+    }
+
+    fn value(text: &str) -> Value {
+        serde_json::from_str(text).unwrap()
+    }
+
+    fn snapshot(service: &Service, job: &str) -> Value {
+        value(&release_job(service, job).unwrap())
+    }
+
+    fn wait_for(service: &Service, job: &str, what: &str, ready: impl Fn(&Value) -> bool) -> Value {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let current = snapshot(service, job);
+            if ready(&current) {
+                return current;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "release job never reported {what}: {current}"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    fn finished(service: &Service, job: &str) -> Value {
+        wait_for(service, job, "finished", |current| current["finished"] == true)
+    }
+
+    fn begin(service: &Arc<Service>) -> String {
+        let started = value(&begin_release(service, &[path()]).unwrap());
+        started["job_id"].as_str().unwrap().to_string()
+    }
+
+    #[test]
+    fn progress_snapshots_advance_one_file_at_a_time_and_never_go_backwards() {
+        let (_dir, service) = fixture();
+        service.set_release_step_delay(40);
+        let job = begin(&service);
+        let mut last_done = 0;
+        let mut saw_intermediate = false;
+        let final_state = loop {
+            let current = snapshot(&service, &job);
+            assert_eq!(current["total"], 4);
+            let done = current["done"].as_u64().unwrap();
+            assert!(done >= last_done, "progress moved backwards: {current}");
+            last_done = done;
+            if current["finished"] == true {
+                break current;
+            }
+            if done > 0 && done < 4 {
+                saw_intermediate = true;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        assert!(saw_intermediate, "the job finished too fast to observe progress");
+        assert_eq!(final_state["done"], 4);
+        assert_eq!(final_state["released_count"], 4);
+        assert_eq!(final_state["reclaimed_bytes"], 12);
+    }
+
+    #[test]
+    fn beginning_another_job_while_one_runs_is_rejected_instead_of_queueing() {
+        let (_dir, service) = fixture();
+        service.set_release_step_delay(80);
+        let job = begin(&service);
+        let error = begin_release(&service, &[path()]).unwrap_err();
+        assert!(
+            error.to_string().contains("in progress"),
+            "unexpected reentry error: {error}"
+        );
+        let final_state = finished(&service, &job);
+        assert_eq!(final_state["released_count"], 4);
+        // Once finished, a new job is accepted again.
+        let next = begin_release(&service, &[path()]).unwrap();
+        assert_eq!(value(&next)["finished"], Value::Null);
+    }
+
+    #[test]
+    fn cancelling_mid_batch_keeps_the_committed_prefix_and_reports_exact_bytes() {
+        let (_dir, service) = fixture();
+        service.set_release_step_delay(60);
+        let job = begin(&service);
+        let current = wait_for(&service, &job, "a committed first file", |current| {
+            current["done"].as_u64().unwrap() >= 1 && current["finished"] == false
+        });
+        let committed = current["done"].as_u64().unwrap();
+        assert!(committed < 4, "the test needs the job to still be running");
+
+        let cancelled = value(&cancel_release(&service, &job).unwrap());
+        assert_eq!(cancelled["cancel_requested"], true);
+
+        let final_state = finished(&service, &job);
+        assert_eq!(final_state["cancelled"], true);
+        let done = final_state["done"].as_u64().unwrap();
+        assert!(done < 4, "cancel must stop the remaining files: {final_state}");
+        assert_eq!(final_state["released_count"], done);
+        assert_eq!(final_state["skipped_count"], 0);
+        // Bytes are counted exactly once: the committed prefix only.
+        assert_eq!(final_state["reclaimed_bytes"], done * 3);
+        // The cancelled files were not released.
+        let released = final_state["released"].as_array().unwrap().len();
+        assert_eq!(released as u64, done);
+        assert_eq!(
+            service.bridge.store.lock().unwrap().collect_garbage().unwrap(),
+            0,
+            "a second GC must not find or double-count freeable bytes"
+        );
+    }
+
+    #[test]
+    fn cancelling_a_finished_job_is_reported_but_never_rolls_back_committed_files() {
+        let (_dir, service) = fixture();
+        service.set_release_step_delay(0);
+        let job = begin(&service);
+        let final_state = finished(&service, &job);
+        let released = final_state["released_count"].clone();
+        let reclaimed = final_state["reclaimed_bytes"].clone();
+        let reply = value(&cancel_release(&service, &job).unwrap());
+        assert_eq!(reply["cancel_requested"], false);
+        assert_eq!(reply["finished"], true);
+        assert_eq!(reply["released_count"], released);
+        assert_eq!(reply["reclaimed_bytes"], reclaimed);
+        // The committed files stay released; a later begin sees them skipped.
+        let next = begin_release(&service, &[path()]).unwrap();
+        let next_job = value(&next)["job_id"].as_str().unwrap().to_string();
+        let next_final = finished(&service, &next_job);
+        assert_eq!(next_final["released_count"], 0);
+        assert_eq!(next_final["skipped_count"], 4);
     }
 }

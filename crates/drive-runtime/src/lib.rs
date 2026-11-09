@@ -1,3 +1,7 @@
+// The GetOverview JSON literal is large; one more additive key pushes the
+// recursive `serde_json::json!` expansion past the default limit.
+#![recursion_limit = "256"]
+
 pub mod background;
 pub mod bridge;
 mod connection_diagnostics;

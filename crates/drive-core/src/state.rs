@@ -94,6 +94,13 @@ pub struct DownloadTicket {
     pub id: String,
     pub version: String,
 }
+/// Result of releasing one node's local body. `Skipped` means the node had no
+/// cached body to reclaim; it is a no-op rather than a successful release.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReleaseOutcome {
+    Released,
+    Skipped,
+}
 /// Offline availability summary over non-directory nodes. `state` is one of
 /// `empty`, `pinned`, `online_only`, `partial`, or `complete`; it describes
 /// what the local cache can serve while the server is unreachable.
@@ -1008,26 +1015,52 @@ impl Store {
     }
     /// Local-only cache policy. This never inserts a remote delete operation.
     /// Physical reclamation is separate and protects snapshots held by open handles.
-    pub fn release(&mut self, id: &str) -> Result<()> {
+    pub fn release(&mut self, id: &str) -> Result<ReleaseOutcome> {
         if self.cache_is_protected(id)? {
             return Err(Error::State(
                 "content has a protected local reference".into(),
             ));
         }
+        let cached: Option<(bool, bool, bool)> = self
+            .db
+            .query_row(
+                "SELECT blob IS NOT NULL, dirty_blob IS NOT NULL, conflict=1 FROM nodes WHERE id=?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+        let Some((has_blob, dirty, conflict)) = cached else {
+            return Err(Error::State("content is dirty, conflicted, or absent".into()));
+        };
+        if dirty || conflict {
+            return Err(Error::State("content is dirty, conflicted, or absent".into()));
+        }
+        if !has_blob {
+            // There is no local body left to reclaim. Reporting success here was
+            // the fake release behind issue #19; keep the state untouched.
+            return Ok(ReleaseOutcome::Skipped);
+        }
         let tx = self.db.transaction()?;
-        if tx.execute("UPDATE nodes SET blob=NULL,local_version=NULL WHERE id=?1 AND dirty_blob IS NULL AND conflict=0",[id])?!=1 {return Err(Error::State("content is dirty, conflicted, or absent".into()));}
+        if tx.execute("UPDATE nodes SET blob=NULL,local_version=NULL WHERE id=?1 AND blob IS NOT NULL AND dirty_blob IS NULL AND conflict=0",[id])?!=1 {return Err(Error::State("content is dirty, conflicted, or absent".into()));}
         tx.execute(
             "DELETE FROM transfers WHERE node=?1 AND direction='download'",
             [id],
         )?;
         tx.commit()?;
-        Ok(())
+        Ok(ReleaseOutcome::Released)
     }
 
     /// Reclaim only unreferenced generated blobs. Journaled writes, conflicts and
     /// open old versions remain protected. No remote operation is created.
     pub fn collect_garbage(&mut self) -> Result<u64> {
-        let mut q=self.db.prepare("SELECT blob FROM nodes WHERE blob IS NOT NULL UNION SELECT dirty_blob FROM nodes WHERE dirty_blob IS NOT NULL UNION SELECT blob FROM operations WHERE blob IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict') UNION SELECT json_extract(body,'$.blob') FROM namespace_ops WHERE kind='replace' AND state NOT IN ('committed','superseded')")?;
+        // Retired rows may still point at the body they used to cache. A shared
+        // pointer means the live row keeps the file below, so dropping the stale
+        // pointer is safe; conflicted recovery rows keep theirs readable.
+        self.db.execute(
+            "UPDATE nodes SET blob=NULL,local_version=NULL WHERE deleted=1 AND conflict=0 AND dirty_blob IS NULL AND blob IS NOT NULL",
+            [],
+        )?;
+        let mut q=self.db.prepare("SELECT blob FROM nodes WHERE blob IS NOT NULL AND (deleted=0 OR conflict=1) UNION SELECT dirty_blob FROM nodes WHERE dirty_blob IS NOT NULL UNION SELECT blob FROM operations WHERE blob IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict') UNION SELECT json_extract(body,'$.blob') FROM namespace_ops WHERE kind='replace' AND state NOT IN ('committed','superseded')")?;
         let mut keep = q
             .query_map([], |r| r.get::<_, String>(0))?
             .collect::<std::result::Result<std::collections::HashSet<_>, _>>()?;

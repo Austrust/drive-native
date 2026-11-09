@@ -29,4 +29,11 @@ class Tests(unittest.TestCase):
         self.assertEqual(json.loads(self.bus.calls[-1][1][0])['limit_bytes'],limit+MIB)
         d.saved(None,'failure');d.unit.setCurrentText('GiB')
         self.assertLessEqual(d.amount.value()*GIB,1024**5)
+    def test_release_job_field_in_cache_reply_is_ignored(self):
+        # New backends append a release-job summary; older GUI builds must keep
+        # loading settings without requesting an unsolicited save.
+        d=self.dialog
+        d.received({'schema':1,'task_id':'task-a','connection':'paused','usage':{'limit_bytes':MIB,'content_bytes':3*MIB,'reclaimable_bytes':MIB,'protected_bytes':2*MIB,'over_target_bytes':0},'release_job':{'job_id':'release-3','total':10,'done':4,'reclaimed_bytes':1024,'finished':False,'cancelled':False}},None)
+        self.assertTrue(d.loaded);self.assertFalse(d.dirty)
+        self.assertFalse(any(call[0]=='SetCacheSettings' for call in self.bus.calls))
 if __name__=='__main__':unittest.main()

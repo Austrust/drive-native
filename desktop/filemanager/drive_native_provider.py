@@ -386,6 +386,9 @@ def build_provider(FileManager):
             # A menu may outlive a mode transition; the backend also validates.
             if self.preview_only:
                 return
+            if method == "ReleaseSpace":
+                self._release(paths)
+                return
             for path in paths:
                 arguments = (
                     GLib.Variant("(s)", (path,))
@@ -401,6 +404,78 @@ def build_provider(FileManager):
                     self._changed()
 
                 self._call(method, arguments, completed)
+
+        @staticmethod
+        def _bytes_text(value):
+            if not isinstance(value, int) or value <= 0:
+                return "0 B"
+            for unit, size in (("GiB", 1 << 30), ("MiB", 1 << 20), ("KiB", 1 << 10)):
+                if value >= size:
+                    return f"{value / size:.2f} {unit}"
+            return f"{value} B"
+
+        def _release(self, paths):
+            # Releasing a directory may take minutes. Ask for a background job and
+            # poll it instead of holding one blocking D-Bus call for the whole run.
+            if not paths:
+                return
+            self._call(
+                "BeginReleaseSpace",
+                GLib.Variant("(as)", (list(paths),)),
+                self._release_started,
+            )
+
+        def _release_started(self, data, failed):
+            job_id = data.get("job_id") if data else None
+            if failed or not isinstance(job_id, str) or not job_id:
+                self._notify("操作未完成，请在 Drive Native 中检查状态。")
+                self._changed()
+                return
+            total = data.get("total")
+            if isinstance(total, int) and total > 0:
+                self._notify(f"正在释放 {total} 个文件，可在 Drive Native 中查看进度。")
+            self._poll_release(job_id)
+
+        def _poll_release(self, job_id):
+            def received(data, failed):
+                # A service restart forgets the in-memory job; stop polling then.
+                if failed or not data or data.get("job_id") != job_id:
+                    self._notify("释放未完成，请在 Drive Native 中检查状态。")
+                    self._changed()
+                    return
+                if data.get("available") is False:
+                    self._notify("释放未完成，请在 Drive Native 中检查状态。")
+                    self._changed()
+                    return
+                if not data.get("finished"):
+                    GLib.timeout_add(250, self._poll_release_once, job_id)
+                    return
+                self._release_finished(data)
+
+            self._call("GetReleaseJob", GLib.Variant("(s)", (job_id,)), received)
+
+        def _poll_release_once(self, job_id):
+            self._poll_release(job_id)
+            return False
+
+        def _release_finished(self, data):
+            done = data.get("done", 0)
+            total = data.get("total", 0)
+            reclaimed = self._bytes_text(data.get("reclaimed_bytes", 0))
+            if data.get("error"):
+                self._notify("释放未完成，请在 Drive Native 中检查状态。")
+            elif data.get("cancelled"):
+                self._notify(f"已取消释放：完成 {done}/{total}，已回收 {reclaimed}。")
+            else:
+                body = (
+                    f"释放完成：已释放 {data.get('released_count', 0)} 个文件，"
+                    f"跳过 {data.get('skipped_count', 0)} 个，回收 {reclaimed}。"
+                )
+                protected = data.get("protected_count", 0)
+                if protected:
+                    body += f"另有 {protected} 个文件受保护暂未释放。"
+                self._notify(body)
+            self._changed()
 
         def _notify(self, body):
             if not self.proxy:
