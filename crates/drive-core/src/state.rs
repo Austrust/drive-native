@@ -199,7 +199,7 @@ impl Drop for ReadHandle {
 }
 
 /// Version of the durable state contract, including journal semantics.
-pub const STATE_SCHEMA_VERSION: i64 = 28;
+pub const STATE_SCHEMA_VERSION: i64 = 29;
 
 /// Automatic read-only reconciliation attempts allowed for one uncertain
 /// upload. The budget is durable so a restart cannot restart an unbounded
@@ -245,6 +245,240 @@ candidates(id,remote_version,cached,local_version,directory,deleted,dirty_blob) 
 SELECT id,remote_version,cached FROM candidates c
 WHERE directory=0 AND deleted=0 AND id NOT IN (SELECT id FROM access_blocked)
   AND dirty_blob IS NULL AND (cached=0 OR local_version!=remote_version)";
+
+/// True when `table` already carries `column`. The schema 29 upgrade guards
+/// every `ALTER TABLE` with this check so an interrupted upgrade can be re-run
+/// without failing on the already-added columns.
+fn table_has_column(db: &Connection, table: &str, column: &str) -> Result<bool> {
+    let mut query = db.prepare(&format!("PRAGMA table_info({table})"))?;
+    let mut rows = query.query([])?;
+    while let Some(row) = rows.next()? {
+        if row.get::<_, String>(1)? == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Add only the columns a schema 29 database is missing.
+fn add_missing_columns(db: &Connection, table: &str, columns: &[(&str, &str)]) -> Result<()> {
+    for (name, definition) in columns {
+        if !table_has_column(db, table, name)? {
+            db.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {definition};"))?;
+        }
+    }
+    Ok(())
+}
+
+/// Schema 29 migration (#9 TB1): one forward-only migration that adds the
+/// durable commit-diagnostic columns (#9), the recovery journal (#10) and the
+/// platform state push queue (#11). This is deliberately migration-only: no
+/// write path consumes the new columns yet (TB2/TB3 do that after #14 lands).
+///
+/// Runs inside `Store::open`'s single migration transaction, after the module
+/// migrations and before `user_version` is raised, so a failure rolls back the
+/// whole upgrade and leaves the VACUUM INTO backup as the only artifact.
+///
+/// Link to #14: legacy `uncertain` rows are backfilled as
+/// `unknown_retryable`/`interrupted`. #14 later introduces an explicit
+/// `abandoned` terminal state for exhausted reconcile budgets; TB2 remaps those
+/// old rows to `unknown_fatal`/`reconcile_exhausted`. TB1 intentionally neither
+/// emits nor depends on `abandoned`.
+fn migrate_v29(db: &Connection, version: i64) -> Result<()> {
+    if version >= 29 {
+        return Ok(());
+    }
+    // (a) operations: unified commit diagnosis (#9 core).
+    add_missing_columns(
+        db,
+        "operations",
+        &[
+            (
+                "outcome",
+                "outcome TEXT CHECK(outcome IN ('confirmed','conflict','unknown_retryable','unknown_fatal'))",
+            ),
+            ("outcome_category", "outcome_category TEXT"),
+            ("last_error", "last_error TEXT"),
+            ("next_retry_at", "next_retry_at INTEGER NOT NULL DEFAULT 0"),
+            ("updated_at", "updated_at INTEGER NOT NULL DEFAULT 0"),
+        ],
+    )?;
+    // (b) namespace_ops: the same diagnosis plus a durable attempt counter. The
+    // runtime currently keeps namespace backoff in a process-local HashMap
+    // (`namespace_schedule::NamespaceRuntime`); TB2 moves it onto these columns.
+    add_missing_columns(
+        db,
+        "namespace_ops",
+        &[
+            ("attempts", "attempts INTEGER NOT NULL DEFAULT 0"),
+            (
+                "outcome",
+                "outcome TEXT CHECK(outcome IN ('confirmed','conflict','unknown_retryable','unknown_fatal'))",
+            ),
+            ("outcome_category", "outcome_category TEXT"),
+            ("last_error", "last_error TEXT"),
+            ("next_retry_at", "next_retry_at INTEGER NOT NULL DEFAULT 0"),
+            ("updated_at", "updated_at INTEGER NOT NULL DEFAULT 0"),
+        ],
+    )?;
+    // (c) transfers: downloads report through the same four-state exit. The
+    // legacy `error` JSON stays intact for read-only compatibility.
+    add_missing_columns(
+        db,
+        "transfers",
+        &[
+            (
+                "outcome",
+                "outcome TEXT CHECK(outcome IN ('confirmed','conflict','unknown_retryable','unknown_fatal'))",
+            ),
+            ("outcome_category", "outcome_category TEXT"),
+            ("last_error", "last_error TEXT"),
+            ("next_retry_at", "next_retry_at INTEGER NOT NULL DEFAULT 0"),
+        ],
+    )?;
+    // (d) #11: the platform push state is orthogonal to the sync state. Columns
+    // and queues only; the Windows adapter that consumes them is future work.
+    if !table_has_column(db, "nodes", "in_sync")? {
+        db.execute_batch(
+            "ALTER TABLE nodes ADD COLUMN in_sync INTEGER NOT NULL DEFAULT 0 CHECK(in_sync IN (0,1));",
+        )?;
+    }
+    db.execute_batch(
+        "
+        -- Durable migration ledger (fixes the old IF NOT EXISTS + direct
+        -- user_version chain that silently skipped future ALTERs).
+        CREATE TABLE IF NOT EXISTS schema_migrations(
+            version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL);
+        INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES
+            (28,unixepoch()),(29,unixepoch());
+
+        -- (e) #10: recovery runs keep retrying/recovering distinct from the
+        -- needs-attention terminal state. No consumer in TB1.
+        CREATE TABLE IF NOT EXISTS recovery_runs(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cause TEXT NOT NULL CHECK(cause IN
+                ('initial_index','permission_recheck','cursor_invalidated',
+                 'filtered_type_changed','snapshot_changed','rescan_later',
+                 'merge_mode','root_unavailable')),
+            status TEXT NOT NULL CHECK(status IN
+                ('retrying','recovering','needs_attention','recovered')),
+            attempts INTEGER NOT NULL DEFAULT 0,
+            last_error TEXT,
+            next_retry_at INTEGER NOT NULL DEFAULT 0,
+            started_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL);
+        CREATE INDEX IF NOT EXISTS recovery_open
+            ON recovery_runs(status,next_retry_at)
+            WHERE status IN ('retrying','recovering');
+
+        -- (f) #11: pushable state changes, delivered idempotently by the
+        -- platform adapter (CFAPI on Windows). The table is the durable tail;
+        -- FUSE invalidation stays the Linux transport.
+        CREATE TABLE IF NOT EXISTS platform_state_changes(
+            seq INTEGER PRIMARY KEY AUTOINCREMENT,
+            node TEXT NOT NULL,
+            kind TEXT NOT NULL CHECK(kind IN
+                ('placeholder','hydrate','hydrate_progress','dehydrate',
+                 'in_sync','conflict','delete')),
+            payload TEXT,
+            created_at INTEGER NOT NULL,
+            delivered_at INTEGER,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            last_error TEXT);
+        CREATE INDEX IF NOT EXISTS platform_state_pending
+            ON platform_state_changes(seq) WHERE delivered_at IS NULL;
+
+        -- (g) One read-only join for the status interface: the authoritative
+        -- state stays in each journal, this view only normalises the diagnosis.
+        CREATE VIEW IF NOT EXISTS commit_diagnostics AS
+            SELECT 'operation' AS scope, o.id, o.node, o.kind AS op_kind, o.state,
+                   o.outcome, o.outcome_category, o.last_error,
+                   o.reconcile_attempts AS attempts, o.next_retry_at
+              FROM operations o WHERE o.outcome IS NOT NULL
+            UNION ALL
+            SELECT 'namespace', n.id, n.node, n.kind, n.state,
+                   n.outcome, n.outcome_category, n.last_error,
+                   n.attempts, n.next_retry_at
+              FROM namespace_ops n WHERE n.outcome IS NOT NULL
+            UNION ALL
+            SELECT 'transfer', t.id, t.node, t.direction, t.state,
+                   t.outcome, t.outcome_category, t.last_error,
+                   0, t.next_retry_at
+              FROM transfers t WHERE t.outcome IS NOT NULL;
+
+        UPDATE metadata SET value='29' WHERE key='schema_version';
+        ",
+    )?;
+    // (h) Legacy backfill. Idempotent: every statement is gated on
+    // `outcome IS NULL`, so a re-run (or the fresh-database path, which has no
+    // rows) cannot overwrite a diagnosis written by TB2 later.
+    //
+    // `state='inflight'` rows are still inflight here: Store::open rewrites them
+    // to `uncertain` after the migration commits, so they need the diagnosis now
+    // rather than being left without one. `state='pending'` rows were never
+    // submitted and deliberately keep `outcome=NULL`: there is no commit result
+    // to report yet.
+    db.execute_batch(
+        "
+        UPDATE operations SET outcome='unknown_retryable',
+               outcome_category='interrupted',
+               last_error='interrupted by restart; awaiting reconciliation',
+               next_retry_at=unixepoch(), updated_at=unixepoch()
+         WHERE outcome IS NULL AND state='uncertain';
+        UPDATE operations SET outcome='unknown_retryable',
+               outcome_category='interrupted',
+               last_error='submitted before restart; outcome unknown',
+               next_retry_at=unixepoch(), updated_at=unixepoch()
+         WHERE outcome IS NULL AND state='inflight';
+        UPDATE operations SET outcome='confirmed', outcome_category='committed',
+               updated_at=unixepoch()
+         WHERE outcome IS NULL AND state='committed';
+        UPDATE operations SET outcome='conflict', outcome_category='server_rejected',
+               updated_at=unixepoch()
+         WHERE outcome IS NULL AND state='conflict';
+        UPDATE operations SET outcome='confirmed', outcome_category='local_abandoned',
+               updated_at=unixepoch()
+         WHERE outcome IS NULL AND state='superseded';
+
+        UPDATE namespace_ops SET outcome='unknown_retryable',
+               outcome_category='interrupted',
+               last_error='interrupted by restart; awaiting reconciliation',
+               next_retry_at=unixepoch(), updated_at=unixepoch()
+         WHERE outcome IS NULL AND state IN ('uncertain','cleanup_uncertain');
+        UPDATE namespace_ops SET outcome='unknown_retryable',
+               outcome_category='interrupted',
+               last_error='submitted before restart; outcome unknown',
+               next_retry_at=unixepoch(), updated_at=unixepoch()
+         WHERE outcome IS NULL AND state IN ('inflight','cleanup_inflight');
+        UPDATE namespace_ops SET outcome='confirmed', outcome_category='committed',
+               updated_at=unixepoch()
+         WHERE outcome IS NULL AND state='committed';
+        UPDATE namespace_ops SET outcome='conflict', outcome_category='server_rejected',
+               updated_at=unixepoch()
+         WHERE outcome IS NULL AND state='conflict';
+        UPDATE namespace_ops SET outcome='confirmed', outcome_category='local_abandoned',
+               updated_at=unixepoch()
+         WHERE outcome IS NULL AND state='superseded';
+
+        UPDATE transfers SET outcome='unknown_retryable',
+               outcome_category=CASE json_extract(error,'$.kind')
+                   WHEN 'server_rejected' THEN 'server_rejected'
+                   WHEN 'invalid_content' THEN 'protocol'
+                   WHEN 'local_storage' THEN 'local_storage'
+                   WHEN 'session_expired' THEN 'timeout'
+                   ELSE 'transport' END,
+               last_error=COALESCE(json_extract(error,'$.kind'),'unknown'),
+               next_retry_at=COALESCE(CAST(json_extract(error,'$.retry_at') AS INTEGER),0)
+         WHERE outcome IS NULL AND state IN ('retry','failed');
+        UPDATE transfers SET outcome='unknown_retryable',
+               outcome_category='interrupted',
+               last_error='interrupted by restart',
+               next_retry_at=unixepoch()
+         WHERE outcome IS NULL AND state='inflight';
+        ",
+    )?;
+    Ok(())
+}
 
 impl Store {
     /// One store per account + sync root. Independent accounts never share event IDs or cursors.
@@ -389,8 +623,12 @@ impl Store {
         )?;
         crate::initialization_store::migrate(&db)?;
         crate::preview::migrate(&db)?;
-        sync_history::migrate(&db, version < STATE_SCHEMA_VERSION)?;
+        // The `repairing` flag is about the v28 durable sync-history row counter
+        // and stays pinned to the literal 28: when the schema moves to 29 a v28
+        // store must not be treated as a legacy (pre-counter) store again.
+        sync_history::migrate(&db, version < 28)?;
         crate::write_permissions::migrate(&db)?;
+        migrate_v29(&db, version)?;
         db.pragma_update(None, "user_version", STATE_SCHEMA_VERSION)?;
         db.execute_batch("COMMIT;")?;
         crate::initialization_store::recover_open(&db)?;

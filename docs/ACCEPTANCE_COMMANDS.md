@@ -120,7 +120,13 @@ export CARGO_TARGET_DIR=/tmp/p032-targets/t0
     # 远端无 rg 时用 grep 备用：
     grep -rnE '6[.]35|47[7]-532|schema[ ]26|STATE_SCHEMA_VERSION=[2]7|TBD[-]FINAL|c3b62a[1]' docs/
     ```
-    前两条覆盖代码-文档引用不被破坏；grep 只扫描顶层 `docs/*.md`（排除 `docs/validation` 证据文件），用于确认过时口径（无出处的毫秒数、旧持锁行号、旧 schema 当前版表述、旧 v27 当前版、TBD 占位与旧树标识、旧 final1 数字）没有残留；括号写法避免命令匹配本文件自身。当前契约 schema 为 v28（`STATE_SCHEMA_VERSION=28`）。
+    前两条覆盖代码-文档引用不被破坏；grep 只扫描顶层 `docs/*.md`（排除 `docs/validation` 证据文件），用于确认过时口径（无出处的毫秒数、旧持锁行号、旧 schema 当前版表述、旧 v27 当前版、TBD 占位与旧树标识、旧 final1 数字）没有残留；括号写法避免命令匹配本文件自身。当前契约 schema 为 v29（`STATE_SCHEMA_VERSION=29`）。
+
+15. **#9 TB1 提交结局抽象与 schema v29 迁移**
+    ```sh
+    cargo test -p drive-core --all-features --locked --test schema_v29
+    ```
+    重点断言：v28 真实结构（operations/namespace_ops/transfers 的 pending/inflight/uncertain/committed 行）升级到 29 后 outcome/outcome_category/last_error/next_retry_at 回填正确、生成 `state-before-v29-*` 备份、二次 open 幂等、`upload_reconcile_operations`/`pending_operations` 查询不受新列影响；`commit_diagnostics` 视图、`recovery_runs`、`platform_state_changes`、`nodes.in_sync` 只建结构，消费逻辑由 TB2/TB3 接入。
 
 ## 与 issue #8 三树数字的关系
 
