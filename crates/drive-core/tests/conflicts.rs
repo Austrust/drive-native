@@ -399,3 +399,213 @@ fn stale_heal_does_not_clear_real_conflicts() {
         "dirty file conflicts must not be healed"
     );
 }
+
+/// issue #54: a bound directory tombstoned by the server while local-only
+/// children survive must be visible in the issue center with keep-local /
+/// keep-remote flags instead of disappearing behind the stale-directory guard.
+fn bound_directory_with_local_child() -> (tempfile::TempDir, Store, String, String) {
+    let d = tempfile::tempdir().unwrap();
+    let mut s = Store::open(d.path()).unwrap();
+    s.install_remote_snapshot(&[node("root", None, "r")], "1", "server")
+        .unwrap();
+    s.ensure_fs_root("root").unwrap();
+    // A locally created directory becomes bound to its confirmed remote identity.
+    let directory = s.create_local_directory("root", "folder", 0o755).unwrap();
+    let queued = s.next_directory().unwrap().unwrap();
+    let job = s.mark_directory_started(&queued.job.operation).unwrap();
+    let mut confirmed = job.node.clone();
+    confirmed.version = "v-folder".into();
+    s.confirm_directory(&queued.job.operation, &confirmed, "900")
+        .unwrap();
+    let child = s.create_local_file(&directory.id, "new", 0o600).unwrap();
+    s.save_local(&child.id, b"local creation").unwrap();
+    s.creation_saved(&child.id).unwrap();
+    // The server stops reporting the bound folder; the local-only child keeps
+    // the tombstone reachable only through the issue service.
+    s.install_remote_snapshot(&[node("root", None, "r")], "2", "server")
+        .unwrap();
+    (d, s, directory.id, child.id)
+}
+
+#[test]
+fn bound_deleted_directory_with_local_content_is_a_recoverable_issue() {
+    let (_d, s, folder, child) = bound_directory_with_local_child();
+    assert_eq!(s.status(&folder).unwrap(), Status::Conflict);
+    let issue = s
+        .sync_issue("root", &folder)
+        .unwrap()
+        .expect("bound deleted directory with surviving local content must be an issue");
+    assert_eq!(issue.reason, "bound_directory_conflict");
+    assert!(issue.can_keep_local);
+    assert!(!issue.can_keep_remote);
+    assert!(!issue.can_keep_both);
+    assert!(!issue.can_keep_directory);
+    assert_eq!(issue.path, "folder");
+    assert!(issue.directory);
+    let json = serde_json::to_value(&issue).unwrap();
+    assert_eq!(json["can_keep_local"], serde_json::json!(true));
+    assert_eq!(json["can_keep_remote"], serde_json::json!(false));
+    let page = s.sync_issues("root", "").unwrap();
+    assert_eq!(page.entries.len(), 1);
+    assert_eq!(page.entries[0].id, folder);
+    assert_eq!(s.sync_issue_count("root").unwrap(), 1);
+    assert!(s.node(&child).is_ok());
+}
+
+#[test]
+fn keep_directory_local_rebinds_the_tree_and_survives_restart() {
+    let (d, mut s, folder, child) = bound_directory_with_local_child();
+    let issue = s.sync_issue("root", &folder).unwrap().unwrap();
+    let revived = s
+        .keep_directory_local("root", &folder, &issue.token)
+        .unwrap();
+    assert_eq!(revived.id, folder);
+    assert_eq!(revived.version, creations::CREATE_VERSION);
+    assert_eq!(
+        s.node(&folder).unwrap().version,
+        creations::CREATE_VERSION,
+        "keep-local must detach the old remote identity and requeue a local creation"
+    );
+    assert!(s.sync_issue("root", &folder).unwrap().is_none());
+    let kept_child = s.node(&child).unwrap();
+    assert_eq!(kept_child.parent.as_deref(), Some(folder.as_str()));
+    let queued = s.next_directory().unwrap().unwrap();
+    assert_eq!(queued.state, "pending");
+    assert_eq!(queued.job.node.id, folder);
+    assert_eq!(queued.job.parent.id, "root");
+    drop(queued);
+    drop(s);
+
+    let mut s = Store::open(d.path()).unwrap();
+    assert_eq!(
+        s.node(&folder).unwrap().version,
+        creations::CREATE_VERSION,
+        "restart must keep the requeued local directory identity"
+    );
+    assert!(s.node(&child).is_ok());
+    let queued = s.next_directory().unwrap().unwrap();
+    let job = s.mark_directory_started(&queued.job.operation).unwrap();
+    let mut confirmed = job.node.clone();
+    confirmed.version = "v-folder2".into();
+    s.confirm_directory(&queued.job.operation, &confirmed, "901")
+        .unwrap();
+    assert_eq!(s.node(&folder).unwrap().version, "v-folder2");
+    assert!(s.sync_issue("root", &folder).unwrap().is_none());
+}
+
+#[test]
+fn keep_directory_remote_clears_the_flag_without_resurrecting_local_content() {
+    let (d, mut s, folder, child) = bound_directory_with_local_child();
+    // Simulate a surviving child that already carries a remote identity instead
+    // of being a local-only creation, so accepting the remote deletion loses no
+    // local-only content.
+    {
+        let db = rusqlite::Connection::open(d.path().join("state.sqlite")).unwrap();
+        db.execute("DELETE FROM local_creations WHERE node=?1", [&child])
+            .unwrap();
+        db.execute(
+            "INSERT INTO remote_aliases(remote,node) VALUES('901',?1)",
+            [&child],
+        )
+        .unwrap();
+    }
+    let issue = s
+        .sync_issue("root", &folder)
+        .unwrap()
+        .expect("bound deleted directory must be recoverable even when content is remote-backed");
+    assert_eq!(issue.reason, "bound_directory_conflict");
+    assert!(issue.can_keep_local);
+    assert!(issue.can_keep_remote);
+    s.keep_directory_remote("root", &folder, &issue.token)
+        .unwrap();
+    assert!(s.sync_issue("root", &folder).unwrap().is_none());
+    assert_eq!(s.status(&folder).unwrap(), Status::Deleted);
+    assert!(s.node(&child).is_ok());
+}
+
+#[test]
+fn keep_directory_remote_refuses_when_local_only_content_would_be_lost() {
+    let (_d, mut s, folder, child) = bound_directory_with_local_child();
+    let issue = s.sync_issue("root", &folder).unwrap().unwrap();
+    assert!(!issue.can_keep_remote);
+    assert!(s
+        .keep_directory_remote("root", &folder, &issue.token)
+        .is_err());
+    assert!(s.sync_issue("root", &folder).unwrap().is_some());
+    assert!(s.node(&child).is_ok());
+}
+
+#[test]
+fn keep_directory_local_rejects_a_token_after_the_remote_identity_returns() {
+    let (_d, mut s, folder, child) = bound_directory_with_local_child();
+    let issue = s.sync_issue("root", &folder).unwrap().unwrap();
+    s.install_remote_snapshot(
+        &[
+            node("root", None, "r"),
+            named(&folder, Some("root"), "folder", "v-folder2", true),
+        ],
+        "3",
+        "server",
+    )
+    .unwrap();
+    assert!(s.sync_issue("root", &folder).unwrap().is_none());
+    assert!(s
+        .keep_directory_local("root", &folder, &issue.token)
+        .is_err());
+    assert_eq!(s.node(&folder).unwrap().version, "v-folder2");
+    assert!(s.node(&child).is_ok());
+}
+
+#[test]
+fn keep_directory_local_refuses_while_a_child_upload_is_uncertain() {
+    let d = tempfile::tempdir().unwrap();
+    let mut s = Store::open(d.path()).unwrap();
+    s.install_remote_snapshot(&[node("root", None, "r")], "1", "server")
+        .unwrap();
+    s.ensure_fs_root("root").unwrap();
+    let directory = s.create_local_directory("root", "folder", 0o755).unwrap();
+    let queued = s.next_directory().unwrap().unwrap();
+    let job = s.mark_directory_started(&queued.job.operation).unwrap();
+    let mut confirmed = job.node.clone();
+    confirmed.version = "v-folder".into();
+    s.confirm_directory(&queued.job.operation, &confirmed, "900")
+        .unwrap();
+    let child = s.create_local_file(&directory.id, "new", 0o600).unwrap();
+    let operation = s.save_local(&child.id, b"pending child").unwrap();
+    s.creation_saved(&child.id).unwrap();
+    s.mark_upload_started(&operation).unwrap();
+    s.mark_upload_uncertain(&operation).unwrap();
+    s.install_remote_snapshot(&[node("root", None, "r")], "2", "server")
+        .unwrap();
+    let issue = s
+        .sync_issue("root", &directory.id)
+        .unwrap()
+        .expect("bound deleted directory must stay visible while a child commit is unresolved");
+    assert!(issue.can_keep_local);
+    assert!(
+        s.keep_directory_local("root", &directory.id, &issue.token)
+            .is_err(),
+        "an unresolved child upload must block requeueing the directory"
+    );
+    assert!(s.node(&child.id).is_ok());
+    assert_eq!(s.status(&directory.id).unwrap(), Status::Conflict);
+}
+
+/// The bound-directory recovery entry must not resurrect the invisible
+/// tombstone problem for directories that have no surviving local content.
+#[test]
+fn bound_deleted_directory_without_surviving_content_stays_hidden() {
+    let (_d, mut s) = fixture();
+    let directory = s.create_local_directory("root", "folder", 0o755).unwrap();
+    let queued = s.next_directory().unwrap().unwrap();
+    let job = s.mark_directory_started(&queued.job.operation).unwrap();
+    let mut confirmed = job.node.clone();
+    confirmed.version = "v-folder".into();
+    s.confirm_directory(&queued.job.operation, &confirmed, "900")
+        .unwrap();
+    s.install_remote_snapshot(&[node("root", None, "r")], "3", "server")
+        .unwrap();
+    assert_eq!(s.status(&directory.id).unwrap(), Status::Deleted);
+    assert!(s.sync_issue("root", &directory.id).unwrap().is_none());
+    assert_eq!(s.sync_issue_count("root").unwrap(), 0);
+}

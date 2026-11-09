@@ -10,4 +10,4 @@
 
 已知 FUSE 限制：[硬链接不支持（#18）](FUSE_HARDLINK.md)。
 
-已知冲突状态问题：[陈旧目录冲突标志自愈（#6 follow-up）](STALE_CONFLICTS.md)。
+已知冲突状态问题：[陈旧目录冲突标志自愈（#6 follow-up）](STALE_CONFLICTS.md)；已绑定目录被服务器删除后的 [keep-local / keep-remote 恢复（#54）](STALE_CONFLICTS.md#绑定目录的-keep-local--keep-remoteissue-54)。

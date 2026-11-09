@@ -36,16 +36,27 @@
 
 - 脏内容（`dirty_blob`）、草稿、未终态上传/命名空间操作保留标志；
 - 本地未确认的 mkdir 树（在 `namespace_overlay` 或 `local_creations`）保留标志，恢复入口仍是 `KeepDirectoryBoth`；
-- 已删除（tombstone）目录不清理，`keep-remote` 等恢复语义不在本修复范围内；
-- 实际远端身份消失、需要 keep-local/keep-remote 的情形属于后续能力（issue #6 的 P1），本修复不改变其行为。
+- 已删除（tombstone）目录不做自愈清理；它们的恢复语义见下节「绑定目录的 keep-local / keep-remote」。
+
+## 绑定目录的 keep-local / keep-remote（issue #54）
+
+已绑定远端身份（存在 `remote_aliases` 行）的目录被服务器删除（`deleted=1, conflict=0`）、但其下仍有 `deleted=0` 子节点时，安装快照事务会在文件树中把它标记为 `conflict=1`，因此问题中心候选集无需新增 SQL 分支即可看到它。
+
+- 问题条目 `reason="bound_directory_conflict"`，令牌额外绑定目录的 `deleted` 状态、远端别名与存活后代签名；子项增删会使旧令牌失效。
+- `can_keep_local=true`（子树仍有 inflight/uncertain 上传时动作返回可解释错误）；`can_keep_remote` 仅当子树没有「仅本地内容」（本地创建且无远端别名）时为 true，避免误删本地数据。
+- **保留本地目录**（`KeepDirectoryLocal`）：保留节点 id、子孙与本地内容（inode/路径不变），解除旧远端别名，以本地新建身份重新排队 mkdir；已绑定的子项保持原远端身份（混合子树只重排根），`confirm_directory` 后绑定新远端别名。
+- **接受远端删除**（`KeepDirectoryRemote`）：仅清除 `conflict` 标志、保留 tombstone 与远端别名；仅在没有仅本地内容时可用。
+- 两者均为 additive D-Bus 方法，经 `GetOverview.recovery_actions.bound_directory_recovery` 与条目中的 `can_keep_local`/`can_keep_remote` 通告；不做 schema 迁移。
 
 ## 验证
 
 ```bash
 cargo test -p drive-core --all-features --locked --test conflicts -- stale
+cargo test -p drive-core --all-features --locked --test conflicts -- bound_directory
+cargo test -p drive-runtime --all-features --locked --test desktop bound_directory_recovery
 ```
 
-覆盖：mkdir/rename 提交后的自愈、历史库安装快照自愈与幂等、未终态操作与脏文件反例。全量回归：
+覆盖：mkdir/rename 提交后的自愈、历史库安装快照自愈与幂等、未终态操作与脏文件反例；以及绑定目录 tombstone 的 issue 表达、keep-local/keep-remote、重启与令牌失效。全量回归：
 
 ```bash
 cargo test -p drive-core -p drive-runtime --all-features --locked

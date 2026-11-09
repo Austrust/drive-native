@@ -1837,6 +1837,20 @@ impl Store {
                     metadata.write(&n)?;
                 }
             }
+            // Bound-directory recovery (issue #54): a directory bound to a
+            // remote identity whose tombstone still has surviving local
+            // descendants cannot be resolved by the stale-directory guard. Mark
+            // it as a conflict so the issue center can offer keep-local /
+            // keep-remote. The bound identity merely disappeared; this is not a
+            // namespace conflict.
+            tx.execute(
+                "UPDATE nodes SET conflict=1
+                  WHERE directory=1 AND deleted=1 AND conflict=0
+                    AND id IN (SELECT node FROM remote_aliases)
+                    AND id NOT IN (SELECT node FROM local_unlinks)
+                    AND EXISTS(SELECT 1 FROM nodes c WHERE c.parent=nodes.id AND c.deleted=0)",
+                [],
+            )?;
             // Stale-flag heal (issue #6 follow-up): a snapshot installed while a
             // namespace operation was in flight marks its overlay member as
             // conflicted, and the later mkdir/rename commit binds the remote

@@ -371,5 +371,53 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(overviews, 1, "a refresh burst must issue one capability GetOverview")
 
 
+    def test_bound_directory_offers_keep_local_and_gates_destructive_accept(self):
+        row = dict(self.row, reason="bound_directory_conflict", path="folder",
+                   can_keep_both=False, can_keep_directory=False,
+                   can_keep_local=True, can_keep_remote=False)
+        self.populate(row)
+        self.assertTrue(self.dialog.keep.isEnabled())
+        self.assertEqual(self.dialog.keep.text(), "保留本地目录（重新上传）")
+        self.assertFalse(self.dialog.name.isEnabled())
+        self.assertFalse(self.dialog.accept_remote.isEnabled())
+        self.assertIn("保留本地目录", self.dialog.explanation.text())
+        self.assertIn("不会提供“接受远端删除”", self.dialog.explanation.text())
+        self.dialog.keep_both()
+        self.assertEqual(self.bus.calls[-1][:2],
+                         ("KeepDirectoryLocal", ["file", "private-token"]))
+        self.assertIn("重新排队上传", self.dialog.message.text())
+        self.bus.respond("KeepDirectoryLocal",
+                         {"schema": 1, "directory_id": "file", "path": "folder",
+                          "kept_local": True})
+        self.assertIn("本地目录已保留", self.dialog.message.text())
+        self.assertIn("file", self.dialog.rows)
+
+    def test_bound_directory_accepts_remote_only_when_backend_allows_and_acknowledges(self):
+        row = dict(self.row, reason="bound_directory_conflict", path="folder",
+                   can_keep_local=True, can_keep_remote=True)
+        self.populate(row)
+        self.assertTrue(self.dialog.accept_remote.isEnabled())
+        self.assertIn("接受远端删除", self.dialog.explanation.text())
+        self.dialog.accept_remote.click()
+        self.assertEqual(self.bus.calls[-1][:2],
+                         ("KeepDirectoryRemote", ["file", "private-token"]))
+        self.bus.respond("KeepDirectoryRemote",
+                         {"schema": 1, "directory_id": "file", "path": "folder",
+                          "kept_remote": True, "deleted_local": False})
+        self.assertIn("已接受远端删除", self.dialog.message.text())
+        self.assertFalse(any(c[0] in ("KeepBoth", "KeepDirectoryBoth", "Resume")
+                             for c in self.bus.calls))
+
+    def test_keep_directory_remote_failure_preserves_issue_and_claims_nothing(self):
+        row = dict(self.row, reason="bound_directory_conflict", path="folder",
+                   can_keep_local=True, can_keep_remote=True)
+        self.populate(row)
+        self.dialog.accept_remote.click()
+        self.bus.respond("KeepDirectoryRemote", None, "stale_issue")
+        self.assertIn("未更改恢复状态", self.dialog.message.text())
+        self.assertIn("file", self.dialog.rows)
+        self.assertFalse(self.dialog.busy)
+
+
 if __name__ == "__main__":
     unittest.main()
