@@ -8,8 +8,6 @@
 
 本地修复分支的证据入口：[索引与桌面历史](FIX_5_2_REPORT.md) · [逐目录权限](FIX_7_REPORT.md) · [DB 热点与增量状态投影（#15/#16/#8）](ISSUES_20261107.md)。
 
-跨平台移植（#11）：[Windows / CFAPI 移植路线与 core POSIX 门禁](WINDOWS_PORT.md)（`bash scripts/check-core-posix.sh`，当前为骨架阶段）。
-
 已知 FUSE 限制：[硬链接不支持（#18）](FUSE_HARDLINK.md)。
 
 已知冲突状态问题：[陈旧目录冲突标志自愈（#6 follow-up）](STALE_CONFLICTS.md)。
