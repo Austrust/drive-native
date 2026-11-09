@@ -687,6 +687,45 @@ class UnifiedTests(unittest.TestCase):
         APP.processEvents()
         self.assertIn('GetOverview', bus.calls)
 
+    # Issue #53: background reconciliation clears uncertain/pending work while
+    # only the committed semantic watermark advances. The daemon must flag such
+    # a watermark as overview_changed; the GUI then re-queries the overview and
+    # the tray badge leaves its stale "needs attention" state.
+    def test_semantic_watermark_advance_clears_stale_tray_attention(self):
+        from drive_native_gui.bus import StatusEvent
+        self.drain_overviews()
+        slot = A
+        bus = self.window.buses[A]
+        bus.calls.clear(); bus.waiting.clear()
+        manager = self.window
+        manager.status2_seen[slot] = True
+        manager.status_epoch[slot] = 'e1'
+        manager.status_revision[slot] = 7
+        manager.status_queried[slot] = 0.0
+        # A queue with one uncertain commit still needs attention.
+        bus.changed2.emit(StatusEvent(7, 8, 'e1', False, True, []))
+        APP.processEvents()
+        self.assertEqual(bus.calls.count('GetOverview'), 1)
+        method, callback = bus.waiting.pop(0)
+        self.assertEqual(method, 'GetOverview')
+        callback({'task_id': 'task-' + slot, 'connection': 'online', 'mounted': True,
+                  'pending_operations': 1, 'issue_count': 1}, None)
+        self.assertIn('需要检查', manager.tray.icon.toolTip())
+        # Reconciling the commit advances the status watermark only: no queue
+        # counters change, so only a semantic-watermark diff can trigger the
+        # refresh. The follow-up overview reports an empty queue.
+        manager.status_queried[slot] = 0.0
+        bus.changed2.emit(StatusEvent(8, 9, 'e1', False, True, []))
+        APP.processEvents()
+        self.assertEqual(bus.calls.count('GetOverview'), 2)
+        method, callback = bus.waiting.pop(0)
+        self.assertEqual(method, 'GetOverview')
+        callback({'task_id': 'task-' + slot, 'connection': 'online', 'mounted': True,
+                  'pending_operations': 0, 'issue_count': 0}, None)
+        self.assertNotIn('需要检查', manager.tray.icon.toolTip())
+        self.assertIn('查看当前活动', manager.tray.icon.toolTip())
+        self.assertEqual(manager.status_revision[slot], 9)
+
     def test_status_gap_falls_back_to_overview(self):
         from drive_native_gui.bus import StatusEvent
         self.drain_overviews()

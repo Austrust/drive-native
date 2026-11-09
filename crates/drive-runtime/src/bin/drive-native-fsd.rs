@@ -3,6 +3,7 @@ use drive_runtime::{
     desktop::{Desktop, OBJECT_PATH},
     service::{Profile, Service, prepare_paths},
     status_events,
+    status_watch::StatusSample,
 };
 use std::{path::PathBuf, sync::atomic::Ordering, time::Duration};
 
@@ -222,19 +223,22 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let downloads=s.bridge.downloads.load(Ordering::Relaxed);
                 let active=s.bridge.active_downloads();
                 let error=s.bridge.last_error();
-                (control,downloads,active.len(),error,s.bridge.transfer_revision(),commit.revision,commit.verified)
+                StatusSample{
+                    control_revision:control,
+                    downloads,
+                    active_downloads:active.len(),
+                    last_error:error,
+                    transfer_revision:s.bridge.transfer_revision(),
+                    commit_revision:commit.revision,
+                    commit_verified:commit.verified,
+                }
             }).await?;
             if last.as_ref()!=Some(&current) {
                 revision+=1;
                 Desktop::status_changed(&zbus::object_server::SignalEmitter::new(&conn,OBJECT_PATH)?,revision).await?;
-                let to_revision=current.5;
-                let overview_changed=last.as_ref().map_or(true,|previous|{
-                    previous.0!=current.0||previous.1!=current.1||previous.2!=current.2
-                        ||previous.3!=current.3||previous.4!=current.4||previous.6!=current.6
-                });
-                let semantic_changed=last.as_ref().map_or(true,|previous|{
-                    previous.5!=current.5||previous.6!=current.6
-                });
+                let to_revision=current.commit_revision;
+                let overview_changed=last.as_ref().map_or(true,|previous|current.overview_changed(previous));
+                let semantic_changed=last.as_ref().map_or(true,|previous|current.semantic_changed(previous));
                 let previous_epoch=last_epoch.clone();
                 last=Some(current);
                 if semantic_changed {
