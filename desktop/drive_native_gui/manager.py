@@ -22,6 +22,7 @@ from .queue_health import queue_caption, queue_notice, uncertain_operations
 from .history import HistoryPage, HistorySource
 from .transfers import PHASES as TRANSFER_PHASES, transfer_row
 from .notifications import NotificationCenter
+from .dbus_notifications import FreedesktopNotifications, NotificationDelivery
 
 LABELS = {"locked":"等待解锁", "connecting":"连接中", "online":"已连接", "offline":"离线", "paused":"已暂停", "needs_attention":"需要处理", "stopping":"正在停止"}
 STOP_TIMEOUT_SECONDS = STOP_DEADLINE_SECONDS
@@ -159,9 +160,18 @@ class MountManager(QMainWindow):
         self.refresh_catalog()
         from .tray import MountTray
         self.tray = MountTray(self)
-        # Delivery policy is injected so the GUI and tests share one center.
-        self.notifications = NotificationCenter(self.tray, self.notification_target, parent=self)
+        # Delivery policy is injected so the GUI and tests share one center.  The
+        # tray stays the first channel; when it cannot show messages the
+        # freedesktop D-Bus service takes over (#2).
+        self.freedesktop_notifications = FreedesktopNotifications(parent=self)
+        self.notification_delivery = NotificationDelivery(self.tray, self.freedesktop_notifications)
+        self.notifications = NotificationCenter(
+            self.notification_delivery, self.notification_target, parent=self)
         self.notifications.set_enabled(self.gui_settings["notifications"])
+        # Freedesktop clicks arrive with the mount slot recorded for that
+        # notification id; the tray's messageClicked has no id and falls back to
+        # the policy's latest target.  Both share the same entry point.
+        self.freedesktop_notifications.clicked.connect(self.notifications.clicked)
         self.tray.notifications = self.notifications
         self.success_timer = QTimer(self); self.success_timer.setInterval(SUCCESS_POLL_MS)
         self.success_timer.timeout.connect(self.poll_success_notifications)
@@ -192,7 +202,7 @@ class MountManager(QMainWindow):
         self.success_check = QCheckBox("同步成功通知（默认关闭；按挂载合并，不逐个文件提示）")
         self.success_check.setAccessibleName("同步成功通知")
         notifications_layout.addWidget(self.success_check)
-        notification_note = QLabel("托盘不可用时只在界面内显示状态，不发送系统通知。同一挂载的同类问题 30 分钟内不会重复提示；点击通知可打开对应挂载。")
+        notification_note = QLabel("托盘不可用时自动改用系统通知；系统通知也不可用时只在界面内显示状态。同一挂载的同类问题 30 分钟内不会重复提示；点击通知可打开对应挂载。")
         notification_note.setWordWrap(True); notifications_layout.addWidget(notification_note)
         settings.addWidget(notifications_box)
 

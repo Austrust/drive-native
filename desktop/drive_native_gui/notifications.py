@@ -1,9 +1,13 @@
 """Notification policy for mount problems and merged sync-completion notices.
 
-The center owns *policy*; delivery belongs to the injected tray host.  The host
-only needs ``available()`` and ``show_message(title, body, *, warning=False)``;
-the tray forwards ``messageClicked`` to :meth:`NotificationCenter.clicked`, so
-a click activates the mount behind the most recent notification.
+The center owns *policy*; delivery belongs to the injected host.  The host only
+needs ``available()`` and ``show_message(title, body, *, warning=False,
+target=None)``; ``target`` is the mount slot behind the notice, which delivery
+layers that can address individual notices (freedesktop D-Bus) use to route a
+click back to the right mount.  A host without per-notice identity (the tray's
+``messageClicked``) can ignore it: :meth:`NotificationCenter.clicked` is also
+called without a target and then activates the mount behind the most recent
+notification.
 """
 import time
 from PySide6.QtCore import QObject
@@ -142,7 +146,7 @@ class NotificationCenter(QObject):
         shown = False
         if available:
             try:
-                self.host.show_message(title, body, warning=warning)
+                self.host.show_message(title, body, warning=warning, target=slot)
                 shown = True
             except (AttributeError, RuntimeError):
                 shown = False
@@ -151,9 +155,16 @@ class NotificationCenter(QObject):
         self.log.append({"slot": slot, "kind": kind, "title": title, "body": body,
                          "warning": warning, "shown": shown, "at": self.now_ms()})
 
-    def clicked(self):
-        """Desktop tray clicks carry no payload; use the last target notice."""
-        target = self.last_target
+    def clicked(self, target=None):
+        """Activate the mount behind a clicked notification.
+
+        Delivery layers that can identify individual notices pass their target
+        explicitly; the tray's ``messageClicked`` has no payload and falls back
+        to the most recent notice.  Policy (merging, enabled kinds) is untouched
+        either way.
+        """
+        if target is None:
+            target = self.last_target
         if target is not None and self.activate is not None:
             self.activate(target)
         return target
