@@ -20,7 +20,7 @@
 - **#10**：rescan_later / merge_mode / 事件游标缺口归为 RecoveryRequired，bridge 单飞恢复循环最多 3 次（2/5/10 秒或 0/5/15 秒退避）自动重建快照或重新初始化，只有耗尽、认证/证书/根失效才需要人工；GetOverview/GetIssues 新增 additive `recovery{state,cause,attempts,next_retry_at,revision,attention}`，`recovery_revision` 推进触发 overview 刷新；无 schema 迁移、IPC 21 不变。
 - **#11 step1**：新增 platform file identity 契约骨架（`PlatformFileId` + `FileIdentitySource` + Linux `fs_inodes` adapter，行为与 ino 语义不变），为 Windows CFAPI adapter 与 v30 `platform_file_ids` 留出替换点。
 
-验证状态：本批候选树为 `integration/fixes3`（当前 HEAD `7336a54`，含 #50 阶段4、#11 step1、#9 TB2、#10、#6/issue #54、#19 M2）；`final-validate b14` 门禁进行中，正式计数、48 路与性能结论待其完成后回填，本文不宣称最终验收通过。发布前必修项已全部并入（#14 残留 pending op、#9 TB2 B1 视图修复、#8 门禁稳健性）。
+验证状态：本批候选树为 `integration/fixes3`，最终候选 HEAD `f5cee4a`（代码内容与 `7336a54` 相同，仅文档回填）。`final-validate b14`（workstation202611，2026-11-09，14/14 phase `PHASE-EXIT=0`）SUMMARY **passed=2662 / failed=0 / ignored=130 / failed_binaries=0**；#8 SLO 8/8 PASS（210k GetStates p95 239.5 ms / 限 500 ms，2000 项目录 p95 4.48 ms / 限 300 ms，48 路 mixed 0 超时，overview total p95 0.91 ms、lock hold 0 ms，初始化期间查询 p95 10 ms / 限 500 ms）；GUI 27/27 suites OK；内核挂载套件 8 passed；schema v29 迁移与 IPC 21 配对检查通过。无真实 NAS ACL、真实 dpkg 安装/升级与 Mint/Cinnamon 桌面验收，本说明不宣称这些项通过。
 
 以下保留此前发布记录。
 
