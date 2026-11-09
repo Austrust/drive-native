@@ -10,7 +10,7 @@ pub struct UploadJob {
 }
 impl Store {
     pub fn upload_operations(&self, state: &str) -> Result<Vec<String>> {
-        if !matches!(state, "pending" | "uncertain") {
+        if !matches!(state, "pending" | "uncertain" | "abandoned") {
             return Err(Error::State("invalid operation selection".into()));
         }
         let mut q = self

@@ -304,7 +304,44 @@ pub(crate) fn note_reconcile_attempt(db: &Connection, key: &str, attempts: u32) 
 /// A locally deleted, never confirmed creation stops being retried. History
 /// keeps the permission evidence and explains why the queue gave up; the
 /// operation type/result stays failure-shaped so the GUI can surface it.
+/// `reason` distinguishes an automatic stop from a user-facing discard.
 pub(crate) fn record_abandoned_upload(
+    db: &Connection,
+    key: &str,
+    node: &str,
+    attempts: u32,
+    reason: &str,
+) -> Result<()> {
+    record(
+        db,
+        key,
+        node,
+        "upload",
+        "failed",
+        Some("permission_commit_uncertain"),
+    )?;
+    let summary = match reason {
+        "user_discarded" => {
+            "已放弃本次本地待上传并删除本地文件；服务器创建结果未确认，已停止重试"
+        }
+        _ => "本地文件已删除；服务器创建结果未确认，已停止自动重试",
+    };
+    let detail = serde_json::json!({
+        "abandoned": reason,
+        "reconcile_attempts": attempts,
+    });
+    db.execute(
+        "UPDATE sync_history SET error_summary=?2, detail=json_patch(COALESCE(detail,'{}'), ?3) WHERE operation_key=?1",
+        params![key, summary, detail.to_string()],
+    )?;
+    Ok(())
+}
+
+/// The bounded read-only reconciliation budget is spent without a confirmed
+/// result. The operation becomes a durable terminal `abandoned` row so it can
+/// no longer block pending work; local content is retained and history explains
+/// the stop. A user recheck re-arms it (see `reset_upload_reconcile_budget`).
+pub(crate) fn record_reconcile_exhausted(
     db: &Connection,
     key: &str,
     node: &str,
@@ -319,14 +356,14 @@ pub(crate) fn record_abandoned_upload(
         Some("permission_commit_uncertain"),
     )?;
     let detail = serde_json::json!({
-        "abandoned": "local_deleted",
+        "abandoned": "reconcile_exhausted",
         "reconcile_attempts": attempts,
     });
     db.execute(
         "UPDATE sync_history SET error_summary=?2, detail=json_patch(COALESCE(detail,'{}'), ?3) WHERE operation_key=?1",
         params![
             key,
-            "本地文件已删除；服务器创建结果未确认，已停止自动重试",
+            "服务器提交结果未确认；自动核对已暂停，本地内容保留",
             detail.to_string()
         ],
     )?;

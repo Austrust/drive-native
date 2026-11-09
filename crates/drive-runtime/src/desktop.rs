@@ -630,6 +630,7 @@ pub(crate) struct OverviewDerived {
 #[derive(Clone, Debug)]
 struct StoreOverview {
     pending: i64,
+    paused_uploads: i64,
     preview_only: bool,
     writable: bool,
     permission: drive_core::write_permissions::Policy,
@@ -653,6 +654,7 @@ fn overview_store(
     let root = &service.profile.scope.file_id;
     let pending = store.pending_operations().map_err(|_| other())?
         + store.pending_namespace_operations().map_err(|_| other())?;
+    let paused_uploads = store.paused_upload_operations().map_err(|_| other())?;
     let preview_only = preview::active(store, root)?;
     let permission = drive_core::write_permissions::policy(store, root).map_err(|_| other())?;
     let writable =
@@ -667,6 +669,7 @@ fn overview_store(
     };
     Ok(StoreOverview {
         pending,
+        paused_uploads,
         preview_only,
         writable,
         permission,
@@ -737,6 +740,7 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
     }
     let StoreOverview {
         pending,
+        paused_uploads,
         preview_only,
         writable,
         permission,
@@ -762,6 +766,11 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
         "checking"
     } else if pending > 0 || uncertain > 0 {
         "pending"
+    } else if paused_uploads > 0 {
+        // Upload commitments that exhausted the read-only reconciliation budget
+        // are no longer counted as pending work, but the user still needs a
+        // visible, explainable reason to open the issue center.
+        "needs_attention"
     } else {
         "idle"
     };
@@ -769,6 +778,9 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
     let background_error = background.as_ref().map(|failure| failure.message);
     let background_error_kind = background.as_ref().map(|failure| failure.source.as_str());
     let background_error_since_ms = background.as_ref().map(|failure| failure.since_ms);
+    // Extracted from the big literal below: the macro expands the nested object
+    // one level per key, and the overview is already close to the recursion cap.
+    let recovery_actions = serde_json::json!({"recheck_issues":true,"abandon_upload":true});
     // Issue #31: the status journal epoch lets a GUI tell a same-daemon delta
     // from a restarted writer (its cursor epoch differs after a restart).
     let status_epoch = ro
@@ -782,14 +794,15 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
         "background_error_kind":background_error_kind,
         "background_error_since_ms":background_error_since_ms,
         "upload_block":*service.bridge.upload_block.lock().unwrap(),
-        "recovery_actions":{"recheck_issues":true},
+        "recovery_actions":recovery_actions,
         "mounted":service.mounted.load(Ordering::Acquire),"writable":writable && !preview_only,
         "writable_source":permission.writable_source,"local_policy":permission.local_policy,
         "server_capability":permission.server_capability,"write_policy_revision":permission.write_policy_revision,
         "configured_writable":service.profile.writable,"preview_only":preview_only,
         "skipped_symlinks":skipped_symlinks,
         "skipped_permission_directories":inaccessible,
-        "pending_operations":pending,"revision":revision,"local_revision":local_revision,
+        "pending_operations":pending,"paused_uploads":paused_uploads,
+        "revision":revision,"local_revision":local_revision,
         "status_revision":key.revision,"status_verified":key.verified,"status_epoch":status_epoch,
         "queue_health":queue_health,
         "downloads_started":service.bridge.downloads.load(Ordering::Relaxed),
@@ -1207,6 +1220,17 @@ pub fn keep_directory_both(
             .to_string(),
     )
 }
+/// Abandon one unconfirmed local creation: the operation moves to the persistent
+/// `abandoned` terminal state and the local-only file is retired. The remote
+/// side is never touched, so the reply always reports `server_changed: false`.
+pub fn abandon_upload(service: &Service, id: &str, token: &str) -> io::Result<String> {
+    let path = service
+        .bridge
+        .abandon_unconfirmed_upload(&service.profile.scope.file_id, id, token)?;
+    Ok(serde_json::json!({"schema":1,"abandoned":true,"id":id,"path":path,
+        "deleted_local":true,"server_changed":false,
+        "summary":"已放弃本次本地待上传并删除本地文件；未修改服务器条目"}).to_string())
+}
 pub fn trust_settings(service: &Service) -> io::Result<String> {
     let settings = service.trust_settings();
     let version = settings.fingerprint();
@@ -1366,6 +1390,14 @@ impl Desktop {
     ) -> zbus::fdo::Result<String> {
         let s = self.0.clone();
         local(move || keep_directory_both(&s, &id, &token, &name)).await
+    }
+    /// Additive issue-center action advertised by
+    /// `GetOverview.recovery_actions.abandon_upload`. It only retires a local
+    /// unconfirmed creation; older backends simply lack the method and the GUI
+    /// keeps offering recheck instead.
+    async fn abandon_upload(&self, id: String, token: String) -> zbus::fdo::Result<String> {
+        let s = self.0.clone();
+        local(move || abandon_upload(&s, &id, &token)).await
     }
     async fn retry_downloads(&self, path: String) -> zbus::fdo::Result<String> {
         let s = self.0.clone();

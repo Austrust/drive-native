@@ -141,6 +141,13 @@ class IssuesDialog(QDialog):
         self.refresh_button.clicked.connect(self.refresh)
         actions.addWidget(self.refresh_button)
         actions.addStretch()
+        self.abandon = QPushButton("放弃上传（仅删除本地文件）")
+        self.abandon.setToolTip(
+            "放弃本次本地待上传并删除本地未上传的文件；不会删除或修改服务器上的任何条目。"
+            "仅对服务器结果未确认、尚未绑定远端身份的本地新建可用。")
+        self.abandon.clicked.connect(self.abandon_upload)
+        self.abandon.setEnabled(False)
+        actions.addWidget(self.abandon)
         self.keep = QPushButton("保留双方版本")
         self.keep.setObjectName("primary")
         self.keep.clicked.connect(self.keep_both)
@@ -265,6 +272,11 @@ class IssuesDialog(QDialog):
             self.explanation.setText("整个本地文件夹将改用新名称，保留所有子文件，并在联网后上传。同名远端条目及其内容保持不变。")
         elif row.get("can_keep_both") and row.get("reason") == "creation_conflict":
             self.explanation.setText("本地文件将以新名称保留，并在联网后上传。同名远端条目保持不变，取得其元数据后会在原位置显示。")
+        elif row.get("can_abandon_upload") is True:
+            self.explanation.setText(
+                reason_label(row, "需要进一步核对")
+                + "。若确认不再需要该本地新建，可使用“放弃上传（仅删除本地文件）”结束本次未确认创建；"
+                  "该操作只删除本地未上传的文件，不会删除或修改服务器条目。")
         else:
             self.explanation.setText(
                 "本地修改将成为同目录下的新文件，并在联网后上传。原文件保留远端版本；远端已删除时不会恢复原路径。"
@@ -301,6 +313,9 @@ class IssuesDialog(QDialog):
         self.recheck.setToolTip("请求安全核对；不会清除缓存或盲目重复未知提交。" if supported else
                                "当前后台未提供安全核对接口。可刷新本地状态，或更新后台后再试。")
         self.open_parent.setEnabled(bool(row and parent_candidates(row.get("path")) and self.overview.get("mounted") is True and not self.busy))
+        # Capability is per row and must be a literal JSON true from the backend;
+        # a missing/legacy field never enables a destructive local action.
+        self.abandon.setEnabled(bool(row and row.get("can_abandon_upload") is True and not self.busy))
         self.pause_sync.setEnabled(not self.busy and self.overview.get("connection") in ("online", "offline", "connecting", "needs_attention"))
         self.login.setEnabled(not self.busy and self.configure is not None)
 
@@ -349,6 +364,27 @@ class IssuesDialog(QDialog):
                 self.resolved.emit()
             self.refresh_context()
         self.bus.call("RecheckIssues", callback=done)
+
+    def abandon_upload(self):
+        """One explicit, backend-confirmed local deletion for an unconfirmed creation."""
+        row = self.selected_row()
+        if not row or not self.abandon.isEnabled() or self.busy:
+            return
+        self.busy = True
+        self.selection_changed()
+        self.message.setText("正在放弃本次本地待上传…")
+        def done(data, error):
+            self.busy = False
+            self.selection_changed()
+            if (error or not isinstance(data, dict) or type(data.get("schema")) is not int
+                    or data.get("schema") != 1 or data.get("abandoned") is not True):
+                self.message.setText("未完成放弃操作；本地文件与服务器状态未更改。请刷新状态后重试。")
+            else:
+                self.message.setText("已放弃本次本地待上传（仅删除本地文件）；未修改服务器。服务器端条目未删除、未修改。")
+                self.resolved.emit()
+                self.refresh()
+            self.refresh_context()
+        self.bus.call("AbandonUpload", [row["id"], row["token"]], done)
 
     def pause_task(self):
         if not self.pause_sync.isEnabled() or self.busy:

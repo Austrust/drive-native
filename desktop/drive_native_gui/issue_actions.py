@@ -6,7 +6,7 @@ from pathlib import PurePosixPath
 NEXT_STEPS = {
     "content_conflict": "保留双方版本；若按钮不可用，先关闭占用此文件的应用，刷新问题后再处理。",
     "remote_deleted": "先查看仍可访问的父文件夹。需要保留本地内容时，使用可用的“保留双方版本”；不要删除草稿或清除缓存。",
-    "commit_uncertain": "后台自动只读核对暂停后，仍可随时请求重新核对；重新核对只会再次确认结果，不会重放创建或覆盖服务器。若确认服务器上不存在该条目，可在文件管理器中删除本地文件作废这次未确认的创建，该删除会记录到同步历史。结果确认前不要重复创建、移动或删除同一条目；若仍无进展，复制诊断并提交问题，可暂停同步保留数据。",
+    "commit_uncertain": "后台自动只读核对暂停后，仍可随时请求重新核对；重新核对只会再次确认结果，不会重放创建或覆盖服务器。若确认服务器上不存在该条目，可在文件管理器中删除本地文件作废这次未确认的创建，该删除会记录到同步历史；也可使用“放弃上传（仅删除本地文件）”结束本次未确认创建（仅移除本地未上传文件，不删除或修改服务器条目）。结果确认前不要重复创建、移动或删除同一条目；若仍无进展，复制诊断并提交问题，可暂停同步保留数据。",
     "namespace_conflict": "检查原目录和目标目录是否仍存在、账号是否有权限，再重新核对。若原位置已改变且无法自动确认，复制诊断提交问题；不要用同名新目录冒充原身份。",
     "directory_creation_conflict": "选择可用的“保留双方版本”为本地文件夹换一个名称；不可用时先检查父目录权限并重新核对。",
     "creation_conflict": "使用可用的“保留双方版本”为本地文件换名；不可用时先关闭占用应用，再刷新问题。",
@@ -102,7 +102,7 @@ def diagnostic_text(overview, row=None):
     for key in ("mounted", "preview_only"):
         if type(overview.get(key)) is bool:
             data[key] = overview[key]
-    for key in ("pending_operations", "download_errors"):
+    for key in ("pending_operations", "download_errors", "paused_uploads"):
         value = overview.get(key)
         if type(value) is int and 0 <= value < 1 << 64:
             data[key] = value
@@ -180,7 +180,7 @@ def diagnostic_text(overview, row=None):
             data["cache_availability"] = closed
     if row:
         data["issue_reason"] = row.get("reason") if row.get("reason") in NEXT_STEPS else "unrecognized"
-        for key in ("directory", "can_keep_both", "can_keep_directory"):
+        for key in ("directory", "can_keep_both", "can_keep_directory", "can_abandon_upload"):
             if type(row.get(key)) is bool:
                 data[key] = row[key]
         # Additive reconcile budget fields; absent on older backends.

@@ -18,7 +18,7 @@ const OLD_CANDIDATES: &str = "
         OR EXISTS(SELECT 1 FROM drafts d WHERE d.node=n.id AND d.dirty=1
             AND (d.base!=n.remote_version OR n.deleted=1)
             AND NOT EXISTS(SELECT 1 FROM local_unlinks WHERE node=n.id))
-        OR EXISTS(SELECT 1 FROM operations WHERE node=n.id AND state='uncertain')
+        OR EXISTS(SELECT 1 FROM operations WHERE node=n.id AND state IN ('uncertain','abandoned'))
         OR EXISTS(SELECT 1 FROM namespace_ops WHERE node=n.id
             AND state IN ('uncertain','cleanup_uncertain','conflict')))
     ORDER BY id LIMIT 257";
@@ -34,7 +34,7 @@ const NEW_CANDIDATE_SOURCES: &str = "
            AND NOT EXISTS(SELECT 1 FROM local_unlinks WHERE node=n.id)
         UNION
         SELECT o.node FROM operations o INDEXED BY operations_unfinished
-         WHERE o.state='uncertain' AND o.state NOT IN ('committed','superseded')
+         WHERE o.state IN ('uncertain','abandoned') AND o.state NOT IN ('committed','superseded')
            AND EXISTS(SELECT 1 FROM nodes n WHERE n.id=o.node)
         UNION
         SELECT o.node FROM namespace_ops o INDEXED BY namespace_unfinished
@@ -382,7 +382,7 @@ fn candidate_query_plan_uses_the_union_indexes() {
     // Per-identity lookups used by `sync_issue` must be covered by the new
     // non-partial indexes, which is what keeps a single issue cheap.
     let operation_lookup = plan_lines(
-        "SELECT 1 FROM operations WHERE node=?1 AND state IN ('inflight','uncertain')",
+        "SELECT 1 FROM operations WHERE node=?1 AND state IN ('inflight','uncertain','abandoned')",
     );
     let namespace_lookup = plan_lines(
         "SELECT 1 FROM namespace_ops WHERE node=?1 AND state IN ('uncertain','cleanup_uncertain','inflight','cleanup_inflight')",

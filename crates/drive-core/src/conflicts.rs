@@ -14,6 +14,9 @@ pub struct SyncIssue {
     pub token: String,
     pub reconcile_attempts: u32,
     pub reconcile_exhausted: bool,
+    /// True only for an unconfirmed local creation that can be discarded
+    /// locally without touching a server object (no bound remote identity).
+    pub can_abandon_upload: bool,
 }
 #[derive(Debug, Serialize)]
 pub struct IssuePage {
@@ -52,7 +55,7 @@ const ISSUE_CANDIDATE_SOURCES: &str = "
            AND NOT EXISTS(SELECT 1 FROM local_unlinks WHERE node=n.id)
         UNION
         SELECT o.node FROM operations o INDEXED BY operations_unfinished
-         WHERE o.state='uncertain' AND o.state NOT IN ('committed','superseded')
+         WHERE o.state IN ('uncertain','abandoned') AND o.state NOT IN ('committed','superseded')
            AND EXISTS(SELECT 1 FROM nodes n WHERE n.id=o.node)
         UNION
         SELECT o.node FROM namespace_ops o INDEXED BY namespace_unfinished
@@ -124,7 +127,7 @@ impl Store {
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
             )
             .optional()?;
-        let uncertain: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE node=?1 AND state IN ('inflight','uncertain')) OR EXISTS(SELECT 1 FROM namespace_ops WHERE node=?1 AND state IN ('uncertain','cleanup_uncertain','inflight','cleanup_inflight'))",[id],|r|r.get(0))?;
+        let uncertain: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE node=?1 AND state IN ('inflight','uncertain','abandoned')) OR EXISTS(SELECT 1 FROM namespace_ops WHERE node=?1 AND state IN ('uncertain','cleanup_uncertain','inflight','cleanup_inflight'))",[id],|r|r.get(0))?;
         let conflict = self.status(id)? == Status::Conflict;
         if !uncertain && !conflict {
             return Ok(None);
@@ -134,7 +137,7 @@ impl Store {
         let reconcile_attempts: u32 = self
             .db
             .query_row(
-                "SELECT COALESCE(MAX(reconcile_attempts),0) FROM operations WHERE kind='upload' AND node=?1 AND state IN ('inflight','uncertain')",
+                "SELECT COALESCE(MAX(reconcile_attempts),0) FROM operations WHERE kind='upload' AND node=?1 AND state IN ('inflight','uncertain','abandoned')",
                 [id],
                 |r| r.get::<_, i64>(0),
             )
@@ -166,6 +169,21 @@ impl Store {
                     && (owner == id || dirty.as_ref() == Some(key) || blob.as_ref() == Some(key))
             });
         let has_local = dirty.is_some() || draft.as_ref().is_some_and(|d| d.4);
+        // Discarding is limited to an unconfirmed local creation: the local
+        // bytes were never acknowledged by the server and no remote identity is
+        // bound, so deleting them cannot leave a dangling server object.
+        let unconfirmed_upload: bool = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM operations WHERE kind='upload' AND node=?1 AND state IN ('uncertain','abandoned'))",
+            [id],
+            |r| r.get(0),
+        )?;
+        let can_abandon_upload = !node.directory
+            && local_creation
+            && !bound_identity
+            && !deleted
+            && parent_live
+            && unconfirmed_upload
+            && crate::removals::creation_unbound(&self.db, id)?;
         let directory_plan =
             if node.directory && local_creation && !uncertain && !deleted && parent_live {
                 self.directory_conflict_plan(id)?
@@ -220,6 +238,7 @@ impl Store {
             &directory_plan,
             reconcile_attempts,
             reconcile_exhausted,
+            can_abandon_upload,
         ))?);
         Ok(Some(SyncIssue {
             id: id.into(),
@@ -233,6 +252,7 @@ impl Store {
             can_keep_directory: directory_plan.is_some(),
             reconcile_attempts,
             reconcile_exhausted,
+            can_abandon_upload,
             token,
         }))
     }
