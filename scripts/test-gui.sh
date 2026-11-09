@@ -35,6 +35,6 @@ for module in gui_unit_tests cache_gui_tests conflict_gui_tests hidden_dialog_te
     unified_manager_tests gui_instance_test queue_gui_tests history_gui_tests \
     permission_gui_tests background_banner_tests notification_tests \
     notification_dbus_tests shutdown_diagnostic_tests keyboard_gui_tests \
-    window_transfer_tests release_gui_tests window_state_tests; do
+    window_transfer_tests release_gui_tests exclude_gui_tests window_state_tests; do
     run_module "$module"
 done
