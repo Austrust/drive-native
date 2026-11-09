@@ -8,6 +8,13 @@ from drive_native_gui.window import MainWindow
 app = QApplication.instance() or QApplication([])
 
 MOUNT = '/tmp/drive-native-test-mount'
+# A minimal valid GetOverview reply: refresh() can fire from a leftover timer,
+# and an empty dict would raise KeyError while rendering the overview cards.
+DEFAULT_OVERVIEW = {
+    "connection": "online", "mounted": True, "mount": MOUNT,
+    "username": "tester", "host": "nas", "scope_path": MOUNT,
+    "write_policy_revision": 0, "preview_only": False,
+}
 
 
 class Bus(QObject):
@@ -19,11 +26,13 @@ class Bus(QObject):
     def __init__(self, parent=None, *, instance=None):
         super().__init__(parent)
         self.calls = []
-        self.replies = {}
+        self.replies = {"GetOverview": dict(DEFAULT_OVERVIEW)}
 
     def call(self, method, args=(), callback=None):
         self.calls.append((method, list(args), callback))
-        reply = self.replies.get(method)
+        # Unknown methods get an empty reply instead of None so callbacks that
+        # guard on dict keys do not raise TypeError noise during refresh paths.
+        reply = self.replies.get(method, {})
         if callable(reply):
             reply = reply()
         if isinstance(reply, list):
@@ -33,6 +42,7 @@ class Bus(QObject):
 
 
 JOB = {"schema": 1, "job_id": "7", "total": 3}
+UNAVAILABLE = {"schema": 1, "job_id": "7", "available": False}
 PROGRESS = {"schema": 1, "job_id": "7", "total": 3, "done": 1,
             "released_count": 1, "skipped_count": 0, "protected_count": 0,
             "reclaimed_bytes": 1024, "finished": False, "cancelled": False}
@@ -153,6 +163,48 @@ class ReleaseGuiTests(unittest.TestCase):
                              for call in self.bus.calls))
         self.assertIn("初始化预览", self.window.banner.text())
         self.assertTrue(self.window.release_label.isHidden())
+
+    def test_first_poll_unavailable_stops_polling_and_resets_the_job(self):
+        """A restarted service forgets the job; the window must stop the timer."""
+        self.begin()
+        self.bus.replies["GetReleaseJob"] = [UNAVAILABLE]
+        self.window.poll_release_job()
+        self.assertFalse(self.window.release_timer.isActive())
+        self.assertIsNone(self.window.release_job_id)
+        self.assertTrue(self.window.release_label.isHidden())
+        self.assertTrue(self.window.release_cancel.isHidden())
+        self.assertIn("重新发起", self.window.banner.text())
+        calls_before = len(self.bus.calls)
+        self.window.poll_release_job()
+        self.assertEqual(len(self.bus.calls), calls_before)
+        self.assertFalse(self.window.release_timer.isActive())
+
+    def test_unavailable_mid_job_does_not_leave_release_progress_stuck(self):
+        """Mid-job restart must clear the stale “正在释放” banner and progress."""
+        self.begin()
+        self.bus.replies["GetReleaseJob"] = [PROGRESS, UNAVAILABLE]
+        self.window.poll_release_job()
+        self.assertIn("正在释放 1/3", self.window.release_label.text())
+        self.window.poll_release_job()
+        self.assertFalse(self.window.release_timer.isActive())
+        self.assertIsNone(self.window.release_job_id)
+        self.assertTrue(self.window.release_label.isHidden())
+        self.assertNotIn("正在释放", self.window.banner.text())
+        self.assertIn("重新发起", self.window.banner.text())
+
+    def test_begin_after_restart_restarts_polling(self):
+        """Once the backend is back, a new BeginReleaseSpace resumes polling."""
+        self.begin()
+        self.bus.replies["GetReleaseJob"] = [UNAVAILABLE]
+        self.window.poll_release_job()
+        self.assertFalse(self.window.release_timer.isActive())
+
+        self.begin()
+        self.assertTrue(self.window.release_timer.isActive())
+        self.assertIn("正在释放 0/3", self.window.release_label.text())
+        self.bus.replies["GetReleaseJob"] = [PROGRESS]
+        self.window.poll_release_job()
+        self.assertIn("正在释放 1/3", self.window.release_label.text())
 
 
 if __name__ == '__main__':
