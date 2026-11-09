@@ -358,7 +358,7 @@ pub(crate) fn creation_unbound(db: &rusqlite::Connection, node: &str) -> Result<
 }
 pub(crate) fn has_uncertain_upload(db: &rusqlite::Connection, node: &str) -> Result<bool> {
     Ok(db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM operations WHERE kind='upload' AND node=?1 AND state='uncertain')",
+        "SELECT EXISTS(SELECT 1 FROM operations WHERE kind='upload' AND node=?1 AND state IN ('uncertain','abandoned'))",
         [node],
         |r| r.get(0),
     )?)
@@ -376,6 +376,7 @@ pub(crate) fn retire_creation_tx(
     tx: &rusqlite::Connection,
     operation: &str,
     node: &str,
+    reason: &str,
 ) -> Result<()> {
     let attempts: i64 = tx.query_row(
         "SELECT reconcile_attempts FROM operations WHERE id=?1 AND kind='upload'",
@@ -383,7 +384,7 @@ pub(crate) fn retire_creation_tx(
         |r| r.get(0),
     )?;
     tx.execute(
-        "UPDATE operations SET state='superseded' WHERE id=?1 AND state='uncertain'",
+        "UPDATE operations SET state='superseded' WHERE id=?1 AND state IN ('uncertain','abandoned')",
         [operation],
     )?;
     // The operation trigger above writes a cancelled history row; recording the
@@ -393,6 +394,7 @@ pub(crate) fn retire_creation_tx(
         &format!("upload:{operation}"),
         node,
         u32::try_from(attempts).unwrap_or(u32::MAX),
+        reason,
     )?;
     tx.execute("DELETE FROM local_creations WHERE node=?1", [node])?;
     tx.execute("UPDATE namespace_ops SET state='superseded' WHERE node=?1 AND kind='remove' AND state IN ('pending','cleanup_pending','uncertain','cleanup_uncertain')", [node])?;
@@ -442,11 +444,11 @@ impl Store {
         if directory && !self.children(&node.id)?.is_empty() {
             return Err(os(libc::ENOTEMPTY));
         }
-        let unsubmitted: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM local_creations c JOIN nodes n ON n.id=c.node WHERE c.node=?1 AND n.directory=0) AND NOT EXISTS(SELECT 1 FROM operations WHERE node=?1 AND state IN ('inflight','uncertain','committed','conflict'))", [&node.id], |r| r.get(0))?;
+        let unsubmitted: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM local_creations c JOIN nodes n ON n.id=c.node WHERE c.node=?1 AND n.directory=0) AND NOT EXISTS(SELECT 1 FROM operations WHERE node=?1 AND state IN ('inflight','uncertain','abandoned','committed','conflict'))", [&node.id], |r| r.get(0))?;
         // An unconfirmed creation has no server identity to remove. When the
-        // user deletes it locally, retire the uncertain upload instead of
-        // queueing a native remove that could never be acknowledged (and would
-        // keep mark_remove_started permanently EBUSY).
+        // user deletes it locally, retire the uncertain/abandoned upload instead
+        // of queueing a native remove that could never be acknowledged (and
+        // would keep mark_remove_started permanently EBUSY).
         let retire = if unsubmitted
             || !creation_unbound(&self.db, &node.id)?
             || !has_uncertain_upload(&self.db, &node.id)?
@@ -455,7 +457,7 @@ impl Store {
         } else {
             self.db
                 .query_row(
-                    "SELECT id FROM operations WHERE kind='upload' AND node=?1 AND state='uncertain' ORDER BY rowid LIMIT 1",
+                    "SELECT id FROM operations WHERE kind='upload' AND node=?1 AND state IN ('uncertain','abandoned') ORDER BY rowid LIMIT 1",
                     [&node.id],
                     |r| r.get::<_, String>(0),
                 )
@@ -471,7 +473,7 @@ impl Store {
                 "UPDATE operations SET state='superseded' WHERE node=?1 AND state='pending'",
                 [&node.id],
             )?;
-            retire_creation_tx(&tx, &operation, &node.id)?;
+            retire_creation_tx(&tx, &operation, &node.id, "local_deleted")?;
             tx.commit()?;
             return Ok(());
         }

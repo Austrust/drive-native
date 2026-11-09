@@ -1256,6 +1256,47 @@ impl Bridge {
         self.signal_upload();
         Ok(result)
     }
+    /// Abandon one unconfirmed local creation (user action from the issue
+    /// center). The token is the same CAS token returned by GetIssues, so a
+    /// stale dialog can never retire a newer issue. Only the local-only file is
+    /// removed; no delete operation is sent to the server.
+    pub fn abandon_unconfirmed_upload(
+        &self,
+        root: &str,
+        id: &str,
+        token: &str,
+    ) -> io::Result<String> {
+        let mut store = self.store.lock().unwrap();
+        let issue = store
+            .sync_issue(root, id)
+            .map_err(io::Error::other)?
+            .ok_or_else(|| io::Error::other("abandon unavailable; issue list is stale"))?;
+        if issue.token != token || !issue.can_abandon_upload {
+            return Err(io::Error::other(
+                "abandon unavailable; reload the issue center",
+            ));
+        }
+        let path = issue.path;
+        // Capture the inode and parent dentry before retirement hides the node
+        // from lookups (retirement marks it deleted).
+        if let Ok(record) = store.record_for_handle(id) {
+            self.enqueue_invalidation(Invalidation::Inode(record.ino));
+            if let Some(parent) = record.node.parent.as_deref() {
+                if let Ok(parent) = store.record(parent) {
+                    self.enqueue_invalidation(Invalidation::Entry(parent.ino, record.node.name));
+                }
+            }
+        }
+        if !store
+            .abandon_unconfirmed_creation(id)
+            .map_err(io::Error::other)?
+        {
+            return Err(io::Error::other("abandon unavailable; state changed"));
+        }
+        drop(store);
+        self.signal_upload();
+        Ok(path)
+    }
     pub fn signal_upload(&self) {
         *self.upload_signal.0.lock().unwrap() = true;
         self.upload_signal.1.notify_all();

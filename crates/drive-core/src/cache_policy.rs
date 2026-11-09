@@ -88,10 +88,12 @@ const CACHE_CANDIDATES_SQL: &str = concat!(
     "upload_blocked(id) AS (SELECT node FROM namespace_overlay UNION SELECT n.id FROM upload_blocked b CROSS JOIN nodes n ON n.parent=b.id), ",
     // Unapplied engine namespace intents resolve through remote aliases.
     "engine_pending(node) AS (SELECT COALESCE(a.node,i.node) FROM engine_bridge_intents i LEFT JOIN remote_aliases a ON a.remote=i.node WHERE i.phase!='applied'), ",
-    "ops_node(node) AS (SELECT DISTINCT node FROM operations WHERE node IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict')), ",
+    // An abandoned upload still protects its local content and node: the server
+    // result is unknown, so evicting the blob would discard the only copy.
+    "ops_node(node) AS (SELECT DISTINCT node FROM operations WHERE node IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict','abandoned')), ",
     "local_node(node) AS (SELECT node FROM local_creations), ",
     // Operations and pending namespace replacements protect a shared blob.
-    "protected_blobs(blob) AS (SELECT DISTINCT blob FROM operations WHERE blob IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict') UNION SELECT json_extract(body,'$.blob') FROM namespace_ops WHERE kind='replace' AND state NOT IN ('committed','superseded') AND json_extract(body,'$.blob') IS NOT NULL), ",
+    "protected_blobs(blob) AS (SELECT DISTINCT blob FROM operations WHERE blob IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict','abandoned') UNION SELECT json_extract(body,'$.blob') FROM namespace_ops WHERE kind='replace' AND state NOT IN ('committed','superseded') AND json_extract(body,'$.blob') IS NOT NULL), ",
     // A blob referenced by any other node (or by any dirty blob) is shared.
     "shared_blobs(blob) AS (SELECT blob FROM nodes WHERE blob IS NOT NULL GROUP BY blob HAVING COUNT(*)>1 UNION SELECT dirty_blob FROM nodes WHERE dirty_blob IS NOT NULL) ",
     "SELECT n.id,n.blob,COALESCE(p.at,0) FROM nodes n ",
@@ -226,7 +228,7 @@ impl Store {
         {
             return Ok(true);
         }
-        Ok(self.db.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE node=?1 AND state IN ('pending','inflight','uncertain','conflict')) OR EXISTS(SELECT 1 FROM local_creations WHERE node=?1)",[id],|r|r.get(0))?)
+        Ok(self.db.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE node=?1 AND state IN ('pending','inflight','uncertain','conflict','abandoned')) OR EXISTS(SELECT 1 FROM local_creations WHERE node=?1)",[id],|r|r.get(0))?)
     }
     fn cache_candidates(&self, now: u64, active: &HashSet<String>) -> Result<Vec<(String, u64)>> {
         // Visibility for a budget decision, not a durable notification: fold the
@@ -278,7 +280,7 @@ impl Store {
         now: u64,
         active: &HashSet<String>,
     ) -> Result<Vec<(String, u64)>> {
-        let mut q=self.db.prepare("SELECT n.id,n.blob,COALESCE(p.at,0) FROM nodes n LEFT JOIN cache_access a ON a.node=n.id LEFT JOIN cache_published p ON p.node=n.id WHERE n.id NOT IN (SELECT id FROM access_blocked) AND n.directory=0 AND n.deleted=0 AND n.blob IS NOT NULL AND n.dirty_blob IS NULL AND n.conflict=0 AND n.local_version=n.remote_version AND NOT EXISTS(SELECT 1 FROM nodes other WHERE other.id!=n.id AND (other.blob=n.blob OR other.dirty_blob=n.blob)) AND NOT EXISTS(SELECT 1 FROM operations o WHERE o.blob=n.blob AND o.state IN ('pending','inflight','uncertain','conflict')) AND NOT EXISTS(SELECT 1 FROM namespace_ops o WHERE o.kind='replace' AND o.state NOT IN ('committed','superseded') AND json_extract(o.body,'$.blob')=n.blob) ORDER BY COALESCE(a.seq,0),n.id")?;
+        let mut q=self.db.prepare("SELECT n.id,n.blob,COALESCE(p.at,0) FROM nodes n LEFT JOIN cache_access a ON a.node=n.id LEFT JOIN cache_published p ON p.node=n.id WHERE n.id NOT IN (SELECT id FROM access_blocked) AND n.directory=0 AND n.deleted=0 AND n.blob IS NOT NULL AND n.dirty_blob IS NULL AND n.conflict=0 AND n.local_version=n.remote_version AND NOT EXISTS(SELECT 1 FROM nodes other WHERE other.id!=n.id AND (other.blob=n.blob OR other.dirty_blob=n.blob)) AND NOT EXISTS(SELECT 1 FROM operations o WHERE o.blob=n.blob AND o.state IN ('pending','inflight','uncertain','conflict','abandoned')) AND NOT EXISTS(SELECT 1 FROM namespace_ops o WHERE o.kind='replace' AND o.state NOT IN ('committed','superseded') AND json_extract(o.body,'$.blob')=n.blob) ORDER BY COALESCE(a.seq,0),n.id")?;
         let rows = q
             .query_map([], |r| {
                 Ok((

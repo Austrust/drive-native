@@ -1417,6 +1417,14 @@ fn permission_uncertain_upload_reconcile_budget_is_bounded_and_never_replays() {
             );
         }
         assert!(!s.upload_reconcile_due(unix_seconds() as i64).unwrap());
+        // The exhausted operation is a persistent terminal state: it no longer
+        // counts as pending work and cannot be selected for reconciliation.
+        assert_eq!(
+            s.upload_operations("abandoned").unwrap(),
+            vec![operation.clone()]
+        );
+        assert_eq!(s.pending_operations().unwrap(), 0);
+        assert_eq!(s.paused_upload_operations().unwrap(), 1);
         let history = s
             .sync_history(&drive_core::sync_history::HistoryQuery::default())
             .unwrap();
@@ -1425,13 +1433,18 @@ fn permission_uncertain_upload_reconcile_budget_is_bounded_and_never_replays() {
             .iter()
             .find(|record| record.error_kind.as_deref() == Some("permission_commit_uncertain"))
             .unwrap();
-        assert_eq!(entry.result, "pending");
+        assert_eq!(entry.result, "failed");
+        let detail = entry.detail.as_ref().unwrap();
+        assert_eq!(detail["abandoned"], "reconcile_exhausted");
         assert_eq!(
-            entry.detail.as_ref().unwrap()["reconcile_attempts"]
-                .as_u64()
-                .unwrap(),
+            detail["reconcile_attempts"].as_u64().unwrap(),
             u64::from(drive_core::MAX_UPLOAD_RECONCILE_ATTEMPTS)
         );
+        assert!(entry
+            .error_summary
+            .as_deref()
+            .unwrap()
+            .contains("自动核对已暂停"));
     }
     bridge.run_upload_cycle();
     assert_eq!(requests.load(Ordering::SeqCst), 2);
@@ -1683,7 +1696,10 @@ fn reconcile_uncertain_replies_consume_the_budget_and_stop_without_background_er
     );
     bridge.run_upload_cycle();
     assert_eq!(requests.load(Ordering::SeqCst), 1);
-    assert_eq!(store.lock().unwrap().pending_operations().unwrap(), 1);
+    // The budget is exhausted: the uncertain upload is parked in the abandoned
+    // terminal state, not left blocking pending work forever.
+    assert_eq!(store.lock().unwrap().pending_operations().unwrap(), 0);
+    assert_eq!(store.lock().unwrap().paused_upload_operations().unwrap(), 1);
     assert!(bridge.last_error().is_none());
     assert!(bridge.upload_block.lock().unwrap().is_none());
     assert!(bridge.background_failure().is_none());

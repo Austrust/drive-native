@@ -1060,7 +1060,7 @@ impl Store {
             "UPDATE nodes SET blob=NULL,local_version=NULL WHERE deleted=1 AND conflict=0 AND dirty_blob IS NULL AND blob IS NOT NULL",
             [],
         )?;
-        let mut q=self.db.prepare("SELECT blob FROM nodes WHERE blob IS NOT NULL AND (deleted=0 OR conflict=1) UNION SELECT dirty_blob FROM nodes WHERE dirty_blob IS NOT NULL UNION SELECT blob FROM operations WHERE blob IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict') UNION SELECT json_extract(body,'$.blob') FROM namespace_ops WHERE kind='replace' AND state NOT IN ('committed','superseded')")?;
+        let mut q=self.db.prepare("SELECT blob FROM nodes WHERE blob IS NOT NULL AND (deleted=0 OR conflict=1) UNION SELECT dirty_blob FROM nodes WHERE dirty_blob IS NOT NULL UNION SELECT blob FROM operations WHERE blob IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict','abandoned') UNION SELECT json_extract(body,'$.blob') FROM namespace_ops WHERE kind='replace' AND state NOT IN ('committed','superseded')")?;
         let mut keep = q
             .query_map([], |r| r.get::<_, String>(0))?
             .collect::<std::result::Result<std::collections::HashSet<_>, _>>()?;
@@ -1214,7 +1214,7 @@ impl Store {
         let op = uuid::Uuid::new_v4().to_string();
         tx.execute("UPDATE nodes SET dirty_blob=?2,base_version=?3,dirty_generation=?4,conflict=CASE WHEN ?3!=remote_version OR ?5!=?3 THEN 1 ELSE conflict END WHERE id=?1",params![id,blob,base,generation+1,opened_version])?;
         tx.execute(
-            "UPDATE operations SET state='superseded' WHERE node=?1 AND state='pending'",
+            "UPDATE operations SET state='superseded' WHERE node=?1 AND state IN ('pending','abandoned')",
             [id],
         )?;
         tx.execute("INSERT INTO operations(id,node,kind,base,blob,generation) VALUES(?1,?2,'upload',?3,?4,?5)",params![op,id,base,blob,generation+1])?;
@@ -1258,7 +1258,7 @@ impl Store {
             )));
         }
         let tx = self.db.transaction()?;
-        let changed=tx.execute("UPDATE operations SET state='inflight' WHERE id=?1 AND state='pending' AND node NOT IN (SELECT id FROM access_blocked) AND NOT EXISTS(SELECT 1 FROM operations other WHERE other.node=operations.node AND other.state IN ('inflight','uncertain')) AND EXISTS(SELECT 1 FROM nodes n WHERE n.id=operations.node AND n.remote_version=operations.base AND n.deleted=0 AND n.conflict=0) AND NOT EXISTS(SELECT 1 FROM drafts d WHERE d.node=operations.node AND d.generation!=d.checkpoint) AND NOT EXISTS(SELECT 1 FROM local_creations c WHERE c.node=operations.node AND c.ready=0)",[op])?;
+        let changed=tx.execute("UPDATE operations SET state='inflight' WHERE id=?1 AND state='pending' AND node NOT IN (SELECT id FROM access_blocked) AND NOT EXISTS(SELECT 1 FROM operations other WHERE other.node=operations.node AND other.state IN ('inflight','uncertain','abandoned')) AND EXISTS(SELECT 1 FROM nodes n WHERE n.id=operations.node AND n.remote_version=operations.base AND n.deleted=0 AND n.conflict=0) AND NOT EXISTS(SELECT 1 FROM drafts d WHERE d.node=operations.node AND d.generation!=d.checkpoint) AND NOT EXISTS(SELECT 1 FROM local_creations c WHERE c.node=operations.node AND c.ready=0)",[op])?;
         if changed != 1 {
             return Err(Error::State(
                 "upload needs conflict resolution or commit reconciliation".into(),
@@ -1650,12 +1650,17 @@ impl Store {
     /// Record one automatic read-only reconciliation attempt. The operation
     /// must still be uncertain; an already committed or superseded operation is
     /// never rewritten. History detail is updated in the same transaction.
+    ///
+    /// The final attempt is terminal: no further read-only pass may be selected,
+    /// so the operation moves to `abandoned` instead of parking as a permanent
+    /// `uncertain` row that would block pending work forever. Local content and
+    /// the permission evidence are retained; a user recheck re-arms the row.
     pub fn note_upload_reconcile_attempt(&mut self, operation: &str, now: i64) -> Result<u32> {
         let tx = self.db.transaction()?;
-        let (state, attempts): (String, i64) = tx.query_row(
-            "SELECT state,reconcile_attempts FROM operations WHERE id=?1 AND kind='upload'",
+        let (node, state, attempts): (String, String, i64) = tx.query_row(
+            "SELECT node,state,reconcile_attempts FROM operations WHERE id=?1 AND kind='upload'",
             [operation],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )?;
         if state != "uncertain" {
             return Err(Error::State(
@@ -1663,30 +1668,63 @@ impl Store {
             ));
         }
         let attempts = u32::try_from(attempts.saturating_add(1)).unwrap_or(u32::MAX);
-        tx.execute(
-            "UPDATE operations SET reconcile_attempts=?2, reconcile_at=?3 WHERE id=?1 AND state='uncertain'",
-            params![
-                operation,
-                i64::from(attempts),
-                now.saturating_add(upload_reconcile_delay(attempts))
-            ],
-        )?;
-        crate::sync_history::note_reconcile_attempt(
-            &tx,
-            &format!("upload:{operation}"),
-            attempts,
-        )?;
+        if attempts >= MAX_UPLOAD_RECONCILE_ATTEMPTS {
+            tx.execute(
+                "UPDATE operations SET state='abandoned', reconcile_attempts=?2, reconcile_at=0 WHERE id=?1 AND state='uncertain'",
+                params![operation, i64::from(attempts)],
+            )?;
+            crate::sync_history::record_reconcile_exhausted(
+                &tx,
+                &format!("upload:{operation}"),
+                &node,
+                attempts,
+            )?;
+        } else {
+            tx.execute(
+                "UPDATE operations SET reconcile_attempts=?2, reconcile_at=?3 WHERE id=?1 AND state='uncertain'",
+                params![
+                    operation,
+                    i64::from(attempts),
+                    now.saturating_add(upload_reconcile_delay(attempts))
+                ],
+            )?;
+            crate::sync_history::note_reconcile_attempt(
+                &tx,
+                &format!("upload:{operation}"),
+                attempts,
+            )?;
+        }
         tx.commit()?;
         Ok(attempts)
     }
 
     /// A user-requested recheck grants every uncertain upload a fresh budget.
-    /// The operation state is untouched: this never turns uncertain into pending.
+    /// Exhausted (`abandoned`) rows are re-armed to `uncertain` with a zeroed
+    /// budget; they are not selectable again until this re-arm. The history row
+    /// loses its `abandoned` marker so the GUI stops presenting a terminal state.
     pub fn reset_upload_reconcile_budget(&mut self) -> Result<usize> {
-        Ok(self.db.execute(
-            "UPDATE operations SET reconcile_attempts=0, reconcile_at=0 WHERE kind='upload' AND state='uncertain'",
+        let tx = self.db.transaction()?;
+        let abandoned: Vec<String> = {
+            let mut q = tx.prepare(
+                "SELECT id FROM operations WHERE kind='upload' AND state='abandoned'",
+            )?;
+            q.query_map([], |r| r.get::<_, String>(0))?
+                .collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        let changed = tx.execute(
+            "UPDATE operations SET state='uncertain', reconcile_attempts=0, reconcile_at=0 WHERE kind='upload' AND state IN ('uncertain','abandoned')",
             [],
-        )?)
+        )?;
+        for operation in &abandoned {
+            tx.execute(
+                "UPDATE sync_history SET error_summary='已重新开始只读核对，服务器提交结果待确认', \
+                 detail=json_patch(json_remove(COALESCE(detail,'{}'), '$.abandoned'), json_object('reconcile_attempts', 0)) \
+                 WHERE operation_key=?1",
+                [format!("upload:{operation}")],
+            )?;
+        }
+        tx.commit()?;
+        Ok(changed)
     }
 
     /// Local unlink tombstones a node; operation-side retirement uses this to
@@ -1700,11 +1738,11 @@ impl Store {
     }
 
     /// Retire an unconfirmed creation whose local path the user already deleted.
-    /// The caller must own the deletion decision; this only accepts an uncertain
-    /// upload of an unbound creation and returns false otherwise, leaving state
-    /// untouched. The uncertain result is never replayed and no terminal state
-    /// value is invented: the operation becomes superseded with explanatory
-    /// history.
+    /// The caller must own the deletion decision; this only accepts an
+    /// uncertain/abandoned upload of an unbound creation and returns false
+    /// otherwise, leaving state untouched. The uncertain result is never
+    /// replayed and no terminal state value is invented: the operation becomes
+    /// superseded with explanatory history.
     pub fn retire_unconfirmed_creation(&mut self, operation: &str) -> Result<bool> {
         let row: Option<(String, String)> = self
             .db
@@ -1717,16 +1755,59 @@ impl Store {
         let Some((node, state)) = row else {
             return Ok(false);
         };
-        if state != "uncertain" || !self.is_locally_deleted(&node)? {
+        if !matches!(state.as_str(), "uncertain" | "abandoned")
+            || !self.is_locally_deleted(&node)?
+        {
             return Ok(false);
         }
         if !crate::removals::creation_unbound(&self.db, &node)? {
             return Ok(false);
         }
         let tx = self.db.transaction()?;
-        crate::removals::retire_creation_tx(&tx, operation, &node)?;
+        crate::removals::retire_creation_tx(&tx, operation, &node, "local_deleted")?;
         tx.commit()?;
         Ok(true)
+    }
+
+    /// A user-authorized discard of an unconfirmed local creation. Only a
+    /// never-bound local creation with an uncertain or exhausted upload
+    /// qualifies: the local file is deleted, the operation is retired with
+    /// explanatory history, and no server request is ever issued. Bound files
+    /// are refused because their server object stores a different version and
+    /// only a recheck can resolve the outcome.
+    pub fn abandon_unconfirmed_creation(&mut self, node: &str) -> Result<bool> {
+        if self.is_locally_deleted(node)? {
+            return Ok(false);
+        }
+        let row: Option<String> = self
+            .db
+            .query_row(
+                "SELECT id FROM operations WHERE kind='upload' AND node=?1 AND state IN ('uncertain','abandoned') ORDER BY rowid LIMIT 1",
+                [node],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let Some(operation) = row else {
+            return Ok(false);
+        };
+        if !crate::removals::creation_unbound(&self.db, node)? {
+            return Ok(false);
+        }
+        let tx = self.db.transaction()?;
+        crate::removals::retire_creation_tx(&tx, &operation, node, "user_discarded")?;
+        tx.commit()?;
+        Ok(true)
+    }
+
+    /// Uploads whose bounded automatic reconciliation stopped without a
+    /// confirmed server result. They are terminal for the pending-work counter
+    /// but still explainable in the issue list and re-armable by a recheck.
+    pub fn paused_upload_operations(&self) -> Result<i64> {
+        Ok(self.db.query_row(
+            "SELECT count(*) FROM operations WHERE kind='upload' AND state='abandoned'",
+            [],
+            |r| r.get(0),
+        )?)
     }
 
     /// Offline availability summary from local metadata only. Directories are

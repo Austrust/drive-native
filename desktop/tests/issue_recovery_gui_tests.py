@@ -251,6 +251,49 @@ class RecoveryTests(unittest.TestCase):
             self.assertNotIn("reconcile_attempts", data)
 
 
+    def test_abandon_upload_is_explicit_local_deletion_with_backend_ack(self):
+        self.populate(dict(self.row, can_abandon_upload=True, reconcile_attempts=5,
+                           reconcile_exhausted=True))
+        self.assertTrue(self.dialog.abandon.isEnabled())
+        self.assertIn("仅删除本地", self.dialog.abandon.text())
+        self.dialog.abandon.click()
+        calls = [c for c in self.bus.calls if c[0] == "AbandonUpload"]
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][1], ["file", "private-token"])
+        self.assertFalse(any(c[0] in ("KeepBoth", "KeepDirectoryBoth", "Resume", "ReleaseSpace")
+                             for c in self.bus.calls))
+        self.bus.respond("AbandonUpload", {"schema": 1, "abandoned": True,
+                                           "deleted_local": True, "server_changed": False})
+        self.assertIn("已放弃本次本地待上传", self.dialog.message.text())
+        self.assertIn("未修改服务器", self.dialog.message.text())
+        self.assertFalse(self.dialog.busy)
+
+    def test_abandon_upload_capability_must_be_a_boolean_and_is_never_guessed(self):
+        for extra in ({}, {"can_abandon_upload": False}, {"can_abandon_upload": "true"},
+                      {"can_abandon_upload": 1}):
+            self.populate(dict(self.row, **extra))
+            self.assertFalse(self.dialog.abandon.isEnabled())
+        self.dialog.abandon_upload()
+        self.assertFalse(any(c[0] == "AbandonUpload" for c in self.bus.calls))
+
+    def test_abandon_upload_failure_preserves_issue_and_never_claims_deletion(self):
+        self.populate(dict(self.row, can_abandon_upload=True))
+        self.dialog.abandon_upload()
+        self.bus.respond("AbandonUpload", None, "service_changed")
+        self.assertIn("未完成", self.dialog.message.text())
+        self.assertIn("file", self.dialog.rows)
+        self.assertFalse(self.dialog.busy)
+        self.dialog.abandon_upload()
+        self.bus.respond("AbandonUpload", {"schema": 1, "abandoned": False})
+        self.assertIn("file", self.dialog.rows)
+        self.assertFalse(any(c[0] in ("KeepBoth", "KeepDirectoryBoth", "Resume")
+                             for c in self.bus.calls))
+
+    def test_diagnostic_includes_paused_upload_count(self):
+        self.dialog.update_context(dict(self.context, paused_uploads=2))
+        data = json.loads(diagnostic_text(self.dialog.overview, self.dialog.selected_row()))
+        self.assertEqual(data["paused_uploads"], 2)
+
     def test_initial_message_never_claims_no_issues(self):
         dialog = IssuesDialog(self.bus)
         try:

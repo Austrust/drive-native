@@ -454,7 +454,7 @@ impl Store {
             "SELECT count(*),coalesce(sum(state IN ('uncertain','cleanup_uncertain')),0) FROM namespace_ops WHERE state NOT IN ('committed','superseded')",
             [],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?)))?;
         let (upload_unfinished,upload_uncertain)=self.db.query_row(
-            "SELECT count(*),coalesce(sum(state='uncertain'),0) FROM operations WHERE state NOT IN ('committed','superseded')",
+            "SELECT count(*),coalesce(sum(state='uncertain'),0) FROM operations WHERE state NOT IN ('committed','superseded','abandoned')",
             [],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?)))?;
         let runtime = self.namespace_runtime.lock().unwrap();
         let now = Instant::now();

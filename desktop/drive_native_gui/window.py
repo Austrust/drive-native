@@ -1140,6 +1140,8 @@ class MainWindow(QMainWindow):
         tooltip.append(f"待处理 {self.count(data.get('pending_operations'))} 项")
         if self.count(data.get("uncertain_operations")):
             tooltip.append(f"待确认 {self.count(data.get('uncertain_operations'))} 项")
+        if self.count(data.get("paused_uploads")):
+            tooltip.append(f"{self.count(data.get('paused_uploads'))} 项上传已暂停自动重试")
         if derived:
             tooltip.append("按旧后台推导")
         self.sync_value.setToolTip("\n".join(tooltip))
