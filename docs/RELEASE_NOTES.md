@@ -1,3 +1,29 @@
+# 0.1.0~dev20261109.2：上传终态处理、缓存释放与 schema v29（候选）
+
+本批把 #14 未确认上传预算耗尽后的 `abandoned` 终态与「放弃本地文件」入口、#19 缓存释放后台作业与 GC 回收、#18 FUSE 硬链接拒绝语义、#53 后台提交推进后的托盘/导航计数刷新、#8 初始化期间桌面读响应性验收、#6 已绑定目录 stale conflict 标志自愈、#9 TB1 的 schema v29 诊断列与迁移回填、#2 2a 托盘不可用时的 freedesktop 系统通知回退、#50 的按任务正则排除（P1/P2 初始化剪枝、P3 读路径隐藏、B2 preview 挂载修复与 P4 写路径/调度防御与本地清理）、#11 stage0 的 core POSIX 门禁与 Windows 移植骨架、#11 step1 的文件身份契约、#6/issue #54 的已绑定目录恢复入口、#9 TB2 的提交诊断消费面、#10 的自动恢复分类、#14 残留 pending 上传补漏、#8 门禁稳健性合入 `integration/fixes3`（`22ba761` 之后的候选树）。schema29、IPC21：FSD 与 worker 必须成对更新，旧程序不能读取新 schema；升级前会自动 `VACUUM INTO` `state-before-v29-*.sqlite` 备份。
+
+- **#14**：未确认上传在 5 次核对后进入 `abandoned` 暂停态，不再无限占用 `pending_operations`；GetIssues 提供「放弃本地文件」（只删本地、不改服务器条目）与重新核对入口，overview 用 `paused_uploads` 单独提示。放弃或本地删除时会一并作废该节点残留的 pending/uncertain 上传操作，避免遗留计数。
+- **#19**：释放空间改为后台作业，带进度、取消与 released/skipped/protected 分类；每 32 个文件触发一次 GC 回收已删除节点的正文；已在线文件不再报假成功。
+- **#18**：FUSE `link(2)` 现在返回 `EOPNOTSUPP`（Linux 上等同 `ENOTSUP`）而非 `EPERM`，工具可按标准语义降级为复制/改名；硬链接仍不支持，符号链接行为不变，详见 [FUSE_HARDLINK.md](FUSE_HARDLINK.md)。
+- **#53**：后台提交/安装推进已提交状态水位时，现在会刷新 overview，托盘「需要检查」徽标与导航计数不再过期。
+- **#8**：新增初始化期间桌面读响应性验收测试（210k 合成库、并发查询），本批无运行时行为变化；门禁稳健性调整为单调计数证据（attempts_throughout/DirectoryCommitted）并放宽并发用例超时预算（delayed directory 60s、FIFO 30s）；#8 全量门槛仍以 final-validate 为准。
+- **#6**：已绑定目录在快照安装、mkdir/rename 确认成功后自动清除残留的 conflict 标志；真实冲突（远端删除、本地脏内容、未终态操作等）保留，规则见 [STALE_CONFLICTS.md](STALE_CONFLICTS.md)。
+- **#9 TB1**：schema v29 只追加 `outcome`/诊断列、`schema_migrations`/`recovery_runs`/`platform_state_changes` 表与 `commit_diagnostics` 视图，并对历史 uncertain/inflight 行做幂等回填；本批只建抽象，不改变提交行为。
+- **#2 2a**：托盘不可用或 showMessage 失败时，通过 freedesktop D-Bus 发送系统通知；jeepney/会话总线缺失时安静降级，不影响主流程。
+- **#50 P1/P2**：profile 新增可选 `exclude_patterns`，初始化导入对匹配路径整棵子树剪枝，非法正则拒绝并报出 pattern 与编译错误，GUI 保存时做同样校验；详见 [EXCLUDE_PATTERNS.md](EXCLUDE_PATTERNS.md)。FUSE 读路径过滤（P3）与初始化 preview 挂载修复（B2）已在本批，见下；上传/下载/缓存调度防御与规则变更后的存量清理属阶段 4。
+- **#50 P3**：配置了 `exclude_patterns` 的任务，读路径对匹配路径整棵子树返回 `ENOENT`（lookup/getattr/readdir(plus)/open/opendir），readdir 不显示且分页游标保持稳定；GetDirectory/GetStates 同样过滤，远端事件与恢复快照在入口剪枝；未配置规则时保持零成本快路径，详见 [EXCLUDE_PATTERNS.md](EXCLUDE_PATTERNS.md)。
+- **#50 B2**：初始化 preview 阶段（committed root 尚未出现）带排除规则挂载不再因索引刷新失败导致后台退出；preview 阶段使用空索引，初始化完成或恢复快照安装后由 bridge 自动重建，排除路径随后保持不可见。
+- **#50 P4**：写路径（create/mkdir/unlink/rmdir/rename/write/setattr）对排除路径返回 `ENOENT` 且不落库、不留 pending 操作；上传/下载/缓存与 namespace 调度入口跳过被排除对象；规则变更或重启时把已导入/已缓存的排除子树在本地隐藏并回收正文（复用 #19 GC，清 staging 与 `upload_paths`/`upload_origins`，绝不向远端提交删除），移除规则后重启可恢复本地视图；恢复快照 install 前先 purge 排除节点，避免 tombstone 把历史行标成冲突。索引重建按事件门控，详见 [EXCLUDE_PATTERNS.md](EXCLUDE_PATTERNS.md)。
+- **#11 stage0**：新增 `scripts/check-core-posix.sh`，对 `drive-core` 的 POSIX 依赖做可审计门禁（默认模式已接入 `scripts/verify.sh`，当前基线为 63 个文件、108 处命中全部列在窄 allowlist；`--strict` 用于收紧基线）；同时新增 [WINDOWS_PORT.md](WINDOWS_PORT.md) 的 FileIdentity/StatePush/LocalChangeSource 三接口与去 POSIX 迁移计划，本阶段不改 Rust/schema/运行行为。
+- **#6（issue #54）**：已绑定目录被远端删除后，GetIssues 仍以 `bound_directory_conflict` 展示，并提供 KeepDirectoryLocal / KeepDirectoryRemote（D-Bus additive 方法）把本地内容恢复为可继续同步的目录，规则见 [STALE_CONFLICTS.md](STALE_CONFLICTS.md)；keep-remote 仅在没有本地内容时可用。
+- **#9 TB2**：五条写路径（upload/rename/mkdir/remove/replace）在同一事务写 `outcome`/`outcome_category`/`last_error`/`next_retry_at`；GetOverview 新增 additive `commit_diagnostics{open_unknown,needs_attention,items}`，abandoned 行带终态原因且不计入 open/needs_attention；旧 v29 库上的 `commit_diagnostics` 视图会在打开时自动修复（B1）。
+- **#10**：rescan_later / merge_mode / 事件游标缺口归为 RecoveryRequired，bridge 单飞恢复循环最多 3 次（2/5/10 秒或 0/5/15 秒退避）自动重建快照或重新初始化，只有耗尽、认证/证书/根失效才需要人工；GetOverview/GetIssues 新增 additive `recovery{state,cause,attempts,next_retry_at,revision,attention}`，`recovery_revision` 推进触发 overview 刷新；无 schema 迁移、IPC 21 不变。
+- **#11 step1**：新增 platform file identity 契约骨架（`PlatformFileId` + `FileIdentitySource` + Linux `fs_inodes` adapter，行为与 ino 语义不变），为 Windows CFAPI adapter 与 v30 `platform_file_ids` 留出替换点。
+
+验证状态：本批候选树为 `integration/fixes3`，最终候选 HEAD `f5cee4a`（代码内容与 `7336a54` 相同，仅文档回填）。`final-validate b14`（workstation202611，2026-11-09，14/14 phase `PHASE-EXIT=0`）SUMMARY **passed=2662 / failed=0 / ignored=130 / failed_binaries=0**；#8 SLO 8/8 PASS（210k GetStates p95 239.5 ms / 限 500 ms，2000 项目录 p95 4.48 ms / 限 300 ms，48 路 mixed 0 超时，overview total p95 0.91 ms、lock hold 0 ms，初始化期间查询 p95 10 ms / 限 500 ms）；GUI 27/27 suites OK；内核挂载套件 8 passed；schema v29 迁移与 IPC 21 配对检查通过。无真实 NAS ACL、真实 dpkg 安装/升级与 Mint/Cinnamon 桌面验收，本说明不宣称这些项通过。
+
+以下保留此前发布记录。
+
 # 0.1.0~dev20261108.1：上传终态、数据库热点与统一桌面
 
 本版把 #14/#17 的未确认上传终态与背景错误清理、#15/#16 的本地 SQLite 索引与去全局锁读、#8 的已提交状态投影、#2 的统一窗口/托盘/持久同步历史与 #5 的 NamespaceIndex 精简投影合入主线（`8646766` 之后的候选发布版）。schema27、IPC21：FSD 与 worker 必须成对更新，旧程序不能读取新 schema。正目录项 entry TTL 恒 0，attr 默认 1000 ms。

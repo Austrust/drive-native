@@ -1,4 +1,5 @@
 //! Durable, version-bound download retries. These records never replay writes.
+use crate::commit_outcome::{CommitCategory, CommitDiagnostic};
 use crate::{DownloadTicket, Error, Result, Store};
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -133,7 +134,7 @@ impl Store {
         };
         let failure = DownloadFailure {
             schema: 1,
-            kind,
+            kind: kind.clone(),
             server_code,
             attempts,
             retry_at,
@@ -151,6 +152,30 @@ impl Store {
                 serde_json::to_string(&failure)?
             ],
         )?;
+        // #9b TB2: downloads already persist a typed failure and retry clock in
+        // `error`; mirror them into the shared diagnosis columns so the status
+        // surface can list every waiting operation from one view. A permanent
+        // failure is a fatal unknown: the version cannot be read until the user
+        // or a later session acts.
+        let (category, name) = match kind {
+            DownloadFailureKind::Transport => (CommitCategory::Transport, "transport"),
+            DownloadFailureKind::SessionExpired => (CommitCategory::Timeout, "session_expired"),
+            DownloadFailureKind::ServerRejected => {
+                (CommitCategory::ServerRejected, "server_rejected")
+            }
+            DownloadFailureKind::InvalidContent => (CommitCategory::Protocol, "invalid_content"),
+            DownloadFailureKind::LocalStorage => (CommitCategory::LocalStorage, "local_storage"),
+        };
+        let diagnostic = match retry_at {
+            Some(at) => CommitDiagnostic::unknown_retryable(
+                category,
+                Some(name.into()),
+                attempts,
+                i64::try_from(at).unwrap_or(i64::MAX),
+            ),
+            None => CommitDiagnostic::unknown_fatal(category, Some(name.into()), attempts),
+        };
+        crate::commit_diagnostics::record(&self.db, "transfers", &id, &diagnostic)?;
         Ok(())
     }
 
@@ -165,7 +190,7 @@ impl Store {
     pub fn retry_download(&mut self, id: &str) -> Result<bool> {
         let n = self.node(id)?;
         Ok(self.db.execute(
-            "UPDATE transfers SET state='pending',error=NULL WHERE node=?1
+            "UPDATE transfers SET state='pending',error=NULL,outcome=NULL,outcome_category=NULL,last_error=NULL,next_retry_at=0 WHERE node=?1
             AND version=?2 AND direction='download' AND error IS NOT NULL",
             params![id, n.version],
         )? > 0)

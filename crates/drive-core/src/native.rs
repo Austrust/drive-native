@@ -258,6 +258,21 @@ fn translate_initialization(
     Ok(Some(page))
 }
 
+/// Map a native recovery signal to the recovery cause token (#10).
+///
+/// The decoder keeps the two wire bits separate so `merge_mode` can be told
+/// apart from a plain rescan; `recovery_required` stays the compatibility
+/// fallback for callers and fixtures that only set the legacy flag.
+pub(crate) fn recovery_token(batch: &EventBatch) -> Option<&'static str> {
+    if batch.merge_mode {
+        Some(crate::recovery_runs::TOKEN_MERGE_MODE)
+    } else if batch.rescan_later || batch.recovery_required {
+        Some(crate::recovery_runs::TOKEN_RESCAN_LATER)
+    } else {
+        None
+    }
+}
+
 // The ordinary path retains the original validation/result contract and does
 // not clone event paths or construct/validate an unused hint envelope.
 fn translate_events(
@@ -267,8 +282,8 @@ fn translate_events(
     batch: EventBatch,
     collect_hints: bool,
 ) -> Result<Option<(Batch, Vec<InitializationEventHint>)>> {
-    if batch.recovery_required {
-        return Err(Error::Unsupported("native event recovery/rescan signal"));
+    if let Some(token) = recovery_token(&batch) {
+        return Err(Error::Unsupported(token));
     }
     let to = format!("native-v1:{}", batch.next.0);
     if to == from {
@@ -433,6 +448,8 @@ mod tests {
             events: vec![event],
             next: EventCursor(next),
             recovery_required: false,
+            rescan_later: false,
+            merge_mode: false,
         }
     }
     #[test]
@@ -596,6 +613,8 @@ mod tests {
                 events: vec![],
                 next: EventCursor(5),
                 recovery_required: false,
+                rescan_later: false,
+                merge_mode: false,
             },
         )
         .unwrap()
@@ -643,6 +662,8 @@ mod tests {
                     events: vec![],
                     next: EventCursor(5),
                     recovery_required: false,
+                    rescan_later: false,
+                    merge_mode: false,
                 },
             )
             .unwrap()
@@ -697,6 +718,8 @@ mod tests {
             events,
             next: EventCursor(4096 + count as u64),
             recovery_required: false,
+            rescan_later: false,
+            merge_mode: false,
         }
     }
     #[test]

@@ -53,6 +53,12 @@ impl Bridge {
             else {
                 return Ok(done);
             };
+            // Issue #50: never send a rename for an excluded path. The restart
+            // cleanup drops the stale row; this guard covers work queued before
+            // the rules applied.
+            if self.node_excluded(&queued.job.node.id) {
+                return Ok(done);
+            }
             let reconcile = match queued.state.as_str() {
                 "pending" => false,
                 "uncertain" => true,
@@ -125,14 +131,36 @@ impl Bridge {
                     }
                     _ => {
                         if !reconcile {
-                            store.mark_rename_uncertain(&op).map_err(io::Error::other)?;
+                            store.mark_rename_uncertain_diagnosed(
+                                &op,
+                                CommitCategory::Protocol,
+                                Some("server returned an unexpected rename reply"),
+                            ).map_err(io::Error::other)?;
+                        } else {
+                            store.record_namespace_commit_diagnostic(
+                                &op,
+                                CommitCategory::Protocol,
+                                Some("server returned an unexpected reply during rename reconcile"),
+                                0,
+                            ).map_err(io::Error::other)?;
                         }
                         return Ok(done);
                     }
                 },
                 Err(_) => {
                     if !reconcile {
-                        store.mark_rename_uncertain(&op).map_err(io::Error::other)?;
+                        store.mark_rename_uncertain_diagnosed(
+                            &op,
+                            CommitCategory::Transport,
+                            Some("rename transport lost before the commit was observed"),
+                        ).map_err(io::Error::other)?;
+                    } else {
+                        store.record_namespace_commit_diagnostic(
+                            &op,
+                            CommitCategory::Transport,
+                            Some("rename transport lost during reconcile"),
+                            0,
+                        ).map_err(io::Error::other)?;
                     }
                     return Err(io::Error::other(
                         "rename commit unknown; durable intent retained",
@@ -253,6 +281,11 @@ impl Bridge {
         else {
             return Ok(0);
         };
+        // Issue #50: never send a remote delete for an excluded path (the
+        // cleanup removes the local row instead).
+        if self.node_excluded(&queued.job.node.id) {
+            return Ok(0);
+        }
         let reconcile = match queued.state.as_str() {
             "pending" => false,
             "uncertain" => true,
@@ -299,14 +332,36 @@ impl Bridge {
                 }
                 _ => {
                     if !reconcile {
-                        store.mark_remove_uncertain(&op).map_err(io::Error::other)?;
+                        store.mark_remove_uncertain_diagnosed(
+                            &op,
+                            CommitCategory::Protocol,
+                            Some("server returned an unexpected remove reply"),
+                        ).map_err(io::Error::other)?;
+                    } else {
+                        store.record_namespace_commit_diagnostic(
+                            &op,
+                            CommitCategory::Protocol,
+                            Some("server returned an unexpected reply during remove reconcile"),
+                            0,
+                        ).map_err(io::Error::other)?;
                     }
                     Ok(0)
                 }
             },
             Err(_) => {
                 if !reconcile {
-                    store.mark_remove_uncertain(&op).map_err(io::Error::other)?;
+                    store.mark_remove_uncertain_diagnosed(
+                        &op,
+                        CommitCategory::Transport,
+                        Some("remove transport lost before the commit was observed"),
+                    ).map_err(io::Error::other)?;
+                } else {
+                    store.record_namespace_commit_diagnostic(
+                        &op,
+                        CommitCategory::Transport,
+                        Some("remove transport lost during reconcile"),
+                        0,
+                    ).map_err(io::Error::other)?;
                 }
                 Err(io::Error::other(
                     "remove commit unknown; reconcile required",
@@ -336,6 +391,13 @@ impl Bridge {
         else {
             return Ok(0);
         };
+        // Issue #50: never send upload/replace/cleanup work for an excluded
+        // source or target.
+        if self.node_excluded(&queued.job.source.id)
+            || self.node_excluded(&queued.job.target.id)
+        {
+            return Ok(0);
+        }
         let permission_targets=drive_core::write_permissions::namespace_targets("replace",&serde_json::to_string(&queued.job)?).map_err(io::Error::other)?;
         let op = queued.job.operation.clone();
         let mut target_remote = queued.job.target_remote.clone();
@@ -458,6 +520,8 @@ impl Bridge {
                 )
             };
         let mut s = self.store.lock().unwrap();
+        let mut unknown_category = CommitCategory::Protocol;
+        let mut unknown_error = "server returned an unexpected replacement reply";
         let result = match outcome {
             Ok(reply) => match reply.body {
                 Response::PermissionDenied{node,action} if !reconcile => {
@@ -484,13 +548,19 @@ impl Bridge {
                 }
                 _ => None,
             },
-            Err(_) => None,
+            Err(_) => {
+                unknown_category = CommitCategory::Transport;
+                unknown_error = "replacement transport lost before the commit was observed";
+                None
+            }
         };
         match result {
             Some(Ok(())) => {drive_core::write_permissions::observe_targets(&s,&permission_targets,true).map_err(io::Error::other)?;Ok(1)},
             _ => {
                 if !reconcile {
-                    s.mark_replace_uncertain(&op).map_err(io::Error::other)?;
+                    s.mark_replace_uncertain_diagnosed(&op, unknown_category, Some(unknown_error)).map_err(io::Error::other)?;
+                } else {
+                    s.record_namespace_commit_diagnostic(&op, unknown_category, Some(unknown_error), 0).map_err(io::Error::other)?;
                 }
                 Ok(0)
             }
@@ -516,6 +586,10 @@ impl Bridge {
         else {
             return Ok(0);
         };
+        // Issue #50: never send a remote mkdir for an excluded path.
+        if self.node_excluded(&q.job.node.id) {
+            return Ok(0);
+        }
         let reconcile = match q.state.as_str() {
             "pending" => false,
             "uncertain" => true,
@@ -533,6 +607,8 @@ impl Bridge {
         };
         let outcome = rpc.call(Command::Mkdir { job, reconcile }, Duration::from_secs(120));
         let mut s = self.store.lock().unwrap();
+        let mut unknown_category = CommitCategory::Protocol;
+        let mut unknown_error = "server returned an unexpected directory reply";
         match outcome {
             Ok(reply) => match reply.body {
                 Response::DirectoryPrepared { origin } => {
@@ -557,10 +633,22 @@ impl Bridge {
                 }
                 _ => {}
             },
-            Err(_) => {}
+            Err(_) => {
+                unknown_category = CommitCategory::Transport;
+                unknown_error = "directory transport lost before the commit was observed";
+            }
         }
         if !reconcile {
-            s.mark_directory_uncertain(&op).map_err(io::Error::other)?;
+            s.mark_directory_uncertain_diagnosed(&op, unknown_category, Some(unknown_error))
+                .map_err(io::Error::other)?;
+        } else {
+            s.record_namespace_commit_diagnostic(
+                &op,
+                unknown_category,
+                Some(unknown_error),
+                0,
+            )
+            .map_err(io::Error::other)?;
         }
         Ok(0)
     }

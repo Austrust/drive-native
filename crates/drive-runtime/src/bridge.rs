@@ -3,7 +3,7 @@ use crate::{rpc::Rpc, wire::*};
 #[cfg(test)]
 use drive_core::Store;
 use drive_core::download_jobs::DownloadFailureKind;
-use drive_core::{Change, DownloadTicket, Node, ReadHandle};
+use drive_core::{Change, CommitCategory, DownloadTicket, Node, ReadHandle};
 use std::{
     collections::HashMap,
     io,
@@ -133,6 +133,10 @@ pub struct Bridge {
     /// Non-zero means the mount suspended cacheable publication for one quiet
     /// lease window and then resumed; it never needs a restart (#27).
     notification_overflows: AtomicU64,
+    /// Bumped whenever the automatic recovery journal changes (#10); the
+    /// desktop status sample includes it so recovery progress refreshes the
+    /// overview without a control-plane revision.
+    recovery_revision: AtomicU64,
     pub downloads: AtomicUsize,
     pub download_failures_seen: AtomicUsize,
     pub last_download_failure: Mutex<Option<(DownloadFailureKind, Option<u32>)>>,
@@ -148,6 +152,11 @@ pub struct Bridge {
     pub upload_block: Mutex<Option<String>>,
     pub cache_error: Mutex<Option<String>>,
     pub initialization: Arc<crate::initialization::Tracker>,
+    /// Issue #50: task-scoped exclusion rules plus the derived namespace
+    /// index. The index is rebuilt after every namespace swap (initialization
+    /// install, recovery snapshot, applied pull). Empty rules keep every check
+    /// a constant-time no-op.
+    exclusion: std::sync::RwLock<Arc<drive_core::exclude::ExclusionState>>,
 }
 impl Bridge {
     pub fn transfer_entries(&self) -> Vec<crate::transfers::TransferEntry> {
@@ -277,18 +286,18 @@ impl Bridge {
         }
         Ok(result)
     }
-    pub fn release_content(&self, id: &str) -> io::Result<()> {
+    pub fn release_content(&self, id: &str) -> io::Result<drive_core::ReleaseOutcome> {
         let flights = self.flights.lock().unwrap();
         if flights.keys().any(|(active, _)| active == id) {
             return Err(io::Error::other("file is being downloaded"));
         }
         let mut store = self.store.lock().unwrap();
         let ino = store.record(id).map_err(io::Error::other)?.ino;
-        store.release(id).map_err(io::Error::other)?;
+        let outcome = store.release(id).map_err(io::Error::other)?;
         drop(store);
         drop(flights);
         self.enqueue_invalidation(Invalidation::Inode(ino));
-        Ok(())
+        Ok(outcome)
     }
     fn from_connection(store: Arc<drive_core::SharedStore>, rpc: Arc<Rpc>) -> io::Result<Self> {
         let notify_hub: Arc<Mutex<Option<drive_fs::NotifyHub>>> = Arc::new(Mutex::new(None));
@@ -322,6 +331,7 @@ impl Bridge {
             notify_hub,
             notifications,
             notification_overflows: AtomicU64::new(0),
+            recovery_revision: AtomicU64::new(0),
             downloads: AtomicUsize::new(0),
             download_failures_seen: AtomicUsize::new(0),
             last_download_failure: Mutex::new(None),
@@ -333,6 +343,11 @@ impl Bridge {
             upload_block: Mutex::new(None),
             cache_error: Mutex::new(None),
             initialization: Arc::new(crate::initialization::Tracker::default()),
+            exclusion: std::sync::RwLock::new(Arc::new(
+                drive_core::exclude::ExclusionState::new(
+                    drive_core::exclude::ExcludeRules::default(),
+                ),
+            )),
         })
     }
     /// Every upstream queue failure must suspend cacheable publication, not
@@ -346,6 +361,110 @@ impl Bridge {
     /// Observable for root diagnostics; the mount recovers without a restart.
     pub fn notification_overflows(&self) -> u64 {
         self.notification_overflows.load(Ordering::Relaxed)
+    }
+    /// Install the profile's exclusion rules. Must be called before
+    /// initialization enumerates the namespace (see `Service::new`, #50).
+    pub(crate) fn set_exclude_rules(&self, rules: drive_core::exclude::ExcludeRules) {
+        self.set_exclusion_state(Arc::new(drive_core::exclude::ExclusionState::new(rules)));
+    }
+    /// Share the exclusion state built by `Service` with the mount and the
+    /// namespace refresh points. The state keeps rules and index together, so a
+    /// rebuild never races a reader between two locks.
+    pub(crate) fn set_exclusion_state(
+        &self,
+        state: Arc<drive_core::exclude::ExclusionState>,
+    ) {
+        *self.exclusion.write().unwrap() = state;
+    }
+    /// Current exclusion state (rules plus index snapshot).
+    pub(crate) fn exclusion_state(&self) -> Arc<drive_core::exclude::ExclusionState> {
+        self.exclusion.read().unwrap().clone()
+    }
+    /// Snapshot the current rules so a worker can match without holding a lock.
+    pub(crate) fn exclude_rules(&self) -> drive_core::exclude::ExcludeRules {
+        self.exclusion_state().rules().clone()
+    }
+    /// True when the scheduler must keep `node_id` out of upload, download and
+    /// cache passes. The FUSE read/write paths already answer ENOENT; this is
+    /// the defense in depth for work that was queued before the rules applied.
+    fn node_excluded(&self, node_id: &str) -> bool {
+        let state = self.exclusion_state();
+        if !state.is_active() {
+            return false;
+        }
+        state.current().node_excluded(node_id)
+    }
+    /// Rebuild the exclusion index after the committed namespace changed.
+    ///
+    /// Called after every namespace swap (owner initialization, recovery
+    /// snapshot install, applied pull). Empty rules return before touching the
+    /// store; a missing binding is a normal pre-attach state.
+    fn refresh_exclusion(&self) {
+        let state = self.exclusion_state();
+        if !state.is_active() {
+            return;
+        }
+        let root = match self.store.lock() {
+            Ok(store) => match store.native_scope_root() {
+                Ok(root) => root,
+                Err(error) => {
+                    eprintln!("drive-native exclude: cannot read scope root: {error}");
+                    return;
+                }
+            },
+            Err(_) => return,
+        };
+        let Some(root) = root else {
+            return;
+        };
+        if let Err(error) = state.refresh_shared(&self.store, &root) {
+            // Keep the previous index: an unavailable namespace is retried on
+            // the next namespace swap rather than hiding every path.
+            eprintln!("drive-native exclude: index refresh failed: {error}");
+        }
+    }
+    /// Issue #50 (phase 4): hide the indexed excluded subtrees from the local
+    /// view before the mount becomes visible. Purging only touches local rows;
+    /// it never creates a remote delete journal entry. The caller has already
+    /// built the index from the committed namespace.
+    pub(crate) fn purge_excluded_from_store(&self) -> io::Result<()> {
+        let state = self.exclusion_state();
+        if !state.is_active() {
+            return Ok(());
+        }
+        let ids = state.current().excluded_node_ids();
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let _mutation = self.recovery_gate.write().unwrap();
+        let mut store = self.store.lock().unwrap();
+        let purged = store
+            .purge_excluded_nodes(&ids)
+            .map_err(io::Error::other)?;
+        if purged > 0 {
+            store.collect_garbage().map_err(io::Error::other)?;
+            drive_core::exclude::trace_hit("mount-cleanup");
+        }
+        Ok(())
+    }
+
+    /// Issue #50 (phase 4): after the rules are removed, unhide the rows a
+    /// previous purge hid so the mount shows the full namespace again.
+    pub(crate) fn restore_excluded_from_store(&self) -> io::Result<()> {
+        let state = self.exclusion_state();
+        if state.is_active() {
+            return Ok(());
+        }
+        let _mutation = self.recovery_gate.write().unwrap();
+        let mut store = self.store.lock().unwrap();
+        if store
+            .restore_excluded_nodes()
+            .map_err(io::Error::other)?
+            > 0
+        {
+            drive_core::exclude::trace_hit("mount-restore");
+        }
+        Ok(())
     }
     /// Above this many per-node invalidations one generation message is cheaper
     /// and bounded: a snapshot commit touches every node, and one message per
@@ -423,8 +542,12 @@ impl Bridge {
             .phase(crate::initialization::Phase::CatchingUp);
         let _event = self.event_gate.lock().unwrap();
         if self.owner_candidate_pending()? {
-            return self
+            let result = self
                 .run_initialization_owner(crate::initialization::RecoveryReason::InitialIndex);
+            if result.is_ok() {
+                self.refresh_exclusion();
+            }
+            return result;
         }
         let cursor = self
             .store
@@ -446,6 +569,18 @@ impl Bridge {
         let batch = match response.body {
             Response::Events(batch) => batch,
             Response::Failed { category }
+                if category.starts_with(drive_core::recovery_runs::TOKEN_PREFIX) =>
+            {
+                drop(receipt);
+                let cause = drive_core::recovery_runs::reason_cause(
+                    category
+                        .strip_prefix(drive_core::recovery_runs::TOKEN_PREFIX)
+                        .unwrap_or_default(),
+                )
+                .unwrap_or(drive_core::recovery_runs::CAUSE_RESCAN_LATER);
+                return self.recover(recovery_reason(cause), cause);
+            }
+            Response::Failed { category }
                 if matches!(
                     category.as_str(),
                     "native_cursor_reset" | "native_filtered_type_changed"
@@ -466,10 +601,38 @@ impl Bridge {
             self.finish_session_catchup(&rpc)?;
             return Ok(false);
         };
+        let mut batch = batch;
         let event_count = batch.events.len();
+        let rules = self.exclude_rules();
+        let exclusion_state = self.exclusion_state();
         let mut invalidations = Vec::new();
         let mut invalidated_inodes = Vec::new();
         let mut store = self.store.lock().unwrap();
+        // Drop events that belong to excluded subtrees before they reach the
+        // committed namespace. Parent/child consistency is resolved from the
+        // same batch first (see drive_core::exclude), so a batch that creates
+        // an excluded directory and its children cannot leak the children.
+        if !rules.is_empty() {
+            match store.native_scope_root() {
+                Ok(Some(root)) => {
+                    let dropped = drive_core::exclude::retain_unexcluded_events(
+                        &store,
+                        &root,
+                        &rules,
+                        &mut batch.events,
+                    );
+                    if dropped > 0 {
+                        drive_core::exclude::trace_hit(&format!(
+                            "pull batch ({dropped} events)"
+                        ));
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    eprintln!("drive-native exclude: cannot filter pull events: {error}");
+                }
+            }
+        }
         for event in &batch.events {
             let id = match &event.change {
                 Change::Upsert(n) => &n.id,
@@ -487,7 +650,21 @@ impl Bridge {
                 }
             }
         }
-        store.receive(&batch).map_err(io::Error::other)?;
+        match store.receive(&batch) {
+            Ok(()) => {}
+            Err(error) if error.is_cursor_gap() => {
+                // A gap means the durable snapshot no longer matches the event
+                // journal. Recovery must not publish a partially applied batch:
+                // drop every lock and rebuild from a fresh snapshot (#10).
+                drop(store);
+                drop(receipt);
+                return self.recover(
+                    crate::initialization::RecoveryReason::CursorInvalidated,
+                    drive_core::recovery_runs::CAUSE_CURSOR_INVALIDATED,
+                );
+            }
+            Err(error) => return Err(io::Error::other(error)),
+        }
         store.drain().map_err(io::Error::other)?;
         for event in &batch.events {
             match &event.change {
@@ -509,8 +686,30 @@ impl Bridge {
                 }
             }
         }
+        let affects_index = if rules.is_empty() {
+            false
+        } else {
+            match store.native_scope_root() {
+                Ok(Some(root)) => drive_core::exclude::events_may_affect_index(
+                    &store,
+                    &root,
+                    &rules,
+                    &exclusion_state.current(),
+                    &batch.events,
+                ),
+                _ => true,
+            }
+        };
         drop(store);
         drop(receipt);
+        // The committed namespace may have gained or lost excluded paths;
+        // rebuild before publishing invalidations so the mount sees ENOENT for
+        // the same snapshot the invalidations describe. Skipped when the batch
+        // cannot change exclusion visibility: on a 210k-node namespace one
+        // projection costs ~550 ms (see exclude_index_build_bench).
+        if affects_index {
+            self.refresh_exclusion();
+        }
         self.initialization
             .pulled(true, event_count, changed_notification);
         for ino in invalidated_inodes {
@@ -523,9 +722,30 @@ impl Bridge {
         self.finish_session_catchup(&rpc)?;
         Ok(true)
     }
+    /// Recovery entry point (#10): recoverable causes run the bounded automatic
+    /// loop; the historical one-shot rebuilds stay single-attempt so existing
+    /// error contracts (integrity failures, owner rechecks) are unchanged.
     fn rebuild_snapshot(&self, reason: crate::initialization::RecoveryReason) -> io::Result<bool> {
+        match reason {
+            crate::initialization::RecoveryReason::CursorInvalidated
+            | crate::initialization::RecoveryReason::SnapshotChanged
+            | crate::initialization::RecoveryReason::RescanLater
+            | crate::initialization::RecoveryReason::MergeMode => {
+                self.recover(reason, recovery_cause_for_reason(reason))
+            }
+            _ => self.rebuild_snapshot_once(reason),
+        }
+    }
+    fn rebuild_snapshot_once(
+        &self,
+        reason: crate::initialization::RecoveryReason,
+    ) -> io::Result<bool> {
         if self.initialization_task.lock().unwrap().is_some() {
-            return self.run_initialization_owner(reason);
+            let result = self.run_initialization_owner(reason);
+            if result.is_ok() {
+                self.refresh_exclusion();
+            }
+            return result;
         }
         use std::io::Read;
         self.initialization.recovery(reason);
@@ -564,11 +784,62 @@ impl Bridge {
             return Err(io::Error::other("snapshot integrity mismatch"));
         }
         let snapshot: drive_core::native::RemoteSnapshot = serde_json::from_slice(&bytes)?;
+        let mut snapshot = snapshot;
+        let rules = self.exclude_rules();
+        if !rules.is_empty() {
+            let dropped = drive_core::exclude::retain_unexcluded_snapshot_nodes(
+                &snapshot.scope.file_id,
+                &rules,
+                &mut snapshot.nodes,
+            );
+            if dropped > 0 {
+                drive_core::exclude::trace_hit(&format!("recovery snapshot ({dropped} nodes)"));
+            }
+        }
         if !rpc.is_connected() || !Arc::ptr_eq(&rpc, &self.connection()) {
             return Err(io::ErrorKind::NotConnected.into());
         }
         let invalidations = {
             let mut store = self.store.lock().unwrap();
+            // Issue #50 phase 4 (R2): nodes hidden by the rules must not become
+            // recovery tombstones. The snapshot below deliberately omits them,
+            // and the install sweeps every committed id that is not in the
+            // snapshot into `deleted=1` (dirty content would flip to
+            // `conflict=1`). Purge them first so that sweep only re-confirms the
+            // local hide: no conflict is raised, no upload stays eligible and no
+            // remote delete is queued.
+            if !rules.is_empty() {
+                match store.native_scope_root() {
+                    Ok(Some(root)) => {
+                        match drive_core::exclude::ExclusionIndex::build(&store, &root, &rules) {
+                            Ok(index) => {
+                                let ids = index.excluded_node_ids();
+                                if !ids.is_empty() {
+                                    match store.purge_excluded_nodes(&ids) {
+                                        Ok(purged) if purged > 0 => {
+                                            let _ = store.collect_garbage();
+                                            drive_core::exclude::trace_hit(&format!(
+                                                "recovery snapshot purge ({purged} nodes)"
+                                            ));
+                                        }
+                                        Ok(_) => {}
+                                        Err(error) => eprintln!(
+                                            "drive-native exclude: recovery purge failed: {error}"
+                                        ),
+                                    }
+                                }
+                            }
+                            Err(error) => eprintln!(
+                                "drive-native exclude: recovery index build failed: {error}"
+                            ),
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        eprintln!("drive-native exclude: cannot read scope root for recovery: {error}");
+                    }
+                }
+            }
             let mut invalidations = store.snapshot_invalidations().map_err(io::Error::other)?;
             store
                 .install_native_snapshot(&snapshot, &cursor)
@@ -577,10 +848,193 @@ impl Bridge {
             invalidations
         };
         self.enqueue_snapshot_invalidations(invalidations);
+        // The snapshot install replaced the whole namespace: rebuild the
+        // exclusion index before any reader observes the new generation.
+        self.refresh_exclusion();
         self.signal_upload();
         self.initialization.activity();
         Ok(true)
     }
+
+    /// Monotonic revision of the automatic recovery journal (#10).
+    pub fn recovery_revision(&self) -> u64 {
+        self.recovery_revision.load(Ordering::Relaxed)
+    }
+
+    /// Additive desktop projection of the recovery journal.
+    ///
+    /// Reads only committed state, never blocks on the writer mutex, and keeps
+    /// the `sync_state` value set unchanged; recovery exhaustion is the only
+    /// recovery state that still requires human action.
+    pub fn recovery_status(&self) -> serde_json::Value {
+        use crate::initialization::Phase;
+        let revision = self.recovery_revision();
+        let snapshot = self.initialization.snapshot();
+        let (open, latest) = {
+            let store = match self.store.try_lock() {
+                Ok(store) => store,
+                Err(_) => {
+                    return serde_json::json!({
+                        "state": "recovering",
+                        "cause": serde_json::Value::Null,
+                        "attempts": 0,
+                        "max_attempts": drive_core::recovery_runs::MAX_RECOVERY_ATTEMPTS,
+                        "started_at_ms": 0,
+                        "updated_at_ms": 0,
+                        "next_retry_at_ms": 0,
+                        "last_error": serde_json::Value::Null,
+                        "recovery_exhausted": false,
+                        "revision": revision,
+                    });
+                }
+            };
+            let open = store.open_recovery_runs().unwrap_or_default();
+            let latest = store.latest_recovery_run().ok().flatten();
+            (open, latest)
+        };
+        let open = open.into_iter().max_by_key(|run| run.id);
+        let exhausted = open.is_none()
+            && latest.as_ref().is_some_and(|run| {
+                run.status == drive_core::recovery_runs::STATUS_NEEDS_ATTENTION
+            });
+        let initialization_recovering = snapshot.active
+            && snapshot.phase != Phase::Waiting
+            && snapshot.recovery_reason.is_some();
+        let state = if exhausted {
+            "needs_attention"
+        } else if open
+            .as_ref()
+            .is_some_and(|run| run.status == drive_core::recovery_runs::STATUS_RETRYING)
+        {
+            "retrying"
+        } else if open.as_ref().is_some_and(|run| {
+            run.status == drive_core::recovery_runs::STATUS_RECOVERING
+        }) || initialization_recovering
+        {
+            "recovering"
+        } else {
+            "idle"
+        };
+        let run = open.as_ref().or(latest.as_ref());
+        serde_json::json!({
+            "state": state,
+            "cause": run.map(|run| run.cause.clone()),
+            "attempts": run.map_or(0, |run| run.attempts),
+            "max_attempts": drive_core::recovery_runs::MAX_RECOVERY_ATTEMPTS,
+            "started_at_ms": run.map_or(0, |run| run.started_at),
+            "updated_at_ms": run.map_or(0, |run| run.updated_at),
+            "next_retry_at_ms": run.map_or(0, |run| run.next_retry_at),
+            "last_error": run.and_then(|run| run.last_error.clone()),
+            "recovery_exhausted": exhausted,
+            // Compatibility alias for the task contract: exhaustion is the only
+            // recovery state that needs a human.
+            "attention": exhausted,
+            "revision": revision,
+        })
+    }
+
+    fn begin_recovery(
+        &self,
+        cause: &'static str,
+    ) -> io::Result<drive_core::recovery_runs::RecoveryRun> {
+        let run = self
+            .store
+            .lock()
+            .unwrap()
+            .begin_recovery_run(cause)
+            .map_err(io::Error::other)?;
+        self.recovery_revision.fetch_add(1, Ordering::Relaxed);
+        Ok(run)
+    }
+
+    fn record_recovery_failure(
+        &self,
+        id: i64,
+        attempts: u32,
+        reason: &'static str,
+        delay: Duration,
+    ) -> io::Result<()> {
+        let next_retry_at = unix_millis() + delay.as_millis() as i64;
+        self.store
+            .lock()
+            .unwrap()
+            .update_recovery_run(
+                id,
+                drive_core::recovery_runs::STATUS_RETRYING,
+                attempts,
+                Some(reason),
+                next_retry_at,
+            )
+            .map_err(io::Error::other)?;
+        self.recovery_revision.fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }
+
+    fn finish_recovery(&self, id: i64, status: &'static str) -> io::Result<()> {
+        self.store
+            .lock()
+            .unwrap()
+            .finish_recovery_run(id, status)
+            .map_err(io::Error::other)?;
+        self.recovery_revision.fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }
+
+    /// Bounded automatic recovery: rebuild from a fresh snapshot, persisting
+    /// every attempt in the v29 `recovery_runs` journal. Success keeps the
+    /// session online; exhaustion becomes a human-visible attention error.
+    fn recover(
+        &self,
+        reason: crate::initialization::RecoveryReason,
+        cause: &'static str,
+    ) -> io::Result<bool> {
+        let run = self.begin_recovery(cause)?;
+        for attempt in 1..=drive_core::recovery_runs::MAX_RECOVERY_ATTEMPTS {
+            match self.rebuild_snapshot_once(reason) {
+                Ok(installed) => {
+                    self.finish_recovery(run.id, drive_core::recovery_runs::STATUS_RECOVERED)?;
+                    return Ok(installed);
+                }
+                Err(error) => {
+                    let delay = recovery_delay(cause, attempt);
+                    self.record_recovery_failure(
+                        run.id,
+                        attempt,
+                        recovery_failure_reason(&error),
+                        delay,
+                    )?;
+                    if attempt < drive_core::recovery_runs::MAX_RECOVERY_ATTEMPTS {
+                        self.recovery_wait(delay)?;
+                    }
+                }
+            }
+        }
+        self.finish_recovery(run.id, drive_core::recovery_runs::STATUS_NEEDS_ATTENTION)?;
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("native_state_recovery_required:{cause}"),
+        ))
+    }
+
+    /// Wait between attempts in small slices so a disconnect stops recovery
+    /// promptly instead of sleeping through the whole backoff.
+    fn recovery_wait(&self, delay: Duration) -> io::Result<()> {
+        let rpc = self.connection();
+        let mut remaining = delay;
+        while !remaining.is_zero() {
+            if !rpc.is_connected() {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotConnected,
+                    "connection closed during recovery backoff",
+                ));
+            }
+            let slice = remaining.min(RETRY_WAIT_SLICE);
+            std::thread::sleep(slice);
+            remaining -= slice;
+        }
+        Ok(())
+    }
+
     pub fn refresh_cached(&self) {
         #[cfg(test)]
         self.refresh_runs.fetch_add(1, Ordering::Relaxed);
@@ -589,6 +1043,11 @@ impl Bridge {
             Err(_) => return,
         };
         for ticket in tickets {
+            // Issue #50: an excluded path never becomes a cache download, even
+            // when a stale transfer intent survived the rule change.
+            if self.node_excluded(&ticket.id) {
+                continue;
+            }
             let now = unix_seconds();
             let node = {
                 let store = self.store.lock().unwrap();
@@ -1172,6 +1631,12 @@ impl drive_fs::Hydrator for Bridge {
         node: &Node,
         cancel: &drive_fs::ReadCancellation,
     ) -> Result<Arc<ReadHandle>, i32> {
+        // Issue #50: a defense-in-depth check; the FUSE open path already hides
+        // excluded inodes, but a stale handle must not start a download.
+        if self.node_excluded(&node.id) {
+            drive_core::exclude::trace_hit("download");
+            return Err(libc::ENOENT);
+        }
         self.ensure_cancellable(node, Some(cancel))?;
         let h = self
             .store
@@ -1185,6 +1650,10 @@ impl drive_fs::Hydrator for Bridge {
         Ok(Arc::new(h))
     }
     fn hydrate(&self, node: &Node) -> Result<Arc<ReadHandle>, i32> {
+        if self.node_excluded(&node.id) {
+            drive_core::exclude::trace_hit("download");
+            return Err(libc::ENOENT);
+        }
         self.ensure(node)?;
         let h = self
             .store
@@ -1255,6 +1724,109 @@ impl Bridge {
         drop(store);
         self.signal_upload();
         Ok(result)
+    }
+    /// Recover a bound directory whose remote identity disappeared: the local
+    /// tree is preserved and requeued as a local creation (issue #54). The
+    /// token is the same CAS token returned by GetIssues.
+    pub fn keep_directory_local(
+        &self,
+        root: &str,
+        id: &str,
+        token: &str,
+    ) -> io::Result<(drive_core::Node, String)> {
+        let mut store = self.store.lock().unwrap();
+        let issue = store
+            .sync_issue(root, id)
+            .map_err(io::Error::other)?
+            .ok_or_else(|| io::Error::other("recovery unavailable; issue list is stale"))?;
+        if issue.token != token || !issue.can_keep_local {
+            return Err(io::Error::other(
+                "recovery unavailable; reload the issue center",
+            ));
+        }
+        let path = issue.path;
+        let node = store
+            .keep_directory_local(root, id, token)
+            .map_err(io::Error::other)?;
+        // The directory was a tombstone before this call, so ordinary lookups
+        // have no record for it; the parent entry is what readers must refresh.
+        if let Some(parent_id) = node.parent.as_deref() {
+            if let Ok(parent) = store.record(parent_id) {
+                self.enqueue_invalidation(Invalidation::Entry(parent.ino, node.name.clone()));
+                self.enqueue_invalidation(Invalidation::Inode(parent.ino));
+            }
+        }
+        drop(store);
+        self.signal_upload();
+        Ok((node, path))
+    }
+
+    /// Accept the server deletion of a bound directory without resurrecting any
+    /// local content. Refused when surviving local-only content would be lost.
+    pub fn keep_directory_remote(
+        &self,
+        root: &str,
+        id: &str,
+        token: &str,
+    ) -> io::Result<String> {
+        let mut store = self.store.lock().unwrap();
+        let issue = store
+            .sync_issue(root, id)
+            .map_err(io::Error::other)?
+            .ok_or_else(|| io::Error::other("recovery unavailable; issue list is stale"))?;
+        if issue.token != token || !issue.can_keep_remote {
+            return Err(io::Error::other(
+                "recovery unavailable; reload the issue center",
+            ));
+        }
+        let path = issue.path;
+        store
+            .keep_directory_remote(root, id, token)
+            .map_err(io::Error::other)?;
+        drop(store);
+        self.signal_upload();
+        Ok(path)
+    }
+    /// Abandon one unconfirmed local creation (user action from the issue
+    /// center). The token is the same CAS token returned by GetIssues, so a
+    /// stale dialog can never retire a newer issue. Only the local-only file is
+    /// removed; no delete operation is sent to the server.
+    pub fn abandon_unconfirmed_upload(
+        &self,
+        root: &str,
+        id: &str,
+        token: &str,
+    ) -> io::Result<String> {
+        let mut store = self.store.lock().unwrap();
+        let issue = store
+            .sync_issue(root, id)
+            .map_err(io::Error::other)?
+            .ok_or_else(|| io::Error::other("abandon unavailable; issue list is stale"))?;
+        if issue.token != token || !issue.can_abandon_upload {
+            return Err(io::Error::other(
+                "abandon unavailable; reload the issue center",
+            ));
+        }
+        let path = issue.path;
+        // Capture the inode and parent dentry before retirement hides the node
+        // from lookups (retirement marks it deleted).
+        if let Ok(record) = store.record_for_handle(id) {
+            self.enqueue_invalidation(Invalidation::Inode(record.ino));
+            if let Some(parent) = record.node.parent.as_deref() {
+                if let Ok(parent) = store.record(parent) {
+                    self.enqueue_invalidation(Invalidation::Entry(parent.ino, record.node.name));
+                }
+            }
+        }
+        if !store
+            .abandon_unconfirmed_creation(id)
+            .map_err(io::Error::other)?
+        {
+            return Err(io::Error::other("abandon unavailable; state changed"));
+        }
+        drop(store);
+        self.signal_upload();
+        Ok(path)
     }
     pub fn signal_upload(&self) {
         *self.upload_signal.0.lock().unwrap() = true;
@@ -1536,6 +2108,13 @@ impl Bridge {
                 )
             };
             let permission_targets=drive_core::write_permissions::upload_targets(&job.node);
+            // Issue #50: an excluded path must never be uploaded. A stale
+            // pending operation is removed by the restart cleanup; skipping it
+            // here is the defense-in-depth guard for work queued before the
+            // rules applied.
+            if self.node_excluded(&job.node.id) {
+                continue;
+            }
             if !reconcile && drive_core::write_permissions::targets_denied(&self.store.lock().unwrap(),&permission_targets).map_err(io::Error::other)? {
                 blocked=Some("permission_denied".into());continue;
             }
@@ -1667,10 +2246,20 @@ impl Bridge {
                     Response::Created { node, remote } => {
                         if let Err(e) = s.validate_upload_mtime(&op, &node) {
                             if !reconcile {
-                                s.mark_upload_uncertain(&op).map_err(io::Error::other)?;
+                                s.mark_upload_uncertain_diagnosed(
+                                    &op,
+                                    CommitCategory::Protocol,
+                                    Some("server confirmation failed local mtime validation"),
+                                )
+                                .map_err(io::Error::other)?;
                             } else {
-                                s.note_upload_reconcile_attempt(&op, unix_seconds() as i64)
-                                    .map_err(io::Error::other)?;
+                                s.note_upload_reconcile_attempt_diagnosed(
+                                    &op,
+                                    unix_seconds() as i64,
+                                    CommitCategory::Protocol,
+                                    Some("reconcile confirmation failed local mtime validation"),
+                                )
+                                .map_err(io::Error::other)?;
                             }
                             return Err(io::Error::other(e));
                         }
@@ -1682,10 +2271,20 @@ impl Bridge {
                     Response::Committed { node } => {
                         if let Err(e) = s.validate_upload_mtime(&op, &node) {
                             if !reconcile {
-                                s.mark_upload_uncertain(&op).map_err(io::Error::other)?;
+                                s.mark_upload_uncertain_diagnosed(
+                                    &op,
+                                    CommitCategory::Protocol,
+                                    Some("server confirmation failed local mtime validation"),
+                                )
+                                .map_err(io::Error::other)?;
                             } else {
-                                s.note_upload_reconcile_attempt(&op, unix_seconds() as i64)
-                                    .map_err(io::Error::other)?;
+                                s.note_upload_reconcile_attempt_diagnosed(
+                                    &op,
+                                    unix_seconds() as i64,
+                                    CommitCategory::Protocol,
+                                    Some("reconcile confirmation failed local mtime validation"),
+                                )
+                                .map_err(io::Error::other)?;
                             }
                             return Err(io::Error::other(e));
                         }
@@ -1702,8 +2301,13 @@ impl Bridge {
                             // The server still has not acted. A read-only
                             // reconciliation spends one bounded attempt and
                             // writes no denial or ACL evidence.
-                            s.note_upload_reconcile_attempt(&op, unix_seconds() as i64)
-                                .map_err(io::Error::other)?;
+                            s.note_upload_reconcile_attempt_diagnosed(
+                                &op,
+                                unix_seconds() as i64,
+                                CommitCategory::PermissionUncertain,
+                                Some("server denied the mutation while reconciling; commit not observed"),
+                            )
+                            .map_err(io::Error::other)?;
                             if s.is_locally_deleted(&node).map_err(io::Error::other)? {
                                 s.retire_unconfirmed_creation(&op).map_err(io::Error::other)?;
                             }
@@ -1714,8 +2318,13 @@ impl Bridge {
                             drive_core::write_permissions::mutation_permission_uncertain(&s,&op,false,code).map_err(io::Error::other)?;
                             blocked=Some("permission_commit_uncertain".into());
                         } else {
-                            s.note_upload_reconcile_attempt(&op, unix_seconds() as i64)
-                                .map_err(io::Error::other)?;
+                            s.note_upload_reconcile_attempt_diagnosed(
+                                &op,
+                                unix_seconds() as i64,
+                                CommitCategory::PermissionUncertain,
+                                Some("permission response during reconcile; commit unconfirmed"),
+                            )
+                            .map_err(io::Error::other)?;
                             if s.is_locally_deleted(&node_id).map_err(io::Error::other)? {
                                 s.retire_unconfirmed_creation(&op).map_err(io::Error::other)?;
                             }
@@ -1732,8 +2341,13 @@ impl Bridge {
                             // attempt and retire the intent instead of
                             // parking the operation behind a conflict that
                             // can never be resolved.
-                            s.note_upload_reconcile_attempt(&op, unix_seconds() as i64)
-                                .map_err(io::Error::other)?;
+                            s.note_upload_reconcile_attempt_diagnosed(
+                                &op,
+                                unix_seconds() as i64,
+                                CommitCategory::ServerRejected,
+                                Some("conflict during reconcile; local creation already deleted"),
+                            )
+                            .map_err(io::Error::other)?;
                             s.retire_unconfirmed_creation(&op).map_err(io::Error::other)?;
                         } else {
                             s.conflict_upload(&op).map_err(io::Error::other)?;
@@ -1741,15 +2355,25 @@ impl Bridge {
                     }
                     _ => {
                         if !reconcile {
-                            s.mark_upload_uncertain(&op).map_err(io::Error::other)?;
+                            s.mark_upload_uncertain_diagnosed(
+                                &op,
+                                CommitCategory::Protocol,
+                                Some("server returned an unexpected reply; commit unconfirmed"),
+                            )
+                            .map_err(io::Error::other)?;
                         } else {
                             // The server replied, but not with a confirmation.
                             // This is still an unconfirmed observation, so it
                             // spends one bounded attempt and never fabricates
                             // a terminal state. A locally deleted creation is
                             // retired instead of waiting for more replies.
-                            s.note_upload_reconcile_attempt(&op, unix_seconds() as i64)
-                                .map_err(io::Error::other)?;
+                            s.note_upload_reconcile_attempt_diagnosed(
+                                &op,
+                                unix_seconds() as i64,
+                                CommitCategory::Protocol,
+                                Some("server returned an unexpected reply during reconcile"),
+                            )
+                            .map_err(io::Error::other)?;
                             if s
                                 .is_locally_deleted(&node_id)
                                 .map_err(io::Error::other)?
@@ -1760,14 +2384,34 @@ impl Bridge {
                     }
                 },
                 Err(error) => {
+                    let message = format!("upload commit unknown: {error}");
                     if !reconcile {
-                        s.mark_upload_uncertain(&op).map_err(io::Error::other)?;
+                        s.mark_upload_uncertain_diagnosed(
+                            &op,
+                            CommitCategory::Transport,
+                            Some(&message),
+                        )
+                        .map_err(io::Error::other)?;
                     } else if !transient_reconcile_error(&error) {
                         // Transport loss does not spend the visible retry
                         // budget; reconnect recovery keeps the original
-                        // bounded allowance intact.
-                        s.note_upload_reconcile_attempt(&op, unix_seconds() as i64)
-                            .map_err(io::Error::other)?;
+                        // bounded allowance intact. The reason is still
+                        // persisted so the queue is never unexplained.
+                        s.note_upload_reconcile_attempt_diagnosed(
+                            &op,
+                            unix_seconds() as i64,
+                            CommitCategory::Transport,
+                            Some(&message),
+                        )
+                        .map_err(io::Error::other)?;
+                    } else {
+                        s.record_upload_commit_diagnostic(
+                            &op,
+                            CommitCategory::Transport,
+                            Some("transport lost during reconcile; waiting for reconnect"),
+                            0,
+                        )
+                        .map_err(io::Error::other)?;
                     }
                     return Err(io::Error::other("commit unknown; reconciliation required"));
                 }
@@ -1817,6 +2461,91 @@ pub(crate) fn capacity_error(error: &io::Error) -> Option<&'static str> {
         _ => None,
     }
 }
+/// Marks a recoverable upstream signal: the runtime rebuilds locally instead of
+/// asking a human (#10). Kept as an `io::Error` payload so the existing channel
+/// plumbing and content-free diagnostics stay unchanged.
+#[derive(Debug)]
+struct RecoveryRequired {
+    cause: &'static str,
+}
+impl std::fmt::Display for RecoveryRequired {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "native recovery required: {}", self.cause)
+    }
+}
+impl std::error::Error for RecoveryRequired {}
+fn recovery_required_error(cause: &'static str) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, RecoveryRequired { cause })
+}
+pub(crate) fn recovery_cause(error: &io::Error) -> Option<&'static str> {
+    error
+        .get_ref()
+        .and_then(|inner| inner.downcast_ref::<RecoveryRequired>())
+        .map(|marker| marker.cause)
+}
+#[cfg(test)]
+pub(crate) fn recovery_test_error(cause: &'static str) -> io::Error {
+    recovery_required_error(cause)
+}
+fn recovery_cause_for_reason(reason: crate::initialization::RecoveryReason) -> &'static str {
+    use crate::initialization::RecoveryReason;
+    use drive_core::recovery_runs as runs;
+    match reason {
+        RecoveryReason::InitialIndex => runs::CAUSE_INITIAL_INDEX,
+        RecoveryReason::PermissionRecheck => runs::CAUSE_PERMISSION_RECHECK,
+        RecoveryReason::CursorInvalidated => runs::CAUSE_CURSOR_INVALIDATED,
+        RecoveryReason::FilteredTypeChanged => runs::CAUSE_FILTERED_TYPE_CHANGED,
+        RecoveryReason::SnapshotChanged => runs::CAUSE_SNAPSHOT_CHANGED,
+        RecoveryReason::RescanLater => runs::CAUSE_RESCAN_LATER,
+        RecoveryReason::MergeMode => runs::CAUSE_MERGE_MODE,
+        RecoveryReason::RootUnavailable => runs::CAUSE_ROOT_UNAVAILABLE,
+    }
+}
+fn recovery_reason(cause: &'static str) -> crate::initialization::RecoveryReason {
+    use crate::initialization::RecoveryReason;
+    use drive_core::recovery_runs as runs;
+    match cause {
+        runs::CAUSE_RESCAN_LATER => RecoveryReason::RescanLater,
+        runs::CAUSE_MERGE_MODE => RecoveryReason::MergeMode,
+        runs::CAUSE_SNAPSHOT_CHANGED => RecoveryReason::SnapshotChanged,
+        runs::CAUSE_CURSOR_INVALIDATED => RecoveryReason::CursorInvalidated,
+        _ => RecoveryReason::InitialIndex,
+    }
+}
+fn recovery_failure_reason(error: &io::Error) -> &'static str {
+    if recovery_cause(error).is_some() {
+        return "recovery_rebootstrap_requested";
+    }
+    match error.kind() {
+        io::ErrorKind::NotConnected => "transport_unavailable",
+        io::ErrorKind::TimedOut => "timeout",
+        io::ErrorKind::InvalidData => "invalid_recovery_response",
+        io::ErrorKind::Interrupted => "interrupted",
+        _ => "recovery_failed",
+    }
+}
+#[cfg(test)]
+fn recovery_delay(_cause: &'static str, _attempt: u32) -> Duration {
+    // Unit tests assert the bounded loop, not the wall-clock ladder.
+    Duration::ZERO
+}
+#[cfg(not(test))]
+fn recovery_delay(cause: &'static str, attempt: u32) -> Duration {
+    use drive_core::recovery_runs as runs;
+    let index = attempt.saturating_sub(1) as usize;
+    let millis = if matches!(cause, runs::CAUSE_RESCAN_LATER | runs::CAUSE_MERGE_MODE) {
+        [0u64, 5_000, 15_000][index.min(2)]
+    } else {
+        [2_000u64, 5_000, 10_000][index.min(2)]
+    };
+    Duration::from_millis(millis)
+}
+fn unix_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX))
+        .unwrap_or(0)
+}
 fn operation_error(body: Response) -> io::Error {
     use crate::connection_diagnostics::Cause;
     if let Response::Failed { category } = &body {
@@ -1860,6 +2589,12 @@ fn operation_error(body: Response) -> io::Error {
         }
         if category == "native_cursor_reset" {
             return io::Error::new(io::ErrorKind::InvalidData, Cause::NativeCursorReset);
+        }
+        if let Some(cause) = category
+            .strip_prefix(drive_core::recovery_runs::TOKEN_PREFIX)
+            .and_then(drive_core::recovery_runs::reason_cause)
+        {
+            return recovery_required_error(cause);
         }
     }
     let kind = match body {

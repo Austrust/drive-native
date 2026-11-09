@@ -9,6 +9,10 @@ import fcntl
 from contextlib import contextmanager
 
 GUI_SETTINGS_SCHEMA = 1
+# Issue #50: the GUI edits exclude rules in place; keep the profile bounded so
+# a paste accident cannot grow the worker's compiled pattern set without limit.
+MAX_EXCLUDE_PATTERNS = 200
+MAX_EXCLUDE_PATTERN_LENGTH = 1024
 
 
 def default_gui_settings():
@@ -47,9 +51,30 @@ def load_profile(instance=None):
     return profile
 
 
+def _validate_exclude_patterns(profile):
+    """Issue #50: reject invalid exclusion rules before they reach the worker.
+
+    The worker compiles the same patterns with the Rust regex crate; validating
+    here keeps a typo from being saved and then only failing at mount time.
+    """
+    patterns = profile.get("exclude_patterns")
+    if patterns is None:
+        return
+    if not isinstance(patterns, list):
+        raise ValueError("排除规则必须是字符串列表")
+    for pattern in patterns:
+        if not isinstance(pattern, str) or not pattern:
+            raise ValueError("排除规则必须是非空字符串")
+        try:
+            re.compile(pattern)
+        except re.error as error:
+            raise ValueError(f"排除规则 {pattern!r} 不是合法正则：{error}") from error
+
+
 def _save_profile(profile, instance=None):
     if profile.get("schema") != 1 or "password" in profile:
         raise ValueError("配置格式不正确")
+    _validate_exclude_patterns(profile)
     path = config_path(instance)
     path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
     if (
@@ -76,6 +101,74 @@ def _save_profile(profile, instance=None):
     finally:
         os.unlink(temporary)
     return path
+
+
+def _replace_profile(profile, instance=None):
+    """Rewrite an existing profile atomically, preserving its permissions.
+
+    Unlike ``_save_profile`` this is the update path used by the settings UI:
+    the profile already exists, so the exclusive-link trick cannot be used.
+    """
+    if profile.get("schema") != 1 or "password" in profile:
+        raise ValueError("配置格式不正确")
+    _validate_exclude_patterns(profile)
+    path = config_path(instance)
+    parent = path.parent
+    parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+    if (
+        parent.is_symlink()
+        or parent.stat().st_uid != os.getuid()
+        or parent.stat().st_mode & 0o077
+    ):
+        raise ValueError("配置目录必须由当前用户私有")
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        raise ValueError("未找到同步配置，请先完成连接设置。") from None
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or info.st_uid != os.getuid()
+        or info.st_mode & 0o077
+    ):
+        raise ValueError("配置文件权限或大小不正确")
+    fd, temporary = tempfile.mkstemp(prefix=".profile-", dir=parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(profile, stream, ensure_ascii=False, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        directory = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+    return path
+
+
+def normalize_exclude_patterns(patterns):
+    """Return the canonical string array a profile should contain."""
+    if patterns is None:
+        return []
+    if not isinstance(patterns, list):
+        raise ValueError("排除规则必须是字符串列表")
+    if len(patterns) > MAX_EXCLUDE_PATTERNS:
+        raise ValueError(f"排除规则最多支持 {MAX_EXCLUDE_PATTERNS} 条")
+    normalized = []
+    for pattern in patterns:
+        if not isinstance(pattern, str) or not pattern.strip():
+            raise ValueError("排除规则必须是非空字符串")
+        value = pattern.strip()
+        if len(value) > MAX_EXCLUDE_PATTERN_LENGTH:
+            raise ValueError(f"排除规则 {value[:32]!r}… 过长")
+        normalized.append(value)
+    _validate_exclude_patterns({"exclude_patterns": normalized})
+    return normalized
 
 
 def gui_settings_path():
@@ -262,3 +355,23 @@ def restore_profile(backup, instance=None):
             profile = json.load(stream)
         validate_mount_overlap(profile)
         _restore_profile(backup, instance)
+
+
+def update_exclude_patterns(patterns, instance=None, expected_task=None):
+    """Atomically replace only ``exclude_patterns`` in the current profile.
+
+    ``expected_task`` guards against editing a different mount than the one the
+    dialog was opened for (the profile file can be replaced by a new setup while
+    the window is open).  Returns the normalized list that was written.
+    """
+    with profile_lock():
+        current = load_profile(instance)
+        if current is None:
+            raise ValueError("未找到同步配置，请先完成连接设置。")
+        if expected_task is not None and current.get("task_id") != expected_task:
+            raise ValueError("同步配置已经变化，请重新打开客户端。")
+        normalized = normalize_exclude_patterns(patterns)
+        updated = dict(current)
+        updated["exclude_patterns"] = normalized
+        _replace_profile(updated, instance)
+        return normalized

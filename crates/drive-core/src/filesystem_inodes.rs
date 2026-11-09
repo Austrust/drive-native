@@ -13,6 +13,7 @@
 //! the SAME transaction that installs the nodes, and it is safe to backfill a
 //! database installed by an older build once at mount initialization.
 use super::*;
+use crate::file_identity::{FileIdentitySource, PlatformFileId, StoreFileIdentity};
 use rusqlite::{Connection, OptionalExtension};
 
 /// O(1) mount hint: the whole namespace was batch-allocated and no code path
@@ -107,13 +108,11 @@ impl Store {
         if completeness_marker(&self.db)? {
             return Ok(0);
         }
-        let root_ok: bool = self
-            .db
-            .query_row("SELECT node FROM fs_inodes WHERE ino=1", [], |r| {
-                r.get::<_, String>(0)
-            })
-            .optional()?
-            .is_some_and(|node| node == root);
+        // Issue #11 step 1 replacement point: the root identity probe is part
+        // of the platform contract now; Linux delegates to the same
+        // `fs_inodes` read and step 2 adds the persisted platform id.
+        let root_ok =
+            StoreFileIdentity::new(self).id_for_node(root)? == Some(PlatformFileId::ROOT);
         let missing: bool = self.db.query_row(
             "SELECT EXISTS(SELECT 1 FROM nodes n WHERE n.deleted=0 AND NOT EXISTS(SELECT 1 FROM fs_inodes i WHERE i.node=n.id))",
             [],

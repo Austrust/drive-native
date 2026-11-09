@@ -14,6 +14,15 @@ pub struct SyncIssue {
     pub token: String,
     pub reconcile_attempts: u32,
     pub reconcile_exhausted: bool,
+    /// True only for an unconfirmed local creation that can be discarded
+    /// locally without touching a server object (no bound remote identity).
+    pub can_abandon_upload: bool,
+    /// True when a bound directory's remote identity disappeared while local
+    /// descendants survive; the tree can be requeued as a local creation.
+    pub can_keep_local: bool,
+    /// True when accepting the remote deletion of that bound directory would
+    /// not lose any surviving local-only content.
+    pub can_keep_remote: bool,
 }
 #[derive(Debug, Serialize)]
 pub struct IssuePage {
@@ -52,7 +61,7 @@ const ISSUE_CANDIDATE_SOURCES: &str = "
            AND NOT EXISTS(SELECT 1 FROM local_unlinks WHERE node=n.id)
         UNION
         SELECT o.node FROM operations o INDEXED BY operations_unfinished
-         WHERE o.state='uncertain' AND o.state NOT IN ('committed','superseded')
+         WHERE o.state IN ('uncertain','abandoned') AND o.state NOT IN ('committed','superseded')
            AND EXISTS(SELECT 1 FROM nodes n WHERE n.id=o.node)
         UNION
         SELECT o.node FROM namespace_ops o INDEXED BY namespace_unfinished
@@ -102,6 +111,45 @@ impl Store {
         parts.reverse();
         Ok(parts.join("/"))
     }
+    /// Count and content signature of surviving descendants of a tombstoned
+    /// directory. The signature participates in the issue token so a stale
+    /// keep-local decision can never requeue a different tree.
+    fn surviving_descendants(&self, id: &str) -> Result<(u64, String)> {
+        let mut q = self.db.prepare(
+            "WITH RECURSIVE tree(id) AS (
+                 SELECT id FROM nodes WHERE parent=?1 AND deleted=0
+                 UNION
+                 SELECT n.id FROM nodes n JOIN tree t ON n.parent=t.id WHERE n.deleted=0
+             )
+             SELECT id FROM tree ORDER BY id",
+        )?;
+        let ids = q
+            .query_map([id], |r| r.get::<_, String>(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let count = u64::try_from(ids.len()).unwrap_or(u64::MAX);
+        Ok((count, crate::sha256(ids.join("\n").as_bytes())))
+    }
+
+    /// True when at least one surviving descendant of the tombstoned directory
+    /// is a local-only creation: accepting the remote deletion would drop those
+    /// bytes, so keep-remote must not be offered.
+    fn has_local_only_surviving_content(&self, id: &str) -> Result<bool> {
+        let local_only: bool = self.db.query_row(
+            "WITH RECURSIVE tree(id) AS (
+                 SELECT id FROM nodes WHERE parent=?1 AND deleted=0
+                 UNION
+                 SELECT n.id FROM nodes n JOIN tree t ON n.parent=t.id WHERE n.deleted=0
+             )
+             SELECT EXISTS(
+                 SELECT 1 FROM tree t
+                  WHERE EXISTS(SELECT 1 FROM local_creations c WHERE c.node=t.id)
+                    AND NOT EXISTS(SELECT 1 FROM remote_aliases a WHERE a.node=t.id)
+             )",
+            [id],
+            |r| r.get(0),
+        )?;
+        Ok(local_only)
+    }
     pub fn sync_issue(&self, root: &str, id: &str) -> Result<Option<SyncIssue>> {
         let node = self.issue_node(id)?;
         let path = self.issue_path(root, id)?;
@@ -124,7 +172,7 @@ impl Store {
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
             )
             .optional()?;
-        let uncertain: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE node=?1 AND state IN ('inflight','uncertain')) OR EXISTS(SELECT 1 FROM namespace_ops WHERE node=?1 AND state IN ('uncertain','cleanup_uncertain','inflight','cleanup_inflight'))",[id],|r|r.get(0))?;
+        let uncertain: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE node=?1 AND state IN ('inflight','uncertain','abandoned')) OR EXISTS(SELECT 1 FROM namespace_ops WHERE node=?1 AND state IN ('uncertain','cleanup_uncertain','inflight','cleanup_inflight'))",[id],|r|r.get(0))?;
         let conflict = self.status(id)? == Status::Conflict;
         if !uncertain && !conflict {
             return Ok(None);
@@ -134,7 +182,7 @@ impl Store {
         let reconcile_attempts: u32 = self
             .db
             .query_row(
-                "SELECT COALESCE(MAX(reconcile_attempts),0) FROM operations WHERE kind='upload' AND node=?1 AND state IN ('inflight','uncertain')",
+                "SELECT COALESCE(MAX(reconcile_attempts),0) FROM operations WHERE kind='upload' AND node=?1 AND state IN ('inflight','uncertain','abandoned')",
                 [id],
                 |r| r.get::<_, i64>(0),
             )
@@ -166,6 +214,44 @@ impl Store {
                     && (owner == id || dirty.as_ref() == Some(key) || blob.as_ref() == Some(key))
             });
         let has_local = dirty.is_some() || draft.as_ref().is_some_and(|d| d.4);
+        // Bound-directory recovery (issue #54): a directory whose remote
+        // identity disappeared is only actionable when local descendants still
+        // exist. Otherwise the stale-directory guard below keeps it hidden.
+        let (survivor_count, survivor_sig, local_only) =
+            if node.directory && bound_identity && deleted && !local_creation {
+                let (count, signature) = self.surviving_descendants(id)?;
+                let local_only = if count > 0 {
+                    self.has_local_only_surviving_content(id)?
+                } else {
+                    false
+                };
+                (count, signature, local_only)
+            } else {
+                (0, String::new(), false)
+            };
+        let alias_remote: Option<String> = self
+            .db
+            .query_row(
+                "SELECT remote FROM remote_aliases WHERE node=?1",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        // Discarding is limited to an unconfirmed local creation: the local
+        // bytes were never acknowledged by the server and no remote identity is
+        // bound, so deleting them cannot leave a dangling server object.
+        let unconfirmed_upload: bool = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM operations WHERE kind='upload' AND node=?1 AND state IN ('uncertain','abandoned'))",
+            [id],
+            |r| r.get(0),
+        )?;
+        let can_abandon_upload = !node.directory
+            && local_creation
+            && !bound_identity
+            && !deleted
+            && parent_live
+            && unconfirmed_upload
+            && crate::removals::creation_unbound(&self.db, id)?;
         let directory_plan =
             if node.directory && local_creation && !uncertain && !deleted && parent_live {
                 self.directory_conflict_plan(id)?
@@ -183,9 +269,12 @@ impl Store {
         } else if node.directory {
             // A directory bound to a remote identity with no ancestor namespace
             // pressure, deletion, or unresolved commit has no recoverable
-            // action. Its stale conflict flag must not be reported as an
-            // unrecoverable namespace conflict (issue #6 follow-up).
-            return Ok(None);
+            // action unless local descendants survive the remote tombstone.
+            if survivor_count > 0 {
+                "bound_directory_conflict"
+            } else {
+                return Ok(None);
+            }
         } else if !has_local {
             "local_content_unavailable"
         } else if busy {
@@ -205,7 +294,12 @@ impl Store {
         } else {
             "content_conflict"
         };
-        let token = crate::sha256(&serde_json::to_vec(&(
+        let can_keep_local = reason == "bound_directory_conflict";
+        let can_keep_remote = can_keep_local && !local_only;
+        // serde tuples stop at 16 elements, so the token input is hashed as two
+        // concatenated JSON fragments. Every decision-relevant field must be
+        // included: a stale token must fail after any visible state change.
+        let mut token_input = serde_json::to_vec(&(
             &node,
             &dirty,
             &base,
@@ -220,7 +314,16 @@ impl Store {
             &directory_plan,
             reconcile_attempts,
             reconcile_exhausted,
+            can_abandon_upload,
+        ))?;
+        token_input.extend(serde_json::to_vec(&(
+            &alias_remote,
+            survivor_count,
+            &survivor_sig,
+            can_keep_local,
+            can_keep_remote,
         ))?);
+        let token = crate::sha256(&token_input);
         Ok(Some(SyncIssue {
             id: id.into(),
             path,
@@ -233,6 +336,9 @@ impl Store {
             can_keep_directory: directory_plan.is_some(),
             reconcile_attempts,
             reconcile_exhausted,
+            can_abandon_upload,
+            can_keep_local,
+            can_keep_remote,
             token,
         }))
     }
@@ -276,6 +382,152 @@ impl Store {
         }
         Ok(count)
     }
+    /// Recover a bound directory whose remote identity disappeared by detaching
+    /// the old identity and requeueing the same node as a local creation.
+    ///
+    /// The node id is preserved so the inode, path and mounted descendants stay
+    /// stable; only the remote alias is dropped. Descendants that are still
+    /// bound keep their own identities (mixed subtrees: only the recovered root
+    /// is requeued, see docs/STALE_CONFLICTS.md).
+    pub fn keep_directory_local(
+        &mut self,
+        root: &str,
+        id: &str,
+        expected: &str,
+    ) -> Result<Node> {
+        let issue = self
+            .sync_issue(root, id)?
+            .ok_or_else(|| Error::State("recovery entry is stale".into()))?;
+        if issue.token != expected || !issue.can_keep_local || !issue.directory {
+            return Err(Error::State("recovery entry is stale".into()));
+        }
+        let mut node = self.issue_node(id)?;
+        let deleted: bool = self.db.query_row(
+            "SELECT deleted FROM nodes WHERE id=?1",
+            [id],
+            |r| r.get(0),
+        )?;
+        let bound: bool = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM remote_aliases WHERE node=?1)",
+            [id],
+            |r| r.get(0),
+        )?;
+        if !node.directory || !deleted || !bound {
+            return Err(Error::State("directory is not recoverable".into()));
+        }
+        let parent_id = node
+            .parent
+            .clone()
+            .ok_or_else(|| Error::State("directory outside task".into()))?;
+        let parent = self.node(&parent_id)?;
+        if !parent.directory {
+            return Err(Error::Io(std::io::Error::from_raw_os_error(libc::ENOTDIR)));
+        }
+        if parent.version == CREATE_VERSION {
+            return Err(Error::State("parent directory not yet committed".into()));
+        }
+        let parent_queued: bool = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM namespace_overlay WHERE node=?1)",
+            [&parent_id],
+            |r| r.get(0),
+        )?;
+        if parent_queued {
+            return Err(Error::State("parent directory not yet committed".into()));
+        }
+        let exists: bool = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM nodes WHERE parent=?1 AND name=?2 AND deleted=0 AND id<>?3)",
+            params![parent_id, node.name, id],
+            |r| r.get(0),
+        )?;
+        if exists {
+            return Err(Error::Io(std::io::Error::from_raw_os_error(libc::EEXIST)));
+        }
+        // Requeueing a tree with an unresolved child commit would fight the
+        // reconciliation worker for the same server object.
+        let unsettled: bool = self.db.query_row(
+            "WITH RECURSIVE tree(id) AS (
+                 SELECT id FROM nodes WHERE id=?1
+                 UNION
+                 SELECT n.id FROM nodes n JOIN tree t ON n.parent=t.id WHERE n.deleted=0
+             )
+             SELECT EXISTS(
+                 SELECT 1 FROM operations o JOIN tree t ON t.id=o.node
+                  WHERE o.kind='upload' AND o.state IN ('inflight','uncertain')
+             )",
+            [id],
+            |r| r.get(0),
+        )?;
+        if unsettled {
+            return Err(Error::State("a child upload is still unresolved".into()));
+        }
+        let base = crate::namespace::node_path(&self.db, &parent_id)?;
+        let path = if base.is_empty() {
+            node.name.clone()
+        } else {
+            format!("{base}/{}", node.name)
+        };
+        node.version = CREATE_VERSION.into();
+        let job = crate::directories::DirectoryJob {
+            creation_contract: 1,
+            cursor: self.cursor()?,
+            origin: None,
+            operation: uuid::Uuid::new_v4().to_string(),
+            node: node.clone(),
+            parent,
+            path,
+        };
+        let tx = self.db.transaction()?;
+        tx.execute("DELETE FROM remote_aliases WHERE node=?1", [id])?;
+        tx.execute(
+            "UPDATE nodes SET remote_version=?2, deleted=0, conflict=0 WHERE id=?1",
+            params![id, CREATE_VERSION],
+        )?;
+        crate::filesystem::mark_inode_map_incomplete(&tx)?;
+        crate::filesystem::write_metadata(&tx, &node)?;
+        tx.execute(
+            "INSERT INTO local_creations(node,ready) VALUES(?1,1)",
+            [id],
+        )?;
+        tx.execute(
+            "INSERT INTO namespace_overlay(node,remote) VALUES(?1,?2)",
+            params![id, serde_json::to_string(&Some(&node))?],
+        )?;
+        tx.execute(
+            "INSERT INTO namespace_ops(id,node,body,state,kind) VALUES(?1,?2,?3,'pending','mkdir')",
+            params![job.operation, id, serde_json::to_string(&job)?],
+        )?;
+        tx.commit()?;
+        Ok(node)
+    }
+
+    /// Accept the server deletion of a bound directory once no surviving
+    /// local-only content would be lost. The tombstone and remote alias stay so
+    /// nothing is recreated locally.
+    pub fn keep_directory_remote(&mut self, root: &str, id: &str, expected: &str) -> Result<()> {
+        let issue = self
+            .sync_issue(root, id)?
+            .ok_or_else(|| Error::State("recovery entry is stale".into()))?;
+        if issue.token != expected || !issue.can_keep_remote || !issue.directory {
+            return Err(Error::State("recovery entry is stale".into()));
+        }
+        let tx = self.db.transaction()?;
+        let changed = tx.execute(
+            "UPDATE nodes SET conflict=0 WHERE id=?1 AND deleted=1",
+            [id],
+        )?;
+        if changed != 1 {
+            return Err(Error::State("directory is not recoverable".into()));
+        }
+        tx.execute("DELETE FROM local_creations WHERE node=?1", [id])?;
+        tx.execute("DELETE FROM namespace_overlay WHERE node=?1", [id])?;
+        tx.execute(
+            "UPDATE namespace_ops SET state='superseded' WHERE node=?1 AND state NOT IN ('committed','superseded')",
+            [id],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Preserve local bytes under a new name and resume the original remote identity.
     /// No server overwrite is generated. Copy upload uses the normal create contract.
     pub fn keep_both(
@@ -368,7 +620,10 @@ impl Store {
             "INSERT INTO upload_times(operation,mtime) VALUES(?1,?2)",
             params![op, mtime],
         )?;
-        tx.execute("UPDATE operations SET state='superseded' WHERE node=?1 AND state IN ('pending','conflict')",[id])?;
+        // #9b TB2: keeping the remote copy resolves the queued local upload at
+        // the queue level. The local content is not replayed; the server copy is
+        // adopted instead, so the outcome is confirmed/local_abandoned.
+        tx.execute("UPDATE operations SET state='superseded', outcome='confirmed', outcome_category='local_abandoned', last_error='conflict resolution superseded the local upload', next_retry_at=0, updated_at=unixepoch() WHERE node=?1 AND state IN ('pending','conflict')",[id])?;
         tx.execute("DELETE FROM drafts WHERE node=?1", [id])?;
         tx.execute(
             "UPDATE nodes SET dirty_blob=NULL,base_version=NULL,conflict=0 WHERE id=?1",

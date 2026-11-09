@@ -537,9 +537,23 @@ pub(super) fn open(fs: &mut CacheFilesystem, ino: u64, flags: i32, reply: ReplyO
         }
     }));
 }
-// Attribute chunks are computed until the reply buffer is full; 128 keeps
-// wasted rows bounded while amortizing the per-chunk Store statement.
+/// Attribute chunks are computed until the reply buffer is full; 128 keeps
+/// wasted rows bounded while amortizing the per-chunk Store statement.
 const PLUS_PAGE: usize = 128;
+
+/// Issue #50: true when `name` is excluded from the directory `parent`.
+///
+/// Cookie positions are intentionally left untouched when an entry is skipped:
+/// the kernel requires cookies to stay stable across continuation pages, and
+/// gaps are legal for READDIR/READDIRPLUS.
+fn excluded(
+    index: Option<&drive_core::exclude::ExclusionIndex>,
+    parent: u64,
+    name: &str,
+) -> bool {
+    index.is_some_and(|index| index.entry_excluded(parent, name))
+}
+
 
 /// READDIRPLUS: names/cookies come from the immutable directory view, bounded
 /// attribute pages from one Store statement. Attributes use the same policy as
@@ -559,6 +573,8 @@ pub(super) fn read_plus(
         reply.error(libc::EINVAL);
         return;
     };
+    // Issue #50: snapshot the index once; matching never takes the Store lock.
+    let exclusion = fs.exclusion_index();
     if let (Some(binding), Ok(view)) = (&fs.namespace_index, fs.directories.get(ino, fh)) {
         if let Some((block, opened)) = view.indexed() {
             let _index_time = diagnostics::span(diagnostics::Stage::IndexReadUs);
@@ -568,6 +584,9 @@ pub(super) fn read_plus(
                     let publication = fs.notify.reply_guard();
                     for (position, entry) in block.entries.iter().enumerate().skip(offset) {
                         let cookie = (position + 1) as i64;
+                        if excluded(exclusion.as_deref(), ino, &entry.name) {
+                            continue;
+                        }
                         let full = match binding.index.entry_by_ino(entry.ino) {
                             Some(slot) => {
                                 let (_, attr_ttl) = preview::reply_ttls(&fs.notify, true, true);
@@ -600,6 +619,7 @@ pub(super) fn read_plus(
     let store = fs.store.clone();
     let notify = fs.notify.clone();
     let (uid, gid) = (fs.uid, fs.gid);
+    let exclusion = exclusion.clone();
     let queued = diagnostics::span(diagnostics::Stage::ReaddirPlusQueue);
     fs.read_queue.submit(Box::new(move || {
         drop(queued);
@@ -613,11 +633,11 @@ pub(super) fn read_plus(
         let publication = notify.reply_guard();
         let permission_lease=if matches!(&view.origin,ViewOrigin::Preview(_)){None}else{store.permission_clear_lease()};
         if store.has_permission_denials() {
-            send_acl_plus(&store,&notify,&view,offset,uid,gid,reply);
+            send_acl_plus(&store,&notify,&view,offset,uid,gid,exclusion.as_deref(),reply);
             return;
         }
         if let Some((block, _)) = view.indexed() {
-            send_index_plus_sql(&store, &notify, block, offset, uid, gid, reply);
+            send_index_plus_sql(&store, &notify, block, offset, uid, gid, exclusion.as_deref(), reply);
             drop(publication);
             return;
         }
@@ -669,6 +689,9 @@ pub(super) fn read_plus(
                     let stable = records.is_some() && !notify.directory_unstable(ino);
                     let mut full = false;
                     for (position, entry) in entries[index..end].iter().enumerate() {
+                        if excluded(exclusion.as_deref(), ino, &entry.name) {
+                            continue;
+                        }
                         let record = records
                             .as_ref()
                             .and_then(|records| records[position].as_ref());
@@ -725,6 +748,9 @@ pub(super) fn read_plus(
                         return;
                     }
                     for (position, entry) in entries[offset..].iter().enumerate() {
+                        if excluded(exclusion.as_deref(), ino, &entry.name) {
+                            continue;
+                        }
                         let kind = if entry.directory {
                             FileType::Directory
                         } else {
@@ -764,13 +790,15 @@ pub(super) fn read(
         reply.error(libc::EINVAL);
         return;
     };
+    // Issue #50: snapshot the index once; matching never takes the Store lock.
+    let exclusion = fs.exclusion_index();
     if let (Some(binding), Ok(view)) = (&fs.namespace_index, fs.directories.get(ino, fh)) {
         if let Some((block, opened)) = view.indexed() {
             let _index_time = diagnostics::span(diagnostics::Stage::IndexReadUs);
             if let Some(lease) = binding.lease(&fs.store, &fs.notify) {
                 if lease.state() == opened {
                     diagnostics::count(diagnostics::Stage::IndexHits);
-                    send_index_page(block, offset, reply);
+                    send_index_page(block, offset, exclusion.as_deref(), reply);
                     drop(lease);
                     return;
                 }
@@ -781,6 +809,7 @@ pub(super) fn read(
     fs.refresh_index_later();
     let views = fs.directories.clone();
     let store = fs.store.clone();
+    let exclusion = exclusion.clone();
     let queued = diagnostics::span(diagnostics::Stage::ReaddirQueue);
     fs.read_queue.submit(Box::new(move || {
         drop(queued);
@@ -791,15 +820,15 @@ pub(super) fn read(
                     let guard=match store.try_lock(){Ok(g)=>g,Err(_)=>{reply.error(libc::EAGAIN);return;}};
                     if let Err(e)=permissions::inode(&guard,ino,permissions::Action::List){reply.error(errno(&e));return;}
                     if let ViewOrigin::Preview(stamp)=&view.origin {if let Err(e)=guard.preview_validate_view(stamp){reply.error(errno(&e));return;}}
-                    if let Some((block,_))=view.indexed(){send_index_page(block,offset,reply);}else{send_page(&view,offset,reply);}
+                    if let Some((block,_))=view.indexed(){send_index_page(block,offset,exclusion.as_deref(),reply);}else{send_page(&view,offset,exclusion.as_deref(),reply);}
                     drop(guard);return;
                 }
                 match &view.origin {
-                    ViewOrigin::Authority => send_page(&view, offset, reply),
+                    ViewOrigin::Authority => send_page(&view, offset, exclusion.as_deref(), reply),
                     ViewOrigin::Preview(stamp) => {
                         let guard = store.lock().unwrap();
                         match guard.preview_validate_view(stamp) {
-                            Ok(()) => send_page(&view, offset, reply),
+                            Ok(()) => send_page(&view, offset, exclusion.as_deref(), reply),
                             Err(e) => reply.error(errno(&e)),
                         }
                         // Keep the same guard through the single bounded reply.
@@ -815,13 +844,13 @@ pub(super) fn read(
                             // Match .9's nonblocking continuation contract;
                             // subsequent lookup/open still revalidates identity.
                             Err(std::sync::TryLockError::WouldBlock) => {
-                                send_index_page(block, offset, reply);
+                                send_index_page(block, offset, exclusion.as_deref(), reply);
                                 return;
                             }
                             Err(std::sync::TryLockError::Poisoned(_)) => { reply.error(libc::EIO); return; }
                         };
                         match guard.directory_identity(ino) {
-                            Ok(_) => send_index_page(block, offset, reply),
+                            Ok(_) => send_index_page(block, offset, exclusion.as_deref(), reply),
                             Err(e) => reply.error(errno(&e)),
                         }
                         drop(guard);
@@ -842,7 +871,7 @@ fn kind(kind: FileKind) -> FileType {
 // are projected in bounded batches instead of one SQL round-trip per entry, so
 // a 2000-entry directory keeps the Store guard for a handful of page queries
 // rather than ~50k per-entry statements (#26).
-fn send_acl_plus(store:&drive_core::SharedStore,notify:&NotifyHub,view:&View,offset:usize,uid:u32,gid:u32,mut reply:ReplyDirectoryPlus) {
+fn send_acl_plus(store:&drive_core::SharedStore,notify:&NotifyHub,view:&View,offset:usize,uid:u32,gid:u32,exclusion:Option<&drive_core::exclude::ExclusionIndex>,mut reply:ReplyDirectoryPlus) {
     let guard=match store.try_lock(){Ok(g)=>g,Err(_)=>{reply.error(libc::EAGAIN);return;}};
     if let Err(e)=permissions::inode(&guard,view.ino,permissions::Action::List){reply.error(errno(&e));return;}
     if let ViewOrigin::Preview(stamp)=&view.origin {if let Err(e)=guard.preview_validate_view(stamp){reply.error(errno(&e));return;}}
@@ -885,6 +914,7 @@ fn send_acl_plus(store:&drive_core::SharedStore,notify:&NotifyHub,view:&View,off
         let mut full=false;
         for position in 0..slots.len() {
             let (ino,name,kind)=&chunk[position];
+            if excluded(exclusion, view.ino, name) { continue; }
             let cookie=(index+position+1) as i64;
             let record=if let Some(dot)=dots[position].take() {
                 let mut dot=dot;
@@ -909,16 +939,18 @@ fn send_acl_plus(store:&drive_core::SharedStore,notify:&NotifyHub,view:&View,off
     diagnostics::add_count(diagnostics::Stage::PermissionCacheMisses,cache_after.misses.saturating_sub(cache_before.misses));
     reply.ok();drop(guard);
 }
-fn send_index_page(block: &DirBlock, offset: usize, mut reply: ReplyDirectory) {
+fn send_index_page(block: &DirBlock, offset: usize, exclusion: Option<&drive_core::exclude::ExclusionIndex>, mut reply: ReplyDirectory) {
     let _span = diagnostics::span(diagnostics::Stage::ReaddirReply);
     if offset > block.entries.len() { reply.error(libc::EINVAL); return; }
     for (position, entry) in block.entries.iter().enumerate().skip(offset) {
+        if excluded(exclusion, block.ino, &entry.name) { continue; }
         if reply.add(entry.ino, (position + 1) as i64, kind(entry.kind), entry.name.as_ref()) { break; }
     }
     reply.ok();
 }
 fn send_index_plus_sql(store: &drive_core::SharedStore, notify: &NotifyHub,
-    block: &DirBlock, offset: usize, uid: u32, gid: u32, mut reply: ReplyDirectoryPlus) {
+    block: &DirBlock, offset: usize, uid: u32, gid: u32,
+    exclusion: Option<&drive_core::exclude::ExclusionIndex>, mut reply: ReplyDirectoryPlus) {
     if offset > block.entries.len() { reply.error(libc::EINVAL); return; }
     let guard = match store.try_lock() {
         Ok(guard) => guard,
@@ -926,6 +958,7 @@ fn send_index_plus_sql(store: &drive_core::SharedStore, notify: &NotifyHub,
             // No old attribute is ever published. dirent-only PLUS preserves
             // .9 continuation/seek behavior while the authority writer is busy.
             for (position, entry) in block.entries.iter().enumerate().skip(offset) {
+                if excluded(exclusion, block.ino, &entry.name) { continue; }
                 if reply.add_without_lookup(entry.ino, (position + 1) as i64,
                     entry.name.as_ref(), kind(entry.kind)) { break; }
             }
@@ -950,6 +983,7 @@ fn send_index_plus_sql(store: &drive_core::SharedStore, notify: &NotifyHub,
             Err(e) => { reply.error(errno(&e)); return; },
         };
         for (position, entry) in block.entries[index..end].iter().enumerate() {
+            if excluded(exclusion, block.ino, &entry.name) { continue; }
             let cookie = (index + position + 1) as i64;
             let full = if let Some(record) = &records[position] {
                 let (_, attr_ttl) = preview::reply_ttls(notify, record.cacheable, true);
@@ -966,13 +1000,14 @@ fn send_index_plus_sql(store: &drive_core::SharedStore, notify: &NotifyHub,
     reply.ok();
     drop(guard);
 }
-fn send_page(view: &View, offset: usize, mut reply: ReplyDirectory) {
+fn send_page(view: &View, offset: usize, exclusion: Option<&drive_core::exclude::ExclusionIndex>, mut reply: ReplyDirectory) {
     let _span = diagnostics::span(diagnostics::Stage::ReaddirReply);
     if offset > view.snapshot().entries.len() {
         reply.error(libc::EINVAL);
         return;
     }
     for (index, entry) in view.snapshot().entries.iter().enumerate().skip(offset) {
+        if excluded(exclusion, view.ino, &entry.name) { continue; }
         let kind = if entry.directory {
             FileType::Directory
         } else {

@@ -12,7 +12,10 @@ use std::{
     collections::{HashMap, HashSet},
     io,
     path::{Component, Path},
-    sync::{Arc, atomic::Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Instant,
 };
 pub const BUS_NAME: &str = "org.drivenative.Client1";
@@ -43,6 +46,46 @@ struct PathState {
 }
 fn other() -> io::Error {
     io::Error::other("local state unavailable")
+}
+/// Issue #50: active exclusion rules for read-only desktop projections.
+/// `None` keeps every projection on its unfiltered fast path.
+fn exclusion_rules(service: &Service) -> Option<drive_core::exclude::ExcludeRules> {
+    let state = service.bridge.exclusion_state();
+    if state.is_active() {
+        Some(state.rules().clone())
+    } else {
+        None
+    }
+}
+/// Mount-relative representation of a desktop path, used to match rules with the
+/// same semantics as FUSE/initialization (POSIX path relative to the scope root).
+fn mount_relative<'a>(mount: &Path, input: &'a str) -> Option<&'a str> {
+    let path = Path::new(input);
+    let relative = if path.is_absolute() {
+        path.strip_prefix(mount).ok()?
+    } else {
+        path
+    };
+    relative.to_str()
+}
+fn path_excluded(
+    rules: &drive_core::exclude::ExcludeRules,
+    mount: &Path,
+    input: &str,
+    is_dir: bool,
+) -> bool {
+    mount_relative(mount, input).is_some_and(|relative| rules.matches(relative, is_dir))
+}
+fn excluded_error() -> io::Error {
+    io::Error::from_raw_os_error(libc::ENOENT)
+}
+/// Display path of a child of `parent` (the desktop API's mount-relative form).
+fn child_path(parent: &str, name: &str) -> String {
+    if parent.is_empty() {
+        name.to_owned()
+    } else {
+        format!("{}/{}", parent.trim_end_matches('/'), name)
+    }
 }
 pub fn resolve(store: &Store, root: &str, mount: &Path, input: &str) -> io::Result<Node> {
     #[cfg(test)]
@@ -279,11 +322,12 @@ fn states_off_lock(
     active: &HashSet<String>,
 ) -> io::Result<String> {
     let root = &service.profile.scope.file_id;
+    let rules = exclusion_rules(service);
     if preview::active(store, root)? {
-        return preview::states(store, root, &service.profile.mount, paths);
+        return preview::states(store, root, &service.profile.mount, paths, rules.as_ref());
     }
     store.ensure_fs_root(root).map_err(|_| other())?;
-    let resolved = resolve_all(store, service, paths);
+    let resolved = resolve_all(store, service, paths, rules.as_ref());
     let entries = entries_off_lock(store, service, resolved, active)?;
     Ok(states_document(entries))
 }
@@ -294,11 +338,12 @@ fn states_locked(
 ) -> io::Result<String> {
     let root = &service.profile.scope.file_id;
     let store = service.bridge.store.lock().unwrap();
+    let rules = exclusion_rules(service);
     if preview::active(&store, root)? {
-        return preview::states(&store, root, &service.profile.mount, paths);
+        return preview::states(&store, root, &service.profile.mount, paths, rules.as_ref());
     }
     store.ensure_fs_root(root).map_err(|_| other())?;
-    let resolved = resolve_all(&store, service, paths);
+    let resolved = resolve_all(&store, service, paths, rules.as_ref());
     let mut tree = load_tree(&store, &resolved)?;
     // Folder aggregation is CPU-only after capture. Release the writer's mutex
     // before walking the tree, so FUSE and overview requests can make progress.
@@ -314,6 +359,7 @@ fn resolve_all(
     store: &Store,
     service: &Service,
     paths: Vec<String>,
+    rules: Option<&drive_core::exclude::ExcludeRules>,
 ) -> Vec<(String, io::Result<Node>)> {
     paths
         .into_iter()
@@ -323,7 +369,17 @@ fn resolve_all(
                 &service.profile.scope.file_id,
                 &service.profile.mount,
                 &path,
-            );
+            )
+            .and_then(|node| {
+                // Issue #50: excluded paths behave exactly like missing ones.
+                if rules.is_some_and(|rules| {
+                    path_excluded(rules, &service.profile.mount, &path, node.directory)
+                }) {
+                    Err(excluded_error())
+                } else {
+                    Ok(node)
+                }
+            });
             (path, node)
         })
         .collect()
@@ -524,7 +580,7 @@ fn entries_locked_paths(
     store
         .ensure_fs_root(&service.profile.scope.file_id)
         .map_err(|_| other())?;
-    let resolved = resolve_all(&store, service, paths);
+    let resolved = resolve_all(&store, service, paths, exclusion_rules(service).as_ref());
     let mut tree = load_tree(&store, &resolved)?;
     let guard = if tree.is_some() {
         drop(store);
@@ -630,6 +686,7 @@ pub(crate) struct OverviewDerived {
 #[derive(Clone, Debug)]
 struct StoreOverview {
     pending: i64,
+    paused_uploads: i64,
     preview_only: bool,
     writable: bool,
     permission: drive_core::write_permissions::Policy,
@@ -639,6 +696,9 @@ struct StoreOverview {
     skipped_symlinks: u64,
     inaccessible: i64,
     download_errors: u64,
+    open_unknown: i64,
+    needs_attention: i64,
+    commit_items: Vec<drive_core::commit_diagnostics::CommitDiagnosticRecord>,
 }
 fn elapsed_us(start: Instant) -> u64 {
     u64::try_from(start.elapsed().as_micros()).unwrap_or(u64::MAX)
@@ -653,6 +713,7 @@ fn overview_store(
     let root = &service.profile.scope.file_id;
     let pending = store.pending_operations().map_err(|_| other())?
         + store.pending_namespace_operations().map_err(|_| other())?;
+    let paused_uploads = store.paused_upload_operations().map_err(|_| other())?;
     let preview_only = preview::active(store, root)?;
     let permission = drive_core::write_permissions::policy(store, root).map_err(|_| other())?;
     let writable =
@@ -667,6 +728,7 @@ fn overview_store(
     };
     Ok(StoreOverview {
         pending,
+        paused_uploads,
         preview_only,
         writable,
         permission,
@@ -676,10 +738,46 @@ fn overview_store(
         skipped_symlinks: store.skipped_symlink_count().map_err(|_| other())?,
         inaccessible: store.inaccessible_count().map_err(|_| other())?,
         download_errors: store.download_failure_count().map_err(|_| other())?,
+        open_unknown: drive_core::commit_diagnostics::open_unknown(store).map_err(|_| other())?,
+        needs_attention: drive_core::commit_diagnostics::needs_attention(store)
+            .map_err(|_| other())?,
+        commit_items: drive_core::commit_diagnostics::list(store, 20).map_err(|_| other())?,
     })
 }
 pub fn overview(service: &Service) -> io::Result<String> {
     Ok(overview_measured(service)?.0)
+}
+/// Serialize commit diagnoses outside the Store lock. `items` may contain
+/// terminal `abandoned` rows (so the user can inspect why retries stopped);
+/// only `open_unknown` and `needs_attention` exclude them.
+fn commit_diagnostics_json(
+    open_unknown: i64,
+    needs_attention: i64,
+    items: &[drive_core::commit_diagnostics::CommitDiagnosticRecord],
+) -> serde_json::Value {
+    let items: Vec<serde_json::Value> = items
+        .iter()
+        .map(|item| {
+            serde_json::json!({
+                "scope": item.scope,
+                "operation": item.operation,
+                "node": item.node,
+                "kind": item.kind,
+                "state": item.state,
+                "outcome": item.outcome.as_str(),
+                "category": item.category.as_str(),
+                "last_error": item.last_error,
+                "attempts": item.attempts,
+                "next_retry_at": item.next_retry_at,
+                "updated_at": item.updated_at,
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "open_unknown": open_unknown,
+        "needs_attention": needs_attention,
+        "items": items,
+    })
 }
 /// Steady-state overview: a private read-only connection plus a generation-keyed
 /// derived cache, so neither FUSE nor other desktop reads queue behind
@@ -737,6 +835,7 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
     }
     let StoreOverview {
         pending,
+        paused_uploads,
         preview_only,
         writable,
         permission,
@@ -746,6 +845,9 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
         skipped_symlinks,
         inaccessible,
         download_errors,
+        open_unknown,
+        needs_attention,
+        commit_items,
     } = store_overview;
     let uncertain = queue_health.namespace_uncertain + queue_health.upload_uncertain;
     let sync_state = if error.is_some()
@@ -762,6 +864,12 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
         "checking"
     } else if pending > 0 || uncertain > 0 {
         "pending"
+    } else if paused_uploads > 0 || needs_attention > 0 {
+        // Upload commitments that exhausted the read-only reconciliation budget
+        // are no longer counted as pending work, but the user still needs a
+        // visible, explainable reason to open the issue center. Conflicting or
+        // terminally unknown commits route the same way.
+        "needs_attention"
     } else {
         "idle"
     };
@@ -769,6 +877,13 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
     let background_error = background.as_ref().map(|failure| failure.message);
     let background_error_kind = background.as_ref().map(|failure| failure.source.as_str());
     let background_error_since_ms = background.as_ref().map(|failure| failure.since_ms);
+    // Extracted from the big literal below: the macro expands the nested object
+    // one level per key, and the overview is already close to the recursion cap.
+    let recovery_actions = serde_json::json!({"recheck_issues":true,"abandon_upload":true,
+        "bound_directory_recovery":true});
+    // Issue #9 TB2: additive, read-only diagnosis list. `items` may contain
+    // terminal abandoned rows; `open_unknown`/`needs_attention` exclude them.
+    let commit_diagnostics = commit_diagnostics_json(open_unknown, needs_attention, &commit_items);
     // Issue #31: the status journal epoch lets a GUI tell a same-daemon delta
     // from a restarted writer (its cursor epoch differs after a restart).
     let status_epoch = ro
@@ -776,20 +891,22 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
         .and_then(|store| store.status_change_watermark().ok())
         .map(|watermark| watermark.cursor.epoch)
         .unwrap_or_default();
+    let recovery = service.bridge.recovery_status();
     let serialize = Instant::now();
     let body = serde_json::json!({"schema":1,"task_id":service.profile.task_id,"mount":service.profile.mount,
         "connection":state,"error":error,"background_error":background_error,
         "background_error_kind":background_error_kind,
         "background_error_since_ms":background_error_since_ms,
         "upload_block":*service.bridge.upload_block.lock().unwrap(),
-        "recovery_actions":{"recheck_issues":true},
+        "recovery_actions":recovery_actions,
         "mounted":service.mounted.load(Ordering::Acquire),"writable":writable && !preview_only,
         "writable_source":permission.writable_source,"local_policy":permission.local_policy,
         "server_capability":permission.server_capability,"write_policy_revision":permission.write_policy_revision,
         "configured_writable":service.profile.writable,"preview_only":preview_only,
         "skipped_symlinks":skipped_symlinks,
         "skipped_permission_directories":inaccessible,
-        "pending_operations":pending,"revision":revision,"local_revision":local_revision,
+        "pending_operations":pending,"paused_uploads":paused_uploads,
+        "revision":revision,"local_revision":local_revision,
         "status_revision":key.revision,"status_verified":key.verified,"status_epoch":status_epoch,
         "queue_health":queue_health,
         "downloads_started":service.bridge.downloads.load(Ordering::Relaxed),
@@ -799,9 +916,12 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
         "connection_diagnostics":service.diagnostics.snapshot(),
         "sync_state":sync_state,"active_transfers":active_transfers,"issue_count":issue_count,
         "cache_availability":{"state":cache.state,"total":cache.total,"offline":cache.offline,"pinned":cache.pinned},
+        "commit_diagnostics":commit_diagnostics,
+        "release_job":release_job_summary(service),
         "version":{"build":env!("CARGO_PKG_VERSION"),"state_schema":drive_core::STATE_SCHEMA_VERSION,"ipc":crate::wire::VERSION},
         "shutdown":service.shutdown_diagnostics.snapshot(),
         "initialization":initialization,
+        "recovery":recovery,
         "host":service.profile.host,"username":service.profile.username,"scope_path":service.profile.scope.path}).to_string();
     timings.serialize_us = elapsed_us(serialize);
     timings.total_us = elapsed_us(started);
@@ -1013,17 +1133,15 @@ fn pin(service: &Service, path: &str, value: bool) -> io::Result<()> {
     service.bridge.signal_upload();
     Ok(())
 }
-fn release(service: &Service, path: &str) -> io::Result<String> {
-    let ids = {
-        let store = service.bridge.store.lock().unwrap();
-        let node = resolve(
-            &store,
-            &service.profile.scope.file_id,
-            &service.profile.mount,
-            path,
-        )?;
-        let mut pending = vec![node];
-        let mut ids = Vec::new();
+/// Collect the file ids covered by the selected paths, deduplicated across
+/// overlapping selections. A cycle in the local tree is a hard error: releasing
+/// part of a corrupt tree would make the result look successful.
+fn release_ids(service: &Service, paths: &[String]) -> io::Result<Vec<String>> {
+    let store = service.bridge.store.lock().unwrap();
+    let mut ids = Vec::new();
+    let mut covered = HashSet::new();
+    for (_, resolved) in resolve_all(&store, service, paths.to_vec(), exclusion_rules(service).as_ref()) {
+        let mut pending = vec![resolved?];
         let mut seen = HashSet::new();
         while let Some(node) = pending.pop() {
             if !seen.insert(node.id.clone()) {
@@ -1037,33 +1155,270 @@ fn release(service: &Service, path: &str) -> io::Result<String> {
                         .into_iter()
                         .map(|r| r.node),
                 );
-            } else {
+            } else if covered.insert(node.id.clone()) {
                 ids.push(node.id);
             }
         }
-        ids
-    };
-    let mut released = Vec::new();
-    let mut protected = Vec::new();
-    for id in ids {
-        if service.bridge.release_content(&id).is_ok() {
-            released.push(id);
-        } else {
-            protected.push(id);
-        }
     }
-    let bytes = service
+    Ok(ids)
+}
+
+/// Bodies are reclaimed in small batches so a huge directory does not hold the
+/// Store lock for the whole run, and a cancellation keeps the bytes reclaimed
+/// by the files that were already released.
+const RELEASE_GC_BATCH: usize = 32;
+
+struct ReleaseRun {
+    released: Vec<String>,
+    skipped: Vec<String>,
+    protected: Vec<String>,
+    reclaimed_bytes: u64,
+    done: usize,
+    cancelled: bool,
+}
+
+fn collect_release_garbage(service: &Service) -> io::Result<u64> {
+    service
         .bridge
         .store
         .lock()
         .unwrap()
         .collect_garbage()
-        .map_err(|_| other())?;
-    Ok(serde_json::json!({"schema":1,"released":released,"protected_or_failed":protected,"reclaimed_bytes":bytes}).to_string())
+        .map_err(|_| other())
+}
+
+/// Release each id in order. Progress snapshots are published after every file
+/// without holding the Store lock, so a synchronous caller can ignore them and
+/// a background job can update its polled state.
+fn run_release(
+    service: &Service,
+    ids: &[String],
+    cancel: &AtomicBool,
+    mut progress: impl FnMut(&ReleaseRun),
+) -> io::Result<ReleaseRun> {
+    let mut run = ReleaseRun {
+        released: Vec::new(),
+        skipped: Vec::new(),
+        protected: Vec::new(),
+        reclaimed_bytes: 0,
+        done: 0,
+        cancelled: false,
+    };
+    let mut since_gc = 0;
+    for id in ids {
+        if cancel.load(Ordering::Acquire) {
+            run.cancelled = true;
+            break;
+        }
+        match service.bridge.release_content(id) {
+            Ok(drive_core::ReleaseOutcome::Released) => run.released.push(id.clone()),
+            Ok(drive_core::ReleaseOutcome::Skipped) => run.skipped.push(id.clone()),
+            Err(_) => run.protected.push(id.clone()),
+        }
+        run.done += 1;
+        since_gc += 1;
+        if since_gc >= RELEASE_GC_BATCH {
+            run.reclaimed_bytes += collect_release_garbage(service)?;
+            since_gc = 0;
+        }
+        progress(&run);
+        #[cfg(test)]
+        {
+            let delay = service.release_step_delay.load(Ordering::Acquire);
+            if delay > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(delay));
+            }
+        }
+    }
+    run.reclaimed_bytes += collect_release_garbage(service)?;
+    run.cancelled |= cancel.load(Ordering::Acquire);
+    Ok(run)
+}
+
+/// Synchronous release kept for existing clients: it blocks until every
+/// selected file has been attempted and returns the same shape as before, with
+/// an additive `skipped` list for already-released content.
+pub fn release(service: &Service, path: &str) -> io::Result<String> {
+    let ids = release_ids(service, &[path.to_string()])?;
+    let run = run_release(service, &ids, &AtomicBool::new(false), |_| {})?;
+    Ok(serde_json::json!({
+        "schema": 1,
+        "released": run.released,
+        "skipped": run.skipped,
+        "protected_or_failed": run.protected,
+        "reclaimed_bytes": run.reclaimed_bytes,
+    })
+    .to_string())
+}
+
+fn update_release_job(service: &Service, run: &ReleaseRun) {
+    let mut state = service.release.lock().unwrap();
+    let Some(job) = state.job.as_mut() else {
+        return;
+    };
+    job.done = run.done;
+    job.released_count = run.released.len();
+    job.skipped_count = run.skipped.len();
+    job.protected_count = run.protected.len();
+    job.reclaimed_bytes = run.reclaimed_bytes;
+}
+
+fn run_release_job(service: Arc<Service>, ids: Vec<String>, cancel: Arc<AtomicBool>) {
+    let result = run_release(&service, &ids, &cancel, |run| {
+        update_release_job(&service, run);
+    });
+    let mut state = service.release.lock().unwrap();
+    state.cancel = None;
+    let Some(job) = state.job.as_mut() else {
+        return;
+    };
+    match result {
+        Ok(run) => {
+            job.done = run.done;
+            job.released_count = run.released.len();
+            job.skipped_count = run.skipped.len();
+            job.protected_count = run.protected.len();
+            job.released = run.released;
+            job.skipped = run.skipped;
+            job.protected = run.protected;
+            job.reclaimed_bytes = run.reclaimed_bytes;
+            job.finished = true;
+            job.cancelled = run.cancelled;
+        }
+        Err(error) => {
+            job.finished = true;
+            job.error = Some(error.to_string());
+        }
+    }
+}
+
+/// Start releasing the selected paths on a background thread. Only one job may
+/// run at a time; a re-entry fails instead of queueing a second scan.
+pub fn begin_release(service: &Arc<Service>, paths: &[String]) -> io::Result<String> {
+    if paths.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "no paths to release",
+        ));
+    }
+    let ids = release_ids(service, paths)?;
+    let (job_id, total, cancel) = {
+        let mut state = service.release.lock().unwrap();
+        if state.job.as_ref().is_some_and(|job| !job.finished) {
+            return Err(io::Error::other("a release job is already in progress"));
+        }
+        state.seq += 1;
+        let job_id = format!("release-{}", state.seq);
+        let cancel = Arc::new(AtomicBool::new(false));
+        state.job = Some(crate::service::ReleaseJob {
+            id: job_id.clone(),
+            total: ids.len(),
+            done: 0,
+            released_count: 0,
+            skipped_count: 0,
+            protected_count: 0,
+            released: Vec::new(),
+            skipped: Vec::new(),
+            protected: Vec::new(),
+            reclaimed_bytes: 0,
+            finished: false,
+            cancelled: false,
+            error: None,
+        });
+        state.cancel = Some(cancel.clone());
+        (job_id, ids.len(), cancel)
+    };
+    let worker = service.clone();
+    std::thread::spawn(move || run_release_job(worker, ids, cancel));
+    Ok(serde_json::json!({"schema":1,"job_id":job_id,"total":total}).to_string())
+}
+
+/// Compact release summary added to GetOverview/GetCacheSettings. It is purely
+/// additive (`schema` stays 1) so older GUI/client builds ignore it.
+fn release_job_summary(service: &Service) -> Option<serde_json::Value> {
+    let state = service.release.lock().unwrap();
+    let job = state.job.as_ref()?;
+    Some(serde_json::json!({
+        "job_id": job.id,
+        "total": job.total,
+        "done": job.done,
+        "reclaimed_bytes": job.reclaimed_bytes,
+        "finished": job.finished,
+        "cancelled": job.cancelled,
+    }))
+}
+
+fn job_snapshot(job: &crate::service::ReleaseJob) -> serde_json::Value {
+    let mut value = serde_json::json!({
+        "schema": 1,
+        "job_id": job.id,
+        "available": true,
+        "total": job.total,
+        "done": job.done,
+        "released_count": job.released_count,
+        "skipped_count": job.skipped_count,
+        "protected_count": job.protected_count,
+        "reclaimed_bytes": job.reclaimed_bytes,
+        "finished": job.finished,
+        "cancelled": job.cancelled,
+        "error": job.error,
+    });
+    if job.finished {
+        let map = value.as_object_mut().expect("release snapshot object");
+        map.insert("released".into(), serde_json::json!(job.released));
+        map.insert("skipped".into(), serde_json::json!(job.skipped));
+        map.insert(
+            "protected_or_failed".into(),
+            serde_json::json!(job.protected),
+        );
+    }
+    value
+}
+
+/// Poll a release job. Unknown or superseded ids are reported as unavailable
+/// instead of failing the client, so a restarted service degrades gracefully.
+pub fn release_job(service: &Service, job_id: &str) -> io::Result<String> {
+    let state = service.release.lock().unwrap();
+    match state.job.as_ref().filter(|job| job.id == job_id) {
+        Some(job) => Ok(job_snapshot(job).to_string()),
+        None => Ok(
+            serde_json::json!({"schema":1,"job_id":job_id,"available":false}).to_string(),
+        ),
+    }
+}
+
+/// Request cancellation. Files already released stay released; the next idle
+/// poll reports `cancelled: true` with the committed prefix and its bytes.
+pub fn cancel_release(service: &Service, job_id: &str) -> io::Result<String> {
+    let state = service.release.lock().unwrap();
+    let Some(job) = state.job.as_ref().filter(|job| job.id == job_id) else {
+        return Ok(serde_json::json!({
+            "schema": 1,
+            "job_id": job_id,
+            "cancel_requested": false,
+            "available": false,
+        })
+        .to_string());
+    };
+    let requested = if job.finished {
+        false
+    } else if let Some(cancel) = &state.cancel {
+        cancel.store(true, Ordering::Release);
+        true
+    } else {
+        false
+    };
+    let mut value = job_snapshot(job);
+    value
+        .as_object_mut()
+        .expect("release snapshot object")
+        .insert("cancel_requested".into(), serde_json::json!(requested));
+    Ok(value.to_string())
 }
 
 /// Read-only browser pages from local metadata, including before network unlock.
 pub fn directory(service: &Service, path: &str, offset: u32) -> io::Result<String> {
+    let rules = exclusion_rules(service);
     let (children, total) = {
         let store = service.bridge.store.lock().unwrap();
         if preview::active(&store, &service.profile.scope.file_id)? {
@@ -1073,6 +1428,7 @@ pub fn directory(service: &Service, path: &str, offset: u32) -> io::Result<Strin
                 &service.profile.mount,
                 path,
                 offset,
+                rules.as_ref(),
             );
         }
         store
@@ -1084,10 +1440,28 @@ pub fn directory(service: &Service, path: &str, offset: u32) -> io::Result<Strin
             &service.profile.mount,
             path,
         )?;
+        // Issue #50: a directory that is itself excluded is indistinguishable
+        // from a missing one.
+        if rules
+            .as_ref()
+            .is_some_and(|rules| path_excluded(rules, &service.profile.mount, path, node.directory))
+        {
+            return Err(excluded_error());
+        }
         let total = store.child_node_count(&node.id).map_err(|_| other())?;
-        let children = store
+        let mut children = store
             .child_nodes_page(&node.id, offset as usize, 256)
             .map_err(|_| other())?;
+        if let Some(rules) = &rules {
+            children.retain(|child| {
+                !path_excluded(
+                    rules,
+                    &service.profile.mount,
+                    &child_path(path, &child.name),
+                    child.directory,
+                )
+            });
+        }
         (children, total)
     };
     // The page snapshot already carries every child id, so only the requested
@@ -1096,11 +1470,7 @@ pub fn directory(service: &Service, path: &str, offset: u32) -> io::Result<Strin
     let resolved: Vec<(String, io::Result<Node>)> = children
         .into_iter()
         .map(|child| {
-            let name = if path.is_empty() {
-                child.name.clone()
-            } else {
-                format!("{}/{}", path.trim_end_matches('/'), child.name)
-            };
+            let name = child_path(path, &child.name);
             (name, Ok(child))
         })
         .collect();
@@ -1168,7 +1538,7 @@ fn issues_on(store: &Store, service: &Service, after: &str) -> io::Result<String
     let page = store
         .sync_issues(&service.profile.scope.file_id, after)
         .map_err(io::Error::other)?;
-    Ok(issues_json(page))
+    Ok(issues_json(page, service.bridge.recovery_status()))
 }
 fn issues_locked(service: &Service, after: &str) -> io::Result<String> {
     let page = service
@@ -1178,10 +1548,14 @@ fn issues_locked(service: &Service, after: &str) -> io::Result<String> {
         .unwrap()
         .sync_issues(&service.profile.scope.file_id, after)
         .map_err(io::Error::other)?;
-    Ok(issues_json(page))
+    Ok(issues_json(page, service.bridge.recovery_status()))
 }
-fn issues_json(page: drive_core::conflicts::IssuePage) -> String {
-    serde_json::json!({"schema":1,"entries":page.entries,"next":page.next}).to_string()
+fn issues_json(
+    page: drive_core::conflicts::IssuePage,
+    recovery: serde_json::Value,
+) -> String {
+    serde_json::json!({"schema":1,"entries":page.entries,"next":page.next,"recovery":recovery})
+        .to_string()
 }
 pub fn keep_both(service: &Service, id: &str, token: &str, name: &str) -> io::Result<String> {
     let result =
@@ -1206,6 +1580,35 @@ pub fn keep_directory_both(
         serde_json::json!({"schema":1,"directory_id":result.node.id,"path":result.path})
             .to_string(),
     )
+}
+pub fn keep_directory_local(service: &Service, id: &str, token: &str) -> io::Result<String> {
+    let (node, path) =
+        service
+            .bridge
+            .keep_directory_local(&service.profile.scope.file_id, id, token)?;
+    Ok(serde_json::json!({"schema":1,"directory_id":node.id,"path":path,"kept_local":true})
+        .to_string())
+}
+/// Accept the remote deletion of a bound directory. Only advertised when no
+/// surviving local-only content would be lost (`can_keep_remote`).
+pub fn keep_directory_remote(service: &Service, id: &str, token: &str) -> io::Result<String> {
+    let path =
+        service
+            .bridge
+            .keep_directory_remote(&service.profile.scope.file_id, id, token)?;
+    Ok(serde_json::json!({"schema":1,"directory_id":id,"path":path,
+        "kept_remote":true,"deleted_local":false}).to_string())
+}
+/// Abandon one unconfirmed local creation: the operation moves to the persistent
+/// `abandoned` terminal state and the local-only file is retired. The remote
+/// side is never touched, so the reply always reports `server_changed: false`.
+pub fn abandon_upload(service: &Service, id: &str, token: &str) -> io::Result<String> {
+    let path = service
+        .bridge
+        .abandon_unconfirmed_upload(&service.profile.scope.file_id, id, token)?;
+    Ok(serde_json::json!({"schema":1,"abandoned":true,"id":id,"path":path,
+        "deleted_local":true,"server_changed":false,
+        "summary":"已放弃本次本地待上传并删除本地文件；未修改服务器条目"}).to_string())
 }
 pub fn trust_settings(service: &Service) -> io::Result<String> {
     let settings = service.trust_settings();
@@ -1253,7 +1656,7 @@ fn cache_settings_with(service: &Service, read_only: Option<&Store>) -> io::Resu
         None => service.bridge.cache_usage()?,
     };
     let state = service.control.lock().unwrap().state;
-    Ok(serde_json::json!({"schema":1,"task_id":service.profile.task_id,"usage":usage,"connection":state,"error":*service.bridge.cache_error.lock().unwrap(),"recent_download_seconds":drive_core::cache_policy::RECENT_DOWNLOAD_SECONDS}).to_string())
+    Ok(serde_json::json!({"schema":1,"task_id":service.profile.task_id,"usage":usage,"connection":state,"error":*service.bridge.cache_error.lock().unwrap(),"recent_download_seconds":drive_core::cache_policy::RECENT_DOWNLOAD_SECONDS,"release_job":release_job_summary(service)}).to_string())
 }
 pub fn set_cache_settings(service: &Service, body: &str) -> io::Result<String> {
     #[derive(serde::Deserialize)]
@@ -1367,6 +1770,25 @@ impl Desktop {
         let s = self.0.clone();
         local(move || keep_directory_both(&s, &id, &token, &name)).await
     }
+    /// Additive bound-directory recovery (issue #54), advertised by
+    /// `GetOverview.recovery_actions` and per-row flags. Older backends lack
+    /// the methods; the GUI keeps offering recheck instead.
+    async fn keep_directory_local(&self, id: String, token: String) -> zbus::fdo::Result<String> {
+        let s = self.0.clone();
+        local(move || keep_directory_local(&s, &id, &token)).await
+    }
+    async fn keep_directory_remote(&self, id: String, token: String) -> zbus::fdo::Result<String> {
+        let s = self.0.clone();
+        local(move || keep_directory_remote(&s, &id, &token)).await
+    }
+    /// Additive issue-center action advertised by
+    /// `GetOverview.recovery_actions.abandon_upload`. It only retires a local
+    /// unconfirmed creation; older backends simply lack the method and the GUI
+    /// keeps offering recheck instead.
+    async fn abandon_upload(&self, id: String, token: String) -> zbus::fdo::Result<String> {
+        let s = self.0.clone();
+        local(move || abandon_upload(&s, &id, &token)).await
+    }
     async fn retry_downloads(&self, path: String) -> zbus::fdo::Result<String> {
         let s = self.0.clone();
         local(move || retry_downloads(&s, &path)).await
@@ -1412,6 +1834,18 @@ impl Desktop {
     async fn release_space(&self, path: String) -> zbus::fdo::Result<String> {
         let s = self.0.clone();
         local(move || release(&s, &path)).await
+    }
+    async fn begin_release_space(&self, paths: Vec<String>) -> zbus::fdo::Result<String> {
+        let s = self.0.clone();
+        local(move || begin_release(&s, &paths)).await
+    }
+    async fn get_release_job(&self, job_id: String) -> zbus::fdo::Result<String> {
+        let s = self.0.clone();
+        local(move || release_job(&s, &job_id)).await
+    }
+    async fn cancel_release_space(&self, job_id: String) -> zbus::fdo::Result<String> {
+        let s = self.0.clone();
+        local(move || cancel_release(&s, &job_id)).await
     }
     async fn pause(&self) -> zbus::fdo::Result<()> {
         let s = self.0.clone();
@@ -1502,6 +1936,7 @@ mod readpath_tests {
             writable: false,
             local_policy: None,
             writable_source: None,
+            exclude_patterns: Vec::new(),
         }
     }
     fn fixture() -> (tempfile::TempDir, Arc<Service>) {
@@ -1742,20 +2177,20 @@ mod readpath_tests {
             "folder/one".to_string(),
             "missing".to_string(),
         ];
-        let resolved = resolve_all(&store, &service, paths.clone());
+        let resolved = resolve_all(&store, &service, paths.clone(), None);
         let mut scoped = load_tree(&store, &resolved).unwrap();
         let scoped_json = render_states(resolved, &active, Some(&store), &mut scoped);
-        let resolved = resolve_all(&store, &service, paths);
+        let resolved = resolve_all(&store, &service, paths, None);
         let mut projected = load_tree_with_projection(&store, &projection, &resolved).unwrap();
         let projected_json = render_states(resolved, &active, Some(&store), &mut projected);
         assert_eq!(scoped_json, projected_json);
         // File-only batches build no tree on either path.
         let files = vec!["folder/one".to_string(), "missing".to_string()];
-        let resolved_files = resolve_all(&store, &service, files.clone());
+        let resolved_files = resolve_all(&store, &service, files.clone(), None);
         let mut scoped_files = load_tree(&store, &resolved_files).unwrap();
         let scoped_files_json =
             render_states(resolved_files, &active, Some(&store), &mut scoped_files);
-        let resolved_files = resolve_all(&store, &service, files);
+        let resolved_files = resolve_all(&store, &service, files, None);
         let mut projected_files =
             load_tree_with_projection(&store, &projection, &resolved_files).unwrap();
         let projected_files_json =
@@ -1798,6 +2233,89 @@ mod readpath_tests {
         assert_eq!(page["entries"], expected["entries"]);
     }
 
+    fn service_with_excludes(
+        patterns: &[&str],
+        nodes: &[Node],
+    ) -> (tempfile::TempDir, Arc<Service>) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(dir.path()).unwrap();
+        store.install_remote_snapshot(nodes, "1", "server").unwrap();
+        store.ensure_fs_root("root").unwrap();
+        let mut profile = profile();
+        profile.exclude_patterns = patterns
+            .iter()
+            .map(|pattern| (*pattern).to_owned())
+            .collect();
+        (
+            dir,
+            Service::new(profile, store, PathBuf::from("/nonexistent-worker")).unwrap(),
+        )
+    }
+
+    /// Issue #50: GetDirectory hides excluded children and their subtrees. The
+    /// authoritative `total` still counts them until phase 4 cleans legacy rows.
+    #[test]
+    fn get_directory_hides_excluded_children_and_subtrees() {
+        let nodes = [
+            node("root", None, true),
+            node("folder", Some("root"), true),
+            node("one", Some("folder"), false),
+            node("notes", Some("root"), true),
+            node("install.iso", Some("root"), false),
+        ];
+        let (_dir, service) = service_with_excludes(&["^folder$", r"\.iso$"], &nodes);
+        let page: serde_json::Value =
+            serde_json::from_str(&directory(&service, "", 0).expect("root page")).unwrap();
+        let paths: Vec<&str> = page["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["path"].as_str().unwrap())
+            .collect();
+        assert_eq!(paths, ["notes"]);
+        assert_eq!(page["total"], 3);
+        for path in ["folder", "folder/one", "install.iso"] {
+            let error = directory(&service, path, 0).unwrap_err();
+            assert_eq!(
+                error.raw_os_error(),
+                Some(libc::ENOENT),
+                "excluded path must answer ENOENT: {path}"
+            );
+        }
+        assert!(directory(&service, "notes", 0).is_ok());
+    }
+
+    /// Issue #50: GetStates treats excluded paths like missing ones.
+    #[test]
+    fn states_treat_excluded_paths_as_unavailable() {
+        let nodes = [
+            node("root", None, true),
+            node("folder", Some("root"), true),
+            node("one", Some("folder"), false),
+            node("notes", Some("root"), true),
+        ];
+        let (_dir, service) = service_with_excludes(&["^folder$"], &nodes);
+        let value: serde_json::Value = serde_json::from_str(
+            &states(
+                &service,
+                vec![
+                    "folder".to_owned(),
+                    "folder/one".to_owned(),
+                    "notes".to_owned(),
+                ],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let entries = value["entries"].as_array().unwrap();
+        assert_eq!(entries[0]["path"], "folder");
+        assert_eq!(entries[0]["error"], "path_or_local_state_unavailable");
+        assert_eq!(entries[1]["path"], "folder/one");
+        assert_eq!(entries[1]["error"], "path_or_local_state_unavailable");
+        assert_eq!(entries[2]["path"], "notes");
+        assert!(entries[2]["error"].is_null());
+    }
+
     #[test]
     fn stale_projection_falls_back_to_the_scoped_read() {
         let (_dir, service) = fixture();
@@ -1820,7 +2338,7 @@ mod readpath_tests {
                 .unwrap();
         }
         let ro = read_only(&service).unwrap();
-        let resolved = resolve_all(&ro, &service, vec!["folder/lateDir".to_string()]);
+        let resolved = resolve_all(&ro, &service, vec!["folder/lateDir".to_string()], None);
         assert!(
             super::status_tree::StatusTree::load_with_projection(
                 &ro,
@@ -2079,5 +2597,226 @@ mod readpath_tests {
             service.bridge.store.local_revision()
         );
         assert!(service.bridge.store.local_revision() > before_revision);
+    }
+}
+
+#[cfg(test)]
+mod release_job_tests {
+    //! Deterministic timing hooks for the background release job: when the
+    //! worker commits each file decides whether a cancel may still act.
+    use super::*;
+    use drive_core::{DownloadTicket, Node, NodeMetadata, native::Scope, sha256};
+    use serde_json::Value;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    const MOUNT: &str = "/tmp/drive-native-release-mount";
+
+    fn node(id: &str, parent: Option<&str>, directory: bool) -> Node {
+        Node {
+            id: id.into(),
+            parent: parent.map(str::to_owned),
+            name: id.into(),
+            version: "1".into(),
+            directory,
+            metadata: Some(NodeMetadata {
+                size: 3,
+                mtime: 1,
+                mode: if directory { 0o755 } else { 0o644 },
+            }),
+        }
+    }
+
+    fn profile() -> crate::service::Profile {
+        crate::service::Profile {
+            schema: 1,
+            task_id: "9f6b8a52-5f4c-4c5e-9d0a-2c1b3d4e5f60".into(),
+            host: "example.invalid".into(),
+            tls_name: "example.invalid".into(),
+            trusted_ca_pem: Vec::new(),
+            username: "test".into(),
+            device_id: "1f6b8a52-5f4c-4c5e-9d0a-2c1b3d4e5f61".into(),
+            scope: Scope {
+                view_id: 1,
+                node_id: 1,
+                file_id: "root".into(),
+                path: "/test".into(),
+            },
+            mount: PathBuf::from(MOUNT),
+            writable: false,
+            exclude_patterns: Vec::new(),
+            local_policy: None,
+            writable_source: None,
+        }
+    }
+
+    fn fixture() -> (tempfile::TempDir, Arc<Service>) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(dir.path()).unwrap();
+        store
+            .install_remote_snapshot(
+                &[
+                    node("root", None, true),
+                    node("folder", Some("root"), true),
+                    node("one", Some("folder"), false),
+                    node("two", Some("folder"), false),
+                    node("three", Some("folder"), false),
+                    node("four", Some("folder"), false),
+                ],
+                "1",
+                "server",
+            )
+            .unwrap();
+        store.ensure_fs_root("root").unwrap();
+        for id in ["one", "two", "three", "four"] {
+            store
+                .publish_download(
+                    &DownloadTicket {
+                        id: id.into(),
+                        version: "1".into(),
+                    },
+                    b"abc",
+                    &sha256(b"abc"),
+                )
+                .unwrap();
+        }
+        (
+            dir,
+            Service::new(profile(), store, PathBuf::from("/nonexistent-worker")).unwrap(),
+        )
+    }
+
+    fn path() -> String {
+        format!("{MOUNT}/folder")
+    }
+
+    fn value(text: &str) -> Value {
+        serde_json::from_str(text).unwrap()
+    }
+
+    fn snapshot(service: &Service, job: &str) -> Value {
+        value(&release_job(service, job).unwrap())
+    }
+
+    fn wait_for(service: &Service, job: &str, what: &str, ready: impl Fn(&Value) -> bool) -> Value {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let current = snapshot(service, job);
+            if ready(&current) {
+                return current;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "release job never reported {what}: {current}"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    fn finished(service: &Service, job: &str) -> Value {
+        wait_for(service, job, "finished", |current| current["finished"] == true)
+    }
+
+    fn begin(service: &Arc<Service>) -> String {
+        let started = value(&begin_release(service, &[path()]).unwrap());
+        started["job_id"].as_str().unwrap().to_string()
+    }
+
+    #[test]
+    fn progress_snapshots_advance_one_file_at_a_time_and_never_go_backwards() {
+        let (_dir, service) = fixture();
+        service.set_release_step_delay(40);
+        let job = begin(&service);
+        let mut last_done = 0;
+        let mut saw_intermediate = false;
+        let final_state = loop {
+            let current = snapshot(&service, &job);
+            assert_eq!(current["total"], 4);
+            let done = current["done"].as_u64().unwrap();
+            assert!(done >= last_done, "progress moved backwards: {current}");
+            last_done = done;
+            if current["finished"] == true {
+                break current;
+            }
+            if done > 0 && done < 4 {
+                saw_intermediate = true;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        assert!(saw_intermediate, "the job finished too fast to observe progress");
+        assert_eq!(final_state["done"], 4);
+        assert_eq!(final_state["released_count"], 4);
+        assert_eq!(final_state["reclaimed_bytes"], 12);
+    }
+
+    #[test]
+    fn beginning_another_job_while_one_runs_is_rejected_instead_of_queueing() {
+        let (_dir, service) = fixture();
+        service.set_release_step_delay(80);
+        let job = begin(&service);
+        let error = begin_release(&service, &[path()]).unwrap_err();
+        assert!(
+            error.to_string().contains("in progress"),
+            "unexpected reentry error: {error}"
+        );
+        let final_state = finished(&service, &job);
+        assert_eq!(final_state["released_count"], 4);
+        // Once finished, a new job is accepted again.
+        let next = begin_release(&service, &[path()]).unwrap();
+        assert_eq!(value(&next)["finished"], Value::Null);
+    }
+
+    #[test]
+    fn cancelling_mid_batch_keeps_the_committed_prefix_and_reports_exact_bytes() {
+        let (_dir, service) = fixture();
+        service.set_release_step_delay(60);
+        let job = begin(&service);
+        let current = wait_for(&service, &job, "a committed first file", |current| {
+            current["done"].as_u64().unwrap() >= 1 && current["finished"] == false
+        });
+        let committed = current["done"].as_u64().unwrap();
+        assert!(committed < 4, "the test needs the job to still be running");
+
+        let cancelled = value(&cancel_release(&service, &job).unwrap());
+        assert_eq!(cancelled["cancel_requested"], true);
+
+        let final_state = finished(&service, &job);
+        assert_eq!(final_state["cancelled"], true);
+        let done = final_state["done"].as_u64().unwrap();
+        assert!(done < 4, "cancel must stop the remaining files: {final_state}");
+        assert_eq!(final_state["released_count"], done);
+        assert_eq!(final_state["skipped_count"], 0);
+        // Bytes are counted exactly once: the committed prefix only.
+        assert_eq!(final_state["reclaimed_bytes"], done * 3);
+        // The cancelled files were not released.
+        let released = final_state["released"].as_array().unwrap().len();
+        assert_eq!(released as u64, done);
+        assert_eq!(
+            service.bridge.store.lock().unwrap().collect_garbage().unwrap(),
+            0,
+            "a second GC must not find or double-count freeable bytes"
+        );
+    }
+
+    #[test]
+    fn cancelling_a_finished_job_is_reported_but_never_rolls_back_committed_files() {
+        let (_dir, service) = fixture();
+        service.set_release_step_delay(0);
+        let job = begin(&service);
+        let final_state = finished(&service, &job);
+        let released = final_state["released_count"].clone();
+        let reclaimed = final_state["reclaimed_bytes"].clone();
+        let reply = value(&cancel_release(&service, &job).unwrap());
+        assert_eq!(reply["cancel_requested"], false);
+        assert_eq!(reply["finished"], true);
+        assert_eq!(reply["released_count"], released);
+        assert_eq!(reply["reclaimed_bytes"], reclaimed);
+        // The committed files stay released; a later begin sees them skipped.
+        let next = begin_release(&service, &[path()]).unwrap();
+        let next_job = value(&next)["job_id"].as_str().unwrap().to_string();
+        let next_final = finished(&service, &next_job);
+        assert_eq!(next_final["released_count"], 0);
+        assert_eq!(next_final["skipped_count"], 4);
     }
 }

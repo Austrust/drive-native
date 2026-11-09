@@ -252,6 +252,7 @@ fn overview_reports_the_failure_source_and_stays_schema_compatible() {
             writable: false,
             local_policy: None,
             writable_source: None,
+            exclude_patterns: Vec::new(),
         },
         store,
         std::path::PathBuf::from("/nonexistent-worker"),

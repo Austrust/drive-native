@@ -66,6 +66,27 @@ class DesktopTests(unittest.TestCase):
             value << paths
             self.assertEqual(value.currentSignature(), "as")
 
+    def test_profile_rejects_invalid_exclude_patterns_and_round_trips_valid_ones(self):
+        base = {"schema": 1, "task_id": "synthetic-test", "mount": str(Path(self.scratch.name) / "mount")}
+        for patterns in ("not-a-list", [""], [42], ["[unclosed"]):
+            with self.assertRaises(ValueError, msg=repr(patterns)):
+                config.save_profile(dict(base, exclude_patterns=patterns))
+        with self.assertRaises(ValueError) as raised:
+            config.save_profile(dict(base, exclude_patterns=["ok", "[unclosed"]))
+        self.assertIn("[unclosed", str(raised.exception))
+        self.assertFalse(config.config_path().exists())
+
+        value = dict(base, exclude_patterns=[r"^Pinned$", r"\.iso$", "(?i)temp"])
+        path = config.save_profile(value)
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(config.load_profile(), value)
+
+        # A profile saved before Issue #50 has no exclude_patterns key.
+        path.unlink()
+        legacy = dict(base)
+        config.save_profile(legacy)
+        self.assertEqual(config.load_profile(), legacy)
+
     def test_unlock_checks_task_and_owner_before_sending_credential(self):
         window = MainWindow()
         window.refresh_timer.stop()

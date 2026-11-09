@@ -21,16 +21,22 @@
 - 全局设置页是真实设置，不再是占位文字：桌面通知两个开关、同步历史保留说明与“打开同步历史”入口、关闭／退出行为和键盘说明。
 - 设置写入配置根下的 `gui-settings.json`（`schema=1`），与任务 profile 分离；目录 0700、文件 0600、`O_NOFOLLOW`、临时文件加 `os.replace` 原子替换。损坏、权限不符或含未知 schema 的文件回退默认值，不阻止窗口启动。设置只保存布尔偏好，不保存账号、服务器或密码。
 
+### 排除规则（issue #50 阶段 4）
+
+- 侧栏“排除规则”打开当前挂载的排除规则编辑器：读取任务 profile 的 `exclude_patterns`（缺失视为空列表），支持添加、更新所选、删除所选与保存；空列表表示不排除任何路径。规则是 Rust `regex` 语法、区分大小写的正则，匹配相对同步目录根的 POSIX 路径，命中的文件、目录及其整个子树不会出现在挂载视图中，规则变更在下次启动挂载后完全生效。
+- 保存前复用 `config._validate_exclude_patterns` 预编译校验，非法正则就地提示原始 pattern 与编译错误且不改动 profile；保存只替换 `exclude_patterns` 键，沿用目录 0700、文件 0600 与临时文件 `os.replace` 原子替换，并对 `task_id` 做并发保护（窗口打开期间换了任务则拒绝写入）。所有控件有可读 accessible name 且可 Tab 到达，错误消息放在可读的提示标签中。
+
 ## 通知与全局设置
 
 - `NotificationCenter` 接收每次 `GetOverview`：`connection == locked` 提示需要登录；`needs_attention` 或 `error` 提示需要处理；`background_error` 持续满 60 秒提示持续同步失败。同一挂载的同一类问题在一个 episode 内只通知一次，条件消失后重置；同一挂载同类问题 30 分钟内合并，不同挂载、不同类别不合并。
-- 通知文本使用中性短文案并带挂载名，不包含服务器地址、账号或错误详情；点击通知激活对应挂载，窗口隐藏时先 `showNormal`。托盘不可用时只做状态记账、不发系统通知，主窗口横幅继续显示状态。
+- 通知文本使用中性短文案并带挂载名，不包含服务器地址、账号或错误详情；点击通知激活对应挂载，窗口隐藏时先 `showNormal`。托盘不可用时改由 freedesktop D-Bus 系统通知投递（`org.freedesktop.Notifications`）；系统通知也不可用时只做状态记账、不发系统通知，主窗口横幅继续显示状态。
+- 系统通知的 `Notify` 调用由 jeepney 按显式签名 `susssasa{sv}i` 发送（PySide6 无法产生规范要求的 `uint32` replaced-id，纯 QtDBus 会被严格实现的守护进程以 `InvalidArgs` 拒绝）；`ActionInvoked` 信号由 QtDBus 订阅，默认动作复用 `clicked(target)` 的定位目标。投递层把每个通知的守护进程 id 映射到触发它的挂载 slot（有界，最多 32 条），点击旧通知仍打开该通知自己的挂载；id 未知或已淘汰时回退到最近一次通知的目标。jeepney 缺失或会话总线不可用时后端报告不可用并回退，不影响 GUI 启动。
 - 成功通知默认关闭。开启后每 30 秒对每个挂载轮询 `GetRecentActivity(limit 20)`，按挂载记录最大 id 作游标，只合并新增的 upload/download 成功项为“「挂载」已完成 N 项同步”，不逐个文件提示，也不把历史记录当作新成功。
 - 全局设置变更立即持久化并更新通知中心；关闭成功通知会停止轮询并清空游标，重新开启从新的基线开始。
 
 ## 托盘与激活
 
-左键切换活动面板；右键提供主窗口、当前活动与最近历史、各挂载文件夹、单挂载及全体暂停／恢复、单挂载“停止此挂载并卸载…”、全局设置和两种退出方式。`messageClicked` 由通知中心记录的目标 slot 决定打开哪个挂载，托盘菜单不重复网络请求。当前活动仍展示在途传输，持久完成记录通过独立历史 IPC 查询。
+左键切换活动面板；右键提供主窗口、当前活动与最近历史、各挂载文件夹、单挂载及全体暂停／恢复、单挂载“停止此挂载并卸载…”、全局设置和两种退出方式。托盘 `messageClicked` 没有通知 id，回退到最近一次通知的目标；freedesktop `ActionInvoked` 携带通知 id，按投递层记录的目标打开该通知对应的挂载。托盘菜单不重复网络请求。当前活动仍展示在途传输，持久完成记录通过独立历史 IPC 查询。
 
 托盘图标按语义四态着色：空闲（✓）、传输（·）、暂停（‖）、需要处理（!），未收到概览前为未知（?）。优先级为“需要处理”>“连接或恢复”>“在途传输”>“暂停”>“待同步”。传输数与问题数与主窗口同源：在途数来自 `GetTransfers` 在途缓存，问题数来自 `issue_count`（缺失时才回退到旧字段）；未收到概览时提示“正在检查状态”，不显示健康状态；提示文本不使用“上传”措辞。暂停分“部分已暂停”和“全部已暂停”，全体恢复只恢复本轮全体暂停记录的任务。
 
@@ -54,10 +60,10 @@ GUI 使用会话 D-Bus 服务按配置根隔离单实例。再次启动激活同
 
 ## 验证范围
 
-合成 GUI 回归覆盖同窗切换、任务配置和子进程环境隔离、迟到回复、单任务无响应、关闭／托盘丢失、独立停止查询、主题变化、全挂载表活动／问题列与行菜单、单挂载确认与真实停止阶段、超时／失败不强杀、通知 episode 与合并、无托盘静默、通知点击定位、全局设置持久化与损坏回退、快捷键映射、导航 Enter、隐藏页不进入键盘路径、托盘图标与计数同源。单实例测试在 `dbus-run-session` 中运行；开发启动测试只运行无害合成程序，不启动同步后台。
+合成 GUI 回归覆盖同窗切换、任务配置和子进程环境隔离、迟到回复、单任务无响应、关闭／托盘丢失、独立停止查询、主题变化、全挂载表活动／问题列与行菜单、单挂载确认与真实停止阶段、超时／失败不强杀、通知 episode 与合并、无托盘时改走系统通知／系统通知不可用时静默、通知点击定位、freedesktop D-Bus 投递与回退、全局设置持久化与损坏回退、快捷键映射、导航 Enter、隐藏页不进入键盘路径、托盘图标与计数同源。单实例测试在 `dbus-run-session` 中运行；开发启动测试只运行无害合成程序，不启动同步后台。
 
 ```sh
-GUI_PYTHON=/path/to/gui-venv/bin/python dbus-run-session -- bash scripts/test-gui.sh
+GUI_PYTHON=/path/to/gui-venv/bin/python bash scripts/test-gui.sh
 ```
 
-`scripts/test-gui.sh` 在 offscreen 环境逐个运行测试模块（含 `notification_tests`、`history_gui_tests`、`shutdown_diagnostic_tests`、`keyboard_gui_tests`、`window_transfer_tests`、`window_state_tests`）；`gui_instance_test` 在无 `DBUS_SESSION_BUS_ADDRESS` 且系统有 `dbus-run-session` 时自动套一层真实会话总线并设置 `DRIVE_NATIVE_GUI_REQUIRE_BUS=1`。测试不依赖真实托盘、D-Bus 或网络。渲染脚本 [`unified_gui_render.py`](../tests/unified_gui_render.py) 只使用合成挂载，不读取账号、访问 NAS 或连接后台。浅／深色截图只验证布局，不等同于 Mint/Cinnamon 托盘、通知和实机验收。完整包、真实 NAS、普通目录全量同步及其他最终门禁仍按仓库验收记录执行。
+`scripts/test-gui.sh` 在 offscreen 环境逐个运行测试模块（含 `notification_tests`、`notification_dbus_tests`、`history_gui_tests`、`shutdown_diagnostic_tests`、`keyboard_gui_tests`、`window_transfer_tests`、`release_gui_tests`、`exclude_gui_tests`、`window_state_tests`）；脚本清除继承的 `DBUS_SESSION_BUS_ADDRESS`／`DBUS_SESSION_BUS_PID`，使通知投递测试使用注入的 fake 连接、绝不碰真实会话总线；`gui_instance_test` 在无会话总线且系统有 `dbus-run-session` 时自动套一层真实会话总线并设置 `DRIVE_NATIVE_GUI_REQUIRE_BUS=1`。测试不依赖真实托盘、D-Bus 或网络。渲染脚本 [`unified_gui_render.py`](../tests/unified_gui_render.py) 只使用合成挂载，不读取账号、访问 NAS 或连接后台。浅／深色截图只验证布局，不等同于 Mint/Cinnamon 托盘、通知和实机验收。完整包、真实 NAS、普通目录全量同步及其他最终门禁仍按仓库验收记录执行。

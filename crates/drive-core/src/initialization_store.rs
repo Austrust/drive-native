@@ -1,5 +1,6 @@
 //! Durable, private initialization candidates. None of these tables supplies
 //! filesystem metadata or authorizes remote writes before atomic final install.
+use crate::exclude::ExcludeRules;
 use crate::initialization_events::{
     InitializationDirectoryEntry, InitializationEventHint, InitializationEventKind,
     InitializationEventPage,
@@ -17,6 +18,12 @@ pub struct InitializationBinding {
     pub restore: String,
     pub start_cursor: String,
     pub expected_cursor: String,
+    /// Issue #50 digest of the compiled exclusion rules that shaped this
+    /// candidate. Empty means "no exclusion rules" and keeps candidates written
+    /// before this field existed resumable. A mismatch restarts enumeration so a
+    /// narrower rule set cannot reuse a candidate that skipped nodes.
+    #[serde(default)]
+    pub rules_digest: String,
 }
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -554,6 +561,21 @@ impl Store {
             _ => Err(invalid("incomplete native binding")),
         }
     }
+    /// Scope root file id from the persisted native binding, if any.
+    ///
+    /// Used by the exclusion index refresher, which only needs the identity of
+    /// the mounted root and must not depend on the native protocol types.
+    pub fn native_scope_root(&self) -> Result<Option<String>> {
+        let Some((_, scope)) = self.native_scope_binding()? else {
+            return Ok(None);
+        };
+        let scope: serde_json::Value =
+            serde_json::from_str(&scope).map_err(|_| invalid("invalid native scope binding"))?;
+        match scope.get("file_id").and_then(|value| value.as_str()) {
+            Some(id) if !id.is_empty() => Ok(Some(id.to_owned())),
+            _ => Err(invalid("invalid native scope binding")),
+        }
+    }
     pub fn initialization_directory_path(
         &self,
         run: &InitializationRun,
@@ -584,6 +606,54 @@ impl Store {
             path.push_str(&node.name);
         }
         Ok(path)
+    }
+    /// Remove candidate entries whose scope-relative path is excluded.
+    ///
+    /// Used when a candidate built under older rules is resumed: excluded
+    /// subtrees are dropped before enumeration so they are neither imported nor
+    /// downloaded. Returns the number of removed direct children.
+    pub fn prune_initialization_excluded(
+        &mut self,
+        run: &InitializationRun,
+        rules: &ExcludeRules,
+    ) -> Result<usize> {
+        if rules.is_empty() {
+            return Ok(0);
+        }
+        let tx = self.db.transaction()?;
+        let state = checked(&tx, run, false)?;
+        let root = root_id(&state.binding)?.to_owned();
+        let root_node = load_node(&tx, &run.run_id, &root)?;
+        if root_node.id != root || root_node.parent.is_some() || !root_node.directory {
+            return Err(invalid("candidate root is not a directory"));
+        }
+        let mut pruned = 0usize;
+        let mut frontier = vec![(root, String::new())];
+        while let Some((directory, relative)) = frontier.pop() {
+            let mut statement = tx.prepare(
+                "SELECT id FROM initialization_entries WHERE run=?1 AND parent=?2 ORDER BY name",
+            )?;
+            let ids: Vec<String> = statement
+                .query_map(params![run.run_id, directory], |row| row.get(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            drop(statement);
+            for id in ids {
+                let node = load_node(&tx, &run.run_id, &id)?;
+                let child_relative = crate::exclude::join_relative(&relative, &node.name);
+                if rules.matches(&child_relative, node.directory) {
+                    delete_subtree(&tx, &run.run_id, &node.id)?;
+                    pruned += 1;
+                } else if node.directory {
+                    frontier.push((node.id, child_relative));
+                }
+            }
+        }
+        if pruned > 0 {
+            // Pruning invalidates any fence evidence for the old candidate shape.
+            clear_fence(&tx, &run.run_id)?;
+        }
+        tx.commit()?;
+        Ok(pruned)
     }
     pub fn initialization_writeback_blocked(&self) -> Result<bool> {
         Ok(self.db.query_row(

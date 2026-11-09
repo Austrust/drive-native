@@ -130,6 +130,8 @@ impl Store {
             "UPDATE namespace_ops SET state='inflight',body=?2 WHERE id=?1 AND state='pending'",
             params![op, serde_json::to_string(&q.job)?],
         )?;
+        // #9b TB2: a fresh mkdir submission supersedes a stale diagnosis.
+        crate::commit_diagnostics::clear_tx(&self.db, "namespace_ops", op)?;
         Ok(q.job)
     }
     /// Worker has not sent a mutation. Persist provenance before allowing a second request.
@@ -154,7 +156,32 @@ impl Store {
         Ok(())
     }
     pub fn mark_directory_uncertain(&mut self, op: &str) -> Result<()> {
-        if self.db.execute("UPDATE namespace_ops SET state='uncertain' WHERE id=?1 AND kind='mkdir' AND state='inflight'",[op])?!=1{return Err(Error::State("directory not in flight".into()));}
+        self.mark_directory_uncertain_diagnosed(
+            op,
+            crate::commit_outcome::CommitCategory::Interrupted,
+            Some("directory creation outcome unknown; reconciliation required"),
+        )
+    }
+    pub fn mark_directory_uncertain_diagnosed(
+        &mut self,
+        op: &str,
+        category: crate::commit_outcome::CommitCategory,
+        last_error: Option<&str>,
+    ) -> Result<()> {
+        let tx = self.db.transaction()?;
+        if tx.execute("UPDATE namespace_ops SET state='uncertain' WHERE id=?1 AND kind='mkdir' AND state='inflight'",[op])?!=1{return Err(Error::State("directory not in flight".into()));}
+        crate::commit_diagnostics::record(
+            &tx,
+            "namespace_ops",
+            op,
+            &crate::commit_outcome::CommitDiagnostic::unknown_retryable(
+                category,
+                last_error.map(str::to_owned),
+                0,
+                0,
+            ),
+        )?;
+        tx.commit()?;
         Ok(())
     }
     pub fn conflict_directory(&mut self, op: &str) -> Result<()> {
@@ -163,6 +190,14 @@ impl Store {
         tx.execute(
             "UPDATE nodes SET conflict=1 WHERE id=(SELECT node FROM namespace_ops WHERE id=?1)",
             [op],
+        )?;
+        crate::commit_diagnostics::record(
+            &tx,
+            "namespace_ops",
+            op,
+            &crate::commit_outcome::CommitDiagnostic::conflict(Some(
+                "remote changed before the directory creation was confirmed".into(),
+            )),
         )?;
         tx.commit()?;
         Ok(())
@@ -211,7 +246,26 @@ impl Store {
                 "DELETE FROM namespace_overlay WHERE node=?1",
                 [&confirmed.id],
             )?;
+            // Stale-flag heal (issue #6 follow-up): a snapshot install may have
+            // flagged this directory while the mkdir was in flight. Confirming
+            // the last pending namespace operation binds the remote identity and
+            // leaves no conflict behind; keep the flag only for genuinely
+            // unresolved state (real conflicts keep their recovery entry).
+            tx.execute(
+                "UPDATE nodes SET conflict=0
+                 WHERE id=?1 AND deleted=0 AND dirty_blob IS NULL
+                   AND id NOT IN (SELECT node FROM local_unlinks)
+                   AND NOT EXISTS(SELECT 1 FROM drafts WHERE node=?1)
+                   AND NOT EXISTS(SELECT 1 FROM operations WHERE node=?1 AND state NOT IN ('committed','superseded'))",
+                [&confirmed.id],
+            )?;
         }
+        crate::commit_diagnostics::record(
+            &tx,
+            "namespace_ops",
+            op,
+            &crate::commit_outcome::CommitDiagnostic::confirmed(),
+        )?;
         tx.commit()?;
         Ok(())
     }

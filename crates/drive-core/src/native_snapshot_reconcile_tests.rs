@@ -66,6 +66,8 @@ fn empty(next: u64) -> EventBatch {
         events: vec![],
         next: EventCursor(next),
         recovery_required: false,
+        rescan_later: false,
+        merge_mode: false,
     }
 }
 
@@ -208,6 +210,8 @@ async fn deletion_same_name_replacement_uses_current_listing_not_historical_even
             events: vec![deleted, replacement],
             next: EventCursor(12),
             recovery_required: false,
+            rescan_later: false,
+            merge_mode: false,
         },
         empty(12),
     ]);
@@ -408,6 +412,8 @@ async fn an_intermediate_repair_is_not_published_when_next_fence_is_unsafe_or_fa
                 1 => Err(Error::State("synthetic transport".into())),
                 _ => Ok(EventBatch {
                     recovery_required: true,
+                    rescan_later: false,
+                    merge_mode: false,
                     ..empty(12)
                 }),
             },
@@ -459,6 +465,8 @@ async fn stationary_nonempty_backwards_root_loss_and_global_recovery_are_rejecte
         empty(9),
         EventBatch {
             recovery_required: true,
+            rescan_later: false,
+            merge_mode: false,
             ..empty(11)
         },
     ] {

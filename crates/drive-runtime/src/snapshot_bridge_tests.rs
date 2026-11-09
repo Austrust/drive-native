@@ -146,3 +146,162 @@ fn recovery_waits_for_remote_mutation_and_blocks_next_commit_while_local_store_r
     assert!(pull.join().unwrap().unwrap());
     assert!(bridge.recovery_gate.try_read().is_ok());
 }
+
+// #10 acceptance: RecoveryRequired signals rebuild the snapshot in place
+// instead of ending in a human-attention error. These tests are deliberately
+// written before the runtime loop (test-first) and are expected to fail until
+// TB2 lands.
+fn peer_after_pull(
+    mut socket: UnixStream,
+    first: Response,
+    fail_recovery: bool,
+) -> std::thread::JoinHandle<usize> {
+    std::thread::spawn(move || {
+        let (request, _) = transport::receive::<Envelope<Command>>(&mut socket).unwrap();
+        assert!(matches!(request.body, Command::Pull { .. }));
+        transport::send(
+            &mut socket,
+            &Envelope {
+                version: VERSION,
+                id: request.id,
+                body: first,
+            },
+            None,
+        )
+        .unwrap();
+        socket
+            .set_read_timeout(Some(Duration::from_millis(300)))
+            .unwrap();
+        let mut attempts = 0;
+        loop {
+            match transport::receive::<Envelope<Command>>(&mut socket) {
+                Ok((request, _)) => {
+                    assert!(matches!(request.body, Command::RecoverySnapshot));
+                    attempts += 1;
+                    if fail_recovery {
+                        transport::send(
+                            &mut socket,
+                            &Envelope {
+                                version: VERSION,
+                                id: request.id,
+                                body: Response::Failed {
+                                    category: "transport".into(),
+                                },
+                            },
+                            None,
+                        )
+                        .unwrap();
+                    } else {
+                        respond(&mut socket, request.id, false);
+                    }
+                }
+                Err(_) => break attempts,
+            }
+        }
+    })
+}
+
+fn install_cursor(bridge: &Bridge) {
+    let snap = snapshot();
+    bridge
+        .store
+        .lock()
+        .unwrap()
+        .install_remote_snapshot(&snap.nodes, "native-v1:7", &snap.restore)
+        .unwrap();
+}
+
+#[test]
+fn rescan_later_recovery_rebuilds_instead_of_attention() {
+    let (_dir, bridge, socket) = fixture();
+    install_cursor(&bridge);
+    let peer = peer_after_pull(
+        socket,
+        Response::Failed {
+            category: "native_recovery_required:rescan_later".into(),
+        },
+        false,
+    );
+    assert!(bridge.pull().unwrap());
+    {
+        let store = bridge.store.lock().unwrap();
+        assert_eq!(store.cursor().unwrap(), "native-v1:7");
+        let run = store.latest_recovery_run().unwrap().unwrap();
+        assert_eq!(run.cause, "rescan_later");
+        assert_eq!(run.status, "recovered");
+    }
+    assert_eq!(peer.join().unwrap(), 1);
+}
+
+#[test]
+fn merge_mode_recovery_labels_the_durable_cause() {
+    let (_dir, bridge, socket) = fixture();
+    install_cursor(&bridge);
+    let peer = peer_after_pull(
+        socket,
+        Response::Failed {
+            category: "native_recovery_required:merge_mode".into(),
+        },
+        false,
+    );
+    assert!(bridge.pull().unwrap());
+    {
+        let store = bridge.store.lock().unwrap();
+        assert_eq!(store.cursor().unwrap(), "native-v1:7");
+        let run = store.latest_recovery_run().unwrap().unwrap();
+        assert_eq!(run.cause, "merge_mode");
+        assert_eq!(run.status, "recovered");
+    }
+    assert_eq!(peer.join().unwrap(), 1);
+}
+
+#[test]
+fn event_cursor_gap_recovery_uses_the_rebuild_path() {
+    let (_dir, bridge, socket) = fixture();
+    install_cursor(&bridge);
+    let peer = peer_after_pull(
+        socket,
+        Response::Events(Some(drive_core::Batch {
+            from: "native-v1:3".into(),
+            to: "native-v1:8".into(),
+            events: Vec::new(),
+        })),
+        false,
+    );
+    assert!(bridge.pull().unwrap());
+    {
+        let store = bridge.store.lock().unwrap();
+        assert_eq!(store.cursor().unwrap(), "native-v1:7");
+        let run = store.latest_recovery_run().unwrap().unwrap();
+        assert_eq!(run.cause, "cursor_invalidated");
+        assert_eq!(run.status, "recovered");
+    }
+    assert_eq!(peer.join().unwrap(), 1);
+}
+
+#[test]
+fn exhausted_recovery_surfaces_needs_attention_after_three_attempts() {
+    let (_dir, bridge, socket) = fixture();
+    install_cursor(&bridge);
+    let peer = peer_after_pull(
+        socket,
+        Response::Failed {
+            category: "native_recovery_required:rescan_later".into(),
+        },
+        true,
+    );
+    let error = bridge.pull().unwrap_err();
+    assert!(
+        error.to_string().contains("native_state_recovery_required"),
+        "unexpected recovery error: {error}"
+    );
+    {
+        let store = bridge.store.lock().unwrap();
+        let run = store.latest_recovery_run().unwrap().unwrap();
+        assert_eq!(run.status, "needs_attention");
+        assert_eq!(run.attempts, 3);
+        assert_eq!(run.cause, "rescan_later");
+        assert!(store.open_recovery_runs().unwrap().is_empty());
+    }
+    assert_eq!(peer.join().unwrap(), 3);
+}

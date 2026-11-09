@@ -155,6 +155,7 @@ async fn main() -> Result<()> {
         },
         mount: mount.clone(),
         writable: true, local_policy: None, writable_source: None,
+        exclude_patterns: Vec::new(),
     };
     let config = scratch.join("profile.json");
     std::fs::write(&config, serde_json::to_vec_pretty(&profile)?)?;

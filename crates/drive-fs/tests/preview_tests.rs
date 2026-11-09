@@ -78,6 +78,7 @@ impl Fixture {
             restore: "server".into(),
             start_cursor: "native-v1:100".into(),
             expected_cursor: "".into(),
+rules_digest: String::new(),
         };
         let run = s
             .begin_initialization(&b, &root(), InitializationBudget::default())

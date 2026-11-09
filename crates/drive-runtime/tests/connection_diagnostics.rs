@@ -110,6 +110,7 @@ fn fixture(mode: &str) -> (tempfile::TempDir, Arc<Service>) {
         },
         mount: root.path().join("mount"),
         writable: false, local_policy: None, writable_source: None,
+        exclude_patterns: Vec::new(),
     };
     // This fixture represents an already authenticated native task. Preserve
     // the same restore/scope binding production establishes before importing.

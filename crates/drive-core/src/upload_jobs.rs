@@ -10,7 +10,7 @@ pub struct UploadJob {
 }
 impl Store {
     pub fn upload_operations(&self, state: &str) -> Result<Vec<String>> {
-        if !matches!(state, "pending" | "uncertain") {
+        if !matches!(state, "pending" | "uncertain" | "abandoned") {
             return Err(Error::State("invalid operation selection".into()));
         }
         let mut q = self
@@ -91,6 +91,14 @@ impl Store {
             [op],
         )?;
         tx.execute("UPDATE operations SET state='conflict' WHERE id=?1 AND state IN ('inflight','uncertain')",[op])?;
+        crate::commit_diagnostics::record(
+            &tx,
+            "operations",
+            op,
+            &crate::commit_outcome::CommitDiagnostic::conflict(Some(
+                "server reported a conflict before the commit was confirmed".into(),
+            )),
+        )?;
         tx.commit()?;
         Ok(())
     }

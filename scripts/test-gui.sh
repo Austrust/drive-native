@@ -10,6 +10,10 @@ mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME" "$XDG_RUNTIME_DIR
 chmod 700 "$XDG_RUNTIME_DIR"
 export PYTHONDONTWRITEBYTECODE=1 QT_QPA_PLATFORM=offscreen
 export PYTHONPATH="$project/desktop"
+# Notification tests deliver through injected fake buses; they must never reach
+# the developer's real session bus or notification daemon.  Modules that need a
+# real bus (gui_instance_test) start their own through dbus-run-session below.
+unset DBUS_SESSION_BUS_ADDRESS DBUS_SESSION_BUS_PID
 # Each module owns its QApplication and runs in a separate process. These are
 # synthetic tests; installed desktop/NAS probes remain explicit release gates.
 run_module() {
@@ -30,7 +34,7 @@ for module in gui_unit_tests cache_gui_tests conflict_gui_tests hidden_dialog_te
     selector_gui_tests backend_upgrade_test pause_handover_test initialization_gui_tests \
     unified_manager_tests gui_instance_test queue_gui_tests history_gui_tests \
     permission_gui_tests background_banner_tests notification_tests \
-    shutdown_diagnostic_tests keyboard_gui_tests window_transfer_tests \
-    window_state_tests; do
+    notification_dbus_tests shutdown_diagnostic_tests keyboard_gui_tests \
+    window_transfer_tests release_gui_tests exclude_gui_tests window_state_tests; do
     run_module "$module"
 done

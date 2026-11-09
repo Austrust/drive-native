@@ -1,6 +1,6 @@
 # 暂停、升级与恢复
 
-本地开发版 `0.1.0~dev20261108.1` 使用schema27、IPC21：schema24增加同步历史，25增加用户读写策略和逐动作权限，26增加未确认上传的持久只读核对预算（`operations.reconcile_attempts`/`reconcile_at`），27增加问题与下载候选的节点索引（`operations_node`/`namespace_ops_node`，以及 `nodes` 的冲突、固定、缓存部分索引）。FSD与worker须成对更新；旧程序不能读取新schema，不可沿用下面历史同schema版本的读回结论。独立G4已覆盖迁移、备份与旧reader拒绝；私有D-Bus/FUSE组件补测确认策略切换、重挂载、组件替换后pending正文、history、pin和cursor保留。它不是实际dpkg安装/升级/重装；后者及真实NAS/Mint均未实测，准确范围见[#7报告](FIX_7_REPORT.md)。
+本地开发版 `0.1.0~dev20261109.2`（候选）使用schema29、IPC21：schema24增加同步历史，25增加用户读写策略和逐动作权限，26增加未确认上传的持久只读核对预算（`operations.reconcile_attempts`/`reconcile_at`），27增加问题与下载候选的节点索引（`operations_node`/`namespace_ops_node`，以及 `nodes` 的冲突、固定、缓存部分索引），28增加性能与同步历史部分索引，29增加提交结局诊断列、`schema_migrations`/`recovery_runs`/`platform_state_changes`/`commit_diagnostics` 结构与 v28→v29 幂等回填（#9 TB1）。本候选另含 #50 读路径排除（P3）与 #11 stage0 的 core POSIX 门禁/Windows 移植骨架：配置了 `exclude_patterns` 的任务升级后读路径会隐藏匹配路径（未配置任务行为不变），POSIX 门禁不影响升级流程；schema 配对与备份流程不变。FSD与worker须成对更新；旧程序不能读取新schema，不可沿用下面历史同schema版本的读回结论。独立G4已覆盖迁移、备份与旧reader拒绝；私有D-Bus/FUSE组件补测确认策略切换、重挂载、组件替换后pending正文、history、pin和cursor保留。它不是实际dpkg安装/升级/重装；后者及真实NAS/Mint均未实测，准确范围见[#7报告](FIX_7_REPORT.md)。
 
 旧任务 `writable=false` 会保留为“用户设为只读”。如要按远端逐目录权限判断，在“读写设置”选择“按远端目录权限同步”，保存后停止并重新启动该挂载；“重新核对”只使旧权限观测失效，不改变用户只读策略。先保存并关闭挂载中的文件、暂停任务，再更新完整组件。正常更新不清缓存；未上传修改和完整状态必须保留。
 
@@ -13,10 +13,10 @@
 1. 保存并关闭挂载中的文件，在对应任务窗口暂停同步。暂停保留挂载、本地完整内容及未上传编辑。
 2. 安装更新包。仍在运行的旧后台不会因为安装路径被替换而自动变成新进程。
 3. 打开新版 GUI，在任务窗口选择“应用后台更新”。GUI 会确认任务身份，暂停同步、保存启动暂停意图，然后请求旧后台正常停止。
-4. 旧进程退出后才启动已安装的后台。GUI 继续确认：D-Bus owner 已更换、任务身份一致、挂载已就绪、状态为暂停、进程执行文件与当前安装文件的 inode 一致，并核对 GetOverview.version 的 state_schema=27／IPC=21 与当前界面期望一致。
+4. 旧进程退出后才启动已安装的后台。GUI 继续确认：D-Bus owner 已更换、任务身份一致、挂载已就绪、状态为暂停、进程执行文件与当前安装文件的 inode 一致，并核对 GetOverview.version 的 state_schema=29／IPC=21 与当前界面期望一致。
 5. 确认任务状态和文件后，手动恢复同步。
 
-升级过程没有后端 stage 事件（GetOverview 不提供 `upgrade_stage`，也不新增 D-Bus 方法）。窗口只使用 BackendUpgrade 既有的 `changed`/`finished`：有更新时显示“应用后台更新”，完成后显示错误或“后台已切换”结果，不显示来自后台的阶段进度。版本配对使用 GetOverview.version：state_schema／IPC 与界面期望（27／21）不匹配时拒绝确认接管并保留暂停与数据；字段缺失（旧后台）按未知降级，不把版本当作确认依据。
+升级过程没有后端 stage 事件（GetOverview 不提供 `upgrade_stage`，也不新增 D-Bus 方法）。窗口只使用 BackendUpgrade 既有的 `changed`/`finished`：有更新时显示“应用后台更新”，完成后显示错误或“后台已切换”结果，不显示来自后台的阶段进度。版本配对使用 GetOverview.version：state_schema／IPC 与界面期望（29／21）不匹配时拒绝确认接管并保留暂停与数据；字段缺失（旧后台）按未知降级，不把版本当作确认依据。
 
 正常升级不要求清除缓存、删除数据库或重新建立任务。关闭 GUI 本身也不会停止挂载。接管期间路径会经历正常卸载、重新挂载，因此应先关闭使用该目录的应用。
 

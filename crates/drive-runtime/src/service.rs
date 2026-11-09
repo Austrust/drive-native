@@ -18,7 +18,7 @@ use std::{
     time::{Duration, Instant},
 };
 #[cfg(test)]
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicU64, AtomicUsize};
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -38,12 +38,22 @@ pub struct Profile {
     pub local_policy: Option<drive_core::write_permissions::LocalPolicy>,
     #[serde(default)]
     pub writable_source: Option<String>,
+    /// Issue #50: task-scoped exclusion patterns matched against POSIX paths
+    /// relative to `scope.path`. Absent in old profiles and therefore empty.
+    #[serde(default)]
+    pub exclude_patterns: Vec<String>,
 }
 impl Profile {
     pub fn effective_local_policy(&self) -> drive_core::write_permissions::LocalPolicy {
         self.local_policy.unwrap_or(if self.writable {
             drive_core::write_permissions::LocalPolicy::FollowRemote
         } else { drive_core::write_permissions::LocalPolicy::ExplicitReadOnly })
+    }
+    /// Pre-compile the profile's exclusion patterns. An empty list is a cheap
+    /// constant-time no-op at match time.
+    pub fn exclude_rules(&self) -> io::Result<drive_core::exclude::ExcludeRules> {
+        drive_core::exclude::ExcludeRules::compile(&self.exclude_patterns)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))
     }
     pub fn read(path: &Path) -> io::Result<Self> {
         use std::io::Read;
@@ -105,6 +115,10 @@ impl Profile {
         if self.writable_source.as_deref().is_some_and(|s| !matches!(s,"user"|"legacy")) {
             return Err(io::Error::other("invalid local permission policy source"));
         }
+        // Reject invalid regular expressions at the profile boundary so a typo
+        // is reported with its pattern and compiler error instead of surfacing
+        // as an undefined initialization failure.
+        self.exclude_rules()?;
         if self.effective_local_policy() == drive_core::write_permissions::LocalPolicy::FollowRemote && !cfg!(feature = "native-research") {
             return Err(io::Error::other(
                 "writable native protocol release gate is closed in this build",
@@ -202,6 +216,30 @@ pub struct Control {
     trust: crate::trust::TrustSettings,
     trust_pending_durability: bool,
 }
+/// Memory-only snapshot of one background release job. It lives only for the
+/// lifetime of the service process: a restart has no job to resume or report.
+pub(crate) struct ReleaseJob {
+    pub(crate) id: String,
+    pub(crate) total: usize,
+    pub(crate) done: usize,
+    pub(crate) released_count: usize,
+    pub(crate) skipped_count: usize,
+    pub(crate) protected_count: usize,
+    pub(crate) released: Vec<String>,
+    pub(crate) skipped: Vec<String>,
+    pub(crate) protected: Vec<String>,
+    pub(crate) reclaimed_bytes: u64,
+    pub(crate) finished: bool,
+    pub(crate) cancelled: bool,
+    pub(crate) error: Option<String>,
+}
+pub(crate) struct ReleaseState {
+    pub(crate) seq: u64,
+    pub(crate) job: Option<ReleaseJob>,
+    /// Cancellation flag of the running job; cloning it out keeps the worker
+    /// independent of the state lock while it reclaims files.
+    pub(crate) cancel: Option<Arc<AtomicBool>>,
+}
 pub struct Service {
     pub profile: Profile,
     pub bridge: Arc<Bridge>,
@@ -213,6 +251,12 @@ pub struct Service {
     pub control: Mutex<Control>,
     changed: Condvar,
     pub stop: AtomicBool,
+    /// Single-slot background release job polled through the desktop bus.
+    pub(crate) release: Mutex<ReleaseState>,
+    /// Test-only spacing between released files, so progress and cancel can be
+    /// observed without racing a job that finishes instantly.
+    #[cfg(test)]
+    pub(crate) release_step_delay: AtomicU64,
     /// Set by `cache_policy_changed()` so a policy edit runs a trim even when
     /// it did not change `local_revision` (the cache limit lives in metadata).
     cache_policy_dirty: AtomicBool,
@@ -292,6 +336,13 @@ impl Service {
             store,
         )))?);
         bridge.enable_initialization_owner(&profile.task_id)?;
+        // Issue #50: compile the exclusion rules once and share the state with
+        // both the initialization owner (import pruning) and the mount (read
+        // path filtering). Empty rules never build or consult an index.
+        let exclusion = Arc::new(drive_core::exclude::ExclusionState::new(
+            profile.exclude_rules()?,
+        ));
+        bridge.set_exclusion_state(exclusion);
         Ok(Arc::new(Self {
             profile,
             bridge,
@@ -317,6 +368,13 @@ impl Service {
             }),
             changed: Condvar::new(),
             stop: AtomicBool::new(false),
+            release: Mutex::new(ReleaseState {
+                seq: 0,
+                job: None,
+                cancel: None,
+            }),
+            #[cfg(test)]
+            release_step_delay: AtomicU64::new(0),
             cache_policy_dirty: AtomicBool::new(false),
             #[cfg(test)]
             cache_trim_runs: AtomicUsize::new(0),
@@ -501,6 +559,11 @@ impl Service {
         self.cache_policy_dirty.store(true, Ordering::Release);
         self.control.lock().unwrap().revision += 1;
         self.changed.notify_all();
+    }
+    /// Slow down each released file so tests can observe a running job.
+    #[cfg(test)]
+    pub(crate) fn set_release_step_delay(&self, ms: u64) {
+        self.release_step_delay.store(ms, Ordering::Release);
     }
     fn cache_loop(&self) {
         self.cache_loop_with(CACHE_LOOP_INTERVAL);
@@ -723,13 +786,19 @@ impl Service {
         if self.stop.load(Ordering::Acquire) {
             return Ok(None);
         }
+        // A preview-only root is mountable before the committed namespace
+        // exists (initialization preview). The exclusion index is built from the
+        // committed `nodes` table, so it cannot be built in that phase; the
+        // bridge rebuilds it after initialization commits or a recovery
+        // snapshot installs.
+        let mut committed_root = true;
         {
             let store = self.bridge.store.lock().unwrap();
             match store.node(&self.profile.scope.file_id) {
                 Ok(_) => {}
                 Err(e) if e.is_not_found() => {
                     match store.preview_mount_root(&self.profile.scope.file_id) {
-                        Ok(Some(_)) => {}
+                        Ok(Some(_)) => committed_root = false,
                         Ok(None) => return Ok(None),
                         Err(drive_core::Error::Io(e))
                             if matches!(e.raw_os_error(), Some(libc::EACCES | libc::EAGAIN)) =>
@@ -744,6 +813,38 @@ impl Service {
                     }
                 }
                 Err(_) => return Err(io::Error::other("cached root cannot be loaded")),
+            }
+        }
+        // Issue #50 (phase 4): reconcile the committed namespace with the active
+        // exclusion rules before the mount becomes visible, so the FUSE inode
+        // map is backfilled from the reconciled namespace. With rules, excluded
+        // subtrees are hidden and their local cache/scheduling state is dropped
+        // (never a remote delete); without rules, rows hidden by a previous rule
+        // set come back. Preview mounts have no committed rows yet.
+        let exclusion = self.bridge.exclusion_state();
+        if committed_root {
+            {
+                let store = self.bridge.store.lock().unwrap();
+                refresh_exclusion_before_mount(
+                    &exclusion,
+                    &store,
+                    &self.profile.scope.file_id,
+                    true,
+                )?;
+            }
+            if exclusion.is_active() {
+                self.bridge.purge_excluded_from_store()?;
+                // The purge changed the committed namespace; rebuild before the
+                // mount and the inode backfill observe it.
+                let store = self.bridge.store.lock().unwrap();
+                refresh_exclusion_before_mount(
+                    &exclusion,
+                    &store,
+                    &self.profile.scope.file_id,
+                    true,
+                )?;
+            } else {
+                self.bridge.restore_excluded_from_store()?;
             }
         }
         // One hub owns the publication gate and invalidation delivery for both
@@ -766,7 +867,8 @@ impl Service {
             Err(e) => return Err(io::Error::other(e)),
         }
         .with_hydrator(self.bridge.clone())
-        .with_notify_hub(notify.clone());
+        .with_notify_hub(notify.clone())
+        .with_exclusion_state(self.bridge.exclusion_state());
         // `new` has now backfilled inodes. Index construction is local metadata
         // only; previews, budget exhaustion and any load error keep the SQL path.
         if drive_fs::namespace_index_enabled() {
@@ -790,6 +892,9 @@ impl Service {
         if writable {
             fs = fs.with_writes_enabled();
         }
+        // The exclusion index was built (and rebuilt after the phase-4 purge)
+        // above, before the FUSE inode map was backfilled; later namespace swaps
+        // rebuild it from the bridge.
         let session = fuser::spawn_mount2(
             fs,
             &self.profile.mount,
@@ -948,7 +1053,8 @@ impl Service {
             c.active = None;
             self.bridge.disconnect();
             if let Err(error) = result {
-                let retry = crate::connection_diagnostics::retryable(&error);
+                let retry = crate::connection_diagnostics::retryable(&error)
+                    || crate::connection_diagnostics::recovery_cause(&error).is_some();
                 c.attention = !retry;
                 c.state = if retry {
                     ConnectionState::Offline
@@ -963,6 +1069,11 @@ impl Service {
                     "native_root_unavailable"
                 } else {
                     match error.kind() {
+                        _ if crate::connection_diagnostics::recovery_cause(&error).is_some() => {
+                            // The runtime rebuilds this session automatically;
+                            // it is a retry, never a request for human action.
+                            "network_unavailable"
+                        }
                         io::ErrorKind::PermissionDenied => "authentication_or_protocol_rejected",
                         io::ErrorKind::InvalidInput => "certificate_or_configuration",
                         io::ErrorKind::InvalidData => "native_state_recovery_required",
@@ -985,6 +1096,26 @@ impl Service {
     }
 }
 
+/// Build the exclusion index before the mount becomes visible.
+///
+/// `committed` is false while the mount is a preview-only root: the exclusion
+/// index is derived from the committed `nodes` table, which does not exist yet,
+/// so the preview keeps an empty index (the bridge refresh paths build it after
+/// owner initialization, a recovery snapshot install, or a pull). In the
+/// committed phase a failure stays fatal: swallowing it would leak excluded
+/// paths into the mount view.
+fn refresh_exclusion_before_mount(
+    exclusion: &drive_core::exclude::ExclusionState,
+    store: &drive_core::Store,
+    root: &str,
+    committed: bool,
+) -> io::Result<()> {
+    if !exclusion.is_active() || !committed {
+        return Ok(());
+    }
+    exclusion.refresh(store, root).map_err(io::Error::other)
+}
+
 #[cfg(test)]
 #[path = "trust_service_tests.rs"]
 mod trust_service_tests;
@@ -992,3 +1123,7 @@ mod trust_service_tests;
 #[cfg(test)]
 #[path = "cache_loop_tests.rs"]
 mod cache_loop_tests;
+
+#[cfg(test)]
+#[path = "mount_exclusion_tests.rs"]
+mod mount_exclusion_tests;

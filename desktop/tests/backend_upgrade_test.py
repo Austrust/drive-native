@@ -205,7 +205,7 @@ class UpgradeTest(unittest.TestCase):
         self.upgrade.stage_changed.connect(stages.append)
         received({"task_id": "synthetic", "connection": "paused", "mounted": True,
                   "upgrade_stage": "waiting_exit",
-                  "version": {"build": "dev", "state_schema": 28, "ipc": 21}}, None)
+                  "version": {"build": "dev", "state_schema": 29, "ipc": 21}}, None)
         self.assertTrue(self.upgrade.stage_supported)
         self.assertIn("waiting_exit", stages)
         self.assertEqual(self.results, [None])
@@ -214,18 +214,18 @@ class UpgradeTest(unittest.TestCase):
         from drive_native_gui.upgrade import (
             available_upgrades, normalize_version, stage_text, version_state, version_summary,
         )
-        self.assertEqual(normalize_version({"build": "0.2", "state_schema": 28, "ipc": 21}),
-                         {"build": "0.2", "state_schema": 28, "ipc": 21})
+        self.assertEqual(normalize_version({"build": "0.2", "state_schema": 29, "ipc": 21}),
+                         {"build": "0.2", "state_schema": 29, "ipc": 21})
         self.assertIsNone(normalize_version(None))
         self.assertIsNone(normalize_version({"build": "", "state_schema": 0, "ipc": None}))
         self.assertEqual(normalize_version({"state_schema": 77}),
                          {"build": None, "state_schema": 77, "ipc": None})
         self.assertEqual(version_state(None), "missing")
-        self.assertEqual(version_state({"state_schema": 28, "ipc": 21}), "ok")
+        self.assertEqual(version_state({"state_schema": 29, "ipc": 21}), "ok")
         self.assertEqual(version_state({"state_schema": 26, "ipc": 21}), "mismatch")
         self.assertEqual(version_state({"state_schema": 25, "ipc": 21}), "mismatch")
-        self.assertEqual(version_summary({"build": "dev", "state_schema": 28, "ipc": 21}),
-                         "dev · 状态库 v28 · IPC v21")
+        self.assertEqual(version_summary({"build": "dev", "state_schema": 29, "ipc": 21}),
+                         "dev · 状态库 v29 · IPC v21")
         self.assertEqual(stage_text("waiting_exit"), "正在等待旧后台退出")
         self.assertEqual(stage_text("invented"), "")
 

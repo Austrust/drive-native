@@ -15,8 +15,9 @@ class Host:
     def available(self):
         return self.is_available
 
-    def show_message(self, title, body, *, warning=False):
-        self.messages.append({"title": title, "body": body, "warning": warning})
+    def show_message(self, title, body, *, warning=False, target=None):
+        self.messages.append({"title": title, "body": body,
+                              "warning": warning, "target": target})
 
 
 class Clock:

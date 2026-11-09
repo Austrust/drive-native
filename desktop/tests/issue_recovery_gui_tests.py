@@ -251,6 +251,51 @@ class RecoveryTests(unittest.TestCase):
             self.assertNotIn("reconcile_attempts", data)
 
 
+    def test_abandon_upload_is_explicit_local_deletion_with_backend_ack(self):
+        self.populate(dict(self.row, can_abandon_upload=True, reconcile_attempts=5,
+                           reconcile_exhausted=True))
+        self.assertTrue(self.dialog.abandon.isEnabled())
+        self.assertIn("仅删除本地", self.dialog.abandon.text())
+        self.assertIn("可能以远端条目出现", self.dialog.explanation.text())
+        self.assertIn("不会向服务器发送删除", self.dialog.explanation.text())
+        self.dialog.abandon.click()
+        calls = [c for c in self.bus.calls if c[0] == "AbandonUpload"]
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][1], ["file", "private-token"])
+        self.assertFalse(any(c[0] in ("KeepBoth", "KeepDirectoryBoth", "Resume", "ReleaseSpace")
+                             for c in self.bus.calls))
+        self.bus.respond("AbandonUpload", {"schema": 1, "abandoned": True,
+                                           "deleted_local": True, "server_changed": False})
+        self.assertIn("已放弃本次本地待上传", self.dialog.message.text())
+        self.assertIn("未修改服务器", self.dialog.message.text())
+        self.assertFalse(self.dialog.busy)
+
+    def test_abandon_upload_capability_must_be_a_boolean_and_is_never_guessed(self):
+        for extra in ({}, {"can_abandon_upload": False}, {"can_abandon_upload": "true"},
+                      {"can_abandon_upload": 1}):
+            self.populate(dict(self.row, **extra))
+            self.assertFalse(self.dialog.abandon.isEnabled())
+        self.dialog.abandon_upload()
+        self.assertFalse(any(c[0] == "AbandonUpload" for c in self.bus.calls))
+
+    def test_abandon_upload_failure_preserves_issue_and_never_claims_deletion(self):
+        self.populate(dict(self.row, can_abandon_upload=True))
+        self.dialog.abandon_upload()
+        self.bus.respond("AbandonUpload", None, "service_changed")
+        self.assertIn("未完成", self.dialog.message.text())
+        self.assertIn("file", self.dialog.rows)
+        self.assertFalse(self.dialog.busy)
+        self.dialog.abandon_upload()
+        self.bus.respond("AbandonUpload", {"schema": 1, "abandoned": False})
+        self.assertIn("file", self.dialog.rows)
+        self.assertFalse(any(c[0] in ("KeepBoth", "KeepDirectoryBoth", "Resume")
+                             for c in self.bus.calls))
+
+    def test_diagnostic_includes_paused_upload_count(self):
+        self.dialog.update_context(dict(self.context, paused_uploads=2))
+        data = json.loads(diagnostic_text(self.dialog.overview, self.dialog.selected_row()))
+        self.assertEqual(data["paused_uploads"], 2)
+
     def test_initial_message_never_claims_no_issues(self):
         dialog = IssuesDialog(self.bus)
         try:
@@ -324,6 +369,54 @@ class RecoveryTests(unittest.TestCase):
                 self.bus.respond("GetOverview", self.context)
                 overviews += 1
         self.assertEqual(overviews, 1, "a refresh burst must issue one capability GetOverview")
+
+
+    def test_bound_directory_offers_keep_local_and_gates_destructive_accept(self):
+        row = dict(self.row, reason="bound_directory_conflict", path="folder",
+                   can_keep_both=False, can_keep_directory=False,
+                   can_keep_local=True, can_keep_remote=False)
+        self.populate(row)
+        self.assertTrue(self.dialog.keep.isEnabled())
+        self.assertEqual(self.dialog.keep.text(), "保留本地目录（重新上传）")
+        self.assertFalse(self.dialog.name.isEnabled())
+        self.assertFalse(self.dialog.accept_remote.isEnabled())
+        self.assertIn("保留本地目录", self.dialog.explanation.text())
+        self.assertIn("不会提供“接受远端删除”", self.dialog.explanation.text())
+        self.dialog.keep_both()
+        self.assertEqual(self.bus.calls[-1][:2],
+                         ("KeepDirectoryLocal", ["file", "private-token"]))
+        self.assertIn("重新排队上传", self.dialog.message.text())
+        self.bus.respond("KeepDirectoryLocal",
+                         {"schema": 1, "directory_id": "file", "path": "folder",
+                          "kept_local": True})
+        self.assertIn("本地目录已保留", self.dialog.message.text())
+        self.assertIn("file", self.dialog.rows)
+
+    def test_bound_directory_accepts_remote_only_when_backend_allows_and_acknowledges(self):
+        row = dict(self.row, reason="bound_directory_conflict", path="folder",
+                   can_keep_local=True, can_keep_remote=True)
+        self.populate(row)
+        self.assertTrue(self.dialog.accept_remote.isEnabled())
+        self.assertIn("接受远端删除", self.dialog.explanation.text())
+        self.dialog.accept_remote.click()
+        self.assertEqual(self.bus.calls[-1][:2],
+                         ("KeepDirectoryRemote", ["file", "private-token"]))
+        self.bus.respond("KeepDirectoryRemote",
+                         {"schema": 1, "directory_id": "file", "path": "folder",
+                          "kept_remote": True, "deleted_local": False})
+        self.assertIn("已接受远端删除", self.dialog.message.text())
+        self.assertFalse(any(c[0] in ("KeepBoth", "KeepDirectoryBoth", "Resume")
+                             for c in self.bus.calls))
+
+    def test_keep_directory_remote_failure_preserves_issue_and_claims_nothing(self):
+        row = dict(self.row, reason="bound_directory_conflict", path="folder",
+                   can_keep_local=True, can_keep_remote=True)
+        self.populate(row)
+        self.dialog.accept_remote.click()
+        self.bus.respond("KeepDirectoryRemote", None, "stale_issue")
+        self.assertIn("未更改恢复状态", self.dialog.message.text())
+        self.assertIn("file", self.dialog.rows)
+        self.assertFalse(self.dialog.busy)
 
 
 if __name__ == "__main__":

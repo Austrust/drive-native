@@ -160,7 +160,8 @@ class ClientBus(QObject):
         destination = (
             self.owner
             if method
-            in ("Unlock", "KeepBoth", "KeepDirectoryBoth", "RecheckIssues", "SetCacheSettings",
+            in ("Unlock", "KeepBoth", "KeepDirectoryBoth", "KeepDirectoryLocal",
+                "KeepDirectoryRemote", "AbandonUpload", "RecheckIssues", "SetCacheSettings",
                 "SetTransferSettings", "SetTrustSettings", "Pause", "Resume", "StopMount",
                 "ClearSyncHistory", "SetWritePolicy", "GetSyncHistoryRetention",
                 "SetSyncHistoryRetention")

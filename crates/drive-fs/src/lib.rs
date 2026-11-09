@@ -4,8 +4,14 @@
 //! No callback waits for the NAS, and unsupported writes are never acknowledged.
 #[cfg(test)]
 mod cached_close_tests;
+#[cfg(test)]
+mod exclude_read_tests;
+#[cfg(test)]
+mod exclude_write_tests;
 pub mod diagnostics;
 mod directory;
+#[cfg(test)]
+mod hardlink_tests;
 #[cfg(test)]
 mod inode_backfill_tests;
 #[cfg(test)]
@@ -42,6 +48,13 @@ use std::{
 };
 
 const TTL: Duration = Duration::ZERO;
+/// `link(2)` cannot be represented: a Synology Drive node is identified by a
+/// single path and carries no hard-link identity. Reject with the standard
+/// "operation not supported" errno (`EOPNOTSUPP`, the same value as `ENOTSUP`
+/// on Linux) instead of the vendored fuser default `EPERM`, so tools that land
+/// files via "write temp + link into place" can fall back to rename/copy.
+/// See docs/FUSE_HARDLINK.md.
+const HARD_LINK_UNSUPPORTED: libc::c_int = libc::EOPNOTSUPP;
 type Job = Box<dyn FnOnce() + Send + 'static>;
 /// Bounded pools keep work off the FUSE dispatcher. Metadata/file I/O use the
 /// metadata pool; held-file reads and native hydration each use separate pools.
@@ -148,6 +161,9 @@ pub struct CacheFilesystem {
     // keeps the plain READDIR profile (e.g. kernel tests that never install a
     // notifier).
     readdirplus: bool,
+    /// Issue #50: shared exclusion rules and derived namespace index. `None`
+    /// (or empty rules) keeps every read-path check a constant-time no-op.
+    exclusion: Option<Arc<drive_core::exclude::ExclusionState>>,
     uid: u32,
     gid: u32,
 }
@@ -187,6 +203,58 @@ impl CacheFilesystem {
         // session exists, which is the earliest point the API allows.
         self.readdirplus = true;
         self
+    }
+
+    /// Install the shared exclusion state (issue #50). Empty rules stay inert;
+    /// the index is rebuilt by the runtime after every namespace swap.
+    pub fn with_exclusion_state(
+        mut self,
+        state: Arc<drive_core::exclude::ExclusionState>,
+    ) -> Self {
+        self.exclusion = Some(state);
+        self
+    }
+
+    /// Snapshot of the exclusion index for a read-path reply, or `None` when
+    /// rules are inactive. Matching runs after the Store lock is released.
+    pub(crate) fn exclusion_index(
+        &self,
+    ) -> Option<Arc<drive_core::exclude::ExclusionIndex>> {
+        self.exclusion.as_ref().and_then(|state| {
+            if state.is_active() {
+                Some(state.current())
+            } else {
+                None
+            }
+        })
+    }
+
+    /// True when `ino` belongs to an excluded subtree and must answer ENOENT.
+    fn inode_excluded(&self, ino: u64) -> bool {
+        self.exclusion_index()
+            .is_some_and(|index| index.inode_excluded(ino))
+    }
+
+    /// True when the directory entry `(parent, name)` is excluded.
+    fn entry_excluded(&self, parent: u64, name: &str) -> bool {
+        self.exclusion_index()
+            .is_some_and(|index| index.entry_excluded(parent, name))
+    }
+
+    /// True when a not-yet-created entry below `parent` matches the rules.
+    ///
+    /// The parent directory is mapped to its scope-relative path by the
+    /// exclusion index, so a name that does not exist in the namespace can
+    /// still be rejected before any local operation is recorded.
+    fn child_excluded(&self, parent: u64, name: &str, is_dir: bool) -> bool {
+        let Some(state) = self.exclusion.as_ref() else {
+            return false;
+        };
+        if !state.is_active() {
+            return false;
+        }
+        let index = state.current();
+        state.child_matches(&index, parent, name, is_dir) || index.inode_excluded(parent)
     }
 
     /// Override the metadata TTL (0 disables caching). The default comes from
@@ -247,6 +315,7 @@ impl CacheFilesystem {
             hydrator: None,
             notify: NotifyHub::from_env(),
             readdirplus: false,
+            exclusion: None,
             uid,
             gid,
         })
@@ -366,6 +435,14 @@ impl Filesystem for CacheFilesystem {
             reply.error(libc::EINVAL);
             return;
         };
+        // Issue #50: creating below an excluded directory or re-creating an
+        // excluded name must look like a missing path and never leave a local
+        // creation or upload operation behind.
+        if self.child_excluded(parent, &name, true) {
+            drive_core::exclude::trace_hit("mkdir");
+            reply.error(libc::ENOENT);
+            return;
+        }
         let store = self.store.clone();
         let hydrator = self.hydrator.clone();
         let notify = self.notify.clone();
@@ -424,9 +501,25 @@ impl Filesystem for CacheFilesystem {
     }
 
     fn unlink(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEmpty) {
+        // Issue #50: removing an excluded entry is a missing path, not a local
+        // tombstone that would later become an upload.
+        if name.to_str().is_some_and(|name| self.entry_excluded(parent, name))
+            || self.inode_excluded(parent)
+        {
+            drive_core::exclude::trace_hit("unlink");
+            reply.error(libc::ENOENT);
+            return;
+        }
         namespace::remove(self, parent, name, false, reply)
     }
     fn rmdir(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEmpty) {
+        if name.to_str().is_some_and(|name| self.entry_excluded(parent, name))
+            || self.inode_excluded(parent)
+        {
+            drive_core::exclude::trace_hit("rmdir");
+            reply.error(libc::ENOENT);
+            return;
+        }
         namespace::remove(self, parent, name, true, reply)
     }
     fn rename(
@@ -439,7 +532,37 @@ impl Filesystem for CacheFilesystem {
         flags: u32,
         reply: ReplyEmpty,
     ) {
+        // Issue #50: both the excluded source and the excluded target behave
+        // like missing paths so no local rename operation is queued. The target
+        // name does not exist yet, so the full relative path is matched.
+        let source_excluded = name
+            .to_str()
+            .is_some_and(|name| self.entry_excluded(parent, name))
+            || self.inode_excluded(parent);
+        let target_excluded = newname.to_str().is_some_and(|name| {
+            self.child_excluded(newparent, name, true)
+                || self.child_excluded(newparent, name, false)
+        });
+        if source_excluded || target_excluded {
+            drive_core::exclude::trace_hit("rename");
+            reply.error(libc::ENOENT);
+            return;
+        }
         namespace::rename(self, parent, name, newparent, newname, flags, reply)
+    }
+
+    fn link(
+        &mut self,
+        _req: &Request<'_>,
+        _ino: u64,
+        _newparent: u64,
+        _newname: &OsStr,
+        reply: ReplyEntry,
+    ) {
+        // A hard link creates a second path for one node; Synology Drive has a
+        // single path per node, so there is nothing to create. `redirect`-free
+        // rejection keeps the local namespace and upload queue untouched.
+        reply.error(HARD_LINK_UNSUPPORTED);
     }
 
     fn create(
@@ -452,6 +575,16 @@ impl Filesystem for CacheFilesystem {
         flags: i32,
         reply: fuser::ReplyCreate,
     ) {
+        // Issue #50: an excluded target or excluded parent directory answers
+        // ENOENT before any local creation is recorded.
+        if name
+            .to_str()
+            .is_some_and(|name| self.child_excluded(parent, name, false))
+        {
+            drive_core::exclude::trace_hit("create");
+            reply.error(libc::ENOENT);
+            return;
+        }
         writable::create(self, parent, name, mode, umask, flags, reply)
     }
     fn lookup(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEntry) {
@@ -460,6 +593,13 @@ impl Filesystem for CacheFilesystem {
             reply.error(libc::ENOENT);
             return;
         };
+        // Issue #50: excluded entries and subtrees must be indistinguishable
+        // from missing ones for every read path.
+        if self.entry_excluded(parent, name) {
+            drive_core::exclude::trace_hit("lookup");
+            reply.error(libc::ENOENT);
+            return;
+        }
         // G3 permission hook: any effective ACL cache must share this lease and
         // token, or disable the index for this request before entering here.
         if let Some(binding) = &self.namespace_index {
@@ -546,6 +686,12 @@ impl Filesystem for CacheFilesystem {
         // Handle-relative attributes, mutable drafts and unlinked objects retain
         // their original descriptor-aware SQL path.
         if fh.is_none() {
+            // Issue #50: an excluded inode has no observable metadata.
+            if self.inode_excluded(ino) {
+                drive_core::exclude::trace_hit("getattr");
+                reply.error(libc::ENOENT);
+                return;
+            }
             if let Some(binding) = &self.namespace_index {
                 let _index_time = diagnostics::span(diagnostics::Stage::IndexReadUs);
                 if let Some(lease) = binding.lease(&self.store, &self.notify) {
@@ -680,6 +826,11 @@ impl Filesystem for CacheFilesystem {
         }));
     }
     fn opendir(&mut self, _req: &Request<'_>, ino: u64, flags: i32, reply: ReplyOpen) {
+        if self.inode_excluded(ino) {
+            drive_core::exclude::trace_hit("opendir");
+            reply.error(libc::ENOENT);
+            return;
+        }
         directory::open(self, ino, flags, reply)
     }
     fn readdir(
@@ -690,6 +841,11 @@ impl Filesystem for CacheFilesystem {
         offset: i64,
         reply: ReplyDirectory,
     ) {
+        if self.inode_excluded(ino) {
+            drive_core::exclude::trace_hit("readdir");
+            reply.error(libc::ENOENT);
+            return;
+        }
         directory::read(self, ino, fh, offset, reply)
     }
     fn readdirplus(
@@ -700,6 +856,11 @@ impl Filesystem for CacheFilesystem {
         offset: i64,
         reply: ReplyDirectoryPlus,
     ) {
+        if self.inode_excluded(ino) {
+            drive_core::exclude::trace_hit("readdirplus");
+            reply.error(libc::ENOENT);
+            return;
+        }
         directory::read_plus(self, ino, fh, offset, reply)
     }
     fn releasedir(
@@ -713,6 +874,11 @@ impl Filesystem for CacheFilesystem {
         directory::release(self, ino, fh, reply)
     }
     fn open(&mut self, _req: &Request<'_>, ino: u64, flags: i32, reply: ReplyOpen) {
+        if self.inode_excluded(ino) {
+            drive_core::exclude::trace_hit("open");
+            reply.error(libc::ENOENT);
+            return;
+        }
         writable::open(self, ino, flags, reply)
     }
     fn write(
@@ -727,6 +893,13 @@ impl Filesystem for CacheFilesystem {
         _lock_owner: Option<u64>,
         reply: fuser::ReplyWrite,
     ) {
+        // Issue #50: writes to an excluded inode are ENOENT and never promote a
+        // handle into a draft upload operation.
+        if self.inode_excluded(ino) {
+            drive_core::exclude::trace_hit("write");
+            reply.error(libc::ENOENT);
+            return;
+        }
         writable::write(self, ino, fh, offset, data, reply)
     }
     fn fsync(&mut self, _req: &Request<'_>, ino: u64, fh: u64, _datasync: bool, reply: ReplyEmpty) {
@@ -760,6 +933,13 @@ impl Filesystem for CacheFilesystem {
         flags: Option<u32>,
         reply: ReplyAttr,
     ) {
+        // Issue #50: metadata/size changes on an excluded inode are missing-path
+        // errors and must not create dirty drafts or upload operations.
+        if self.inode_excluded(ino) {
+            drive_core::exclude::trace_hit("setattr");
+            reply.error(libc::ENOENT);
+            return;
+        }
         writable::setattr(
             self, ino, mode, uid, gid, size, atime, mtime, ctime, fh, crtime, chgtime, bkuptime,
             flags, reply,

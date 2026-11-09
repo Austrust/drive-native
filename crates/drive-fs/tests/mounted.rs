@@ -668,3 +668,70 @@ fn kernel_sequential_100_mib_write_has_bounded_metadata_commits_and_fsyncs() {
     assert_eq!(first, [0xa5u8; 16]);
     assert_eq!(s.record("a").unwrap().size, TOTAL as u64);
 }
+
+#[test]
+#[ignore = "requires ordinary Linux user and /dev/fuse; run explicitly"]
+fn kernel_hard_link_is_rejected_with_operation_not_supported() {
+    // Acceptance for #18: tools that land files with "write temp + link into
+    // place" must see EOPNOTSUPP instead of EPERM so they can fall back, and a
+    // rejected link must leave the namespace untouched. Symlinks are a separate
+    // limitation (fuser's default EPERM) and stay out of this issue's scope.
+    use std::os::unix::fs::MetadataExt;
+    let uid = unsafe { libc::getuid() };
+    let gid = unsafe { libc::getgid() };
+    assert_ne!(uid, 0);
+    let d = tempfile::tempdir().unwrap();
+    let mount = d.path().join("mount");
+    std::fs::create_dir(&mount).unwrap();
+    let mut s = Store::open(d.path().join("state")).unwrap();
+    s.install_remote_snapshot(&[node("root", 0, "1")], "1", "test")
+        .unwrap();
+    let s = Arc::new(drive_core::SharedStore::new(s));
+    let fs = drive_fs::CacheFilesystem::new(s.clone(), "root", uid, gid)
+        .unwrap()
+        .with_writes_enabled();
+    let session = fuser::spawn_mount2(
+        fs,
+        &mount,
+        &[
+            fuser::MountOption::RW,
+            fuser::MountOption::DefaultPermissions,
+            fuser::MountOption::NoDev,
+            fuser::MountOption::NoSuid,
+        ],
+    )
+    .unwrap();
+    let src = mount.join("src");
+    std::fs::write(&src, b"hard link source").unwrap();
+    let dst = mount.join("dst");
+    let error = std::fs::hard_link(&src, &dst).unwrap_err();
+    assert_eq!(error.raw_os_error(), Some(libc::EOPNOTSUPP));
+    // Linux defines ENOTSUP and EOPNOTSUPP as the same errno; a portable probe
+    // must observe the support verdict too.
+    assert_eq!(error.raw_os_error(), Some(libc::ENOTSUP));
+    assert_eq!(error.kind(), std::io::ErrorKind::Unsupported);
+    assert!(
+        !dst.exists(),
+        "a rejected hard link must not create the target name"
+    );
+    assert_eq!(std::fs::metadata(&src).unwrap().nlink(), 1);
+    // Repeat the attempt: no cached state may turn the second failure into a
+    // different errno.
+    assert_eq!(
+        std::fs::hard_link(&src, &dst).unwrap_err().raw_os_error(),
+        Some(libc::EOPNOTSUPP)
+    );
+    // Out of scope for #18: symlink keeps fuser's default EPERM.
+    assert_eq!(
+        std::os::unix::fs::symlink("src", mount.join("sym"))
+            .unwrap_err()
+            .raw_os_error(),
+        Some(libc::EPERM)
+    );
+    session.join();
+    drop(s);
+    let s = Store::open(d.path().join("state")).unwrap();
+    assert_eq!(s.lookup("root", "src").unwrap().node.name, "src");
+    assert!(s.lookup("root", "dst").is_err());
+    assert!(s.lookup("root", "sym").is_err());
+}

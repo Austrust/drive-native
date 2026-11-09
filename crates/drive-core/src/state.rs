@@ -1,3 +1,4 @@
+use crate::commit_outcome::{CommitCategory, CommitDiagnostic};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -42,6 +43,13 @@ impl Error {
     pub fn is_not_found(&self) -> bool {
         matches!(self, Self::Db(rusqlite::Error::QueryReturnedNoRows))
             || matches!(self, Self::Io(e) if e.kind() == std::io::ErrorKind::NotFound)
+    }
+
+    /// The event journal reported a gap between the committed cursor and the
+    /// next batch. The native runtime must rebuild its snapshot instead of
+    /// surfacing a human-attention error (#10).
+    pub fn is_cursor_gap(&self) -> bool {
+        matches!(self, Self::State(message) if message.starts_with("event cursor gap"))
     }
 }
 
@@ -93,6 +101,13 @@ pub enum Status {
 pub struct DownloadTicket {
     pub id: String,
     pub version: String,
+}
+/// Result of releasing one node's local body. `Skipped` means the node had no
+/// cached body to reclaim; it is a no-op rather than a successful release.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReleaseOutcome {
+    Released,
+    Skipped,
 }
 /// Offline availability summary over non-directory nodes. `state` is one of
 /// `empty`, `pinned`, `online_only`, `partial`, or `complete`; it describes
@@ -192,7 +207,7 @@ impl Drop for ReadHandle {
 }
 
 /// Version of the durable state contract, including journal semantics.
-pub const STATE_SCHEMA_VERSION: i64 = 28;
+pub const STATE_SCHEMA_VERSION: i64 = 29;
 
 /// Automatic read-only reconciliation attempts allowed for one uncertain
 /// upload. The budget is durable so a restart cannot restart an unbounded
@@ -238,6 +253,264 @@ candidates(id,remote_version,cached,local_version,directory,deleted,dirty_blob) 
 SELECT id,remote_version,cached FROM candidates c
 WHERE directory=0 AND deleted=0 AND id NOT IN (SELECT id FROM access_blocked)
   AND dirty_blob IS NULL AND (cached=0 OR local_version!=remote_version)";
+
+/// True when `table` already carries `column`. The schema 29 upgrade guards
+/// every `ALTER TABLE` with this check so an interrupted upgrade can be re-run
+/// without failing on the already-added columns.
+fn table_has_column(db: &Connection, table: &str, column: &str) -> Result<bool> {
+    let mut query = db.prepare(&format!("PRAGMA table_info({table})"))?;
+    let mut rows = query.query([])?;
+    while let Some(row) = rows.next()? {
+        if row.get::<_, String>(1)? == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Add only the columns a schema 29 database is missing.
+fn add_missing_columns(db: &Connection, table: &str, columns: &[(&str, &str)]) -> Result<()> {
+    for (name, definition) in columns {
+        if !table_has_column(db, table, name)? {
+            db.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {definition};"))?;
+        }
+    }
+    Ok(())
+}
+
+/// Schema 29 migration (#9 TB1): one forward-only migration that adds the
+/// durable commit-diagnostic columns (#9), the recovery journal (#10) and the
+/// platform state push queue (#11). This is deliberately migration-only: no
+/// write path consumes the new columns yet (TB2/TB3 do that after #14 lands).
+///
+/// Runs inside `Store::open`'s single migration transaction, after the module
+/// migrations and before `user_version` is raised, so a failure rolls back the
+/// whole upgrade and leaves the VACUUM INTO backup as the only artifact.
+///
+/// Link to #14: legacy `uncertain` rows are backfilled as
+/// `unknown_retryable`/`interrupted`. #14 later introduces an explicit
+/// `abandoned` terminal state for exhausted reconcile budgets; TB2 remaps those
+/// old rows to `unknown_fatal`/`reconcile_exhausted`. TB1 intentionally neither
+/// emits nor depends on `abandoned`.
+/// (Re)create the read-only `commit_diagnostics` projection.
+///
+/// The view definition was refined in TB2 (stable `operation` column and
+/// `updated_at`) without a schema bump, because schema versions only grow. A
+/// database already migrated by an earlier build still carries the old column
+/// names, so every writer open re-creates the view before any reader queries it.
+/// DROP/CREATE is idempotent and stays inside the open transaction.
+fn install_commit_diagnostics_view(db: &Connection) -> Result<()> {
+    db.execute_batch(
+        "DROP VIEW IF EXISTS commit_diagnostics;
+        CREATE VIEW commit_diagnostics AS
+            SELECT 'operation' AS scope, o.id AS operation, o.node, o.kind, o.state,
+                   o.outcome, o.outcome_category, o.last_error,
+                   o.reconcile_attempts AS attempts, o.next_retry_at, o.updated_at
+              FROM operations o WHERE o.outcome IS NOT NULL
+            UNION ALL
+            SELECT 'namespace', n.id, n.node, n.kind, n.state,
+                   n.outcome, n.outcome_category, n.last_error,
+                   n.attempts, n.next_retry_at, n.updated_at
+              FROM namespace_ops n WHERE n.outcome IS NOT NULL
+            UNION ALL
+            SELECT 'transfer', t.id, t.node, t.direction, t.state,
+                   t.outcome, t.outcome_category, t.last_error,
+                   0, t.next_retry_at, 0
+              FROM transfers t WHERE t.outcome IS NOT NULL;",
+    )?;
+    Ok(())
+}
+
+fn migrate_v29(db: &Connection, version: i64) -> Result<()> {
+    if version >= 29 {
+        // Same-version DDL repair: the projection must match the current code
+        // even when the schema version was already raised by an earlier build.
+        return install_commit_diagnostics_view(db);
+    }
+    // (a) operations: unified commit diagnosis (#9 core).
+    add_missing_columns(
+        db,
+        "operations",
+        &[
+            (
+                "outcome",
+                "outcome TEXT CHECK(outcome IN ('confirmed','conflict','unknown_retryable','unknown_fatal'))",
+            ),
+            ("outcome_category", "outcome_category TEXT"),
+            ("last_error", "last_error TEXT"),
+            ("next_retry_at", "next_retry_at INTEGER NOT NULL DEFAULT 0"),
+            ("updated_at", "updated_at INTEGER NOT NULL DEFAULT 0"),
+        ],
+    )?;
+    // (b) namespace_ops: the same diagnosis plus a durable attempt counter. The
+    // runtime currently keeps namespace backoff in a process-local HashMap
+    // (`namespace_schedule::NamespaceRuntime`); TB2 moves it onto these columns.
+    add_missing_columns(
+        db,
+        "namespace_ops",
+        &[
+            ("attempts", "attempts INTEGER NOT NULL DEFAULT 0"),
+            (
+                "outcome",
+                "outcome TEXT CHECK(outcome IN ('confirmed','conflict','unknown_retryable','unknown_fatal'))",
+            ),
+            ("outcome_category", "outcome_category TEXT"),
+            ("last_error", "last_error TEXT"),
+            ("next_retry_at", "next_retry_at INTEGER NOT NULL DEFAULT 0"),
+            ("updated_at", "updated_at INTEGER NOT NULL DEFAULT 0"),
+        ],
+    )?;
+    // (c) transfers: downloads report through the same four-state exit. The
+    // legacy `error` JSON stays intact for read-only compatibility.
+    add_missing_columns(
+        db,
+        "transfers",
+        &[
+            (
+                "outcome",
+                "outcome TEXT CHECK(outcome IN ('confirmed','conflict','unknown_retryable','unknown_fatal'))",
+            ),
+            ("outcome_category", "outcome_category TEXT"),
+            ("last_error", "last_error TEXT"),
+            ("next_retry_at", "next_retry_at INTEGER NOT NULL DEFAULT 0"),
+        ],
+    )?;
+    // (d) #11: the platform push state is orthogonal to the sync state. Columns
+    // and queues only; the Windows adapter that consumes them is future work.
+    if !table_has_column(db, "nodes", "in_sync")? {
+        db.execute_batch(
+            "ALTER TABLE nodes ADD COLUMN in_sync INTEGER NOT NULL DEFAULT 0 CHECK(in_sync IN (0,1));",
+        )?;
+    }
+    db.execute_batch(
+        "
+        -- Durable migration ledger (fixes the old IF NOT EXISTS + direct
+        -- user_version chain that silently skipped future ALTERs).
+        CREATE TABLE IF NOT EXISTS schema_migrations(
+            version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL);
+        INSERT OR IGNORE INTO schema_migrations(version,applied_at) VALUES
+            (28,unixepoch()),(29,unixepoch());
+
+        -- (e) #10: recovery runs keep retrying/recovering distinct from the
+        -- needs-attention terminal state. No consumer in TB1.
+        CREATE TABLE IF NOT EXISTS recovery_runs(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cause TEXT NOT NULL CHECK(cause IN
+                ('initial_index','permission_recheck','cursor_invalidated',
+                 'filtered_type_changed','snapshot_changed','rescan_later',
+                 'merge_mode','root_unavailable')),
+            status TEXT NOT NULL CHECK(status IN
+                ('retrying','recovering','needs_attention','recovered')),
+            attempts INTEGER NOT NULL DEFAULT 0,
+            last_error TEXT,
+            next_retry_at INTEGER NOT NULL DEFAULT 0,
+            started_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL);
+        CREATE INDEX IF NOT EXISTS recovery_open
+            ON recovery_runs(status,next_retry_at)
+            WHERE status IN ('retrying','recovering');
+
+        -- (f) #11: pushable state changes, delivered idempotently by the
+        -- platform adapter (CFAPI on Windows). The table is the durable tail;
+        -- FUSE invalidation stays the Linux transport.
+        CREATE TABLE IF NOT EXISTS platform_state_changes(
+            seq INTEGER PRIMARY KEY AUTOINCREMENT,
+            node TEXT NOT NULL,
+            kind TEXT NOT NULL CHECK(kind IN
+                ('placeholder','hydrate','hydrate_progress','dehydrate',
+                 'in_sync','conflict','delete')),
+            payload TEXT,
+            created_at INTEGER NOT NULL,
+            delivered_at INTEGER,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            last_error TEXT);
+        CREATE INDEX IF NOT EXISTS platform_state_pending
+            ON platform_state_changes(seq) WHERE delivered_at IS NULL;
+
+        UPDATE metadata SET value='29' WHERE key='schema_version';
+        ",
+    )?;
+    // (g) One read-only join for the status interface; the authoritative state
+    // stays in each journal, this view only normalises the diagnosis.
+    install_commit_diagnostics_view(db)?;
+    // (h) Legacy backfill. Idempotent: every statement is gated on
+    // `outcome IS NULL`, so a re-run (or the fresh-database path, which has no
+    // rows) cannot overwrite a diagnosis written by TB2 later.
+    //
+    // `state='inflight'` rows are still inflight here: Store::open rewrites them
+    // to `uncertain` after the migration commits, so they need the diagnosis now
+    // rather than being left without one. `state='pending'` rows were never
+    // submitted and deliberately keep `outcome=NULL`: there is no commit result
+    // to report yet.
+    db.execute_batch(
+        "
+        UPDATE operations SET outcome='unknown_retryable',
+               outcome_category='interrupted',
+               last_error='interrupted by restart; awaiting reconciliation',
+               next_retry_at=unixepoch(), updated_at=unixepoch()
+         WHERE outcome IS NULL AND state='uncertain';
+        UPDATE operations SET outcome='unknown_retryable',
+               outcome_category='interrupted',
+               last_error='submitted before restart; outcome unknown',
+               next_retry_at=unixepoch(), updated_at=unixepoch()
+         WHERE outcome IS NULL AND state='inflight';
+        UPDATE operations SET outcome='confirmed', outcome_category='committed',
+               updated_at=unixepoch()
+         WHERE outcome IS NULL AND state='committed';
+        UPDATE operations SET outcome='conflict', outcome_category='server_rejected',
+               updated_at=unixepoch()
+         WHERE outcome IS NULL AND state='conflict';
+        UPDATE operations SET outcome='confirmed', outcome_category='local_abandoned',
+               updated_at=unixepoch()
+         WHERE outcome IS NULL AND state='superseded';
+        UPDATE operations SET outcome='confirmed', outcome_category='local_abandoned',
+               last_error='legacy abandoned operation; reconcile budget was exhausted',
+               next_retry_at=0, updated_at=unixepoch()
+         WHERE outcome IS NULL AND state='abandoned';
+
+        UPDATE namespace_ops SET outcome='unknown_retryable',
+               outcome_category='interrupted',
+               last_error='interrupted by restart; awaiting reconciliation',
+               next_retry_at=unixepoch(), updated_at=unixepoch()
+         WHERE outcome IS NULL AND state IN ('uncertain','cleanup_uncertain');
+        UPDATE namespace_ops SET outcome='unknown_retryable',
+               outcome_category='interrupted',
+               last_error='submitted before restart; outcome unknown',
+               next_retry_at=unixepoch(), updated_at=unixepoch()
+         WHERE outcome IS NULL AND state IN ('inflight','cleanup_inflight');
+        UPDATE namespace_ops SET outcome='confirmed', outcome_category='committed',
+               updated_at=unixepoch()
+         WHERE outcome IS NULL AND state='committed';
+        UPDATE namespace_ops SET outcome='conflict', outcome_category='server_rejected',
+               updated_at=unixepoch()
+         WHERE outcome IS NULL AND state='conflict';
+        UPDATE namespace_ops SET outcome='confirmed', outcome_category='local_abandoned',
+               updated_at=unixepoch()
+         WHERE outcome IS NULL AND state='superseded';
+        UPDATE namespace_ops SET outcome='confirmed', outcome_category='local_abandoned',
+               last_error='legacy abandoned operation; reconcile budget was exhausted',
+               next_retry_at=0, updated_at=unixepoch()
+         WHERE outcome IS NULL AND state='abandoned';
+
+        UPDATE transfers SET outcome='unknown_retryable',
+               outcome_category=CASE json_extract(error,'$.kind')
+                   WHEN 'server_rejected' THEN 'server_rejected'
+                   WHEN 'invalid_content' THEN 'protocol'
+                   WHEN 'local_storage' THEN 'local_storage'
+                   WHEN 'session_expired' THEN 'timeout'
+                   ELSE 'transport' END,
+               last_error=COALESCE(json_extract(error,'$.kind'),'unknown'),
+               next_retry_at=COALESCE(CAST(json_extract(error,'$.retry_at') AS INTEGER),0)
+         WHERE outcome IS NULL AND state IN ('retry','failed');
+        UPDATE transfers SET outcome='unknown_retryable',
+               outcome_category='interrupted',
+               last_error='interrupted by restart',
+               next_retry_at=unixepoch()
+         WHERE outcome IS NULL AND state='inflight';
+        ",
+    )?;
+    Ok(())
+}
 
 impl Store {
     /// One store per account + sync root. Independent accounts never share event IDs or cursors.
@@ -360,9 +633,7 @@ impl Store {
                 .iter()
                 .any(|column| column.as_str() == name)
             {
-                db.execute_batch(&format!(
-                    "ALTER TABLE operations ADD COLUMN {definition};"
-                ))?;
+                db.execute_batch(&format!("ALTER TABLE operations ADD COLUMN {definition};"))?;
             }
         }
         // Schema 28 index candidates. They are created after every `ALTER TABLE`
@@ -382,8 +653,12 @@ impl Store {
         )?;
         crate::initialization_store::migrate(&db)?;
         crate::preview::migrate(&db)?;
-        sync_history::migrate(&db, version < STATE_SCHEMA_VERSION)?;
+        // The `repairing` flag is about the v28 durable sync-history row counter
+        // and stays pinned to the literal 28: when the schema moves to 29 a v28
+        // store must not be treated as a legacy (pre-counter) store again.
+        sync_history::migrate(&db, version < 28)?;
         crate::write_permissions::migrate(&db)?;
+        migrate_v29(&db, version)?;
         db.pragma_update(None, "user_version", STATE_SCHEMA_VERSION)?;
         db.execute_batch("COMMIT;")?;
         crate::initialization_store::recover_open(&db)?;
@@ -400,6 +675,10 @@ impl Store {
             "UPDATE transfers SET state='pending' WHERE direction='download' AND state='inflight'",
             [],
         )?;
+        // #9b TB2: explain rows that startup recovery left unexplained and map
+        // legacy `abandoned` terminal rows (#14) to an explicit local_abandoned
+        // outcome, so a restart never leaves an anonymous pending item.
+        crate::commit_diagnostics::backfill_startup(&db)?;
         // Derived state starts after startup recovery. TEMP objects and a fresh
         // epoch keep the durable schema and external readers unchanged.
         crate::status_changes::install(&db)?;
@@ -1008,26 +1287,61 @@ impl Store {
     }
     /// Local-only cache policy. This never inserts a remote delete operation.
     /// Physical reclamation is separate and protects snapshots held by open handles.
-    pub fn release(&mut self, id: &str) -> Result<()> {
+    pub fn release(&mut self, id: &str) -> Result<ReleaseOutcome> {
         if self.cache_is_protected(id)? {
             return Err(Error::State(
                 "content has a protected local reference".into(),
             ));
         }
+        let cached: Option<(bool, bool, bool)> = self
+            .db
+            .query_row(
+                "SELECT blob IS NOT NULL, dirty_blob IS NOT NULL, conflict=1 FROM nodes WHERE id=?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+        let Some((has_blob, dirty, conflict)) = cached else {
+            return Err(Error::State("content is dirty, conflicted, or absent".into()));
+        };
+        if dirty || conflict {
+            return Err(Error::State("content is dirty, conflicted, or absent".into()));
+        }
+        if !has_blob {
+            // There is no local body left to reclaim, so report the no-op as
+            // skipped instead of the fake success behind issue #19. Releasing an
+            // online-only path still withdraws a pending or failed local read
+            // intent, matching the body path below and keeping the queue clean.
+            self.db.execute(
+                "DELETE FROM transfers WHERE node=?1 AND direction='download'",
+                [id],
+            )?;
+            return Ok(ReleaseOutcome::Skipped);
+        }
         let tx = self.db.transaction()?;
-        if tx.execute("UPDATE nodes SET blob=NULL,local_version=NULL WHERE id=?1 AND dirty_blob IS NULL AND conflict=0",[id])?!=1 {return Err(Error::State("content is dirty, conflicted, or absent".into()));}
+        if tx.execute("UPDATE nodes SET blob=NULL,local_version=NULL WHERE id=?1 AND blob IS NOT NULL AND dirty_blob IS NULL AND conflict=0",[id])?!=1 {return Err(Error::State("content is dirty, conflicted, or absent".into()));}
         tx.execute(
             "DELETE FROM transfers WHERE node=?1 AND direction='download'",
             [id],
         )?;
         tx.commit()?;
-        Ok(())
+        Ok(ReleaseOutcome::Released)
     }
 
     /// Reclaim only unreferenced generated blobs. Journaled writes, conflicts and
     /// open old versions remain protected. No remote operation is created.
     pub fn collect_garbage(&mut self) -> Result<u64> {
-        let mut q=self.db.prepare("SELECT blob FROM nodes WHERE blob IS NOT NULL UNION SELECT dirty_blob FROM nodes WHERE dirty_blob IS NOT NULL UNION SELECT blob FROM operations WHERE blob IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict') UNION SELECT json_extract(body,'$.blob') FROM namespace_ops WHERE kind='replace' AND state NOT IN ('committed','superseded')")?;
+        // Retired rows may still point at the body they used to cache. A shared
+        // pointer means the live row keeps the file below, so dropping the stale
+        // pointer is safe; conflicted recovery rows keep theirs readable.
+        self.db.execute(
+            "UPDATE nodes SET blob=NULL,local_version=NULL WHERE deleted=1 AND conflict=0 AND dirty_blob IS NULL AND blob IS NOT NULL",
+            [],
+        )?;
+        // `abandoned` is #14's terminal upload state, but it is only terminal for
+        // automatic reconcile: an explicit retry re-arms it as `uncertain`, so its
+        // body still has to survive garbage collection.
+        let mut q=self.db.prepare("SELECT blob FROM nodes WHERE blob IS NOT NULL AND (deleted=0 OR conflict=1) UNION SELECT dirty_blob FROM nodes WHERE dirty_blob IS NOT NULL UNION SELECT blob FROM operations WHERE blob IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict','abandoned') UNION SELECT json_extract(body,'$.blob') FROM namespace_ops WHERE kind='replace' AND state NOT IN ('committed','superseded')")?;
         let mut keep = q
             .query_map([], |r| r.get::<_, String>(0))?
             .collect::<std::result::Result<std::collections::HashSet<_>, _>>()?;
@@ -1099,6 +1413,121 @@ impl Store {
             Err(e) => return Err(e.into()),
         }
         Ok(removed)
+    }
+
+    /// Issue #50 (phase 4): hide a rule-excluded subtree locally and drop its
+    /// cached content and local scheduling state. This never queues a remote
+    /// delete: no `namespace_ops` row is written here. Callers run
+    /// [`Self::collect_garbage`] afterwards so the now-unreferenced blobs are
+    /// reclaimed from disk.
+    ///
+    /// Conflicted nodes are left untouched: dropping them could destroy the only
+    /// local copy of user data. The purged ids are recorded under the
+    /// `excluded_purged` metadata key so removing the rules restores the local
+    /// view on the next mount (see [`Self::restore_excluded_nodes`]).
+    pub fn purge_excluded_nodes(&mut self, ids: &[String]) -> Result<u64> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let tx = self.db.transaction()?;
+        let mut purged = 0u64;
+        let mut persisted: Vec<String> = Vec::new();
+        for id in ids {
+            let row: Option<(bool, bool)> = tx
+                .query_row(
+                    "SELECT deleted,conflict FROM nodes WHERE id=?1",
+                    [id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            let Some((_deleted, conflict)) = row else {
+                continue;
+            };
+            if conflict {
+                continue;
+            }
+            tx.execute(
+                "UPDATE nodes SET deleted=1,pinned=0,dirty_blob=NULL WHERE id=?1",
+                [id],
+            )?;
+            // Local scheduling state for this node no longer has a namespace to
+            // reach; leaving it would upload/rename content the rules hide.
+            tx.execute("DELETE FROM operations WHERE node=?1", [id])?;
+            tx.execute("DELETE FROM transfers WHERE node=?1", [id])?;
+            tx.execute("DELETE FROM drafts WHERE node=?1", [id])?;
+            tx.execute("DELETE FROM local_creations WHERE node=?1", [id])?;
+            tx.execute(
+                "DELETE FROM namespace_ops WHERE node=?1 AND state NOT IN ('committed','superseded')",
+                [id],
+            )?;
+            tx.execute("DELETE FROM local_unlinks WHERE node=?1", [id])?;
+            tx.execute("DELETE FROM cache_access WHERE node=?1", [id])?;
+            tx.execute("DELETE FROM cache_published WHERE node=?1", [id])?;
+            tx.execute("DELETE FROM local_atimes WHERE node=?1", [id])?;
+            // A pending namespace overlay entry would make a later recovery
+            // snapshot flag the hidden node as a stale conflict (see
+            // install_remote_snapshot_with_initialization). The local rename is
+            // dropped together with the rest of the node's local work.
+            tx.execute("DELETE FROM namespace_overlay WHERE node=?1", [id])?;
+            tx.execute("DELETE FROM fs_inodes WHERE node=?1", [id])?;
+            purged += 1;
+            persisted.push(id.clone());
+        }
+        if purged > 0 {
+            let previous: Vec<String> = tx
+                .query_row(
+                    "SELECT value FROM metadata WHERE key='excluded_purged'",
+                    [],
+                    |r| r.get::<_, String>(0),
+                )
+                .optional()?
+                .and_then(|raw| serde_json::from_str(&raw).ok())
+                .unwrap_or_default();
+            let mut merged = previous;
+            for id in persisted {
+                if !merged.contains(&id) {
+                    merged.push(id);
+                }
+            }
+            tx.execute(
+                "INSERT OR REPLACE INTO metadata(key,value) VALUES('excluded_purged',?1)",
+                [serde_json::to_string(&merged)?],
+            )?;
+            // The inode map is derived state; force a rebuild on the next mount.
+            tx.execute("DELETE FROM metadata WHERE key='fs_inodes_complete'", [])?;
+        }
+        tx.commit()?;
+        Ok(purged)
+    }
+
+    /// Issue #50 (phase 4): undo a previous exclusion purge after the rules are
+    /// removed. Restores the rows and marks the derived inode map stale so the
+    /// next mount backfills it again. Returns the number of restored nodes.
+    pub fn restore_excluded_nodes(&mut self) -> Result<u64> {
+        let Some(raw) = self
+            .db
+            .query_row(
+                "SELECT value FROM metadata WHERE key='excluded_purged'",
+                [],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?
+        else {
+            return Ok(0);
+        };
+        let ids: Vec<String> = serde_json::from_str(&raw).unwrap_or_default();
+        let tx = self.db.transaction()?;
+        let mut restored = 0u64;
+        for id in &ids {
+            restored += tx.execute(
+                "UPDATE nodes SET deleted=0 WHERE id=?1 AND deleted=1 AND conflict=0",
+                [id],
+            )? as u64;
+        }
+        tx.execute("DELETE FROM metadata WHERE key='excluded_purged'", [])?;
+        tx.execute("DELETE FROM metadata WHERE key='fs_inodes_complete'", [])?;
+        tx.commit()?;
+        Ok(restored)
     }
 
     /// Persist scheduler intent before starting network I/O. Duplicate tickets coalesce.
@@ -1180,8 +1609,12 @@ impl Store {
         let base = base.unwrap_or_else(|| opened_version.to_string());
         let op = uuid::Uuid::new_v4().to_string();
         tx.execute("UPDATE nodes SET dirty_blob=?2,base_version=?3,dirty_generation=?4,conflict=CASE WHEN ?3!=remote_version OR ?5!=?3 THEN 1 ELSE conflict END WHERE id=?1",params![id,blob,base,generation+1,opened_version])?;
+        // #9b TB2: a newer local edit supersedes the previous queued submission
+        // (pending) or paused terminal (abandoned) at the queue level. Neither
+        // will be replayed; the server outcome stays unknown, so this is
+        // confirmed/local_abandoned rather than a failure.
         tx.execute(
-            "UPDATE operations SET state='superseded' WHERE node=?1 AND state='pending'",
+            "UPDATE operations SET state='superseded', outcome='confirmed', outcome_category='local_abandoned', last_error='superseded by a newer local edit', next_retry_at=0, updated_at=unixepoch() WHERE node=?1 AND state IN ('pending','abandoned')",
             [id],
         )?;
         tx.execute("INSERT INTO operations(id,node,kind,base,blob,generation) VALUES(?1,?2,'upload',?3,?4,?5)",params![op,id,base,blob,generation+1])?;
@@ -1225,7 +1658,7 @@ impl Store {
             )));
         }
         let tx = self.db.transaction()?;
-        let changed=tx.execute("UPDATE operations SET state='inflight' WHERE id=?1 AND state='pending' AND node NOT IN (SELECT id FROM access_blocked) AND NOT EXISTS(SELECT 1 FROM operations other WHERE other.node=operations.node AND other.state IN ('inflight','uncertain')) AND EXISTS(SELECT 1 FROM nodes n WHERE n.id=operations.node AND n.remote_version=operations.base AND n.deleted=0 AND n.conflict=0) AND NOT EXISTS(SELECT 1 FROM drafts d WHERE d.node=operations.node AND d.generation!=d.checkpoint) AND NOT EXISTS(SELECT 1 FROM local_creations c WHERE c.node=operations.node AND c.ready=0)",[op])?;
+        let changed=tx.execute("UPDATE operations SET state='inflight' WHERE id=?1 AND state='pending' AND node NOT IN (SELECT id FROM access_blocked) AND NOT EXISTS(SELECT 1 FROM operations other WHERE other.node=operations.node AND other.state IN ('inflight','uncertain','abandoned')) AND EXISTS(SELECT 1 FROM nodes n WHERE n.id=operations.node AND n.remote_version=operations.base AND n.deleted=0 AND n.conflict=0) AND NOT EXISTS(SELECT 1 FROM drafts d WHERE d.node=operations.node AND d.generation!=d.checkpoint) AND NOT EXISTS(SELECT 1 FROM local_creations c WHERE c.node=operations.node AND c.ready=0)",[op])?;
         if changed != 1 {
             return Err(Error::State(
                 "upload needs conflict resolution or commit reconciliation".into(),
@@ -1235,16 +1668,89 @@ impl Store {
             "INSERT INTO upload_paths(operation,path) VALUES(?1,?2)",
             params![op, path],
         )?;
+        // #9b TB2: a fresh submission supersedes any stale diagnosis left by an
+        // earlier interrupted attempt.
+        crate::commit_diagnostics::clear_tx(&tx, "operations", op)?;
         tx.commit()?;
         Ok(())
     }
+    /// Record that a submitted upload's server outcome is unknown. Runtime
+    /// paths that know the failure category use
+    /// [`Store::mark_upload_uncertain_diagnosed`] instead.
     pub fn mark_upload_uncertain(&mut self, op: &str) -> Result<()> {
-        if self.db.execute(
+        self.mark_upload_uncertain_diagnosed(
+            op,
+            CommitCategory::Interrupted,
+            Some("commit outcome unknown; reconciliation required"),
+        )
+    }
+    /// Persist an unknown upload outcome together with the category, the last
+    /// error and the retry time (#9b TB2). The diagnostic is written in the same
+    /// transaction as the state change, so a crash cannot lose the reason.
+    pub fn mark_upload_uncertain_diagnosed(
+        &mut self,
+        op: &str,
+        category: CommitCategory,
+        last_error: Option<&str>,
+    ) -> Result<()> {
+        let tx = self.db.transaction()?;
+        if tx.execute(
             "UPDATE operations SET state='uncertain' WHERE id=?1 AND state='inflight'",
             [op],
         )? != 1
         {
             return Err(Error::State("operation not inflight".into()));
+        }
+        crate::commit_diagnostics::record(
+            &tx,
+            "operations",
+            op,
+            &CommitDiagnostic::unknown_retryable(category, last_error.map(str::to_owned), 0, 0),
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+    /// Refresh the upload diagnosis without consuming reconcile budget (for
+    /// transient transport loss during reconciliation). Existing attempts and a
+    /// scheduled retry time are preserved: a read-only observation must not
+    /// erase the bounded reconcile progress.
+    pub fn record_upload_commit_diagnostic(
+        &mut self,
+        op: &str,
+        category: CommitCategory,
+        last_error: Option<&str>,
+        next_retry_at: i64,
+    ) -> Result<()> {
+        let changed = self.db.execute(
+            "UPDATE operations SET outcome='unknown_retryable', outcome_category=?2, last_error=?3, updated_at=unixepoch(), next_retry_at=CASE WHEN ?4>0 THEN ?4 ELSE next_retry_at END WHERE id=?1",
+            params![op, category.as_str(), last_error, next_retry_at],
+        )?;
+        if changed == 0 {
+            return Err(Error::State(format!(
+                "commit diagnostic target {op} is missing from operations"
+            )));
+        }
+        Ok(())
+    }
+    /// Refresh the namespace diagnosis during read-only reconciliation. The
+    /// journal state is already `uncertain`; the next scheduling observation
+    /// rewrites `next_retry_at` with the real delay. An existing scheduled time
+    /// survives a transient observation.
+    pub fn record_namespace_commit_diagnostic(
+        &mut self,
+        op: &str,
+        category: CommitCategory,
+        last_error: Option<&str>,
+        next_retry_at: i64,
+    ) -> Result<()> {
+        let changed = self.db.execute(
+            "UPDATE namespace_ops SET outcome='unknown_retryable', outcome_category=?2, last_error=?3, updated_at=unixepoch(), next_retry_at=CASE WHEN ?4>0 THEN ?4 ELSE next_retry_at END WHERE id=?1",
+            params![op, category.as_str(), last_error, next_retry_at],
+        )?;
+        if changed == 0 {
+            return Err(Error::State(format!(
+                "commit diagnostic target {op} is missing from namespace_ops"
+            )));
         }
         Ok(())
     }
@@ -1284,6 +1790,14 @@ impl Store {
         {
             tx.execute("UPDATE nodes SET conflict=1 WHERE id=?1", [&id])?;
             tx.execute("UPDATE operations SET state='conflict' WHERE id=?1", [op])?;
+            crate::commit_diagnostics::record(
+                &tx,
+                "operations",
+                op,
+                &CommitDiagnostic::conflict(Some(
+                    "remote changed before commit reconciliation; preserve local content".into(),
+                )),
+            )?;
             tx.commit()?;
             return Err(Error::State(
                 "remote changed before commit reconciliation; preserve local content".into(),
@@ -1351,6 +1865,7 @@ impl Store {
         // forever. The delete is bookkeeping: the journal does not publish it.
         crate::retention::drop_committed_generations(&tx, &id, op)?;
         tx.execute("UPDATE node_metadata SET mtime=(SELECT mtime FROM upload_times WHERE operation=?1) WHERE node=?2 AND EXISTS(SELECT 1 FROM upload_times WHERE operation=?1)",params![op,id])?;
+        crate::commit_diagnostics::record(&tx, "operations", op, &CommitDiagnostic::confirmed())?;
         tx.commit()?;
         Ok(())
     }
@@ -1539,7 +2054,7 @@ impl Store {
             tx.execute("UPDATE nodes SET deleted=1,conflict=CASE WHEN dirty_blob IS NOT NULL AND id NOT IN (SELECT node FROM local_unlinks) THEN 1 ELSE conflict END WHERE id NOT IN (SELECT id FROM recovery_ids) AND id NOT IN (SELECT node FROM local_creations) AND id NOT IN (SELECT node FROM namespace_overlay)",[])?;
             // A missing/replaced remote object must not leave a pending upload
             // eligible for automatic recreation. Keep its blob for conflict resolution.
-            tx.execute("UPDATE operations SET state='conflict' WHERE kind='upload' AND state='pending' AND node IN (SELECT id FROM nodes WHERE deleted=1 AND conflict=1)", [])?;
+            tx.execute("UPDATE operations SET state='conflict', outcome='conflict', outcome_category='server_rejected', last_error='remote object changed before the upload was sent', next_retry_at=0, updated_at=unixepoch() WHERE kind='upload' AND state='pending' AND node IN (SELECT id FROM nodes WHERE deleted=1 AND conflict=1)", [])?;
             tx.execute("UPDATE namespace_overlay SET remote='null' WHERE node NOT IN (SELECT id FROM recovery_ids)",[])?;
             tx.execute("UPDATE nodes SET conflict=1 WHERE id IN (SELECT node FROM namespace_overlay WHERE remote='null') AND id NOT IN (SELECT node FROM local_unlinks)",[])?;
             {
@@ -1557,8 +2072,49 @@ impl Store {
                     metadata.write(&n)?;
                 }
             }
+            // Bound-directory recovery (issue #54): a directory bound to a
+            // remote identity whose tombstone still has surviving local
+            // descendants cannot be resolved by the stale-directory guard. Mark
+            // it as a conflict so the issue center can offer keep-local /
+            // keep-remote. The bound identity merely disappeared; this is not a
+            // namespace conflict.
             tx.execute(
-                "UPDATE operations SET state='uncertain' WHERE state='inflight'",
+                "UPDATE nodes SET conflict=1
+                  WHERE directory=1 AND deleted=1 AND conflict=0
+                    AND id IN (SELECT node FROM remote_aliases)
+                    AND id NOT IN (SELECT node FROM local_unlinks)
+                    AND EXISTS(SELECT 1 FROM nodes c WHERE c.parent=nodes.id AND c.deleted=0)",
+                [],
+            )?;
+            // Stale-flag heal (issue #6 follow-up): a snapshot installed while a
+            // namespace operation was in flight marks its overlay member as
+            // conflicted, and the later mkdir/rename commit binds the remote
+            // identity without clearing the flag. A bound, live, untouched
+            // directory with no overlay row, local creation, unlink, pending
+            // operation or draft has nothing left to resolve, so the flag cannot
+            // describe a real conflict. This is not conflict resolution: real
+            // conflicts keep both their flag and their recovery entry (see
+            // docs/STALE_CONFLICTS.md).
+            tx.execute(
+                "UPDATE nodes SET conflict=0
+                 WHERE directory=1 AND conflict=1 AND deleted=0
+                   AND id IN (SELECT id FROM recovery_ids)
+                   AND id IN (SELECT node FROM remote_aliases)
+                   AND remote_version != ?1
+                   AND dirty_blob IS NULL
+                   AND id NOT IN (SELECT node FROM local_creations)
+                   AND id NOT IN (SELECT node FROM namespace_overlay)
+                   AND id NOT IN (SELECT node FROM local_unlinks)
+                   AND NOT EXISTS(SELECT 1 FROM namespace_ops WHERE node=nodes.id AND state NOT IN ('committed','superseded'))
+                   AND NOT EXISTS(SELECT 1 FROM operations WHERE node=nodes.id AND state NOT IN ('committed','superseded'))
+                   AND NOT EXISTS(SELECT 1 FROM drafts WHERE node=nodes.id)",
+                params![crate::creations::CREATE_VERSION],
+            )?;
+            // #9b TB2: an in-flight submission cannot survive a namespace swap
+            // with a known outcome. Its commit is unknown; record the diagnosis
+            // in the same transaction so a later restart cannot lose the reason.
+            tx.execute(
+                "UPDATE operations SET state='uncertain', outcome='unknown_retryable', outcome_category='interrupted', last_error='namespace snapshot replaced before the commit was observed', next_retry_at=unixepoch(), updated_at=unixepoch() WHERE state='inflight'",
                 [],
             )?;
             tx.execute("UPDATE transfers SET state='obsolete' WHERE direction='download' AND NOT EXISTS(SELECT 1 FROM nodes n WHERE n.id=transfers.node AND n.remote_version=transfers.version AND n.deleted=0)",[])?;
@@ -1617,12 +2173,35 @@ impl Store {
     /// Record one automatic read-only reconciliation attempt. The operation
     /// must still be uncertain; an already committed or superseded operation is
     /// never rewritten. History detail is updated in the same transaction.
+    ///
+    /// The final attempt is terminal: no further read-only pass may be selected,
+    /// so the operation moves to `abandoned` instead of parking as a permanent
+    /// `uncertain` row that would block pending work forever. Local content and
+    /// the permission evidence are retained; a user recheck re-arms the row.
     pub fn note_upload_reconcile_attempt(&mut self, operation: &str, now: i64) -> Result<u32> {
+        self.note_upload_reconcile_attempt_diagnosed(
+            operation,
+            now,
+            CommitCategory::PermissionUncertain,
+            Some("server did not confirm the upload commit during reconciliation"),
+        )
+    }
+    /// Record one automatic attempt together with the category and last error
+    /// that triggered it (#9b TB2). The budget update and the diagnostic share
+    /// one transaction; the terminal attempt records `unknown_fatal` +
+    /// `reconcile_exhausted` while the operation becomes `abandoned` (#14).
+    pub fn note_upload_reconcile_attempt_diagnosed(
+        &mut self,
+        operation: &str,
+        now: i64,
+        category: CommitCategory,
+        last_error: Option<&str>,
+    ) -> Result<u32> {
         let tx = self.db.transaction()?;
-        let (state, attempts): (String, i64) = tx.query_row(
-            "SELECT state,reconcile_attempts FROM operations WHERE id=?1 AND kind='upload'",
+        let (node, state, attempts): (String, String, i64) = tx.query_row(
+            "SELECT node,state,reconcile_attempts FROM operations WHERE id=?1 AND kind='upload'",
             [operation],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )?;
         if state != "uncertain" {
             return Err(Error::State(
@@ -1630,30 +2209,95 @@ impl Store {
             ));
         }
         let attempts = u32::try_from(attempts.saturating_add(1)).unwrap_or(u32::MAX);
-        tx.execute(
-            "UPDATE operations SET reconcile_attempts=?2, reconcile_at=?3 WHERE id=?1 AND state='uncertain'",
-            params![
+        if attempts >= MAX_UPLOAD_RECONCILE_ATTEMPTS {
+            tx.execute(
+                "UPDATE operations SET state='abandoned', reconcile_attempts=?2, reconcile_at=0 WHERE id=?1 AND state='uncertain'",
+                params![operation, i64::from(attempts)],
+            )?;
+            crate::sync_history::record_reconcile_exhausted(
+                &tx,
+                &format!("upload:{operation}"),
+                &node,
+                attempts,
+            )?;
+            let exhausted = last_error
+                .map(|error| format!("reconcile budget exhausted: {error}"))
+                .or_else(|| Some("reconcile budget exhausted".into()));
+            crate::commit_diagnostics::record(
+                &tx,
+                "operations",
                 operation,
-                i64::from(attempts),
-                now.saturating_add(upload_reconcile_delay(attempts))
-            ],
-        )?;
-        crate::sync_history::note_reconcile_attempt(
-            &tx,
-            &format!("upload:{operation}"),
-            attempts,
-        )?;
+                &CommitDiagnostic::unknown_fatal(
+                    CommitCategory::ReconcileExhausted,
+                    exhausted,
+                    attempts,
+                ),
+            )?;
+        } else {
+            tx.execute(
+                "UPDATE operations SET reconcile_attempts=?2, reconcile_at=?3 WHERE id=?1 AND state='uncertain'",
+                params![
+                    operation,
+                    i64::from(attempts),
+                    now.saturating_add(upload_reconcile_delay(attempts))
+                ],
+            )?;
+            crate::sync_history::note_reconcile_attempt(
+                &tx,
+                &format!("upload:{operation}"),
+                attempts,
+            )?;
+            crate::commit_diagnostics::record(
+                &tx,
+                "operations",
+                operation,
+                &CommitDiagnostic::unknown_retryable(
+                    category,
+                    last_error.map(str::to_owned),
+                    attempts,
+                    now.saturating_add(upload_reconcile_delay(attempts)),
+                ),
+            )?;
+        }
         tx.commit()?;
         Ok(attempts)
     }
 
     /// A user-requested recheck grants every uncertain upload a fresh budget.
-    /// The operation state is untouched: this never turns uncertain into pending.
+    /// Exhausted (`abandoned`) rows are re-armed to `uncertain` with a zeroed
+    /// budget; they are not selectable again until this re-arm. The history row
+    /// loses its `abandoned` marker so the GUI stops presenting a terminal state.
     pub fn reset_upload_reconcile_budget(&mut self) -> Result<usize> {
-        Ok(self.db.execute(
-            "UPDATE operations SET reconcile_attempts=0, reconcile_at=0 WHERE kind='upload' AND state='uncertain'",
+        let tx = self.db.transaction()?;
+        let abandoned: Vec<String> = {
+            let mut q = tx.prepare(
+                "SELECT id FROM operations WHERE kind='upload' AND state='abandoned'",
+            )?;
+            q.query_map([], |r| r.get::<_, String>(0))?
+                .collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        let changed = tx.execute(
+            "UPDATE operations SET state='uncertain', reconcile_attempts=0, reconcile_at=0 WHERE kind='upload' AND state IN ('uncertain','abandoned')",
             [],
-        )?)
+        )?;
+        // The user asked for a fresh recheck: the old diagnosis described the
+        // previous budget, so clear it instead of showing a stale retry time.
+        tx.execute(
+            "UPDATE operations SET outcome=NULL, outcome_category=NULL, last_error=NULL,
+                    next_retry_at=0, updated_at=unixepoch()
+              WHERE kind='upload' AND state='uncertain'",
+            [],
+        )?;
+        for operation in &abandoned {
+            tx.execute(
+                "UPDATE sync_history SET error_summary='已重新开始只读核对，服务器提交结果待确认', \
+                 detail=json_patch(json_remove(COALESCE(detail,'{}'), '$.abandoned'), json_object('reconcile_attempts', 0)) \
+                 WHERE operation_key=?1",
+                [format!("upload:{operation}")],
+            )?;
+        }
+        tx.commit()?;
+        Ok(changed)
     }
 
     /// Local unlink tombstones a node; operation-side retirement uses this to
@@ -1667,11 +2311,11 @@ impl Store {
     }
 
     /// Retire an unconfirmed creation whose local path the user already deleted.
-    /// The caller must own the deletion decision; this only accepts an uncertain
-    /// upload of an unbound creation and returns false otherwise, leaving state
-    /// untouched. The uncertain result is never replayed and no terminal state
-    /// value is invented: the operation becomes superseded with explanatory
-    /// history.
+    /// The caller must own the deletion decision; this only accepts an
+    /// uncertain/abandoned upload of an unbound creation and returns false
+    /// otherwise, leaving state untouched. The uncertain result is never
+    /// replayed and no terminal state value is invented: the operation becomes
+    /// superseded with explanatory history.
     pub fn retire_unconfirmed_creation(&mut self, operation: &str) -> Result<bool> {
         let row: Option<(String, String)> = self
             .db
@@ -1684,16 +2328,77 @@ impl Store {
         let Some((node, state)) = row else {
             return Ok(false);
         };
-        if state != "uncertain" || !self.is_locally_deleted(&node)? {
+        if !matches!(state.as_str(), "uncertain" | "abandoned")
+            || !self.is_locally_deleted(&node)?
+        {
             return Ok(false);
         }
         if !crate::removals::creation_unbound(&self.db, &node)? {
             return Ok(false);
         }
         let tx = self.db.transaction()?;
-        crate::removals::retire_creation_tx(&tx, operation, &node)?;
+        crate::removals::retire_creation_tx(&tx, operation, &node, "local_deleted")?;
+        crate::commit_diagnostics::record(
+            &tx,
+            "operations",
+            operation,
+            &CommitDiagnostic::confirmed_with_category(
+                CommitCategory::LocalAbandoned,
+                Some("local file was deleted; server creation outcome unconfirmed".into()),
+            ),
+        )?;
         tx.commit()?;
         Ok(true)
+    }
+
+    /// A user-authorized discard of an unconfirmed local creation. Only a
+    /// never-bound local creation with an uncertain or exhausted upload
+    /// qualifies: the local file is deleted, the operation is retired with
+    /// explanatory history, and no server request is ever issued. Bound files
+    /// are refused because their server object stores a different version and
+    /// only a recheck can resolve the outcome.
+    pub fn abandon_unconfirmed_creation(&mut self, node: &str) -> Result<bool> {
+        if self.is_locally_deleted(node)? {
+            return Ok(false);
+        }
+        let row: Option<String> = self
+            .db
+            .query_row(
+                "SELECT id FROM operations WHERE kind='upload' AND node=?1 AND state IN ('uncertain','abandoned') ORDER BY rowid LIMIT 1",
+                [node],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let Some(operation) = row else {
+            return Ok(false);
+        };
+        if !crate::removals::creation_unbound(&self.db, node)? {
+            return Ok(false);
+        }
+        let tx = self.db.transaction()?;
+        crate::removals::retire_creation_tx(&tx, &operation, node, "user_discarded")?;
+        crate::commit_diagnostics::record(
+            &tx,
+            "operations",
+            &operation,
+            &CommitDiagnostic::confirmed_with_category(
+                CommitCategory::LocalAbandoned,
+                Some("user discarded the local creation; server outcome unconfirmed".into()),
+            ),
+        )?;
+        tx.commit()?;
+        Ok(true)
+    }
+
+    /// Uploads whose bounded automatic reconciliation stopped without a
+    /// confirmed server result. They are terminal for the pending-work counter
+    /// but still explainable in the issue list and re-armable by a recheck.
+    pub fn paused_upload_operations(&self) -> Result<i64> {
+        Ok(self.db.query_row(
+            "SELECT count(*) FROM operations WHERE kind='upload' AND state='abandoned'",
+            [],
+            |r| r.get(0),
+        )?)
     }
 
     /// Offline availability summary from local metadata only. Directories are

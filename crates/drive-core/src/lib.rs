@@ -1,12 +1,22 @@
 //! Offline-testable state engine. Server versions/cursors are opaque strings;
 //! these types are internal contracts, not invented Synology wire fields.
+// Kept for compatibility only: `DriveBackend`/`Commit` are an unimplemented
+// scaffold (see backend.rs) and every use inside is a deprecated-path use we
+// deliberately tolerate until TB3 decides to wire or remove it.
+#[allow(deprecated)]
 pub mod backend;
+pub mod commit_outcome;
+pub use commit_outcome::*;
+pub mod commit_diagnostics;
 pub mod filesystem;
+pub mod file_identity;
 #[cfg(feature = "native")]
 pub mod native;
 pub mod preview;
 pub mod state;
 pub use state::*;
+pub mod recovery_runs;
+pub mod exclude;
 pub mod shared_store;
 pub mod write_permissions;
 pub use shared_store::SharedStore;

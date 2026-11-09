@@ -35,6 +35,7 @@ fn profile() -> Profile {
         },
         mount: PathBuf::from("/tmp/drive-native-test-mount"),
         writable: false, local_policy: None, writable_source: None,
+        exclude_patterns: Vec::new(),
     }
 }
 fn fixture() -> (tempfile::TempDir, std::sync::Arc<Service>) {
@@ -420,6 +421,266 @@ fn overview_reports_exact_unknown_commits_without_running_dependency_scheduler()
     let after = service.bridge.store.lock().unwrap().queue_health().unwrap();
     assert!(after.schedule_age_ms >= before.schedule_age_ms);
     assert_eq!(after.recovery_attempts_observed, 0);
+    // #9b TB2: unknown commits are exposed additively with their scope, state
+    // and category without changing the existing queue_health payload.
+    let diagnostics = &overview["commit_diagnostics"];
+    assert_eq!(diagnostics["open_unknown"], 2);
+    assert_eq!(diagnostics["needs_attention"], 0);
+    assert_eq!(diagnostics["items"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn overview_surfaces_paused_uploads_as_an_explainable_count() {
+    let (_d, service) = fixture();
+    {
+        let mut store = service.bridge.store.lock().unwrap();
+        drive_core::write_permissions::set_local_policy(
+            &store,
+            "root",
+            drive_core::write_permissions::LocalPolicy::FollowRemote,
+        )
+        .unwrap();
+        let op = store.save_local("one", b"unconfirmed local edit").unwrap();
+        store.mark_upload_started(&op).unwrap();
+        store.mark_upload_uncertain(&op).unwrap();
+        for i in 0..drive_core::MAX_UPLOAD_RECONCILE_ATTEMPTS {
+            store
+                .note_upload_reconcile_attempt(&op, 1_700_000_000 + i64::from(i))
+                .unwrap();
+        }
+        assert_eq!(store.upload_job(&op).unwrap().state, "abandoned");
+        assert_eq!(store.pending_operations().unwrap(), 0);
+    }
+    let overview: serde_json::Value =
+        serde_json::from_str(&desktop::overview(&service).unwrap()).unwrap();
+    // Additive field: old clients ignore it, new clients explain the pause.
+    assert_eq!(overview["paused_uploads"], 1);
+    assert_eq!(overview["pending_operations"], 0);
+    assert_eq!(overview["queue_health"]["upload_uncertain"], 0);
+    assert_eq!(overview["queue_health"]["upload_unfinished"], 0);
+    assert_eq!(overview["sync_state"], "needs_attention");
+    assert_eq!(overview["issue_count"], 1);
+    assert!(overview["background_error"].is_null());
+    assert!(overview["upload_block"].is_null());
+    // #9b TB2: the additive commit diagnostics block explains the paused row
+    // without counting it as open unknown work or an attention action.
+    let diagnostics = &overview["commit_diagnostics"];
+    assert_eq!(diagnostics["open_unknown"], 0);
+    assert_eq!(diagnostics["needs_attention"], 0);
+    let items = diagnostics["items"].as_array().unwrap();
+    assert!(items.iter().any(|item| {
+        item["state"] == "abandoned"
+            && item["outcome"] == "unknown_fatal"
+            && item["category"] == "reconcile_exhausted"
+    }));
+}
+
+#[test]
+fn issues_offer_abandon_only_for_unconfirmed_local_creations() {
+    let (_d, service) = fixture();
+    let creation_id;
+    {
+        let mut store = service.bridge.store.lock().unwrap();
+        drive_core::write_permissions::set_local_policy(
+            &store,
+            "root",
+            drive_core::write_permissions::LocalPolicy::FollowRemote,
+        )
+        .unwrap();
+        let bound = store.save_local("one", b"local edit").unwrap();
+        store.mark_upload_started(&bound).unwrap();
+        store.mark_upload_uncertain(&bound).unwrap();
+        let creation = store.create_local_file("folder", "new", 0o600).unwrap();
+        let op = store.save_local(&creation.id, b"new creation").unwrap();
+        store.creation_saved(&creation.id).unwrap();
+        store.mark_upload_started(&op).unwrap();
+        store.mark_upload_uncertain(&op).unwrap();
+        drive_core::write_permissions::set_local_policy(
+            &store,
+            "root",
+            drive_core::write_permissions::LocalPolicy::FollowRemote,
+        )
+        .unwrap();
+        for operation in [&bound, &op] {
+            for i in 0..drive_core::MAX_UPLOAD_RECONCILE_ATTEMPTS {
+                store
+                    .note_upload_reconcile_attempt(operation, 1_700_000_000 + i64::from(i))
+                    .unwrap();
+            }
+        }
+        creation_id = creation.id;
+    }
+    let page: serde_json::Value =
+        serde_json::from_str(&desktop::issues(&service, "").unwrap()).unwrap();
+    assert_eq!(page["schema"], 1);
+    let entries = page["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 2);
+    let bound = entries.iter().find(|row| row["id"] == "one").unwrap();
+    assert_eq!(bound["reason"], "commit_uncertain");
+    assert_eq!(bound["can_abandon_upload"], false);
+    let creation = entries
+        .iter()
+        .find(|row| row["id"] == creation_id.as_str())
+        .unwrap();
+    assert_eq!(creation["reason"], "commit_uncertain");
+    assert_eq!(creation["can_abandon_upload"], true);
+    assert_eq!(creation["reconcile_exhausted"], true);
+    assert_eq!(
+        creation["reconcile_attempts"],
+        drive_core::MAX_UPLOAD_RECONCILE_ATTEMPTS
+    );
+}
+
+#[test]
+fn abandon_upload_ipc_retires_only_the_local_creation() {
+    let (_d, service) = fixture();
+    let creation_id;
+    let token;
+    {
+        let mut store = service.bridge.store.lock().unwrap();
+        drive_core::write_permissions::set_local_policy(
+            &store,
+            "root",
+            drive_core::write_permissions::LocalPolicy::FollowRemote,
+        )
+        .unwrap();
+        let creation = store.create_local_file("folder", "new", 0o600).unwrap();
+        let op = store.save_local(&creation.id, b"new creation").unwrap();
+        store.creation_saved(&creation.id).unwrap();
+        store.mark_upload_started(&op).unwrap();
+        store.mark_upload_uncertain(&op).unwrap();
+        for i in 0..drive_core::MAX_UPLOAD_RECONCILE_ATTEMPTS {
+            store
+                .note_upload_reconcile_attempt(&op, 1_700_000_000 + i64::from(i))
+                .unwrap();
+        }
+        drive_core::write_permissions::set_local_policy(
+            &store,
+            "root",
+            drive_core::write_permissions::LocalPolicy::FollowRemote,
+        )
+        .unwrap();
+        creation_id = creation.id;
+    }
+    let page: serde_json::Value =
+        serde_json::from_str(&desktop::issues(&service, "").unwrap()).unwrap();
+    let entry = page["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == creation_id.as_str())
+        .unwrap()
+        .clone();
+    assert_eq!(entry["can_abandon_upload"], true);
+    token = entry["token"].as_str().unwrap().to_owned();
+
+    let reply: serde_json::Value =
+        serde_json::from_str(&desktop::abandon_upload(&service, &creation_id, &token).unwrap())
+            .unwrap();
+    assert_eq!(reply["schema"], 1);
+    assert_eq!(reply["abandoned"], true);
+    assert_eq!(reply["deleted_local"], true);
+    assert_eq!(reply["server_changed"], false);
+    assert_eq!(reply["id"], creation_id);
+    assert!(reply["path"].as_str().unwrap().ends_with("/new"));
+
+    {
+        let store = service.bridge.store.lock().unwrap();
+        assert_eq!(store.pending_operations().unwrap(), 0);
+        assert_eq!(store.pending_namespace_operations().unwrap(), 0);
+        assert_eq!(store.paused_upload_operations().unwrap(), 0);
+        assert!(store.upload_operations("abandoned").unwrap().is_empty());
+        assert!(store.lookup("folder", "new").is_err());
+        assert!(store.next_remove().unwrap().is_none());
+    }
+    let issues: serde_json::Value =
+        serde_json::from_str(&desktop::issues(&service, "").unwrap()).unwrap();
+    assert!(issues["entries"].as_array().unwrap().is_empty());
+    let overview: serde_json::Value =
+        serde_json::from_str(&desktop::overview(&service).unwrap()).unwrap();
+    assert_eq!(overview["pending_operations"], 0);
+    assert_eq!(overview["paused_uploads"], 0);
+    // The token is a CAS guard: a stale token (and a second try with the old
+    // one) must never silently delete another entry.
+    assert!(desktop::abandon_upload(&service, &creation_id, &token).is_err());
+    assert!(desktop::abandon_upload(&service, &creation_id, "stale-token").is_err());
+}
+
+/// Regression for the issue #14 release blocker: a local edit after the
+/// permission-uncertain commit queues a second pending upload for the same
+/// node. Abandoning the exhausted upload must retire that residual row too;
+/// otherwise it survives the tombstone and leaves `pending_operations` at 1
+/// with a permanent upload block and an empty issue center.
+#[test]
+fn abandon_upload_clears_a_pending_upload_queued_after_the_uncertain_commit() {
+    let (_d, service) = fixture();
+    let creation_id;
+    let resaved_op;
+    let token;
+    {
+        let mut store = service.bridge.store.lock().unwrap();
+        drive_core::write_permissions::set_local_policy(
+            &store,
+            "root",
+            drive_core::write_permissions::LocalPolicy::FollowRemote,
+        )
+        .unwrap();
+        let creation = store.create_local_file("folder", "new", 0o600).unwrap();
+        let op = store.save_local(&creation.id, b"new creation").unwrap();
+        store.creation_saved(&creation.id).unwrap();
+        store.mark_upload_started(&op).unwrap();
+        store.mark_upload_uncertain(&op).unwrap();
+        resaved_op = store
+            .save_local(&creation.id, b"edited after uncertainty")
+            .unwrap();
+        for i in 0..drive_core::MAX_UPLOAD_RECONCILE_ATTEMPTS {
+            store
+                .note_upload_reconcile_attempt(&op, 1_700_000_000 + i64::from(i))
+                .unwrap();
+        }
+        creation_id = creation.id;
+        assert_eq!(store.pending_operations().unwrap(), 1);
+    }
+
+    let page: serde_json::Value =
+        serde_json::from_str(&desktop::issues(&service, "").unwrap()).unwrap();
+    let entry = page["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == creation_id.as_str())
+        .unwrap()
+        .clone();
+    assert_eq!(entry["can_abandon_upload"], true);
+    token = entry["token"].as_str().unwrap().to_owned();
+
+    let reply: serde_json::Value =
+        serde_json::from_str(&desktop::abandon_upload(&service, &creation_id, &token).unwrap())
+            .unwrap();
+    assert_eq!(reply["abandoned"], true);
+    {
+        let store = service.bridge.store.lock().unwrap();
+        assert_eq!(store.pending_operations().unwrap(), 0);
+        assert_eq!(store.pending_namespace_operations().unwrap(), 0);
+        assert_eq!(store.paused_upload_operations().unwrap(), 0);
+        assert!(store.upload_operations("pending").unwrap().is_empty());
+        assert!(store.upload_operations("uncertain").unwrap().is_empty());
+        assert!(store.upload_operations("abandoned").unwrap().is_empty());
+        assert_eq!(store.upload_job(&resaved_op).unwrap().state, "superseded");
+        assert!(store.lookup("folder", "new").is_err());
+        assert!(store.next_remove().unwrap().is_none());
+    }
+    // No pending upload survives, so the upload pass has nothing to fail on:
+    // the bridge never leaves a sticky block for a tombstoned node.
+    assert!(service.bridge.upload_block.lock().unwrap().is_none());
+    let overview: serde_json::Value =
+        serde_json::from_str(&desktop::overview(&service).unwrap()).unwrap();
+    assert_eq!(overview["pending_operations"], 0);
+    assert_eq!(overview["paused_uploads"], 0);
+    assert_eq!(overview["upload_block"], serde_json::Value::Null);
+    assert_eq!(overview["queue_health"]["upload_uncertain"], 0);
+    assert_eq!(overview["queue_health"]["upload_unfinished"], 0);
+    assert_eq!(overview["issue_count"], 0);
 }
 
 #[test]
@@ -1210,4 +1471,193 @@ fn overview_reports_sync_state_cache_availability_and_version() {
     );
     assert_eq!(overview["version"]["ipc"], 21);
     assert_eq!(overview["schema"], 1);
+}
+
+/// Issue #50: a profile written before exclusion rules existed still loads.
+#[test]
+fn profile_without_exclude_patterns_stays_readable() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_profile(&dir, |value| {
+        value.as_object_mut().unwrap().remove("exclude_patterns");
+    });
+    let profile = Profile::read(&path).unwrap();
+    assert!(profile.exclude_patterns.is_empty());
+    assert!(profile.exclude_rules().unwrap().is_empty());
+}
+
+/// Issue #50: an invalid regular expression is rejected with its pattern text
+/// and the compiler reason, so the settings UI can point at the bad rule.
+#[test]
+fn profile_rejects_invalid_exclude_pattern_with_pattern_and_reason() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_profile(&dir, |value| {
+        value.as_object_mut().unwrap().insert(
+            "exclude_patterns".into(),
+            serde_json::json!(["[unclosed"]),
+        );
+    });
+    let error = Profile::read(&path)
+        .err()
+        .expect("invalid exclude pattern must be rejected")
+        .to_string();
+    assert!(error.contains("[unclosed"), "{error}");
+    assert!(error.contains("invalid exclude pattern"), "{error}");
+}
+
+/// Issue #50: compiled rules match scope-relative POSIX paths and exclude whole
+/// directory subtrees.
+#[test]
+fn profile_reads_valid_exclude_patterns_and_matches_relative_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_profile(&dir, |value| {
+        value.as_object_mut().unwrap().insert(
+            "exclude_patterns".into(),
+            serde_json::json!(["^Sub$", r"\.iso$"]),
+        );
+    });
+    let profile = Profile::read(&path).unwrap();
+    let rules = profile.exclude_rules().unwrap();
+    assert!(rules.matches("Sub", true));
+    assert!(rules.matches("Sub/C.txt", false));
+    assert!(rules.matches("install.iso", false));
+    assert!(!rules.matches("A.txt", false));
+}
+
+/// issue #54: a bound directory tombstoned by the server while local-only
+/// children survive is visible through GetIssues and recoverable through the
+/// additive KeepDirectoryLocal IPC method.
+#[test]
+fn bound_directory_recovery_round_trips_through_ipc() {
+    let (_d, service) = fixture();
+    let (folder, child) = {
+        let mut store = service.bridge.store.lock().unwrap();
+        drive_core::write_permissions::set_local_policy(
+            &store, "root", drive_core::write_permissions::LocalPolicy::FollowRemote).unwrap();
+        let directory = store.create_local_directory("root", "bound", 0o755).unwrap();
+        let queued = store.next_directory().unwrap().unwrap();
+        let job = store.mark_directory_started(&queued.job.operation).unwrap();
+        let mut confirmed = job.node.clone();
+        confirmed.version = "v-bound".into();
+        store
+            .confirm_directory(&queued.job.operation, &confirmed, "900")
+            .unwrap();
+        let child = store.create_local_file(&directory.id, "new", 0o600).unwrap();
+        store.save_local(&child.id, b"local creation").unwrap();
+        store.creation_saved(&child.id).unwrap();
+        store
+            .install_remote_snapshot(&[node("root", None, true)], "2", "server")
+            .unwrap();
+        (directory.id, child.id)
+    };
+    let overview: serde_json::Value =
+        serde_json::from_str(&desktop::overview(&service).unwrap()).unwrap();
+    assert_eq!(
+        overview["recovery_actions"]["bound_directory_recovery"],
+        serde_json::json!(true)
+    );
+    let issues: serde_json::Value =
+        serde_json::from_str(&desktop::issues(&service, "").unwrap()).unwrap();
+    let entry = issues["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["id"] == serde_json::json!(folder))
+        .expect("bound deleted directory must be listed in the issue center")
+        .clone();
+    assert_eq!(entry["reason"], "bound_directory_conflict");
+    assert_eq!(entry["can_keep_local"], serde_json::json!(true));
+    assert_eq!(entry["can_keep_remote"], serde_json::json!(false));
+    let token = entry["token"].as_str().unwrap().to_owned();
+    let kept: serde_json::Value =
+        serde_json::from_str(&desktop::keep_directory_local(&service, &folder, &token).unwrap())
+            .unwrap();
+    assert_eq!(kept["schema"], 1);
+    assert_eq!(kept["kept_local"], serde_json::json!(true));
+    assert_eq!(kept["directory_id"], serde_json::json!(folder));
+    assert_eq!(kept["path"], "bound");
+    let issues: serde_json::Value =
+        serde_json::from_str(&desktop::issues(&service, "").unwrap()).unwrap();
+    assert!(issues["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|entry| entry["id"] != serde_json::json!(folder)));
+    let store = service.bridge.store.lock().unwrap();
+    assert!(store.node(&child).is_ok());
+    let queued = store.next_directory().unwrap().unwrap();
+    assert_eq!(queued.job.node.id, folder);
+    assert_eq!(queued.job.parent.id, "root");
+    drop(store);
+    // keep-remote is refused while local-only content would be lost, even when
+    // the caller presents the pre-keep-local token.
+    assert!(desktop::keep_directory_remote(&service, &folder, &token).is_err());
+}
+
+fn write_profile(
+    dir: &tempfile::TempDir,
+    modify: impl FnOnce(&mut serde_json::Value),
+) -> PathBuf {
+    let mut value = serde_json::to_value(profile()).unwrap();
+    modify(&mut value);
+    let path = dir.path().join("profile.json");
+    std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    path
+}
+
+// #10 acceptance: GetOverview and GetIssues expose the additive `recovery`
+// object with three distinguishable states (recovering / retrying / needs
+// attention) without changing `sync_state` or the IPC version.
+#[test]
+fn recovery_states_are_visible_and_additive_on_overview_and_issues() {
+    let (_d, service) = fixture();
+    let overview = |service: &Service| -> serde_json::Value {
+        serde_json::from_str(&desktop::overview(service).unwrap()).unwrap()
+    };
+    let idle = overview(&service);
+    assert_eq!(idle["recovery"]["state"], "idle");
+    assert_eq!(idle["recovery"]["max_attempts"], 3);
+    assert_eq!(idle["recovery"]["recovery_exhausted"], false);
+
+    let run = service
+        .bridge
+        .store
+        .lock()
+        .unwrap()
+        .begin_recovery_run("cursor_invalidated")
+        .unwrap();
+    let recovering = overview(&service);
+    assert_eq!(recovering["recovery"]["state"], "recovering");
+    assert_eq!(recovering["recovery"]["cause"], "cursor_invalidated");
+    assert_eq!(recovering["recovery"]["attempts"], 0);
+
+    service
+        .bridge
+        .store
+        .lock()
+        .unwrap()
+        .update_recovery_run(run.id, "retrying", 1, Some("transport_unavailable"), 0)
+        .unwrap();
+    let retrying = overview(&service);
+    assert_eq!(retrying["recovery"]["state"], "retrying");
+    assert_eq!(retrying["recovery"]["attempts"], 1);
+    assert_eq!(retrying["recovery"]["last_error"], "transport_unavailable");
+
+    service
+        .bridge
+        .store
+        .lock()
+        .unwrap()
+        .finish_recovery_run(run.id, "needs_attention")
+        .unwrap();
+    let exhausted = overview(&service);
+    assert_eq!(exhausted["recovery"]["state"], "needs_attention");
+    assert_eq!(exhausted["recovery"]["recovery_exhausted"], true);
+    assert_eq!(exhausted["sync_state"], "idle");
+
+    let issues: serde_json::Value =
+        serde_json::from_str(&desktop::issues(&service, "").unwrap()).unwrap();
+    assert_eq!(issues["schema"], 1);
+    assert_eq!(issues["recovery"]["state"], "needs_attention");
+    assert_eq!(issues["recovery"]["recovery_exhausted"], true);
 }

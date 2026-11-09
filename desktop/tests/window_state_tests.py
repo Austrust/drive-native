@@ -118,6 +118,12 @@ class WindowStateTests(unittest.TestCase):
         self.window.received_overview(overview(sync_state='needs_attention'), None)
         self.assertEqual(self.window.sync_value.text(), '需要处理')
 
+    def test_paused_uploads_are_explained_without_faking_pending_counts(self):
+        self.window.received_overview(overview(
+            sync_state='needs_attention', paused_uploads=2), None)
+        self.assertEqual(self.window.sync_value.text(), '需要处理')
+        self.assertIn('2 项上传已暂停自动重试', self.window.sync_value.toolTip())
+
     def test_upload_block_and_paused_are_conservative(self):
         self.window.received_overview(overview(upload_block={'reason': 'quota'}), None)
         self.assertEqual(self.window.sync_value.text(), '上传暂缓')

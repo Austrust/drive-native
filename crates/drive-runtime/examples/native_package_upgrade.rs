@@ -147,6 +147,7 @@ async fn main() -> Result<()> {
         },
         mount: mount.clone(),
         writable: true, local_policy: None, writable_source: None,
+        exclude_patterns: Vec::new(),
     };
     let config = base.join("profile.json");
     let mut old_profile = serde_json::to_value(&profile)?;
