@@ -7,6 +7,8 @@ mod cached_close_tests;
 pub mod diagnostics;
 mod directory;
 #[cfg(test)]
+mod hardlink_tests;
+#[cfg(test)]
 mod inode_backfill_tests;
 #[cfg(test)]
 mod inline_metadata_tests;
@@ -42,6 +44,13 @@ use std::{
 };
 
 const TTL: Duration = Duration::ZERO;
+/// `link(2)` cannot be represented: a Synology Drive node is identified by a
+/// single path and carries no hard-link identity. Reject with the standard
+/// "operation not supported" errno (`EOPNOTSUPP`, the same value as `ENOTSUP`
+/// on Linux) instead of the vendored fuser default `EPERM`, so tools that land
+/// files via "write temp + link into place" can fall back to rename/copy.
+/// See docs/FUSE_HARDLINK.md.
+const HARD_LINK_UNSUPPORTED: libc::c_int = libc::EOPNOTSUPP;
 type Job = Box<dyn FnOnce() + Send + 'static>;
 /// Bounded pools keep work off the FUSE dispatcher. Metadata/file I/O use the
 /// metadata pool; held-file reads and native hydration each use separate pools.
@@ -440,6 +449,20 @@ impl Filesystem for CacheFilesystem {
         reply: ReplyEmpty,
     ) {
         namespace::rename(self, parent, name, newparent, newname, flags, reply)
+    }
+
+    fn link(
+        &mut self,
+        _req: &Request<'_>,
+        _ino: u64,
+        _newparent: u64,
+        _newname: &OsStr,
+        reply: ReplyEntry,
+    ) {
+        // A hard link creates a second path for one node; Synology Drive has a
+        // single path per node, so there is nothing to create. `redirect`-free
+        // rejection keeps the local namespace and upload queue untouched.
+        reply.error(HARD_LINK_UNSUPPORTED);
     }
 
     fn create(
