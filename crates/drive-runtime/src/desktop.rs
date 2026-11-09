@@ -881,7 +881,6 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
     // one level per key, and the overview is already close to the recursion cap.
     let recovery_actions = serde_json::json!({"recheck_issues":true,"abandon_upload":true,
         "bound_directory_recovery":true});
-    let recovery_actions = serde_json::json!({"recheck_issues":true,"abandon_upload":true});
     // Issue #9 TB2: additive, read-only diagnosis list. `items` may contain
     // terminal abandoned rows; `open_unknown`/`needs_attention` exclude them.
     let commit_diagnostics = commit_diagnostics_json(open_unknown, needs_attention, &commit_items);
