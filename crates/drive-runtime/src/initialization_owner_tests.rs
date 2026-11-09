@@ -2213,6 +2213,7 @@ fn latency_profile(scope: Scope) -> crate::service::Profile {
         scope,
         mount: std::path::PathBuf::from("/tmp/drive-native-test-mount"),
         writable: false,
+        exclude_patterns: Vec::new(),
         local_policy: None,
         writable_source: None,
     }

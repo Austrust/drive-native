@@ -2410,6 +2410,7 @@ mod release_job_tests {
             },
             mount: PathBuf::from(MOUNT),
             writable: false,
+            exclude_patterns: Vec::new(),
             local_policy: None,
             writable_source: None,
         }
