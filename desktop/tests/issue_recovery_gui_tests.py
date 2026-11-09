@@ -256,6 +256,8 @@ class RecoveryTests(unittest.TestCase):
                            reconcile_exhausted=True))
         self.assertTrue(self.dialog.abandon.isEnabled())
         self.assertIn("仅删除本地", self.dialog.abandon.text())
+        self.assertIn("可能以远端条目出现", self.dialog.explanation.text())
+        self.assertIn("不会向服务器发送删除", self.dialog.explanation.text())
         self.dialog.abandon.click()
         calls = [c for c in self.bus.calls if c[0] == "AbandonUpload"]
         self.assertEqual(len(calls), 1)

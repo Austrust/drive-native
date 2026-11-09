@@ -144,7 +144,8 @@ class IssuesDialog(QDialog):
         self.abandon = QPushButton("放弃上传（仅删除本地文件）")
         self.abandon.setToolTip(
             "放弃本次本地待上传并删除本地未上传的文件；不会删除或修改服务器上的任何条目。"
-            "仅对服务器结果未确认、尚未绑定远端身份的本地新建可用。")
+            "仅对服务器结果未确认、尚未绑定远端身份的本地新建可用。"
+            "服务器侧若实际已创建该文件，下次刷新后可能以远端条目出现；放弃不会向服务器发送删除。")
         self.abandon.clicked.connect(self.abandon_upload)
         self.abandon.setEnabled(False)
         actions.addWidget(self.abandon)
@@ -276,7 +277,8 @@ class IssuesDialog(QDialog):
             self.explanation.setText(
                 reason_label(row, "需要进一步核对")
                 + "。若确认不再需要该本地新建，可使用“放弃上传（仅删除本地文件）”结束本次未确认创建；"
-                  "该操作只删除本地未上传的文件，不会删除或修改服务器条目。")
+                  "该操作只删除本地未上传的文件，不会删除或修改服务器条目。"
+                  "服务器侧若实际已创建该文件，下次刷新后可能以远端条目出现；放弃不会向服务器发送删除。")
         else:
             self.explanation.setText(
                 "本地修改将成为同目录下的新文件，并在联网后上传。原文件保留远端版本；远端已删除时不会恢复原路径。"
