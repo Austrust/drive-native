@@ -362,6 +362,8 @@ mod tests {
                     events: vec![update.clone()],
                     next: EventCursor(11),
                     recovery_required: false,
+                    rescan_later: false,
+                    merge_mode: false,
                 }))
             },
             |_, _| async { panic!("directory change must not use file-only local reconciliation") },
@@ -375,11 +377,15 @@ mod tests {
                 events: vec![update],
                 next: EventCursor(11),
                 recovery_required: false,
+                rescan_later: false,
+                merge_mode: false,
             },
             EventBatch {
                 events: vec![],
                 next: EventCursor(11),
                 recovery_required: false,
+                rescan_later: false,
+                merge_mode: false,
             },
         ]);
         let mut requests = Vec::new();
@@ -399,6 +405,8 @@ mod tests {
                     events: vec![],
                     next: cursor,
                     recovery_required: false,
+                    rescan_later: false,
+                    merge_mode: false,
                 }))
             },
             |_, _| async { panic!("unchanged candidate requires no local lists") },

@@ -1604,3 +1604,60 @@ fn write_profile(
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
     path
 }
+
+// #10 acceptance: GetOverview and GetIssues expose the additive `recovery`
+// object with three distinguishable states (recovering / retrying / needs
+// attention) without changing `sync_state` or the IPC version.
+#[test]
+fn recovery_states_are_visible_and_additive_on_overview_and_issues() {
+    let (_d, service) = fixture();
+    let overview = |service: &Service| -> serde_json::Value {
+        serde_json::from_str(&desktop::overview(service).unwrap()).unwrap()
+    };
+    let idle = overview(&service);
+    assert_eq!(idle["recovery"]["state"], "idle");
+    assert_eq!(idle["recovery"]["max_attempts"], 3);
+    assert_eq!(idle["recovery"]["recovery_exhausted"], false);
+
+    let run = service
+        .bridge
+        .store
+        .lock()
+        .unwrap()
+        .begin_recovery_run("cursor_invalidated")
+        .unwrap();
+    let recovering = overview(&service);
+    assert_eq!(recovering["recovery"]["state"], "recovering");
+    assert_eq!(recovering["recovery"]["cause"], "cursor_invalidated");
+    assert_eq!(recovering["recovery"]["attempts"], 0);
+
+    service
+        .bridge
+        .store
+        .lock()
+        .unwrap()
+        .update_recovery_run(run.id, "retrying", 1, Some("transport_unavailable"), 0)
+        .unwrap();
+    let retrying = overview(&service);
+    assert_eq!(retrying["recovery"]["state"], "retrying");
+    assert_eq!(retrying["recovery"]["attempts"], 1);
+    assert_eq!(retrying["recovery"]["last_error"], "transport_unavailable");
+
+    service
+        .bridge
+        .store
+        .lock()
+        .unwrap()
+        .finish_recovery_run(run.id, "needs_attention")
+        .unwrap();
+    let exhausted = overview(&service);
+    assert_eq!(exhausted["recovery"]["state"], "needs_attention");
+    assert_eq!(exhausted["recovery"]["recovery_exhausted"], true);
+    assert_eq!(exhausted["sync_state"], "idle");
+
+    let issues: serde_json::Value =
+        serde_json::from_str(&desktop::issues(&service, "").unwrap()).unwrap();
+    assert_eq!(issues["schema"], 1);
+    assert_eq!(issues["recovery"]["state"], "needs_attention");
+    assert_eq!(issues["recovery"]["recovery_exhausted"], true);
+}

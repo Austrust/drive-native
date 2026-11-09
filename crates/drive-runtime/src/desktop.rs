@@ -891,6 +891,7 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
         .and_then(|store| store.status_change_watermark().ok())
         .map(|watermark| watermark.cursor.epoch)
         .unwrap_or_default();
+    let recovery = service.bridge.recovery_status();
     let serialize = Instant::now();
     let body = serde_json::json!({"schema":1,"task_id":service.profile.task_id,"mount":service.profile.mount,
         "connection":state,"error":error,"background_error":background_error,
@@ -920,6 +921,7 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
         "version":{"build":env!("CARGO_PKG_VERSION"),"state_schema":drive_core::STATE_SCHEMA_VERSION,"ipc":crate::wire::VERSION},
         "shutdown":service.shutdown_diagnostics.snapshot(),
         "initialization":initialization,
+        "recovery":recovery,
         "host":service.profile.host,"username":service.profile.username,"scope_path":service.profile.scope.path}).to_string();
     timings.serialize_us = elapsed_us(serialize);
     timings.total_us = elapsed_us(started);
@@ -1536,7 +1538,7 @@ fn issues_on(store: &Store, service: &Service, after: &str) -> io::Result<String
     let page = store
         .sync_issues(&service.profile.scope.file_id, after)
         .map_err(io::Error::other)?;
-    Ok(issues_json(page))
+    Ok(issues_json(page, service.bridge.recovery_status()))
 }
 fn issues_locked(service: &Service, after: &str) -> io::Result<String> {
     let page = service
@@ -1546,10 +1548,14 @@ fn issues_locked(service: &Service, after: &str) -> io::Result<String> {
         .unwrap()
         .sync_issues(&service.profile.scope.file_id, after)
         .map_err(io::Error::other)?;
-    Ok(issues_json(page))
+    Ok(issues_json(page, service.bridge.recovery_status()))
 }
-fn issues_json(page: drive_core::conflicts::IssuePage) -> String {
-    serde_json::json!({"schema":1,"entries":page.entries,"next":page.next}).to_string()
+fn issues_json(
+    page: drive_core::conflicts::IssuePage,
+    recovery: serde_json::Value,
+) -> String {
+    serde_json::json!({"schema":1,"entries":page.entries,"next":page.next,"recovery":recovery})
+        .to_string()
 }
 pub fn keep_both(service: &Service, id: &str, token: &str, name: &str) -> io::Result<String> {
     let result =

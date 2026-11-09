@@ -698,6 +698,8 @@ mod tests {
             }],
             next: super::super::native::EventCursor(11),
             recovery_required: false,
+            rescan_later: false,
+            merge_mode: false,
         }
     }
     fn object(v: serde_json::Value) -> PObject {
