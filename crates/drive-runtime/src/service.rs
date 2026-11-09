@@ -786,13 +786,19 @@ impl Service {
         if self.stop.load(Ordering::Acquire) {
             return Ok(None);
         }
+        // A preview-only root is mountable before the committed namespace
+        // exists (initialization preview). The exclusion index is built from the
+        // committed `nodes` table, so it cannot be built in that phase; the
+        // bridge rebuilds it after initialization commits or a recovery
+        // snapshot installs.
+        let mut committed_root = true;
         {
             let store = self.bridge.store.lock().unwrap();
             match store.node(&self.profile.scope.file_id) {
                 Ok(_) => {}
                 Err(e) if e.is_not_found() => {
                     match store.preview_mount_root(&self.profile.scope.file_id) {
-                        Ok(Some(_)) => {}
+                        Ok(Some(_)) => committed_root = false,
                         Ok(None) => return Ok(None),
                         Err(drive_core::Error::Io(e))
                             if matches!(e.raw_os_error(), Some(libc::EACCES | libc::EAGAIN)) =>
@@ -858,12 +864,17 @@ impl Service {
         // mount is visible. Empty rules keep this a no-op. Later namespace
         // swaps rebuild it from the bridge (pull, recovery snapshot, owner
         // initialization), so this initial build only covers pre-existing data.
+        // Preview-phase mounts skip it: their root is not committed yet and the
+        // bridge refresh path builds the index once the namespace is installed.
         let exclusion = self.bridge.exclusion_state();
-        if exclusion.is_active() {
+        {
             let store = self.bridge.store.lock().unwrap();
-            exclusion
-                .refresh(&store, &self.profile.scope.file_id)
-                .map_err(io::Error::other)?;
+            refresh_exclusion_before_mount(
+                &exclusion,
+                &store,
+                &self.profile.scope.file_id,
+                committed_root,
+            )?;
         }
         let session = fuser::spawn_mount2(
             fs,
@@ -1060,6 +1071,26 @@ impl Service {
     }
 }
 
+/// Build the exclusion index before the mount becomes visible.
+///
+/// `committed` is false while the mount is a preview-only root: the exclusion
+/// index is derived from the committed `nodes` table, which does not exist yet,
+/// so the preview keeps an empty index (the bridge refresh paths build it after
+/// owner initialization, a recovery snapshot install, or a pull). In the
+/// committed phase a failure stays fatal: swallowing it would leak excluded
+/// paths into the mount view.
+fn refresh_exclusion_before_mount(
+    exclusion: &drive_core::exclude::ExclusionState,
+    store: &drive_core::Store,
+    root: &str,
+    committed: bool,
+) -> io::Result<()> {
+    if !exclusion.is_active() || !committed {
+        return Ok(());
+    }
+    exclusion.refresh(store, root).map_err(io::Error::other)
+}
+
 #[cfg(test)]
 #[path = "trust_service_tests.rs"]
 mod trust_service_tests;
@@ -1067,3 +1098,7 @@ mod trust_service_tests;
 #[cfg(test)]
 #[path = "cache_loop_tests.rs"]
 mod cache_loop_tests;
+
+#[cfg(test)]
+#[path = "mount_exclusion_tests.rs"]
+mod mount_exclusion_tests;
