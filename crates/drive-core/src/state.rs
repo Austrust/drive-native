@@ -117,10 +117,41 @@ pub struct Store {
     pub(crate) db: Connection,
     pub(crate) root: PathBuf,
     pub(crate) handles: Arc<Mutex<HashMap<String, (String, usize)>>>,
-    pub(crate) namespace_runtime: Mutex<crate::namespace_schedule::NamespaceRuntime>,
+    // Shared with the `SharedStore` and every read-only handle it opens: the
+    // scheduler observations describe the writer's domain, not one connection.
+    pub(crate) namespace_runtime: Arc<Mutex<crate::namespace_schedule::NamespaceRuntime>>,
+    /// Deferred LRU recency for cached file opens. The FUSE open path must not
+    /// append WAL frames or fsync; entries are merged into `cache_access` in
+    /// one transaction before a budget/trim decision and on drop. Maintained as
+    /// an amortized O(1) ledger because this is the hottest FUSE path.
+    pub(crate) cache_recency: Mutex<crate::cache_policy::CacheRecency>,
+    // Issue #24 counters; the Store writer lock serializes access, so plain
+    // integers are cheaper than another atomic layer.
+    pub(crate) draft_stats: DraftWriteStats,
+    /// Writer-local effective-decision memo (#26); see `PermissionCache`. It is
+    /// invalidated wholesale whenever a transaction commits, so it never
+    /// outlives a permission, policy or namespace write.
+    pub(crate) permission_cache: Mutex<crate::write_permissions::PermissionCache>,
     // Fields drop in order: close SQLite before releasing writer ownership.
     // Read-only handles own no lock and therefore carry None.
     _writer_lock: Option<WriterLock>,
+    // #28: incremental remove-barrier index; empty on read-only handles.
+    pub(crate) barrier: crate::removals::RemoveBarrierCache,
+}
+
+/// Counters that make the draft write path observable without tracing every
+/// syscall. Diagnostic only: no behaviour depends on these values.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DraftWriteStats {
+    /// Content writes routed through a draft handle.
+    pub writes: u64,
+    /// Durable draft-metadata statements: dirty-epoch marks plus checkpoint
+    /// updates (checkpoint advances share the snapshot transaction).
+    pub metadata_commits: u64,
+    /// fsync calls on the mutable draft file itself (begin copy, checkpoint).
+    pub draft_file_fsyncs: u64,
+    /// Checkpoints that produced an upload snapshot.
+    pub checkpoints: u64,
 }
 
 /// A handle retains its immutable version even if a newer blob is published.
@@ -161,7 +192,7 @@ impl Drop for ReadHandle {
 }
 
 /// Version of the durable state contract, including journal semantics.
-pub const STATE_SCHEMA_VERSION: i64 = 27;
+pub const STATE_SCHEMA_VERSION: i64 = 28;
 
 /// Automatic read-only reconciliation attempts allowed for one uncertain
 /// upload. The budget is durable so a restart cannot restart an unbounded
@@ -334,9 +365,24 @@ impl Store {
                 ))?;
             }
         }
+        // Schema 28 index candidates. They are created after every `ALTER TABLE`
+        // above because `operations.reconcile_at` only exists on v25+ databases,
+        // and they are idempotent so an interrupted upgrade simply re-creates
+        // them on the next open.
+        //
+        // `operations_countable` is the exact predicate of `pending_operations`
+        // and the cache candidate guard; the previous partial index keyed on
+        // `id` could satisfy existence tests but not this aggregate.
+        db.execute_batch(
+            "CREATE INDEX IF NOT EXISTS operations_countable ON operations(id) WHERE state IN ('pending','inflight','uncertain');
+             CREATE INDEX IF NOT EXISTS operations_node_active ON operations(node) WHERE state IN ('pending','inflight','uncertain','conflict');
+             CREATE INDEX IF NOT EXISTS operations_blob_active ON operations(blob) WHERE blob IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict');
+             CREATE INDEX IF NOT EXISTS operations_uncertain_reconcile ON operations(reconcile_at) WHERE kind='upload' AND state='uncertain';
+             CREATE INDEX IF NOT EXISTS inbox_pending ON inbox(seq) WHERE done=0;",
+        )?;
         crate::initialization_store::migrate(&db)?;
         crate::preview::migrate(&db)?;
-        sync_history::migrate(&db)?;
+        sync_history::migrate(&db, version < STATE_SCHEMA_VERSION)?;
         crate::write_permissions::migrate(&db)?;
         db.pragma_update(None, "user_version", STATE_SCHEMA_VERSION)?;
         db.execute_batch("COMMIT;")?;
@@ -357,13 +403,25 @@ impl Store {
         // Derived state starts after startup recovery. TEMP objects and a fresh
         // epoch keep the durable schema and external readers unchanged.
         crate::status_changes::install(&db)?;
-        Ok(Self {
+        crate::removals::install_barrier_versions(&db)?;
+        let mut store = Self {
             _writer_lock: Some(writer_lock),
             db,
             root,
             handles: Arc::new(Mutex::new(HashMap::new())),
-            namespace_runtime: Mutex::new(Default::default()),
-        })
+            namespace_runtime: Arc::new(Mutex::new(Default::default())),
+            cache_recency: Mutex::new(crate::cache_policy::CacheRecency::new()),
+            draft_stats: DraftWriteStats::default(),
+            permission_cache: Mutex::new(crate::write_permissions::PermissionCache::new()),
+            barrier: Default::default(),
+        };
+        // Bound bookkeeping written before schema 28 (superseded operations,
+        // old terminal namespace history, applied inbox receipts, duplicate
+        // committed generations) once at startup after the upgrade. The durable
+        // marker keeps later opens on a large database from re-scanning history
+        // before the steady-state paths have anything to remove.
+        store.prune_storage_if_due()?;
+        Ok(store)
     }
     /// Second handle for read-only work next to a live writer. Unlike
     /// [`Store::open`] this takes no `writer.lock`, creates no files and never
@@ -373,6 +431,21 @@ impl Store {
     /// database is missing, does not match this build's schema or is not in WAL
     /// mode; those cases keep the one-writer contract intact.
     pub fn open_read_only(root: &Path) -> Result<Self> {
+        Self::open_read_only_with(root, Arc::new(Mutex::new(Default::default())))
+    }
+    /// Read-only handle whose scheduler diagnostics come from the live writer's
+    /// `NamespaceRuntime` instead of a private empty copy. The SQLite connection
+    /// is still a plain committed-WAL snapshot: only observations are shared.
+    pub(crate) fn open_read_only_observing(
+        root: &Path,
+        namespace_runtime: Arc<Mutex<crate::namespace_schedule::NamespaceRuntime>>,
+    ) -> Result<Self> {
+        Self::open_read_only_with(root, namespace_runtime)
+    }
+    fn open_read_only_with(
+        root: &Path,
+        namespace_runtime: Arc<Mutex<crate::namespace_schedule::NamespaceRuntime>>,
+    ) -> Result<Self> {
         let root = root.to_owned();
         let database = root.join("state.sqlite");
         if !database.is_file() {
@@ -406,8 +479,57 @@ impl Store {
             db,
             root,
             handles: Arc::new(Mutex::new(HashMap::new())),
-            namespace_runtime: Mutex::new(Default::default()),
+            namespace_runtime,
+            cache_recency: Mutex::new(crate::cache_policy::CacheRecency::new()),
+            draft_stats: DraftWriteStats::default(),
+            permission_cache: Mutex::new(crate::write_permissions::PermissionCache::new()),
+            barrier: Default::default(),
         })
+    }
+    /// Memoized effective decision for the writer connection (#26). Read-only
+    /// handles return `None`: they cannot observe later commits, so caching
+    /// there could resurrect a revoked decision.
+    pub(crate) fn permission_cache_lookup(
+        &self,
+        root: &str,
+        node: &str,
+        action: crate::write_permissions::Action,
+    ) -> Option<crate::write_permissions::Decision> {
+        if self._writer_lock.is_none() {
+            return None;
+        }
+        let epoch = self.db.total_changes();
+        self.permission_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .lookup(epoch, root, node, action)
+    }
+    pub(crate) fn permission_cache_store(
+        &self,
+        root: &str,
+        node: &str,
+        action: crate::write_permissions::Action,
+        decision: crate::write_permissions::Decision,
+    ) {
+        if self._writer_lock.is_none() {
+            return;
+        }
+        let epoch = self.db.total_changes();
+        self.permission_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .store(epoch, root, node, action, decision);
+    }
+    /// Cumulative hit/miss counters of the writer-local decision memo.
+    pub fn permission_cache_stats(&self) -> crate::write_permissions::PermissionCacheStats {
+        let cache = self
+            .permission_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        crate::write_permissions::PermissionCacheStats {
+            hits: cache.hits,
+            misses: cache.misses,
+        }
     }
     /// The state directory, including `state.sqlite` and `blobs`.
     pub fn root(&self) -> &Path {
@@ -587,6 +709,20 @@ impl Store {
             |r| r.get(0),
         )?;
         if batch.from != received {
+            // Applied receipts are deleted from the inbox (see `apply_next`), so
+            // the duplicate check above cannot see a batch that has already been
+            // committed. A resend whose target cursor equals the committed cursor
+            // is the last applied batch being replayed: ignore it so redelivery
+            // stays idempotent even after the receipt is gone. Anything else is a
+            // genuine gap.
+            let committed: String = tx.query_row(
+                "SELECT value FROM metadata WHERE key='committed_cursor'",
+                [],
+                |r| r.get(0),
+            )?;
+            if batch.to == committed {
+                return Ok(());
+            }
             return Err(Error::State(
                 "event cursor gap; reconciliation required".into(),
             ));
@@ -673,7 +809,11 @@ impl Store {
             )?;
             sync_history::record_remote_event(&tx, event)?;
         }
-        tx.execute("UPDATE inbox SET done=1 WHERE seq=?1", [seq])?;
+        // An applied receipt is never read again: deleting it in the same
+        // transaction keeps the inbox bounded (the `inbox_pending` index only
+        // ever walks unapplied rows). Resent bodies cannot reappear here because
+        // the cursor contract rejects a regressed batch before insertion.
+        tx.execute("DELETE FROM inbox WHERE seq=?1", [seq])?;
         tx.execute(
             "UPDATE metadata SET value=?1 WHERE key='committed_cursor'",
             [batch.to],
@@ -988,7 +1128,7 @@ impl Store {
         bytes: &[u8],
     ) -> Result<String> {
         let blob = self.write_blob(bytes)?;
-        self.commit_local_blob(id, opened_version, blob)
+        self.commit_local_blob(id, opened_version, blob, None)
     }
     /// FUSE uses an immutable/locked draft reader; no whole-file allocation.
     pub fn save_local_reader_from_version<R: Read>(
@@ -998,28 +1138,34 @@ impl Store {
         source: &mut R,
     ) -> Result<String> {
         let blob = self.write_blob_reader(source, None)?;
-        self.commit_local_blob(id, opened_version, blob)
+        self.commit_local_blob(id, opened_version, blob, None)
     }
     /// Preserve the mutable draft timestamp on its immutable queued snapshot.
     /// The byte copy creates a new inode; copying only bytes loses utimens.
+    ///
+    /// `draft_checkpoint` folds the draft's `checkpoint=generation` advance into
+    /// the snapshot transaction: one commit instead of two, and a crash between
+    /// the two writes can no longer leave a snapshot whose draft row disagrees.
     pub(crate) fn save_draft_file_from_version(
         &mut self,
         id: &str,
         base: &str,
         source: &mut File,
+        draft_checkpoint: Option<(&str, i64)>,
     ) -> Result<String> {
         let modified = source.metadata()?.modified()?;
         let blob = self.write_blob_reader(source, None)?;
         let snapshot = File::open(self.root.join("blobs").join(&blob))?;
         snapshot.set_modified(modified)?;
         snapshot.sync_all()?;
-        self.commit_local_blob(id, base, blob)
+        self.commit_local_blob(id, base, blob, draft_checkpoint)
     }
     fn commit_local_blob(
         &mut self,
         id: &str,
         opened_version: &str,
         blob: String,
+        draft_checkpoint: Option<(&str, i64)>,
     ) -> Result<String> {
         let mtime = crate::timestamps::native_mtime(
             std::fs::metadata(self.root.join("blobs").join(&blob))?.modified()?,
@@ -1043,6 +1189,17 @@ impl Store {
             "INSERT INTO upload_times(operation,mtime) VALUES(?1,?2)",
             params![op, mtime],
         )?;
+        if let Some((token, generation)) = draft_checkpoint {
+            let changed = tx.execute(
+                "UPDATE drafts SET checkpoint=?3 WHERE node=?1 AND token=?2",
+                params![id, token, generation],
+            )?;
+            if changed != 1 {
+                return Err(Error::State(
+                    "draft checkpoint row vanished during snapshot commit".into(),
+                ));
+            }
+        }
         tx.commit()?;
         Ok(op)
     }
@@ -1061,7 +1218,7 @@ impl Store {
         // or overlapping path) may precede the upload. A global remove barrier
         // let unrelated pending removes, such as freedesktop trash entries,
         // block every ordinary upload.
-        if let Some(blocked) = crate::removals::upload_remove_barrier(&self.db, &node, &path)? {
+        if let Some(blocked) = self.upload_remove_barrier(&node, &path)? {
             return Err(Error::State(format!(
                 "pending remove of {} blocks upload of {}",
                 blocked.path, path
@@ -1188,6 +1345,11 @@ impl Store {
             }
         }
         tx.execute("UPDATE operations SET state='committed' WHERE id=?1", [op])?;
+        // Only the newest committed generation per node is observable (the
+        // `unsubmitted` predicate is an existence check), so the previous
+        // generation is retired in the same transaction instead of being kept
+        // forever. The delete is bookkeeping: the journal does not publish it.
+        crate::retention::drop_committed_generations(&tx, &id, op)?;
         tx.execute("UPDATE node_metadata SET mtime=(SELECT mtime FROM upload_times WHERE operation=?1) WHERE node=?2 AND EXISTS(SELECT 1 FROM upload_times WHERE operation=?1)",params![op,id])?;
         tx.commit()?;
         Ok(())
@@ -1203,6 +1365,57 @@ impl Store {
     ) -> Result<()> {
         self.install_remote_snapshot_with_access(nodes, cursor, server, &[])
     }
+    /// Replace the access-denied set without installing a snapshot.
+    ///
+    /// This is the incremental counterpart of the `inaccessible` argument of
+    /// [`Store::install_remote_snapshot_with_access`]: the difference against the
+    /// rows already stored is applied in one transaction, so the status journal
+    /// records one `access_denied` subtree change per edge instead of resetting
+    /// the journal for a whole snapshot.
+    ///
+    /// Test/diagnostic support only: production code changes access through the
+    /// sync snapshot path, and other crates must not treat this as a stable
+    /// contract.
+    pub fn set_access_denied(&mut self, denied: &[String]) -> Result<()> {
+        use std::collections::HashSet;
+        let mut wanted = HashSet::new();
+        for id in denied {
+            if id.is_empty() {
+                return Err(Error::State("invalid access denied identity".into()));
+            }
+            if !wanted.insert(id.as_str()) {
+                return Err(Error::State("duplicate access denied identity".into()));
+            }
+        }
+        let tx = self.db.transaction()?;
+        let stored = tx
+            .prepare("SELECT node FROM access_denied ORDER BY node")?
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let stored_set = stored.iter().map(String::as_str).collect::<HashSet<_>>();
+        for id in &stored {
+            if !wanted.contains(id.as_str()) {
+                tx.execute("DELETE FROM access_denied WHERE node=?1", [id])?;
+            }
+        }
+        let mut insert = tx.prepare("INSERT OR IGNORE INTO access_denied(node) VALUES(?1)")?;
+        for id in denied {
+            if !stored_set.contains(id.as_str()) {
+                insert.execute([id])?;
+            }
+        }
+        drop(insert);
+        tx.commit()?;
+        Ok(())
+    }
+    /// Install a recovery snapshot together with the set of subtrees whose access
+    /// was denied.
+    ///
+    /// The snapshot itself replaces the status journal (see
+    /// [`crate::status_changes::replace_snapshot`]), so consumers rebuild from it;
+    /// the `inaccessible` set is stored in the same transaction. `inaccessible`
+    /// must name directory nodes that are present in `nodes`, have a parent, and
+    /// are unique.
     pub(crate) fn install_remote_snapshot_with_access(
         &mut self,
         nodes: &[Node],
@@ -1378,9 +1591,14 @@ impl Store {
 
     /// Uncertain uploads that may take one more read-only reconciliation pass.
     /// Exhausted rows stay uncertain for safety but are not selected again.
+    ///
+    /// Ordered by the durable retry clock, not `rowid`: the v28 partial index on
+    /// `reconcile_at` can then answer the range scan without a table scan and
+    /// without a temporary sort. The clock is the fairness signal anyway — the
+    /// oldest due operation is reconciled first.
     pub fn upload_reconcile_operations(&self, now: i64) -> Result<Vec<String>> {
         let mut q = self.db.prepare(
-            "SELECT id FROM operations WHERE kind='upload' AND node NOT IN (SELECT id FROM access_blocked) AND state='uncertain' AND reconcile_attempts < ?1 AND reconcile_at <= ?2 ORDER BY rowid",
+            "SELECT id FROM operations WHERE kind='upload' AND node NOT IN (SELECT id FROM access_blocked) AND state='uncertain' AND reconcile_attempts < ?1 AND reconcile_at <= ?2 ORDER BY reconcile_at",
         )?;
         Ok(q.query_map(params![i64::from(MAX_UPLOAD_RECONCILE_ATTEMPTS), now], |r| {
             r.get::<_, String>(0)
@@ -1482,16 +1700,32 @@ impl Store {
     /// not countable entries; deleted and access-blocked nodes never count as
     /// available. A dirty draft is available because it preserves local bytes.
     pub fn cache_availability(&self) -> Result<CacheAvailability> {
-        let (total, offline, pinned) = self.db.query_row(
-            "WITH RECURSIVE pinned_tree(id) AS (SELECT id FROM nodes WHERE pinned=1 AND deleted=0 UNION SELECT n.id FROM nodes n JOIN pinned_tree p ON n.parent=p.id WHERE n.deleted=0) SELECT COALESCE(SUM(CASE WHEN n.directory=0 THEN 1 ELSE 0 END),0), COALESCE(SUM(CASE WHEN n.directory=0 AND COALESCE(n.dirty_blob,n.blob) IS NOT NULL AND n.id NOT IN (SELECT id FROM access_blocked) THEN 1 ELSE 0 END),0), COALESCE(SUM(CASE WHEN n.directory=0 AND n.id IN (SELECT id FROM pinned_tree) THEN 1 ELSE 0 END),0) FROM nodes n WHERE n.deleted=0",
+        // One sequential pass answers both counters. The previous shape folded
+        // the recursive pinned CTE into the same scan, so SQLite built automatic
+        // partial indexes for every recursion step: ~11x slower at 210k nodes
+        // even though the result is three numbers (issue #21).
+        let (total, offline) = self.db.query_row(
+            "SELECT COALESCE(SUM(CASE WHEN n.directory=0 THEN 1 ELSE 0 END),0), \
+                    COALESCE(SUM(CASE WHEN n.directory=0 AND COALESCE(n.dirty_blob,n.blob) IS NOT NULL \
+                        AND n.id NOT IN (SELECT id FROM access_blocked) THEN 1 ELSE 0 END),0) \
+             FROM nodes n WHERE n.deleted=0",
             [],
-            |r| {
-                let total: i64 = r.get(0)?;
-                let offline: i64 = r.get(1)?;
-                let pinned: i64 = r.get(2)?;
-                Ok((total as u64, offline as u64, pinned as u64))
-            },
+            |r| Ok((r.get::<_, i64>(0)? as u64, r.get::<_, i64>(1)? as u64)),
         )?;
+        // Directories are not countable entries, so carry `directory` through the
+        // pinned recursion and count the co-routine's output. `id IN pinned_tree`
+        // would materialize the tree and re-scan all nodes once per aggregate.
+        let pinned: i64 = self.db.query_row(
+            "WITH RECURSIVE pinned_tree(id,directory) AS (\
+                SELECT id,directory FROM nodes WHERE pinned=1 AND deleted=0 \
+                UNION \
+                SELECT n.id,n.directory FROM nodes n INDEXED BY nodes_parent_name_live \
+                    JOIN pinned_tree p ON n.parent=p.id WHERE n.deleted=0) \
+             SELECT count(*) FROM pinned_tree WHERE directory=0",
+            [],
+            |r| r.get(0),
+        )?;
+        let pinned = pinned as u64;
         let state = if total == 0 {
             "empty"
         } else if pinned > 0 && pinned == total && offline == total {
@@ -1589,7 +1823,7 @@ mod cache_availability_tests {
     #[test]
     fn reports_empty_online_only_partial_complete_and_pinned() {
         let d = tempfile::tempdir().unwrap();
-        let mut s = Store::open(d.path()).unwrap();
+        let s = Store::open(d.path()).unwrap();
         assert_eq!(
             s.cache_availability().unwrap(),
             CacheAvailability {

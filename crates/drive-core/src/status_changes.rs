@@ -56,6 +56,31 @@ pub struct JournalWatermark {
     pub budget: JournalBudget,
 }
 
+/// Namespace semantic watermark: the version/invalidation primitive a
+/// materialized namespace projection compares instead of `total_changes`.
+///
+/// `journal` is the committed status-journal cursor. It advances exactly when
+/// the semantic sources in [`SOURCES`] change names, parents, visibility,
+/// types, content identity, pins, local precedence, ACL overlays, drafts or
+/// task state.
+///
+/// `attributes` counts the two attribute-only tables the namespace/attribute
+/// projection reads but the semantic journal deliberately excludes:
+/// `fs_inodes` (identity allocation) and `local_atimes` (explicit atime). A
+/// semantic-only write therefore does not move it, and an attribute-only write
+/// does not move the journal.
+///
+/// Two equal watermarks prove that a projection captured under the same writer
+/// connection is still current. No projection may serve results across unequal
+/// watermarks, and comparisons across processes always differ because the
+/// journal epoch is per writer connection and the counter is TEMP-backed.
+/// The type is a value to compare, never a durable receipt.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NamespaceWatermark {
+    pub journal: StatusCursor,
+    pub attributes: u64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ChangeScope {
     NodeAndAncestors,
@@ -197,7 +222,8 @@ pub(crate) fn install(db: &Connection) -> Result<()> {
         bytes INTEGER NOT NULL, overflows INTEGER NOT NULL,
         max_entries INTEGER NOT NULL, max_bytes INTEGER NOT NULL,
         bulk INTEGER NOT NULL DEFAULT 0 CHECK(bulk IN (0,1)),
-        snapshot_resets INTEGER NOT NULL DEFAULT 0);
+        snapshot_resets INTEGER NOT NULL DEFAULT 0,
+        prune INTEGER NOT NULL DEFAULT 0 CHECK(prune IN (0,1)));
         CREATE TEMP TABLE dn_status_changes (
         seq INTEGER PRIMARY KEY, source TEXT NOT NULL, operation TEXT NOT NULL,
         subtree INTEGER NOT NULL, old_node TEXT, new_node TEXT,
@@ -206,7 +232,7 @@ pub(crate) fn install(db: &Connection) -> Result<()> {
     )?;
     let budget = JournalBudget::default();
     db.execute(
-        "INSERT INTO dn_status_meta VALUES(1,?1,0,0,0,0,0,?2,?3,0,0)",
+        "INSERT INTO dn_status_meta VALUES(1,?1,0,0,0,0,0,?2,?3,0,0,0)",
         params![
             uuid::Uuid::new_v4().to_string(),
             budget.entries as i64,
@@ -281,7 +307,8 @@ pub(crate) fn install(db: &Connection) -> Result<()> {
             db.execute_batch(&format!(
                 "CREATE TEMP TRIGGER dn_status_{table}_{operation}
                 AFTER {operation} ON main.{table}
-                WHEN (SELECT bulk FROM dn_status_meta)=0 {when} BEGIN
+                WHEN (SELECT bulk FROM dn_status_meta)=0
+                 AND (SELECT prune FROM dn_status_meta)=0 {when} BEGIN
                 UPDATE dn_status_meta SET head=head+1;
                 INSERT INTO dn_status_changes
                 SELECT head,'{table}','{operation}',({subtree}),{old},{new},
@@ -297,7 +324,79 @@ pub(crate) fn install(db: &Connection) -> Result<()> {
             ))?;
         }
     }
+    // Attribute-only projection sources. They are read by the namespace and
+    // attribute projection but deliberately excluded from the semantic journal
+    // above: hot-path inode allocation and explicit atime updates must not
+    // publish desktop status notifications. A compact counter keeps that
+    // projection exact without durable schema, journal rows or per-write
+    // bookkeeping beyond one TEMP row update. The counter and its triggers are
+    // TEMP objects on this writer connection only.
+    db.execute_batch(
+        "CREATE TEMP TABLE dn_namespace_meta (
+        singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+        attributes INTEGER NOT NULL);
+        INSERT INTO dn_namespace_meta VALUES(1,0);
+        CREATE TEMP TRIGGER dn_namespace_attributes_fs_inodes_insert
+        AFTER INSERT ON main.fs_inodes BEGIN
+        UPDATE dn_namespace_meta SET attributes=attributes+1; END;
+        CREATE TEMP TRIGGER dn_namespace_attributes_fs_inodes_update
+        AFTER UPDATE ON main.fs_inodes BEGIN
+        UPDATE dn_namespace_meta SET attributes=attributes+1; END;
+        CREATE TEMP TRIGGER dn_namespace_attributes_fs_inodes_delete
+        AFTER DELETE ON main.fs_inodes BEGIN
+        UPDATE dn_namespace_meta SET attributes=attributes+1; END;
+        CREATE TEMP TRIGGER dn_namespace_attributes_local_atimes_insert
+        AFTER INSERT ON main.local_atimes BEGIN
+        UPDATE dn_namespace_meta SET attributes=attributes+1; END;
+        CREATE TEMP TRIGGER dn_namespace_attributes_local_atimes_update
+        AFTER UPDATE ON main.local_atimes BEGIN
+        UPDATE dn_namespace_meta SET attributes=attributes+1; END;
+        CREATE TEMP TRIGGER dn_namespace_attributes_local_atimes_delete
+        AFTER DELETE ON main.local_atimes BEGIN
+        UPDATE dn_namespace_meta SET attributes=attributes+1; END;",
+    )?;
     Ok(())
+}
+
+/// Retention deletes whole rows that no consumer can still reference, so the
+/// journal must not publish them as semantic changes. Suppression is a TEMP
+/// flag toggled inside the cleanup transaction: every journal trigger tests it
+/// and skips the row entirely, the journal cursor does not move, and a
+/// rollback restores the previous flag with the rows. One transaction, no
+/// public begin/end pair, and no trigger is rebuilt.
+///
+/// The flag lives on the writer connection. Read-only connections have no TEMP
+/// journal at all, and cleanup is never attempted there.
+pub(crate) fn without_journal<T>(
+    db: &mut Connection,
+    write: impl FnOnce(&Transaction<'_>) -> Result<T>,
+) -> Result<T> {
+    let tx = db.transaction()?;
+    let value = without_journal_in(&tx, || write(&tx))?;
+    tx.commit()?;
+    Ok(value)
+}
+
+/// [`without_journal`] for a caller that already owns the transaction (for
+/// example, a commit that also removes the previous generation). The
+/// suppression is enabled and disabled inside that transaction, so an error
+/// anywhere rolls it back together with the rows.
+pub(crate) fn without_journal_in<T>(
+    tx: &Transaction<'_>,
+    write: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    if tx.execute(
+        "UPDATE dn_status_meta SET prune=1 WHERE singleton=1 AND prune=0",
+        [],
+    )? != 1
+    {
+        return Err(Error::State(
+            "status journal prune suppression is unavailable".into(),
+        ));
+    }
+    let value = write()?;
+    tx.execute("UPDATE dn_status_meta SET prune=0 WHERE singleton=1 AND prune=1", [])?;
+    Ok(value)
 }
 
 /// Only a complete snapshot replacement uses this path. It already invalidates
@@ -361,6 +460,30 @@ impl Store {
             ));
         }
         Ok(watermark)
+    }
+
+    /// The namespace semantic watermark: committed journal cursor plus the
+    /// attribute-only counter. Projections that SQLite backs (the FUSE
+    /// namespace index and, later, the desktop status index) compare this
+    /// value instead of `total_changes`, so unrelated writes — open/LRU
+    /// bookkeeping, settings, receipt bodies and TEMP maintenance — cannot
+    /// invalidate them while name, identity, visibility and projected
+    /// attribute changes still do. Like [`Store::status_change_watermark`] it
+    /// requires a committed boundary and fails while a transaction or bulk
+    /// replacement is open.
+    pub fn namespace_watermark(&self) -> Result<NamespaceWatermark> {
+        let watermark = self.status_change_watermark()?;
+        let attributes: i64 =
+            self.db
+                .query_row("SELECT attributes FROM dn_namespace_meta", [], |row| {
+                    row.get(0)
+                })?;
+        let attributes = u64::try_from(attributes)
+            .map_err(|_| Error::State("invalid namespace attribute counter".into()))?;
+        Ok(NamespaceWatermark {
+            journal: watermark.cursor,
+            attributes,
+        })
     }
 
     /// Returns invalidations, not complete historical atoms. Read current node

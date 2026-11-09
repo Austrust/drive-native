@@ -41,6 +41,7 @@ pub enum Counter {
     AppliedPages,
     AwaitingCoverage,
     DirectoryCommitted,
+    DirectoryCommitRounds,
     DirectoryDenied,
     DirectoryRetry,
     StaleReceipt,

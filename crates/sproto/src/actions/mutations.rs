@@ -78,26 +78,72 @@ impl UploadIntent {
         Ok(())
     }
 }
+/// One authoritative read-back pass over parent directories.
+///
+/// Reconciliations issue several path lookups against the same path space
+/// (rename: source and destination, before and after). `SCMD_LIST` exposes no
+/// by-name filter, so each lookup would re-enumerate the complete parent
+/// directory page by page. Within one read-back pass this index performs at
+/// most one enumeration per `(view, parent)` and filters locally.
+///
+/// A fresh index must be used for a later observation pass: caching across
+/// passes would hide exactly the server-side change the second pass exists to
+/// detect.
+#[derive(Debug, Default)]
+pub(crate) struct ReadBackIndex {
+    listings: std::collections::HashMap<(u64, String), Vec<NodeInfo>>,
+}
+
+impl ReadBackIndex {
+    /// Look up one leaf path, enumerating its parent at most once per pass.
+    ///
+    /// All lookups served by one index share a single server observation of a
+    /// given parent directory.
+    pub(crate) async fn current_path(
+        &mut self,
+        client: &Client,
+        view: u64,
+        path: &str,
+    ) -> Result<Option<NodeInfo>> {
+        validate_path(path)?;
+        let (parent, name) = split_leaf(path)?;
+        let key = (view, parent.to_owned());
+        if !self.listings.contains_key(&key) {
+            let listing = client.list_dir(view, parent).await?;
+            self.listings.insert(key.clone(), listing);
+        }
+        let listing = self.listings.get(&key).expect("listing inserted above");
+        find_leaf(listing, name)
+    }
+}
+
+fn split_leaf(path: &str) -> Result<(&str, &str)> {
+    let (parent, name) = path
+        .rsplit_once('/')
+        .ok_or_else(|| Error::InvalidConfig("missing parent".into()))?;
+    if name.is_empty() {
+        return Err(Error::InvalidConfig("expected file leaf".into()));
+    }
+    let parent = if parent.is_empty() { "/" } else { parent };
+    Ok((parent, name))
+}
+
+fn find_leaf(listing: &[NodeInfo], name: &str) -> Result<Option<NodeInfo>> {
+    let mut found = listing
+        .iter()
+        .filter(|n| n.name == name && !n.is_removed);
+    let node = found.next().cloned();
+    if found.next().is_some() {
+        return Err(Error::Decode("ambiguous native path".into()));
+    }
+    Ok(node)
+}
+
 impl Client {
     pub(crate) async fn current_path(&self, view: u64, path: &str) -> Result<Option<NodeInfo>> {
         validate_path(path)?;
-        let (parent, name) = path
-            .rsplit_once('/')
-            .ok_or_else(|| Error::InvalidConfig("missing parent".into()))?;
-        if name.is_empty() {
-            return Err(Error::InvalidConfig("expected file leaf".into()));
-        }
-        let parent = if parent.is_empty() { "/" } else { parent };
-        let mut found = self
-            .list_dir(view, parent)
-            .await?
-            .into_iter()
-            .filter(|n| n.name == name && !n.is_removed);
-        let node = found.next();
-        if found.next().is_some() {
-            return Err(Error::Decode("ambiguous native path".into()));
-        }
-        Ok(node)
+        let (parent, name) = split_leaf(path)?;
+        find_leaf(&self.list_dir(view, parent).await?, name)
     }
     /// Read-only reconciliation of an upload whose reply was lost. Uses a bounded
     /// temporary file and a second metadata read to detect verification races.
@@ -108,7 +154,11 @@ impl Client {
         staging: &Path,
     ) -> Result<UploadReconciliation> {
         intent.validate()?;
-        let Some(before) = self.current_path(intent.view_id, &intent.path).await? else {
+        let mut index = ReadBackIndex::default();
+        let Some(before) = index
+            .current_path(self, intent.view_id, &intent.path)
+            .await?
+        else {
             return Ok(UploadReconciliation::Missing);
         };
         if !intent.matches_metadata(&before) {
@@ -130,7 +180,18 @@ impl Client {
         if verified.sha256 != intent.sha256 {
             return Ok(UploadReconciliation::Diverged(before));
         }
-        let after = self.current_path(intent.view_id, &intent.path).await?;
+        // The verified download already pinned the exact remote revision and
+        // hashed its content, which is a stronger observation than a second
+        // listing. Implicit-mtime uploads may therefore reuse the first
+        // enumeration; an explicit mtime still requires a fresh read-back.
+        let after = if intent.mtime.is_none() {
+            Some(before.clone())
+        } else {
+            let mut fresh = ReadBackIndex::default();
+            fresh
+                .current_path(self, intent.view_id, &intent.path)
+                .await?
+        };
         if !after
             .as_ref()
             .is_some_and(|n| same_revision(&before, n, intent.mtime.is_some()))

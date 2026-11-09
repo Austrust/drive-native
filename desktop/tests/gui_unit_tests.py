@@ -144,5 +144,54 @@ class DesktopTests(unittest.TestCase):
             window.deleteLater()
 
 
+class StatusChanged2ProtocolTests(unittest.TestCase):
+    """Issue #31: parse the revisioned change-set payload before consumers use it."""
+
+    def test_valid_payload_is_normalised(self):
+        from drive_native_gui.bus import parse_status_event
+        event = parse_status_event(
+            4, 5, 'epoch-1', False, True,
+            '{"schema":1,"changes":[{"path":"/mnt/d/./Lab/x.txt","directory":false,'
+            '"kind":"status"}],"truncated":false}')
+        self.assertFalse(event.invalid)
+        self.assertEqual((event.from_revision, event.to_revision), (4, 5))
+        self.assertEqual(event.epoch, 'epoch-1')
+        self.assertFalse(event.reset)
+        self.assertTrue(event.overview_changed)
+        self.assertFalse(event.truncated)
+        self.assertEqual(len(event.changes), 1)
+        self.assertEqual(event.changes[0]['path'], '/mnt/d/Lab/x.txt')
+        self.assertEqual(event.changes[0]['kind'], 'status')
+        self.assertFalse(event.changes[0]['directory'])
+
+    def test_truncated_and_all_change_kinds_are_preserved(self):
+        from drive_native_gui.bus import parse_status_event
+        event = parse_status_event(
+            1, 2, 'e', False, False,
+            '{"schema":1,"changes":[{"path":"/mnt/d/dir","directory":true,'
+            '"kind":"listing"},{"path":"/mnt/d/sub","directory":true,'
+            '"kind":"subtree"}],"truncated":true}')
+        self.assertFalse(event.invalid)
+        self.assertTrue(event.truncated)
+        self.assertEqual([change['kind'] for change in event.changes],
+                         ['listing', 'subtree'])
+
+    def test_invalid_payloads_are_marked_for_full_fallback(self):
+        from drive_native_gui.bus import parse_status_event
+        payloads = [
+            '',
+            'not-json',
+            '{"schema":2,"changes":[]}',
+            '{"schema":1,"changes":[{"path":"relative","directory":false,'
+            '"kind":"status"}]}',
+            '{"schema":1,"changes":[{"path":"/mnt/d/x","directory":false,'
+            '"kind":"unknown"}]}',
+        ]
+        for payload in payloads:
+            event = parse_status_event(1, 2, 'e', False, False, payload)
+            self.assertTrue(event.invalid, payload)
+            self.assertEqual(event.changes, [])
+
+
 if __name__ == "__main__":
     unittest.main()

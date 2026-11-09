@@ -6,6 +6,123 @@ use std::{
     os::{fd::OwnedFd, unix::net::UnixStream},
     sync::Arc,
 };
+/// Job bodies concurrently active per worker session. Bursts above this limit
+/// queue instead of ending the session (#31).
+pub(crate) const MAX_IN_FLIGHT: usize = 32;
+/// Hard bound on accepted commands (running + queued) per worker session.
+/// Beyond it the worker refuses the individual command with a retryable
+/// `worker_overloaded` category instead of dropping the whole session.
+pub(crate) const MAX_ACCEPTED: usize = 160;
+/// Fixed IPC category for a retryable overload refusal. Never a transport
+/// loss: clients keep the session and retry the command.
+pub(crate) const WORKER_OVERLOADED_CATEGORY: &str = "worker_overloaded";
+/// A malformed or replayed command id is refused and dropped; unrelated jobs
+/// and the session survive.
+pub(crate) const INVALID_REQUEST_CATEGORY: &str = "invalid_worker_request";
+
+fn failed_envelope(id: u64, category: &str) -> Envelope<Response> {
+    Envelope {
+        version: VERSION,
+        id,
+        body: Response::Failed {
+            category: category.into(),
+        },
+    }
+}
+
+/// Bounded command admission shared by the worker loop and its tests.
+///
+/// The loop owns at most `MAX_IN_FLIGHT` executing bodies and at most
+/// `max_accepted` accepted commands. Excess commands receive the retryable
+/// `worker_overloaded` response; cancellation reaches queued jobs through the
+/// stored abort handle, and shutdown aborts every accepted command.
+struct JobQueue {
+    in_flight: Arc<tokio::sync::Semaphore>,
+    max_accepted: usize,
+    handles: HashMap<u64, tokio::task::AbortHandle>,
+    /// Tokio task id -> command id. `join_next_with_id` reports the former for
+    /// failed tasks, so this map is the only way to retire a panicked job's
+    /// admission slot.
+    task_ids: HashMap<tokio::task::Id, u64>,
+    tasks: tokio::task::JoinSet<u64>,
+}
+impl JobQueue {
+    fn new(max_in_flight: usize, max_accepted: usize) -> Self {
+        Self {
+            in_flight: Arc::new(tokio::sync::Semaphore::new(max_in_flight)),
+            max_accepted,
+            handles: HashMap::new(),
+            task_ids: HashMap::new(),
+            tasks: tokio::task::JoinSet::new(),
+        }
+    }
+    fn accepted(&self) -> usize {
+        self.handles.len()
+    }
+    fn can_accept(&self) -> bool {
+        self.accepted() < self.max_accepted
+    }
+    fn has_jobs(&self) -> bool {
+        !self.handles.is_empty()
+    }
+    fn contains(&self, id: u64) -> bool {
+        self.handles.contains_key(&id)
+    }
+    fn spawn<F>(&mut self, id: u64, job: F)
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        let in_flight = self.in_flight.clone();
+        let abort = self.tasks.spawn(async move {
+            let Ok(_permit) = in_flight.acquire_owned().await else {
+                return id;
+            };
+            job.await;
+            id
+        });
+        self.task_ids.insert(abort.id(), id);
+        self.handles.insert(id, abort);
+    }
+    fn cancel(&mut self, id: u64) -> bool {
+        let Some(abort) = self.handles.remove(&id) else {
+            return false;
+        };
+        abort.abort();
+        true
+    }
+    async fn next_completed(&mut self) -> Option<u64> {
+        loop {
+            // `join_next_with_id` reports the tokio task id for both completed
+            // and failed tasks. A panicked job never returns its command id, so
+            // the id map is required to release its admission slot instead of
+            // leaking it until shutdown.
+            match self.tasks.join_next_with_id().await {
+                Some(Ok((task_id, id))) => {
+                    self.task_ids.remove(&task_id);
+                    self.handles.remove(&id);
+                    return Some(id);
+                }
+                Some(Err(join_err)) => {
+                    // Cancelled jobs already left `handles` via `cancel`; a
+                    // panicked job did not. Removing both is idempotent. The
+                    // semaphore permit is tied to the dropped future, so it is
+                    // released either way; neither outcome ends the session.
+                    if let Some(id) = self.task_ids.remove(&join_err.id()) {
+                        self.handles.remove(&id);
+                    }
+                    continue;
+                }
+                None => return None,
+            }
+        }
+    }
+    async fn shutdown(mut self) {
+        self.tasks.abort_all();
+        while self.tasks.join_next_with_id().await.is_some() {}
+        self.handles.clear();
+        self.task_ids.clear();
+    }
+}
 pub async fn serve(socket: UnixStream) -> io::Result<()> {
     transport::check_peer(&socket)?;
     let mut reader = socket.try_clone()?;
@@ -100,53 +217,74 @@ pub async fn serve(socket: UnixStream) -> io::Result<()> {
         .map_err(|_| io::Error::other("IPC output closed"))?;
     let flow_control = sproto::flow::TransferControl::new(0, 0);
     let staging = Arc::new(tempfile::tempdir()?);
-    let mut jobs: HashMap<u64, tokio::task::JoinHandle<()>> = HashMap::new();
-    while let Some((env, fd)) = rx.recv().await {
-        jobs.retain(|_, job| !job.is_finished());
-        if env.version != VERSION || !valid_command_descriptor(&env.body, fd.is_some()) {
-            break;
-        }
-        if let Command::ConfigureTransfers(limits) = &env.body {
-            if env.id == 0 || limits.validate().is_err() {
-                break;
-            }
-            flow_control.set_limits(limits.download_bps, limits.upload_bps);
-            let response = Envelope {
-                version: VERSION,
-                id: env.id,
-                body: Response::TransfersConfigured(*limits),
-            };
-            if out_tx.try_send((response, None)).is_err() {
-                break;
-            }
-            continue;
-        }
-        if let Command::Cancel { request } = env.body {
-            if let Some(job) = jobs.remove(&request) {
-                job.abort()
-            }
-            continue;
-        }
-        if env.id == 0 || jobs.contains_key(&env.id) || jobs.len() >= 32 {
-            break;
-        }
-        let session = session.clone();
-        let output = out_tx.clone();
-        let staging = staging.clone();
-        let control = flow_control.clone();
-        let progress_output = output.clone();
-        let request_id = env.id;
-        let observer = Arc::new(move |progress: sproto::flow::Progress| {
-            let _ = progress_output.try_send((
-                Envelope {
-                    version: VERSION,
-                    id: request_id,
-                    body: Response::TransferProgress(progress.into()),
-                },
-                None,
-            ));
-        });
-        let job = tokio::spawn(async move {
+    let mut queue = JobQueue::new(MAX_IN_FLIGHT, MAX_ACCEPTED);
+    loop {
+        tokio::select! {
+            incoming = rx.recv() => {
+                let Some((env, fd)) = incoming else {
+                    break;
+                };
+                if env.version != VERSION || !valid_command_descriptor(&env.body, fd.is_some()) {
+                    break;
+                }
+                if let Command::ConfigureTransfers(limits) = &env.body {
+                    if env.id == 0 || limits.validate().is_err() {
+                        break;
+                    }
+                    flow_control.set_limits(limits.download_bps, limits.upload_bps);
+                    let response = Envelope {
+                        version: VERSION,
+                        id: env.id,
+                        body: Response::TransfersConfigured(*limits),
+                    };
+                    if out_tx.try_send((response, None)).is_err() {
+                        break;
+                    }
+                    continue;
+                }
+                if let Command::Cancel { request } = env.body {
+                    queue.cancel(request);
+                    continue;
+                }
+                if env.id == 0 || queue.contains(env.id) {
+                    // A replayed or malformed id is refused per request; it
+                    // never takes unrelated jobs or the session down.
+                    if out_tx
+                        .try_send((failed_envelope(env.id, INVALID_REQUEST_CATEGORY), None))
+                        .is_err()
+                    {
+                        break;
+                    }
+                    continue;
+                }
+                if !queue.can_accept() {
+                    // Bounded backpressure: refuse this command with a
+                    // retryable category and keep the session and its jobs.
+                    if out_tx
+                        .try_send((failed_envelope(env.id, WORKER_OVERLOADED_CATEGORY), None))
+                        .is_err()
+                    {
+                        break;
+                    }
+                    continue;
+                }
+                let session = session.clone();
+                let output = out_tx.clone();
+                let staging = staging.clone();
+                let control = flow_control.clone();
+                let progress_output = output.clone();
+                let request_id = env.id;
+                let observer = Arc::new(move |progress: sproto::flow::Progress| {
+                    let _ = progress_output.try_send((
+                        Envelope {
+                            version: VERSION,
+                            id: request_id,
+                            body: Response::TransferProgress(progress.into()),
+                        },
+                        None,
+                    ));
+                });
+                queue.spawn(request_id, async move {
             let result: drive_core::Result<(Response, Option<OwnedFd>)> =
                 sproto::flow::scope(control, observer, async {
                     match env.body {
@@ -465,12 +603,12 @@ pub async fn serve(socket: UnixStream) -> io::Result<()> {
                 ))
             })
             .await;
-        });
-        jobs.insert(env.id, job);
+                });
+            }
+            _ = queue.next_completed(), if queue.has_jobs() => {}
+        }
     }
-    for (_, job) in jobs {
-        job.abort()
-    }
+    queue.shutdown().await;
     Ok(())
 }
 
@@ -805,6 +943,10 @@ mod download_diagnostics_tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "worker_queue_tests.rs"]
+mod worker_queue_tests;
 
 #[cfg(test)]
 mod capacity_categories {

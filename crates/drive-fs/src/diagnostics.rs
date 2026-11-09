@@ -44,9 +44,14 @@ pub enum Stage {
     TtlDelivered,
     /// Invalidations queued (may lag delivery).
     TtlInvalidations,
-    /// Invalidation failures (notification rejected/unsupported). Non-zero means
-    /// the mount has fallen back to zero TTL.
+    /// Invalidation failures (notification rejected/unsupported or queue
+    /// overflow). Non-zero means the mount suspended cacheable publication for
+    /// one quiet lease window; it recovers on its own (see `TtlDegraded`).
     TtlFailures,
+    /// One transition into the degraded quiet window (leases suspended).
+    TtlDegraded,
+    /// One automatic recovery out of the degraded quiet window.
+    TtlRecovered,
     /// LOOKUP replies published with a non-zero positive-entry TTL.
     EntryTtlNonZero,
     /// LOOKUP replies published with a zero entry TTL.
@@ -61,6 +66,12 @@ pub enum Stage {
     ReaddirPlusQueue,
     /// One bounded attribute page projection for READDIRPLUS.
     ReaddirPlusProjection,
+    /// One READDIRPLUS ACL page whose permission projection ran batched (#26).
+    ReaddirPlusBatchedPages,
+    /// Effective decisions served by the writer-local memo (#26).
+    PermissionCacheHits,
+    /// Effective decisions computed and memoized by the writer-local memo (#26).
+    PermissionCacheMisses,
     IndexHits,
     IndexMisses,
     IndexFallback,
@@ -78,8 +89,16 @@ pub enum Stage {
     ReaddirPlusRequests,
     /// Elapsed time for index attempts/replies, not a CPU-time attribution.
     IndexReadUs,
+    /// Time one WRITE request waited in the local queue before executing.
+    WriteQueue,
+    /// Time a WRITE job waited to acquire the shared store lock.
+    WriteStoreWait,
+    /// Time a WRITE job held the shared store lock (draft write + permissions).
+    WriteHold,
+    /// Wall time of one checkpoint: dirty-draft barrier, snapshot and commit.
+    CheckpointTotal,
 }
-const STAGES: [Stage; 50] = [
+const STAGES: [Stage; 59] = [
     Stage::LookupQueue,
     Stage::LookupStoreWait,
     Stage::LookupProjection,
@@ -108,6 +127,7 @@ const STAGES: [Stage; 50] = [
     Stage::TtlDelivered,
     Stage::TtlInvalidations,
     Stage::TtlFailures,
+    Stage::TtlDegraded, Stage::TtlRecovered,
     Stage::EntryTtlNonZero,
     Stage::EntryTtlZero,
     Stage::AttrTtlNonZero,
@@ -120,6 +140,10 @@ const STAGES: [Stage; 50] = [
     Stage::IndexPartial, Stage::PermissionDenied, Stage::SpaceForbidden,
     Stage::LookupRequests, Stage::GetattrRequests, Stage::OpendirRequests,
     Stage::ReaddirRequests, Stage::ReaddirPlusRequests, Stage::IndexReadUs,
+    Stage::WriteQueue, Stage::WriteStoreWait, Stage::WriteHold,
+    Stage::CheckpointTotal,
+    Stage::ReaddirPlusBatchedPages, Stage::PermissionCacheHits,
+    Stage::PermissionCacheMisses,
 ];
 struct Aggregate {
     count: AtomicU64,
@@ -137,7 +161,7 @@ impl Aggregate {
         }
     }
 }
-static TOTALS: [Aggregate; 50] = [const { Aggregate::new() }; 50];
+static TOTALS: [Aggregate; 59] = [const { Aggregate::new() }; 59];
 static ENABLED: OnceLock<bool> = OnceLock::new();
 pub(crate) fn enabled() -> bool {
     *ENABLED
@@ -157,6 +181,15 @@ pub fn count(stage: Stage) {
     if enabled() {
         record(stage, 0);
     }
+}
+/// Add a count without treating it as a duration sample.
+pub(crate) fn add_count(stage: Stage, count: u64) {
+    if !enabled() || count == 0 {
+        return;
+    }
+    TOTALS[stage as usize]
+        .count
+        .fetch_add(count, Ordering::Relaxed);
 }
 pub(crate) fn value(stage: Stage, value: u64) {
     if enabled() { record(stage, value); }

@@ -35,6 +35,9 @@ struct DirectorySql {
     count: String,
     allocate: String,
     collect: String,
+    /// Read-only variant of `collect` used by `directory_snapshot_read`:
+    /// a NULL inode marks a child the writer has not allocated yet.
+    read_collect: String,
 }
 fn directory_sql() -> &'static DirectorySql {
     static SQL: std::sync::OnceLock<DirectorySql> = std::sync::OnceLock::new();
@@ -60,6 +63,7 @@ fn directory_sql() -> &'static DirectorySql {
             count: format!("SELECT count(*),coalesce(sum(length(CAST(n.name AS BLOB))),0) FROM nodes n WHERE {visible}"),
             allocate: format!("INSERT INTO fs_inodes(node) SELECT n.id FROM nodes n WHERE {visible} AND NOT EXISTS(SELECT 1 FROM fs_inodes i WHERE i.node=n.id) ORDER BY n.name,n.id"),
             collect: format!("SELECT i.ino,n.directory,n.name FROM nodes n JOIN fs_inodes i ON i.node=n.id WHERE {visible} ORDER BY n.name,n.id"),
+            read_collect: format!("SELECT i.ino,n.directory,n.name FROM nodes n LEFT JOIN fs_inodes i ON i.node=n.id WHERE {visible} ORDER BY n.name,n.id"),
         }
     })
 }
@@ -135,6 +139,127 @@ impl Store {
         let mut timings = DirectoryBuildTimings::default();
         let snapshot = self.directory_snapshot_impl(ino, max_bytes, Some(&mut timings))?;
         Ok((snapshot, timings))
+    }
+    /// Read-only projection of one authoritative directory for callers that do
+    /// not hold the writer lock (issue #23). Mirrors `directory_snapshot` but
+    /// never allocates inodes: `Ok(None)` means the namespace is not fully
+    /// mapped yet (an unmapped parent or child inode), so the caller must fall
+    /// back to `directory_snapshot` under the Store lock. Callers must also
+    /// re-read `SharedStore::change_state` after this call and only publish the
+    /// result when the semantic token is unchanged and verified.
+    pub fn directory_snapshot_read(
+        &self,
+        ino: u64,
+        max_bytes: usize,
+    ) -> Result<Option<DirectorySnapshot>> {
+        let sql = directory_sql();
+        let tx = self.db.unchecked_transaction()?;
+        let identity = tx
+            .prepare_cached(&sql.identity)?
+            .query_row([sql_unsigned(ino)?], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, bool>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, Option<i64>>(3)?
+                        .map(u64::try_from)
+                        .transpose()
+                        .map_err(|e| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                3,
+                                rusqlite::types::Type::Integer,
+                                Box::new(e),
+                            )
+                        })?,
+                ))
+            })
+            .optional()?;
+        let Some((id, directory, parent, mapped_parent)) = identity else {
+            return Err(Error::Io(std::io::Error::from_raw_os_error(libc::ENOENT)));
+        };
+        if !directory {
+            return Err(Error::Io(std::io::Error::from_raw_os_error(libc::ENOTDIR)));
+        }
+        let (count, names) = tx
+            .prepare_cached(&sql.count)?
+            .query_row([&id], |r| Ok((read_unsigned(r, 0)?, read_unsigned(r, 1)?)))?;
+        let count =
+            usize::try_from(count).map_err(|_| Error::State("directory size overflow".into()))?;
+        let names =
+            usize::try_from(names).map_err(|_| Error::State("directory size overflow".into()))?;
+        let count = count
+            .checked_add(2)
+            .ok_or_else(|| Error::State("directory size overflow".into()))?;
+        let bytes = count
+            .checked_mul(std::mem::size_of::<DirectoryEntry>())
+            .and_then(|n| n.checked_add(names))
+            .and_then(|n| n.checked_add(3))
+            .ok_or_else(|| Error::State("directory size overflow".into()))?;
+        if bytes > max_bytes {
+            return Err(Error::Io(std::io::Error::from_raw_os_error(libc::ENOMEM)));
+        }
+        let parent_ino = match (parent.as_deref(), mapped_parent) {
+            (None, _) => 1,
+            (Some(_), Some(ino)) => ino,
+            (Some(_), None) => return Ok(None),
+        };
+        let mut entries = Vec::with_capacity(count);
+        entries.push(DirectoryEntry {
+            ino,
+            directory: true,
+            name: ".".into(),
+        });
+        entries.push(DirectoryEntry {
+            ino: parent_ino,
+            directory: true,
+            name: "..".into(),
+        });
+        {
+            let mut query = tx.prepare_cached(&sql.read_collect)?;
+            let rows = query.query_map([&id], |r| {
+                let ino = r.get::<_, Option<i64>>(0)?;
+                Ok((ino, r.get::<_, bool>(1)?, r.get::<_, String>(2)?))
+            })?;
+            for row in rows {
+                let (child, directory, name) = row?;
+                let Some(child) = child else {
+                    return Ok(None);
+                };
+                let child = u64::try_from(child)
+                    .map_err(|_| Error::State("inode overflow".into()))?;
+                entries.push(DirectoryEntry {
+                    ino: child,
+                    directory,
+                    name,
+                });
+            }
+        }
+        let actual = entries.capacity() * std::mem::size_of::<DirectoryEntry>()
+            + entries.iter().map(|e| e.name.capacity()).sum::<usize>();
+        if actual > max_bytes {
+            return Err(Error::Io(std::io::Error::from_raw_os_error(libc::ENOMEM)));
+        }
+        tx.commit()?;
+        Ok(Some(DirectorySnapshot {
+            entries,
+            bytes: actual,
+        }))
+    }
+    /// Lightweight check that `ino` still names a listable directory. Used by
+    /// the indexed readdir continuation path instead of rebuilding the whole
+    /// directory just to validate the open view.
+    pub fn directory_identity(&self, ino: u64) -> Result<()> {
+        let sql = directory_sql();
+        let identity: Option<bool> = self
+            .db
+            .prepare_cached(&sql.identity)?
+            .query_row([sql_unsigned(ino)?], |r| r.get::<_, bool>(1))
+            .optional()?;
+        match identity {
+            None => Err(Error::Io(std::io::Error::from_raw_os_error(libc::ENOENT))),
+            Some(false) => Err(Error::Io(std::io::Error::from_raw_os_error(libc::ENOTDIR))),
+            Some(true) => Ok(()),
+        }
     }
     fn directory_snapshot_impl(
         &self,
@@ -481,14 +606,29 @@ impl Store {
     pub fn lookup_node(&self, parent: &str, name: &str) -> Result<Node> {
         let mut q = self
             .db
-            .prepare("SELECT n.id FROM nodes n WHERE n.id NOT IN (SELECT id FROM access_blocked) AND n.parent=?1 AND n.name=?2 AND n.deleted=0 AND NOT EXISTS(SELECT 1 FROM nodes l JOIN local_creations c ON c.node=l.id WHERE l.parent=n.parent AND l.name=n.name AND l.id!=n.id AND l.deleted=0)")?;
+            .prepare("SELECT n.id FROM nodes n WHERE n.parent=?1 AND n.name=?2 AND n.deleted=0 AND NOT EXISTS(SELECT 1 FROM nodes l JOIN local_creations c ON c.node=l.id WHERE l.parent=n.parent AND l.name=n.name AND l.id!=n.id AND l.deleted=0)")?;
         let ids = q
             .query_map(params![parent, name], |r| r.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         if ids.len() > 1 {
-            return Err(Error::State(
-                "ambiguous namespace; recovery required".into(),
-            ));
+            // Denied duplicates are invisible: the old closure-filtered query
+            // simply did not return them. Keep that contract while taking the
+            // ancestor walk instead of materializing the whole blocked closure.
+            let mut visible = Vec::new();
+            for id in &ids {
+                if !self.is_inaccessible(id)? {
+                    visible.push(id.clone());
+                }
+            }
+            if visible.len() > 1 {
+                return Err(Error::State(
+                    "ambiguous namespace; recovery required".into(),
+                ));
+            }
+            return match visible.first() {
+                Some(id) => self.node(id),
+                None => Err(rusqlite::Error::QueryReturnedNoRows.into()),
+            };
         }
         let id = ids.first().ok_or(rusqlite::Error::QueryReturnedNoRows)?;
         self.node(id)

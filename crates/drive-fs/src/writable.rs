@@ -209,13 +209,21 @@ pub(super) fn write(
             return;
         }
         let missing = matches!(body, OpenContent::Missing(_));
+        // Issue #24: make write-path queueing and store-lock footprint visible.
+        let queued = diagnostics::span(diagnostics::Stage::WriteQueue);
         let job: Job = Box::new(move || {
+            drop(queued);
             let result =
                 draft(&store, &handles, &updates, &hydrator, &id, body, false, permissions::Action::WriteContent).and_then(|d| {
+                    let wait = diagnostics::span(diagnostics::Stage::WriteStoreWait);
                     let mut s=store.lock().unwrap();
+                    drop(wait);
+                    let hold = diagnostics::span(diagnostics::Stage::WriteHold);
                     permissions::node(&s,&id,permissions::Action::WriteContent).map_err(|e|errno(&e))?;
-                    s.draft_write(&d, offset as u64, &data, flags & libc::O_APPEND != 0)
-                        .map_err(|e| errno(&e))
+                    let written = s.draft_write(&d, offset as u64, &data, flags & libc::O_APPEND != 0)
+                        .map_err(|e| errno(&e))?;
+                    drop(hold);
+                    Ok(written)
                 });
             match result {
                 Ok(n) => {
@@ -322,10 +330,20 @@ pub(super) fn sync(fs: &mut CacheFilesystem, ino: u64, fh: u64, release: bool, r
         };
         let result = match snapshot {
             Some((flags, OpenContent::Draft(d))) if flags & libc::O_ACCMODE != libc::O_RDONLY => {
-                let mut s = store.lock().unwrap();
-                s.checkpoint_draft(&d)
-                    .and_then(|_| s.creation_saved(&d.node))
+                let total = diagnostics::span(diagnostics::Stage::CheckpointTotal);
+                // The working-file fsync runs outside the store lock; only the
+                // snapshot copy and the draft-row advance stay inside it.
+                let result = drive_core::drafts::checkpoint_draft_shared(&store, &d)
                     .map_err(|e| errno(&e))
+                    .and_then(|_| {
+                        store
+                            .lock()
+                            .unwrap()
+                            .creation_saved(&d.node)
+                            .map_err(|e| errno(&e))
+                    });
+                drop(total);
+                result
             }
             Some((_, OpenContent::Draft(d))) => store
                 .lock()
@@ -468,15 +486,30 @@ pub(super) fn setattr(
         let job: Job = Box::new(move || {
             let result = draft(&store, &handles, &updates, &hydrator, &id, body, size == 0, permissions::Action::WriteContent)
                 .and_then(|d| {
-                    let mut s = store.lock().unwrap();
-                    permissions::node(&s,&id,permissions::Action::WriteContent).map_err(|e|errno(&e))?;
-                    s.draft_truncate(&d, size).map_err(|e| errno(&e))?;
-                    // Path-based truncate has no later file-handle fsync/release callback.
-                    if fh.is_none() {
-                        s.checkpoint_draft(&d).map_err(|e| errno(&e))?;
-                        s.creation_saved(&d.node).map_err(|e| errno(&e))?;
+                    {
+                        let mut s = store.lock().unwrap();
+                        permissions::node(&s,&id,permissions::Action::WriteContent).map_err(|e|errno(&e))?;
+                        s.draft_truncate(&d, size).map_err(|e| errno(&e))?;
                     }
-                    s.record_for_handle(&id).map_err(|e| errno(&e))
+                    // Path-based truncate has no later file-handle fsync/release
+                    // callback, so it checkpoints here; the fsync barrier no
+                    // longer holds the store lock (#24).
+                    if fh.is_none() {
+                        let total = diagnostics::span(diagnostics::Stage::CheckpointTotal);
+                        drive_core::drafts::checkpoint_draft_shared(&store, &d)
+                            .map_err(|e| errno(&e))?;
+                        drop(total);
+                        store
+                            .lock()
+                            .unwrap()
+                            .creation_saved(&d.node)
+                            .map_err(|e| errno(&e))?;
+                    }
+                    store
+                        .lock()
+                        .unwrap()
+                        .record_for_handle(&id)
+                        .map_err(|e| errno(&e))
                 });
             match result {
                 Ok(record) => {

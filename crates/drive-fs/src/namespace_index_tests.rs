@@ -131,3 +131,33 @@ fn explicit_hint_refreshes_without_a_store_revision_change() {
     assert_eq!(store.projection_state(), state);
     assert!(binding.lease(&store, &notify).is_some());
 }
+
+#[test]
+fn read_only_open_bookkeeping_keeps_the_namespace_generation_current() {
+    let (_temp, store, binding, notify) = fixture();
+    let state = store.projection_state();
+    let generation = binding.index.revision();
+    // A read-only FUSE open only records recency in memory. It writes no WAL
+    // frame and no namespace watermark, so the first following opendir must be
+    // served by the current generation instead of rebuilding it.
+    for _ in 0..16 {
+        {
+            let guard = store.lock().unwrap();
+            guard.note_cache_use("a").unwrap();
+        }
+        assert_eq!(store.projection_state(), state);
+        assert!(!binding.needs_refresh(&store));
+        assert!(binding.index.dir_block(1).is_some());
+    }
+    assert!(binding.lease(&store, &notify).is_some());
+    assert_eq!(binding.index.revision(), generation);
+    // A semantic namespace write still invalidates the generation and refresh
+    // repairs it, so this is not a blanket "never refresh" change.
+    store.lock().unwrap().create_local_directory("root", "added", 0o755).unwrap();
+    assert!(binding.needs_refresh(&store));
+    assert!(store.lock().unwrap().posix_lookup_by_inode(1, "added").unwrap().directory);
+    binding.refresh(&store);
+    let lease = binding.lease(&store, &notify).unwrap();
+    assert!(binding.index.lookup(1, "added").unwrap().directory);
+    drop(lease);
+}

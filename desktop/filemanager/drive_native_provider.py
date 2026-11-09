@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import time
 from collections import OrderedDict
 import gi
 
@@ -27,6 +28,62 @@ STATES = {
     "conflict": ("需要处理冲突", "drive-native-error"),
     "mixed": ("部分本地可用", "drive-native-online"),
 }
+STATUS_SIGNAL_INTERVAL = 1.0
+STATUS_KINDS = frozenset(("status", "listing", "subtree"))
+
+
+def _beneath(path, root):
+    root = root.rstrip("/") or "/"
+    if root == "/":
+        return path != "/" and path.startswith("/")
+    return path != root and path.startswith(root + "/")
+
+
+def parse_status_changes(changes_json):
+    """Parse the change list carried by StatusChanged2 (issue #31).
+
+    Returns ``(changes, truncated)``; ``changes`` is None for an invalid or
+    unknown payload, in which case the consumer must fall back to a full
+    refresh instead of trusting a partial change set.
+    """
+    if not isinstance(changes_json, str) or not changes_json:
+        return None, False
+    try:
+        payload = json.loads(changes_json)
+    except (TypeError, ValueError):
+        return None, False
+    if not isinstance(payload, dict) or payload.get("schema") != 1:
+        return None, False
+    raw = payload.get("changes") or ()
+    if not isinstance(raw, (list, tuple)):
+        return None, False
+    changes = []
+    for change in raw:
+        if not isinstance(change, dict):
+            return None, False
+        path = change.get("path")
+        kind = change.get("kind")
+        if (not isinstance(path, str) or not path.startswith("/")
+                or kind not in STATUS_KINDS):
+            return None, False
+        changes.append({
+            "path": os.path.normpath(path),
+            "directory": bool(change.get("directory")),
+            "kind": kind,
+        })
+    return changes, bool(payload.get("truncated"))
+
+
+def affected_tracked(changes, tracked_paths):
+    """Tracked paths equal to or below a changed path (issue #31)."""
+    affected = set()
+    for tracked in tracked_paths:
+        for change in changes:
+            path = change["path"]
+            if tracked == path or _beneath(tracked, path):
+                affected.add(tracked)
+                break
+    return affected
 
 
 def build_provider(FileManager):
@@ -43,6 +100,21 @@ def build_provider(FileManager):
             self.timer = None
             self.busy = False
             self.generation = 0
+            # StatusChanged storms used to run a full reorder + GetOverview per
+            # signal (issue #29). At most one window per second fires; signals
+            # arriving inside the window collapse into one trailing refresh.
+            self.status_signal_at = 0.0
+            self.status_signal_timer = None
+            self.status_signal_seen = 0
+            self.overview_queries = 0
+            self.coalesced_signals = 0
+            # #31 revisioned change sets: a v2 event with a contiguous revision
+            # only re-queries the tracked paths it names; reset/gap/invalid
+            # payloads still run the full GetOverview + requery fallback.
+            self.status2_seen = False
+            self.status_epoch = None
+            self.status_revision = None
+            self.status2_events = 0
             Gio.DBusProxy.new_for_bus(
                 Gio.BusType.SESSION,
                 Gio.DBusProxyFlags.DO_NOT_AUTO_START | Gio.DBusProxyFlags.DO_NOT_LOAD_PROPERTIES,
@@ -58,7 +130,7 @@ def build_provider(FileManager):
             try:
                 self.proxy = Gio.DBusProxy.new_for_bus_finish(result)
                 self.proxy.connect("g-signal", self._signal)
-                self.proxy.connect("notify::g-name-owner", lambda *_: self._changed())
+                self.proxy.connect("notify::g-name-owner", self._owner_changed)
                 self._changed()
             except GLib.Error:
                 self.proxy = None
@@ -82,10 +154,82 @@ def build_provider(FileManager):
 
         def _signal(self, _proxy, _sender, signal, _parameters):
             if signal == "StatusChanged":
-                self._changed()
+                # Legacy daemons only emit the unversioned signal. New daemons
+                # dual-emit it with StatusChanged2; once a v2 event was seen the
+                # legacy signal carries no extra information (issue #31).
+                if not self.status2_seen:
+                    self._status_signal()
+            elif signal == "StatusChanged2":
+                self._status2_signal(_parameters)
 
-        def _changed(self):
+        def _status_signal(self):
+            now = time.monotonic()
+            if now - self.status_signal_at >= STATUS_SIGNAL_INTERVAL:
+                self.status_signal_at = now
+                self._changed()
+                return
+            self.coalesced_signals += 1
+            if self.status_signal_timer is None:
+                delay = int((STATUS_SIGNAL_INTERVAL - (now - self.status_signal_at)) * 1000) + 1
+                self.status_signal_timer = GLib.timeout_add(delay, self._status_trailing)
+
+        def _status_trailing(self):
+            self.status_signal_timer = None
+            self.status_signal_at = time.monotonic()
+            self._changed()
+            return GLib.SOURCE_REMOVE
+
+        def _status2_signal(self, parameters):
+            """Consume one revisioned StatusChanged2 event (issue #31)."""
+            try:
+                (from_revision, to_revision, epoch, reset,
+                 overview_changed, changes_json) = parameters.unpack()
+            except (TypeError, ValueError, AttributeError):
+                self._changed()
+                return
+            self.status2_events += 1
+            self.status2_seen = bool(epoch)
+            parsed = parse_status_changes(changes_json)
+            if parsed is None or not epoch:
+                self._changed()
+                return
+            changes, truncated = parsed
+            full = self._status_discontinuous(
+                from_revision, to_revision, epoch, reset, truncated)
+            self.status_epoch = epoch
+            self.status_revision = to_revision
+            if full:
+                self._changed()
+                return
+            if overview_changed:
+                self._changed(requery_all=False)
+                return
+            affected = affected_tracked(changes, self.files.keys())
+            if affected:
+                self.pending.update(affected)
+                self._schedule()
+
+        def _status_discontinuous(self, from_revision, to_revision, epoch,
+                                  reset, truncated):
+            return bool(
+                reset or truncated
+                or self.status_epoch != epoch
+                or self.status_revision is None
+                or from_revision != self.status_revision
+                or to_revision < from_revision
+            )
+
+        def _owner_changed(self, *_args):
+            # A replacement daemon may be older and only speak the legacy
+            # protocol; forget revision tracking so both paths start fresh.
+            self.status2_seen = False
+            self.status_epoch = None
+            self.status_revision = None
+            self._changed()
+
+        def _changed(self, requery_all=True):
             self.generation += 1
+            self.overview_queries += 1
             generation = self.generation
 
             def overview(data, failed):
@@ -100,7 +244,8 @@ def build_provider(FileManager):
                     self.pending.clear()
                 for path, file in list(self.files.items()):
                     if self.root and self._contains(path):
-                        self.pending.add(path)
+                        if requery_all:
+                            self.pending.add(path)
                         if old_root != self.root or old_connection != self.connection or old_preview != self.preview_only:
                             file.invalidate_extension_info()
                     elif old_root and os.path.commonpath((old_root, path)) == old_root:

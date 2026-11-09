@@ -30,9 +30,18 @@
 //!     --test status_latency_210k -- --ignored --nocapture
 //!
 //! Env: LAT_ITERS (default 120), LAT_BATCH_ITERS (24), LAT_DIR_ITERS (120),
-//!      LAT_MIX_SECONDS (15), LAT_LOCK_MS (2000), LAT_TIMEOUT_MS (15000),
-//!      LAT_KEEP (keep the fixture directory), LAT_FIXTURE_DIR (reuse a
-//!      persistent fixture), LAT_FUSE=0 (skip the FUSE mount scenario).
+//!      LAT_OVERVIEW_ITERS (40), LAT_MIX_SECONDS (15), LAT_LOCK_MS (2000),
+//!      LAT_TIMEOUT_MS (15000), LAT_KEEP (keep the fixture directory),
+//!      LAT_FIXTURE_DIR (reuse a persistent fixture), LAT_FUSE=0 (skip the FUSE
+//!      mount scenario).
+//!
+//! Issue #21 (GetOverview without the Store lock): this harness also prints
+//!      `#8 OVERVIEW` with the query / serialize / lock-hold split and the
+//!      `overview_total_p95_ms`, `overview_lock_hold_p95_ms` and
+//!      `overview_responsive_under_lock` SLO lines. `overview_scale_curve`
+//!      (ignored, separate run) reports the 210k/294k/500k `#8 CURVE` points;
+//!      LAT_CURVE_DIRS selects the directory counts, LAT_CURVE_WARM_ITERS (5)
+//!      the steady-state calls per point.
 //!
 //! #8 status-cache runs (merged tree with the committed status projection):
 //!      LAT_SERVICE=start starts the runtime tasks (required for the projection
@@ -49,6 +58,10 @@
 //! the cache) columns use the same fixture and the same command; only the
 //! LAT_SERVICE/LAT_WARM pair differs. `analysis/#8-acceptance.md` records the
 //! exact invocations and the loadavg of every run.
+
+// The `#8 METRICS`/`#8 CURVE` payloads are one large `json!` literal; the
+// default macro recursion limit is not enough for that many fields.
+#![recursion_limit = "256"]
 
 use drive_core::{sha256, DownloadTicket, Node, NodeMetadata, Store};
 use drive_runtime::{
@@ -82,6 +95,10 @@ const ROOT_BUDGET: usize = 64 * 1024 * 1024;
 const SLO_STATES_P95_MS: f64 = 500.0;
 const SLO_DIR_P95_MS: f64 = 300.0;
 const SLO_TIMEOUTS: u64 = 0;
+/// Issue #21 acceptance: GetOverview must never serialize behind the writer
+/// (lock hold p95 < 200 ms) and must stay well under a desktop poll budget.
+const SLO_OVERVIEW_TOTAL_P95_MS: f64 = 500.0;
+const SLO_OVERVIEW_LOCK_HOLD_P95_MS: f64 = 200.0;
 const MIX_THREADS: usize = 48;
 
 fn env_usize(key: &str, default: usize) -> usize {
@@ -710,6 +727,15 @@ fn mixed_load(
         let dir_entries = facts.dir_entries.clone();
         handles.push(thread::spawn(move || {
             let mut ops = 0usize;
+            // Issue #21: the overview lanes report the store timing split, so a
+            // regression that reintroduces a writer-lock stretch shows up even
+            // when the coarse latency stays under the timeout.
+            let mut mix_total_us = 0u64;
+            let mut mix_query_us = 0u64;
+            let mut mix_serialize_us = 0u64;
+            let mut mix_lock_hold_us = 0u64;
+            let mut mix_read_only = 0usize;
+            let mut mix_cached = 0usize;
             while Instant::now() < deadline {
                 let started = Instant::now();
                 let error: Option<String> = match kind {
@@ -746,11 +772,19 @@ fn mixed_load(
                         Err(error) => Some(error.to_string()),
                     },
                     "read" => read_cached(&service),
-                    "overview" => match desktop::overview(&service) {
-                        Ok(body) => serde_json::from_str::<serde_json::Value>(&body)
-                            .map(|_| ())
-                            .map_err(|error| error.to_string())
-                            .err(),
+                    "overview" => match desktop::overview_measured(&service) {
+                        Ok((body, timings)) => {
+                            mix_total_us += timings.total_us;
+                            mix_query_us += timings.query_us;
+                            mix_serialize_us += timings.serialize_us;
+                            mix_lock_hold_us += timings.lock_hold_us;
+                            mix_read_only += usize::from(timings.read_only);
+                            mix_cached += usize::from(timings.derived_cached);
+                            serde_json::from_str::<serde_json::Value>(&body)
+                                .map(|_| ())
+                                .map_err(|error| error.to_string())
+                                .err()
+                        }
                         Err(error) => Some(error.to_string()),
                     },
                     _ => unreachable!(),
@@ -763,6 +797,11 @@ fn mixed_load(
                     break;
                 }
                 ops += 1;
+            }
+            if kind == "overview" {
+                println!(
+                    "#8 OVERVIEW_MIX ops={ops} total_us={mix_total_us} query_us={mix_query_us} serialize_us={mix_serialize_us} lock_hold_us={mix_lock_hold_us} read_only_calls={mix_read_only} cached_calls={mix_cached}"
+                );
             }
             println!("#8 MIX_THREAD kind={kind} ops={ops}");
         }));
@@ -977,6 +1016,56 @@ fn warm_status_projection(
     }
 }
 
+/// Issue #21 acceptance segments for one GetOverview call, measured on the
+/// steady-state path a desktop poll actually takes.
+struct OverviewBench {
+    timings: Vec<desktop::OverviewTimings>,
+    total: Samples,
+}
+
+impl OverviewBench {
+    fn p95(&self, field: fn(&desktop::OverviewTimings) -> u64) -> f64 {
+        let mut values: Vec<u64> = self.timings.iter().map(field).collect();
+        values.sort_unstable();
+        Samples::ms(percentile(&values, 0.95))
+    }
+
+    fn read_only_calls(&self) -> usize {
+        self.timings.iter().filter(|timings| timings.read_only).count()
+    }
+
+    fn cached_calls(&self) -> usize {
+        self.timings
+            .iter()
+            .filter(|timings| timings.derived_cached)
+            .count()
+    }
+}
+
+/// Quiet single-call benchmark. The first call after a commit recomputes the
+/// availability scan and the issue count, so the reported segments cover both
+/// the warm (cached) and the cold (generation-miss) shape; `#8 OVERVIEW` prints
+/// the whole distribution instead of hiding the miss in an average.
+fn bench_overview(service: &Arc<Service>, iters: usize, timeout_ms: u64) -> OverviewBench {
+    let mut total = Samples::default();
+    let mut timings = Vec::with_capacity(iters);
+    for _ in 0..iters {
+        let started = Instant::now();
+        let result = desktop::overview_measured(service);
+        let us = started.elapsed().as_micros() as u64;
+        match result {
+            Ok((body, timings_for_call)) => {
+                let failed = serde_json::from_str::<serde_json::Value>(&body).is_err();
+                total.record(us, failed, timeout_ms);
+                timings.push(timings_for_call);
+            }
+            Err(_) => total.record(us, true, timeout_ms),
+        }
+    }
+    total.report("overview", timeout_ms);
+    OverviewBench { timings, total }
+}
+
 fn verdict(passed: bool) -> &'static str {
     if passed {
         "PASS"
@@ -991,6 +1080,7 @@ fn status_latency_210k() {
     let iters = env_usize("LAT_ITERS", 120);
     let batch_iters = env_usize("LAT_BATCH_ITERS", 24);
     let dir_iters = env_usize("LAT_DIR_ITERS", 120);
+    let overview_iters = env_usize("LAT_OVERVIEW_ITERS", 40);
     let mix_seconds = env_u64("LAT_MIX_SECONDS", 15);
     let lock_ms = env_u64("LAT_LOCK_MS", 2_000);
     let timeout_ms = env_u64("LAT_TIMEOUT_MS", 15_000);
@@ -1012,6 +1102,7 @@ fn status_latency_210k() {
             "iters": iters,
             "batch_iters": batch_iters,
             "dir_iters": dir_iters,
+            "overview_iters": overview_iters,
             "mix_seconds": mix_seconds,
             "lock_ms": lock_ms,
             "timeout_ms": timeout_ms,
@@ -1110,6 +1201,31 @@ fn status_latency_210k() {
     let batch_paths: Vec<String> = (0..45).map(|i| format!("d{i:03}")).collect();
     let states_batch = bench_states(&service, "states_batch45", batch_paths, batch_iters, timeout_ms);
     let dir2000 = bench_directories(&service, &facts, dir_iters, timeout_ms);
+    // Issue #21: steady-state GetOverview, measured in the same quiet window as
+    // the other single-call scenarios (before the 48-way mixed load).
+    let overview = bench_overview(&service, overview_iters, timeout_ms);
+    let first_overview = overview.timings.first().copied();
+    println!(
+        "#8 OVERVIEW {}",
+        serde_json::json!({
+            "n": overview.total.us.len(),
+            "errors": overview.total.errors,
+            "read_only_calls": overview.read_only_calls(),
+            "cached_calls": overview.cached_calls(),
+            "first_total_ms": first_overview.map(|timings| Samples::ms(timings.total_us)),
+            "first_cached": first_overview.map(|timings| timings.derived_cached),
+            "total_p50_ms": overview.total.p50_ms(),
+            "total_p95_ms": overview.total.p95_ms(),
+            "total_max_ms": Samples::ms(*overview.total.us.iter().max().unwrap_or(&0)),
+            "query_p95_ms": overview.p95(|timings| timings.query_us),
+            "serialize_p95_ms": overview.p95(|timings| timings.serialize_us),
+            "lock_wait_p95_ms": overview.p95(|timings| timings.lock_wait_us),
+            "lock_hold_p95_ms": overview.p95(|timings| timings.lock_hold_us),
+            "lock_hold_max_ms": Samples::ms(
+                overview.timings.iter().map(|timings| timings.lock_hold_us).max().unwrap_or(0)
+            ),
+        })
+    );
     let fuse = fuse_mount(&service).and_then(|(mount, session)| {
         let bench = bench_fuse(mount.path(), dir_iters.min(60), timeout_ms);
         drop(session);
@@ -1152,6 +1268,16 @@ fn status_latency_210k() {
             "states_dir2000_p95_ms": states_dir.p95_ms(),
             "states_batch45_p95_ms": states_batch.p95_ms(),
             "dir2000_p95_ms": dir2000.p95_ms(),
+            "overview_total_p95_ms": overview.total.p95_ms(),
+            "overview_total_max_ms": Samples::ms(*overview.total.us.iter().max().unwrap_or(&0)),
+            "overview_query_p95_ms": overview.p95(|timings| timings.query_us),
+            "overview_serialize_p95_ms": overview.p95(|timings| timings.serialize_us),
+            "overview_lock_hold_p95_ms": overview.p95(|timings| timings.lock_hold_us),
+            "overview_lock_wait_p95_ms": overview.p95(|timings| timings.lock_wait_us),
+            "overview_read_only_calls": overview.read_only_calls(),
+            "overview_cached_calls": overview.cached_calls(),
+            "overview_calls": overview.total.us.len(),
+            "overview_errors": overview.total.errors,
             "fuse_dir_entries": fuse.as_ref().map(|fuse| fuse.entries),
             "fuse_dir_cold_ms": fuse.as_ref().map(|fuse| fuse.cold_ms),
             "fuse_dir2000_p95_ms": fuse.as_ref().map(|fuse| fuse.warm.p95_ms()),
@@ -1227,7 +1353,25 @@ fn status_latency_210k() {
         verdict(probes[1].completed_while_locked)
     );
     println!(
-        "#8 NOTE overview_during_lock observed={}ms completed_while_locked={} (overview still takes the global Store mutex on both trees)",
+        "#8 SLO name=overview_total_p95_ms observed={:.3} limit={:.0} verdict={}",
+        overview.total.p95_ms(),
+        SLO_OVERVIEW_TOTAL_P95_MS,
+        verdict(overview.total.p95_ms() <= SLO_OVERVIEW_TOTAL_P95_MS)
+    );
+    println!(
+        "#8 SLO name=overview_lock_hold_p95_ms observed={:.3} limit={:.0} verdict={}",
+        overview.p95(|timings| timings.lock_hold_us),
+        SLO_OVERVIEW_LOCK_HOLD_P95_MS,
+        verdict(overview.p95(|timings| timings.lock_hold_us) <= SLO_OVERVIEW_LOCK_HOLD_P95_MS)
+    );
+    println!(
+        "#8 SLO name=overview_responsive_under_lock observed={}ms limit=<{}ms verdict={}",
+        probes[2].ms,
+        lock_ms,
+        verdict(probes[2].completed_while_locked)
+    );
+    println!(
+        "#8 NOTE overview_during_lock observed={}ms completed_while_locked={} (overview reads through its own read-only connection; the global Store mutex is only a fail-safe)",
         probes[2].ms,
         probes[2].completed_while_locked
     );
@@ -1237,7 +1381,7 @@ fn status_latency_210k() {
         states_conc.p95_ms()
     );
     println!(
-        "#8 NOTE mix_states_p95_ms observed={:.3} (acceptance mix also runs overview, which still takes the global Store mutex on both trees)",
+        "#8 NOTE mix_states_p95_ms observed={:.3} (acceptance mix also runs overview lanes; those use the private read-only connection and no longer take the global Store mutex)",
         mix_states.p95_ms()
     );
     if let Some(tasks) = tasks {
@@ -1256,4 +1400,140 @@ fn status_latency_210k() {
         }
     }
     println!("#8 DONE");
+}
+
+/// Issue #21 acceptance #3: the GetOverview cost curve across synthetic library
+/// sizes. Each point builds `dirs` directories with `per_dir` files (the last
+/// directory holds `last` files), installs the snapshot, then reports both the
+/// generation-miss (cold) call and the steady-state (cached) calls.
+///
+/// Run explicitly:
+/// `cargo test -p drive-runtime --release --all-features --locked \
+///    --test status_latency_210k overview_scale_curve -- --ignored --nocapture`
+///
+/// `LAT_CURVE_DIRS` selects the directory counts (default `105,147,250`, i.e.
+/// the 210k / 294k / 500k shapes used by the acceptance report).
+#[test]
+#[ignore]
+fn overview_scale_curve() {
+    let counts: Vec<usize> = env::var("LAT_CURVE_DIRS")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| {
+            value
+                .split(',')
+                .filter_map(|part| part.trim().parse().ok())
+                .collect()
+        })
+        .unwrap_or_else(|| vec![105, 147, 250]);
+    for dirs in counts {
+        curve_point(dirs, FILES_PER_DIR, if dirs == DIRS { LAST_DIR_FILES } else { FILES_PER_DIR });
+    }
+}
+
+fn curve_point(dirs: usize, per_dir: usize, last_dir_files: usize) {
+    let started = Instant::now();
+    let temp = tempfile::tempdir().expect("curve fixture dir");
+    let mut nodes = Vec::with_capacity(dirs * per_dir + dirs + 1);
+    nodes.push(node("root".into(), None, "fixture".into(), true, 0));
+    let mut files = 0usize;
+    for d in 0..dirs {
+        let id = format!("d{d:03}");
+        nodes.push(node(id.clone(), Some("root".into()), id.clone(), true, 0));
+        let count = if d + 1 == dirs { last_dir_files } else { per_dir };
+        for c in 0..count {
+            nodes.push(node(
+                format!("file-{files:06}"),
+                Some(id.clone()),
+                format!("f{c:05}"),
+                false,
+                0,
+            ));
+            files += 1;
+        }
+    }
+    let node_count = nodes.len();
+    let mut store = Store::open(temp.path()).expect("curve store");
+    store
+        .install_remote_snapshot(&nodes, "curve-cursor-1", "curve-server-1")
+        .expect("curve snapshot");
+    store.ensure_fs_root("root").expect("curve fs root");
+    // Keep the availability predicate non-trivial: cache a slice of files.
+    let cached = files.min(256).min(2_048);
+    for index in 0..cached {
+        let body: Vec<u8> = (0..4_096).map(|i| ((i + index) % 251) as u8).collect();
+        store
+            .publish_download(
+                &DownloadTicket {
+                    id: format!("file-{index:06}"),
+                    version: "fixture-v1".into(),
+                },
+                &body,
+                &sha256(&body),
+            )
+            .expect("curve cached publish");
+    }
+    let build_ms = started.elapsed().as_millis();
+    let service = Service::new(
+        profile(PathBuf::from("/tmp/drive-native-issue21-curve")),
+        store,
+        PathBuf::from("/nonexistent-worker"),
+    )
+    .expect("curve service");
+    // Isolated counter timings on the same private read-only path.
+    let counter_store = service.bridge.store.read_only().expect("curve read-only");
+    let started = Instant::now();
+    let availability = counter_store
+        .cache_availability()
+        .expect("curve availability");
+    let availability_ms = started.elapsed().as_secs_f64() * 1_000.0;
+    let started = Instant::now();
+    let issue_count = counter_store
+        .sync_issue_count("root")
+        .expect("curve issue count");
+    let issue_count_ms = started.elapsed().as_secs_f64() * 1_000.0;
+    let (cold_body, cold_timings) = desktop::overview_measured(&service).expect("cold overview");
+    let cold: serde_json::Value = serde_json::from_str(&cold_body).expect("cold overview json");
+    let warm_iters = env_usize("LAT_CURVE_WARM_ITERS", 5);
+    let mut warm_total = Samples::default();
+    let mut warm_timings = Vec::with_capacity(warm_iters);
+    for _ in 0..warm_iters {
+        let (_, timings) = desktop::overview_measured(&service).expect("warm overview");
+        warm_total.record(timings.total_us, false, 60_000);
+        warm_timings.push(timings);
+    }
+    let mut warm_queries: Vec<u64> = warm_timings.iter().map(|timings| timings.query_us).collect();
+    warm_queries.sort_unstable();
+    println!(
+        "#8 CURVE {}",
+        serde_json::json!({
+            "nodes": node_count,
+            "dirs": dirs,
+            "files": files,
+            "cached": cached,
+            "build_ms": build_ms,
+            "availability_state": availability.state,
+            "availability_total": availability.total,
+            "availability_offline": availability.offline,
+            "availability_pinned": availability.pinned,
+            "availability_ms": availability_ms,
+            "issue_count": issue_count,
+            "issue_count_ms": issue_count_ms,
+            "cold_read_only": cold_timings.read_only,
+            "cold_total_ms": Samples::ms(cold_timings.total_us),
+            "cold_query_ms": Samples::ms(cold_timings.query_us),
+            "cold_serialize_ms": Samples::ms(cold_timings.serialize_us),
+            "cold_lock_wait_ms": Samples::ms(cold_timings.lock_wait_us),
+            "cold_lock_hold_ms": Samples::ms(cold_timings.lock_hold_us),
+            "cold_cache_availability": cold["cache_availability"].clone(),
+            "cold_issue_count": cold["issue_count"].clone(),
+            "warm_calls": warm_timings.len(),
+            "warm_cached_calls": warm_timings.iter().filter(|timings| timings.derived_cached).count(),
+            "warm_total_p95_ms": warm_total.p95_ms(),
+            "warm_query_p95_ms": Samples::ms(percentile(&warm_queries, 0.95)),
+            "warm_lock_hold_max_ms": Samples::ms(
+                warm_timings.iter().map(|timings| timings.lock_hold_us).max().unwrap_or(0)
+            ),
+        })
+    );
 }

@@ -80,7 +80,12 @@ fn now() -> i64 {
 }
 
 /// Called inside Store::open's existing atomic migration, after its backup.
-pub(crate) fn migrate(db: &Connection) -> Result<()> {
+///
+/// `repairing` is true for a brand-new or pre-v28 store. A legacy store has no
+/// durable row counter yet, so it is rebuilt from the table once here; after
+/// that the append/delete triggers keep it exact and the hot path never counts
+/// the retained window.
+pub(crate) fn migrate(db: &Connection, repairing: bool) -> Result<()> {
     db.execute_batch(
         "CREATE TABLE IF NOT EXISTS sync_history(
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -95,9 +100,21 @@ pub(crate) fn migrate(db: &Connection) -> Result<()> {
          CREATE INDEX IF NOT EXISTS sync_history_name ON sync_history(name COLLATE NOCASE);
          CREATE INDEX IF NOT EXISTS sync_history_result ON sync_history(result,completed_at DESC);
          CREATE INDEX IF NOT EXISTS sync_history_time ON sync_history(completed_at);
+         CREATE INDEX IF NOT EXISTS sync_history_mount_seq ON sync_history(mount,seq DESC);
+         CREATE INDEX IF NOT EXISTS sync_history_result_seq ON sync_history(result,seq DESC);
          INSERT OR IGNORE INTO metadata(key,value) VALUES
-           ('sync_history_sequence','0'),('sync_history_days','30'),('sync_history_records','10000');",
+           ('sync_history_sequence','0'),('sync_history_days','30'),('sync_history_records','10000');
+         INSERT OR IGNORE INTO metadata(key,value) VALUES ('sync_history_rows','0');",
     )?;
+    if repairing {
+        // A pre-v28 store has rows but no counter yet. Rebuild it once inside the
+        // same migration transaction; the triggers below keep it exact afterwards.
+        db.execute(
+            "UPDATE metadata SET value=(SELECT COUNT(*) FROM sync_history)
+             WHERE key='sync_history_rows'",
+            [],
+        )?;
+    }
     // Durable triggers cover *all* writers, including reconciliation and the
     // bridge. They store only a controlled classification, never error bodies.
     workflow_trigger(db, "history_upload", "operations", "NEW.kind='upload'",
@@ -123,17 +140,33 @@ pub(crate) fn migrate(db: &Connection) -> Result<()> {
         "CREATE TRIGGER IF NOT EXISTS history_download_removed AFTER DELETE ON transfers
          WHEN OLD.direction='download' BEGIN {body} END;"
     ))?;
-    // An append can exceed the configured cap by at most one row. Use the seq
-    // index to evict that oldest row rather than walking/sorting 10,000 retained
-    // rows on every event. A retention-setting change prunes the whole excess.
-    db.execute_batch("CREATE TRIGGER IF NOT EXISTS history_prune_insert AFTER INSERT ON sync_history BEGIN
-        DELETE FROM sync_history WHERE completed_at < unixepoch()-86400*(SELECT CAST(value AS INTEGER) FROM metadata WHERE key='sync_history_days');
-        DELETE FROM sync_history WHERE seq=(SELECT MIN(seq) FROM sync_history)
-          AND (SELECT COUNT(*) FROM sync_history)>(SELECT CAST(value AS INTEGER) FROM metadata WHERE key='sync_history_records');
-      END;
-      CREATE TRIGGER IF NOT EXISTS history_prune_update AFTER UPDATE ON sync_history BEGIN
-        DELETE FROM sync_history WHERE completed_at < unixepoch()-86400*(SELECT CAST(value AS INTEGER) FROM metadata WHERE key='sync_history_days');
-      END;")?;
+    // Retained-window bookkeeping runs inside the same triggers as the append so
+    // no writer can grow the table past the retention setting. The row count is
+    // a durable counter, never `COUNT(*)`: each append and each durable delete
+    // adjusts one metadata row, so an update costs the same at 10 rows and at the
+    // retained cap. Age and cap eviction share one DELETE so the trigger program
+    // has a constant, small statement count.
+    //
+    // v27 stores used a different prune trigger; drop and recreate them so the
+    // upgrade installs the bounded program. Only the history table is touched.
+    let evict = "DELETE FROM sync_history
+        WHERE completed_at < unixepoch()-86400*(SELECT CAST(value AS INTEGER) FROM metadata WHERE key='sync_history_days')
+           OR (seq=(SELECT MIN(seq) FROM sync_history)
+               AND (SELECT CAST(value AS INTEGER) FROM metadata WHERE key='sync_history_rows')
+                 > (SELECT CAST(value AS INTEGER) FROM metadata WHERE key='sync_history_records'))";
+    db.execute_batch(&format!(
+        "DROP TRIGGER IF EXISTS history_prune_insert;
+         DROP TRIGGER IF EXISTS history_prune_update;
+         DROP TRIGGER IF EXISTS history_prune_delete;
+         CREATE TRIGGER history_prune_insert AFTER INSERT ON sync_history BEGIN
+           UPDATE metadata SET value=CAST(value AS INTEGER)+1 WHERE key='sync_history_rows';
+           {evict};
+         END;
+         CREATE TRIGGER history_prune_update AFTER UPDATE ON sync_history BEGIN {evict}; END;
+         CREATE TRIGGER history_prune_delete AFTER DELETE ON sync_history BEGIN
+           UPDATE metadata SET value=CAST(value AS INTEGER)-1 WHERE key='sync_history_rows';
+         END;"
+    ))?;
     prune(db, now())?;
     Ok(())
 }
@@ -625,6 +658,37 @@ mod tests {
         assert_eq!(store.open_cached("file").unwrap().size().unwrap(),bytes);
         assert_eq!(store.upload_job(&op).unwrap().state,"pending");
         assert_eq!(rows(&store).len(),1);
+    }
+
+    #[test]
+    fn retained_window_bookkeeping_is_exact_and_never_counts_the_window() {
+        let (_dir,mut store)=fixture();
+        let counter=|s:&Store|->i64 { s.db.query_row(
+            "SELECT CAST(value AS INTEGER) FROM metadata WHERE key='sync_history_rows'",[],|r|r.get(0)).unwrap() };
+        let table=|s:&Store|->i64 { s.db.query_row("SELECT COUNT(*) FROM sync_history",[],|r|r.get(0)).unwrap() };
+        for index in 0..20 { add(&mut store,&format!("k{index}"),"ok"); }
+        assert_eq!(counter(&store),table(&store));
+        assert_eq!(table(&store),20);
+        // An append that merges into an existing operation must not double-count.
+        add(&mut store,"k3","failed");
+        assert_eq!(counter(&store),table(&store));
+        // A durable delete outside the triggers keeps the counter honest.
+        store.db.execute("DELETE FROM sync_history WHERE operation_key='k5'",[]).unwrap();
+        assert_eq!(counter(&store),table(&store));
+        // Lowering the cap prunes the excess; the counter follows the deletes.
+        store.set_sync_history_retention(30,5).unwrap();
+        assert_eq!(table(&store),5);
+        assert_eq!(counter(&store),table(&store));
+        // The append trigger must not scan or count the retained window.
+        let trigger:String=store.db.query_row(
+            "SELECT sql FROM sqlite_master WHERE name='history_prune_insert'",[],|r|r.get(0)).unwrap();
+        assert!(!trigger.contains("COUNT(*)"),"append trigger must not count retained rows: {trigger}");
+        assert!(trigger.contains("sync_history_rows"));
+        let keys:Vec<String>={
+            let mut query=store.db.prepare("SELECT operation_key FROM sync_history ORDER BY seq DESC").unwrap();
+            query.query_map([],|r|r.get(0)).unwrap().collect::<std::result::Result<_,_>>().unwrap()
+        };
+        assert_eq!(keys,["k3","k19","k18","k17","k16"]);
     }
 
     #[test]

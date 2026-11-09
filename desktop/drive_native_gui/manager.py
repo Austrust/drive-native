@@ -27,6 +27,8 @@ LABELS = {"locked":"等待解锁", "connecting":"连接中", "online":"已连接
 STOP_TIMEOUT_SECONDS = STOP_DEADLINE_SECONDS
 SUCCESS_POLL_MS = 30 * 1000
 TRANSFER_POLL_MS = 2000
+TRANSFER_HIDDEN_POLL_MS = 5000
+STATUS_SIGNAL_INTERVAL = 1.0
 TRANSFER_LIMIT = 128
 
 
@@ -143,6 +145,17 @@ class MountManager(QMainWindow):
         # without the main window; the backend call is cheap and per mount.
         self.transfer_timer = QTimer(self); self.transfer_timer.setInterval(TRANSFER_POLL_MS)
         self.transfer_timer.timeout.connect(self.refresh_transfers); self.transfer_timer.start()
+        # Signal-driven overview refreshes are coalesced per mount (issue #29);
+        # the polled fallback in refresh_catalog stays unthrottled.
+        self.status_queried = {}
+        self.status_timers = {}
+        self.overview_queries = 0
+        # #31 revisioned change-set tracking (per mount): status-only changes do
+        # not re-query the overview; reset/gap/overview_changed do.
+        self.status2_seen = {}
+        self.status_epoch = {}
+        self.status_revision = {}
+        self.status2_events = 0
         self.refresh_catalog()
         from .tray import MountTray
         self.tray = MountTray(self)
@@ -298,6 +311,8 @@ class MountManager(QMainWindow):
                 old_bus = self.buses.pop(slot, None)
                 if old_bus is not None: old_bus.deleteLater()
                 self.status_pending.discard(slot); self.status_again.discard(slot)
+                self.status2_seen.pop(slot, None); self.status_epoch.pop(slot, None)
+                self.status_revision.pop(slot, None)
                 self.progress_pending.discard(slot); self.progress_again.discard(slot)
                 self.transfer_pending.discard(slot); self.transfer_again.discard(slot)
                 self.transfer_cache.pop(slot, None)
@@ -312,9 +327,11 @@ class MountManager(QMainWindow):
             if slot == selected: self.table.setCurrentItem(item)
             if slot not in self.buses:
                 bus = ClientBus(self, instance=slot); self.buses[slot] = bus
-                bus.changed.connect(lambda key=slot: self.refresh_status(key))
+                bus.changed.connect(lambda key=slot: self._legacy_status(key))
+                if hasattr(bus, "changed2"):
+                    bus.changed2.connect(lambda event, key=slot: self.status2_changed(key, event))
                 bus.progress_changed.connect(lambda key=slot: self.refresh_progress(key))
-                bus.availability.connect(lambda _up, key=slot: self.refresh_status(key))
+                bus.availability.connect(lambda _up, key=slot: self.schedule_status(key))
                 watcher = ShutdownWatcher(bus, lambda key=slot: self.records.get(key, {}).get("task_id"), lambda value, mounted, key=slot: self.render_shutdown(key, value, mounted), bus)
                 self.shutdown_watchers[slot] = watcher
                 if hasattr(bus, "shutdown_changed"): watcher.refresh()
@@ -331,11 +348,70 @@ class MountManager(QMainWindow):
         else: self.message.setText(f"共 {len(records)} 个挂载。双击任务可登录、查看传输或处理错误。")
 
 
+    def schedule_status(self, slot):
+        """Coalesce StatusChanged/availability bursts into one query per second.
+
+        The old path answered every signal and then re-queried 100 ms after any
+        overlapping reply, which kept an unbounded signal/query loop alive
+        (issue #29).
+        """
+        if slot not in self.items: return
+        if slot in self.status_pending:
+            self.status_again.add(slot); return
+        elapsed = time.monotonic() - self.status_queried.get(slot, 0.0)
+        delay = int((STATUS_SIGNAL_INTERVAL - elapsed) * 1000)
+        if delay <= 0:
+            self.refresh_status(slot)
+            return
+        timer = self.status_timers.get(slot)
+        if timer is None:
+            timer = QTimer(self); timer.setSingleShot(True)
+            timer.timeout.connect(lambda key=slot: self._scheduled_status(key))
+            self.status_timers[slot] = timer
+        if not timer.isActive():
+            timer.start(delay)
+
+    def _scheduled_status(self, slot):
+        timer = self.status_timers.get(slot)
+        if timer is not None: timer.stop()
+        self.refresh_status(slot)
+
+    def _legacy_status(self, slot):
+        # An old daemon only emits the unversioned signal, which always means a
+        # full refresh; after StatusChanged2 was seen the legacy signal is a
+        # duplicate of the same revision (issue #31).
+        if self.status2_seen.get(slot):
+            return
+        self.schedule_status(slot)
+
+    def status2_changed(self, slot, event):
+        """Apply one revisioned StatusChanged2 event for a mount (issue #31).
+
+        Only reset/gap/invalid/overview_changed events require a new overview;
+        a plain status change just updates the mount row's activity counts via
+        the regular coalesced query path when the GUI needs it.
+        """
+        if slot not in self.items: return
+        self.status2_events += 1
+        if event.epoch:
+            self.status2_seen[slot] = True
+        else:
+            # Owner-change sentinel; a replacement daemon may speak v1 only.
+            self.status2_seen[slot] = False
+        full = event.discontinuous(self.status_epoch.get(slot),
+                                   self.status_revision.get(slot))
+        self.status_epoch[slot] = event.epoch or None
+        self.status_revision[slot] = event.to_revision
+        if full or event.overview_changed:
+            self.schedule_status(slot)
+
     def refresh_status(self, slot):
         if slot not in self.items: return
         if slot in self.status_pending:
             self.status_again.add(slot); return
         self.status_pending.add(slot)
+        self.status_queried[slot] = time.monotonic()
+        self.overview_queries += 1
         expected = self.records[slot]["task_id"]
         bus = self.buses[slot]
         def received(data, error):
@@ -343,7 +419,7 @@ class MountManager(QMainWindow):
             self.status_pending.discard(slot)
             if slot in self.status_again:
                 self.status_again.discard(slot)
-                QTimer.singleShot(100, self, lambda: self.refresh_status(slot))
+                self.schedule_status(slot)
             if slot not in self.items: return
             profile = self.records[slot]
             if profile["task_id"] != expected: return
@@ -611,6 +687,17 @@ class MountManager(QMainWindow):
     def spawn(self, slot, name=None):
         # Kept as an internal compatibility entry point; never launches a process.
         self.activate_task(slot, name)
+
+    def showEvent(self, event):
+        # Foreground: keep the fast transfer poll that feeds the table.
+        self.transfer_timer.setInterval(TRANSFER_POLL_MS)
+        super().showEvent(event)
+
+    def hideEvent(self, event):
+        # Hidden (tray-only): the tray still needs activity, but the full table
+        # does not. Slow the poll instead of stopping it (issue #29).
+        self.transfer_timer.setInterval(TRANSFER_HIDDEN_POLL_MS)
+        super().hideEvent(event)
 
     def closeEvent(self, event):
         if self.tray.available():

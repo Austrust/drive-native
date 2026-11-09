@@ -645,3 +645,253 @@ fn overlay_remote_parent_edges_are_out_of_scope_for_a_denied_subtree_refresh() {
     assert!(full.contains("b1"));
     assert!(!ids(&s.desktop_status_seeds_for(&["den".to_owned()]).unwrap()).contains("b1"));
 }
+
+// ---------------------------------------------------------------------------
+// Batch detail (`desktop_status_details`) oracle.
+//
+// The runtime replaces three-to-four point queries per detailed node with one
+// batch call. `point_detail` below is the exact single-node sequence from
+// `drive-runtime/src/desktop_tree.rs` (`detail_for`); comparing the batch map
+// against it keeps the bulk read from silently drifting from `Store::status`,
+// `open_cached`, `open_dirty_draft` or `download_failure` semantics.
+
+fn detail_nodes() -> Vec<Node> {
+    vec![
+        node("root", None, true),
+        node("dir", Some("root"), true),
+        node("cached", Some("dir"), false),
+        node("pinned_cached", Some("dir"), false),
+        node("updating", Some("dir"), false),
+        node("pending", Some("dir"), false),
+        node("draft", Some("dir"), false),
+        node("conflict", Some("dir"), false),
+        node("failed", Some("dir"), false),
+        node("deleted", Some("dir"), false),
+        node("remote_only", Some("dir"), false),
+        node("missing_blob", Some("dir"), false),
+        node("draft_missing", Some("dir"), false),
+        node("draft_bad", Some("dir"), false),
+        node("failed_bad", Some("dir"), false),
+        node("ov", Some("root"), true),
+        node("ov1", Some("ov"), false),
+        node("den", Some("root"), true),
+        node("den1", Some("den"), false),
+    ]
+}
+
+fn detail_fixture() -> (tempfile::TempDir, Store) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = Store::open(dir.path()).unwrap();
+    s.install_remote_snapshot(&detail_nodes(), "1", "server")
+        .unwrap();
+    let blobs = dir.path().join("blobs");
+    let drafts = dir.path().join("drafts");
+    std::fs::create_dir_all(&blobs).unwrap();
+    std::fs::create_dir_all(&drafts).unwrap();
+    for name in ["blob-cached", "blob-pinned", "blob-dirty"] {
+        std::fs::write(blobs.join(name), b"body").unwrap();
+    }
+    std::fs::write(drafts.join("11111111-1111-1111-1111-111111111111"), b"draft").unwrap();
+    s.db.execute_batch(
+        r#"
+        UPDATE nodes SET blob='blob-cached', local_version='v' WHERE id='cached';
+        UPDATE nodes SET blob='blob-pinned', local_version='v' WHERE id='pinned_cached';
+        UPDATE nodes SET pinned=1 WHERE id='pinned_cached';
+        UPDATE nodes SET blob='blob-cached', local_version='v0' WHERE id='updating';
+        UPDATE nodes SET dirty_blob='blob-dirty', local_version='v' WHERE id='pending';
+        UPDATE nodes SET blob='blob-missing', local_version='v' WHERE id='missing_blob';
+        UPDATE nodes SET conflict=1 WHERE id='conflict';
+        UPDATE nodes SET deleted=1 WHERE id='deleted';
+        INSERT INTO namespace_overlay(node,remote) VALUES('ov','{}');
+        INSERT INTO access_denied(node) VALUES('den');
+        INSERT INTO drafts(node,token,base,generation,checkpoint,dirty)
+            VALUES('draft','11111111-1111-1111-1111-111111111111','v',1,0,1);
+        INSERT INTO drafts(node,token,base,generation,checkpoint,dirty)
+            VALUES('draft_missing','22222222-2222-2222-2222-222222222222','v',1,0,1);
+        INSERT INTO drafts(node,token,base,generation,checkpoint,dirty)
+            VALUES('draft_bad','not-a-uuid','v',1,0,1);
+        INSERT INTO transfers(id,node,version,direction,state,error)
+            VALUES('tr-failed','failed','v','download','failed',
+                '{"schema":1,"kind":"transport","server_code":null,"attempts":2,"retry_at":null}');
+        INSERT INTO transfers(id,node,version,direction,state,error)
+            VALUES('tr-bad','failed_bad','v','download','failed','garbage');
+        "#,
+    )
+    .unwrap();
+    (dir, s)
+}
+
+/// Exact single-node sequence of `detail_for` in desktop_tree.rs.
+fn point_detail(s: &Store, id: &str, directory: bool) -> std::result::Result<super::StatusDetail, ()> {
+    use super::StatusDetail;
+    use crate::Status;
+    let status = s.status(id).map_err(|_| ())?;
+    let offline = !directory
+        && (s.open_dirty_draft(id).map_err(|_| ())?.is_some() || s.open_cached(id).is_ok());
+    let failure = if directory || matches!(&status, Status::Conflict | Status::PendingUpload) {
+        None
+    } else {
+        s.download_failure(id).map_err(|_| ())?
+    };
+    Ok(StatusDetail {
+        status,
+        offline,
+        failure,
+    })
+}
+
+#[test]
+fn batch_details_match_the_single_node_reads() {
+    use super::desktop_status_details;
+    use crate::Status;
+    let (_dir, s) = detail_fixture();
+    let nodes: Vec<(String, bool)> = detail_nodes()
+        .into_iter()
+        .map(|n| (n.id, n.directory))
+        .collect();
+    let batch = desktop_status_details(&s, &nodes).unwrap();
+    let mut compared = 0usize;
+    let mut skipped = 0usize;
+    let mut statuses: HashSet<String> = HashSet::new();
+    for (id, directory) in &nodes {
+        match (batch.get(id), point_detail(&s, id, *directory)) {
+            (Some(got), Ok(want)) => {
+                assert_eq!(got, &want, "batch and point disagree for {id}");
+                statuses.insert(format!("{:?}", want.status));
+                compared += 1;
+            }
+            (None, Err(())) => skipped += 1,
+            (Some(got), Err(())) => {
+                panic!("batch answered {id:?} ({got:?}) but the point read errored")
+            }
+            (None, Ok(want)) => {
+                panic!("batch skipped {id:?} but the point read answered {want:?}")
+            }
+        }
+    }
+    // The fixture must actually exercise both paths and the status spectrum.
+    assert!(compared >= 14, "only compared {compared} ids");
+    assert!(skipped >= 4, "only skipped {skipped} ids");
+    for status in [
+        Status::LocalComplete,
+        Status::PinnedComplete,
+        Status::Updating,
+        Status::PendingUpload,
+        Status::Conflict,
+        Status::Deleted,
+        Status::OnlineOnly,
+    ] {
+        assert!(
+            statuses.contains(&format!("{status:?}")),
+            "fixture never produced {status:?}: {statuses:?}"
+        );
+    }
+    let failed = batch.get("failed").expect("failed detail");
+    assert_eq!(failed.status, Status::OnlineOnly);
+    assert!(failed.failure.is_some());
+    assert!(!failed.offline);
+    let cached = batch.get("cached").expect("cached detail");
+    assert_eq!(cached.status, Status::LocalComplete);
+    assert!(cached.offline);
+}
+
+/// Issue #25: the journal-driven ACL refresh closes over the overlay
+/// remote-parent edge, so an `access_denied` page no longer needs a
+/// whole-namespace rebuild to stay correct.
+#[test]
+fn acl_refresh_covers_the_overlay_remote_parent_closure() {
+    let (_dir, s) = small_fixture();
+    s.db.execute(
+        "INSERT INTO namespace_overlay(node,remote) VALUES('b1','{\"parent\":\"den\"}')",
+        [],
+    )
+    .unwrap();
+
+    let refresh = s
+        .desktop_status_acl_refresh(&["den".to_owned()], 1_000)
+        .unwrap()
+        .expect("a small denial closure must be resolvable");
+    let affected: HashSet<&str> = refresh.affected.iter().map(String::as_str).collect();
+    assert!(affected.contains("den"));
+    assert!(affected.contains("den1"));
+    assert!(
+        affected.contains("b1"),
+        "the overlay remote-parent edge must be part of the closure"
+    );
+    // Only the visible ancestors of the closure are returned; denied rows are
+    // filtered out by the shared seed predicate.
+    let seeds: HashSet<&str> = refresh.seeds.iter().map(|seed| seed.id.as_str()).collect();
+    assert_eq!(seeds, HashSet::from(["root", "b"]));
+
+    // Restoring the denial reveals the whole closure through the same query, so
+    // both journal directions are handled without a full scan.
+    s.db.execute("DELETE FROM access_denied WHERE node='den'", [])
+        .unwrap();
+    let refresh = s
+        .desktop_status_acl_refresh(&["den".to_owned()], 1_000)
+        .unwrap()
+        .expect("a small denial closure must be resolvable");
+    let seeds: HashSet<&str> = refresh.seeds.iter().map(|seed| seed.id.as_str()).collect();
+    assert_eq!(
+        seeds,
+        HashSet::from(["root", "b", "den", "den1", "b1"])
+    );
+}
+
+/// Issue #31: journal node ids must resolve to mount-relative paths in one
+/// read, including ancestors and rows that are flagged deleted.
+#[test]
+fn ancestry_paths_resolve_a_journal_batch_with_ancestors() {
+    let (_dir, s) = small_fixture();
+    let ids: Vec<String> = [
+        "root", "a", "a1", "a2a", "b1", "pinned", "gone_child", "shadowed", "absent",
+    ]
+    .iter()
+    .map(|id| (*id).to_owned())
+    .collect();
+    let paths = super::desktop_status_ancestry_paths(&s, &ids).unwrap();
+
+    assert_eq!(paths["root"].path, ".");
+    assert!(paths["root"].directory);
+    assert!(paths["root"].ancestors.is_empty());
+
+    assert_eq!(paths["a"].path, "a");
+    assert_eq!(paths["a"].ancestors, vec!["."]);
+    assert_eq!(paths["a1"].path, "a/a1");
+    assert!(!paths["a1"].directory);
+    assert_eq!(paths["a1"].ancestors, vec!["a", "."]);
+    assert_eq!(paths["a2a"].path, "a/a2/a2a");
+    assert_eq!(paths["a2a"].ancestors, vec!["a/a2", "a", "."]);
+    assert_eq!(paths["b1"].path, "b/b1");
+    assert_eq!(paths["pinned"].path, "pinned");
+    // Deleted rows still resolve for as long as the tombstone row is retained.
+    assert_eq!(paths["gone_child"].path, "gone/gone_child");
+    assert_eq!(paths["shadowed"].path, "a/shadowed");
+    assert!(
+        !paths.contains_key("absent"),
+        "missing ids must be omitted so callers keep the recorded old facts"
+    );
+
+    assert!(super::desktop_status_ancestry_paths(&s, &[])
+        .unwrap()
+        .is_empty());
+}
+
+/// Issue #25: an unbounded ACL closure falls back to the rebuild path instead of
+/// scanning the whole namespace inside the resize.
+#[test]
+fn acl_refresh_refuses_closures_over_the_limit() {
+    let (_dir, s) = small_fixture();
+    assert!(
+        s.desktop_status_acl_refresh(&["den".to_owned()], 1)
+            .unwrap()
+            .is_none(),
+        "a two-row closure must not be accepted for a one-row limit"
+    );
+    let empty = s
+        .desktop_status_acl_refresh(&[], 1)
+        .unwrap()
+        .expect("an empty denial list is always resolvable");
+    assert!(empty.affected.is_empty());
+    assert!(empty.seeds.is_empty());
+}

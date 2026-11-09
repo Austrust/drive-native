@@ -1,5 +1,6 @@
 import os
 import json
+import time
 from pathlib import Path
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal, QProcess
 from PySide6.QtGui import QDesktopServices, QAction, QIcon, QColor, QPainter, QPixmap, QPalette
@@ -142,7 +143,20 @@ def cache_row_text(row):
     return "仅在线"
 
 
+# Status icons never change for a given status: build each one once and reuse
+# the QIcon. The old code painted a fresh 20x20 pixmap for every row on every
+# four-per-second signal burst (issue #29).
+_STATUS_ICONS = {}
+OVERVIEW_SIGNAL_INTERVAL = 1.0
+# A membership change (listing/subtree) reloads the current directory page at
+# most this often, so a rename burst opens one page request, not one per event.
+MEMBERSHIP_REFRESH_MS = 250
+
+
 def status_icon(status):
+    cached = _STATUS_ICONS.get(status)
+    if cached is not None:
+        return cached
     color = QColor(STATUS.get(status, ("", "#c14c58"))[1])
     pix = QPixmap(20, 20)
     pix.fill(Qt.transparent)
@@ -161,7 +175,9 @@ def status_icon(status):
     else:
         painter.drawText(pix.rect(), Qt.AlignCenter, "·")
     painter.end()
-    return QIcon(pix)
+    icon = QIcon(pix)
+    _STATUS_ICONS[status] = icon
+    return icon
 
 
 class _MountActions:
@@ -201,6 +217,30 @@ class MainWindow(QMainWindow):
         # Directory page accumulator: a GetDirectory reply may arrive before
         # received_overview creates it for the first time.
         self.page_rows = []
+        # #29 counters: asserted by tests and reported as evidence.
+        self.overview_queries = 0
+        self.directory_queries = 0
+        self.icon_sets = 0
+        self.filter_passes = 0
+        self.filter_row_updates = 0
+        self.last_overview_at = 0.0
+        self._directory_loading = False
+        self._dir_icon = None
+        self._file_icon = None
+        # #31 revisioned change-set consumer: a StatusChanged2 storm patches the
+        # visible rows with one GetStates batch instead of refreshing everything.
+        self.status2_seen = False
+        self.status_epoch = None
+        self.status_revision = None
+        self.status_events = 0
+        self.status_getstates = 0
+        self.status_patched_rows = 0
+        self.status_dropped_rows = 0
+        self.membership_refreshes = 0
+        self._status_loading = False
+        self._status_pending = set()
+        self._status_generation = None
+        self._membership_again = False
         self.loading = False
         self.progress_loading = False
         self.progress_again = False
@@ -428,9 +468,15 @@ class MainWindow(QMainWindow):
         self.tabs.currentChanged.connect(self.tab_changed)
         self.refresh_timer = QTimer(self)
         self.refresh_timer.setSingleShot(True)
-        self.refresh_timer.setInterval(100)
+        self.refresh_timer.setInterval(int(OVERVIEW_SIGNAL_INTERVAL * 1000))
         self.refresh_timer.timeout.connect(self.refresh)
-        self.bus.changed.connect(self.schedule_refresh)
+        self.bus.changed.connect(self._legacy_status_changed)
+        if hasattr(self.bus, "changed2"):
+            self.bus.changed2.connect(self.received_status2)
+        self.membership_timer = QTimer(self)
+        self.membership_timer.setSingleShot(True)
+        self.membership_timer.setInterval(MEMBERSHIP_REFRESH_MS)
+        self.membership_timer.timeout.connect(self._refresh_membership)
         self.bus.progress_changed.connect(self.refresh_progress)
         # This reads only the local monotonic clocks while a phase is active.
         # It never increments completed work or starts a NAS request.
@@ -822,8 +868,15 @@ class MainWindow(QMainWindow):
             return
         if self.loading:
             self.refresh_again = True
-        elif not self.refresh_timer.isActive():
-            self.refresh_timer.start()
+            return
+        if self.refresh_timer.isActive():
+            return
+        # Coalesce signal bursts into at most one GetOverview per second while
+        # keeping the first signal prompt (issue #29). Direct refresh() calls
+        # (buttons, first show, tests) are intentionally not throttled.
+        elapsed = time.monotonic() - self.last_overview_at
+        delay = max(0, int((OVERVIEW_SIGNAL_INTERVAL - elapsed) * 1000))
+        self.refresh_timer.start(delay)
 
     def refresh(self):
         if not self.isVisible():
@@ -832,8 +885,156 @@ class MainWindow(QMainWindow):
             self.refresh_again = True
             return
         self.loading = True
+        self.last_overview_at = time.monotonic()
+        self.overview_queries += 1
         self.refresh_progress()
         self.bus.call("GetOverview", callback=self.received_overview)
+
+    def _legacy_status_changed(self):
+        # A daemon without StatusChanged2 only has the unversioned signal; the
+        # only correct interpretation is a full refresh. Once a StatusChanged2
+        # has been seen the legacy signal is a duplicate of the same revision.
+        if self.status2_seen:
+            return
+        self.schedule_refresh()
+
+    def received_status2(self, event):
+        """Apply one revisioned StatusChanged2 change set (issue #31).
+
+        Reset/gap/invalid/oversized payloads fall back to the existing full
+        refresh path. A plain status change is patched through a single
+        GetStates batch, so a write storm does not re-run GetOverview or reload
+        the directory page.
+        """
+        self.status_events += 1
+        if event.epoch:
+            self.status2_seen = True
+        else:
+            # Owner-change sentinel: a replacement daemon may speak the old
+            # protocol, so let the legacy signal drive refreshes again.
+            self.status2_seen = False
+        full = event.discontinuous(self.status_epoch, self.status_revision)
+        self.status_epoch = event.epoch or None
+        self.status_revision = event.to_revision
+        if full or event.overview_changed:
+            self.schedule_refresh()
+            return
+        if (not self.isVisible() or not self.files_button.isChecked()
+                or self.loading or self._directory_loading or not self.rows
+                or not event.changes):
+            return
+        if self._membership_affected(event.changes):
+            self._queue_membership_refresh()
+        paths = self._changed_row_paths(event.changes)
+        if paths:
+            self._request_status_patch(paths)
+
+    @staticmethod
+    def _beneath(path, root):
+        if not path or not root:
+            return False
+        root = root.rstrip("/") or "/"
+        if root == "/":
+            return path.startswith("/") and path != "/"
+        return path != root and path.startswith(root + "/")
+
+    def _changed_row_paths(self, changes):
+        wanted = set()
+        for row in self.rows:
+            row_path = row.get("path")
+            if not row_path:
+                continue
+            for change in changes:
+                changed_path = change["path"]
+                if row_path == changed_path:
+                    wanted.add(row_path)
+                    break
+                kind = change["kind"]
+                if kind in ("listing", "subtree"):
+                    if (self._beneath(row_path, changed_path)
+                            or self._beneath(changed_path, row_path)):
+                        wanted.add(row_path)
+                        break
+                elif kind == "status" and self._beneath(changed_path, row_path):
+                    # A changed child updates the aggregate on its ancestor rows.
+                    wanted.add(row_path)
+                    break
+        return wanted
+
+    def _membership_affected(self, changes):
+        folder = self.folder or (self.overview or {}).get("mount") or ""
+        if not folder:
+            return False
+        for change in changes:
+            path = change["path"]
+            if change["kind"] == "listing" and path == folder:
+                return True
+            if change["kind"] == "subtree" and (
+                    path == folder or self._beneath(folder, path)):
+                return True
+        return False
+
+    def _queue_membership_refresh(self):
+        if self._membership_again or self.membership_timer.isActive():
+            return
+        self._membership_again = True
+        self.membership_timer.start()
+
+    def _refresh_membership(self):
+        self._membership_again = False
+        if (not self.isVisible() or not self.files_button.isChecked()
+                or self._directory_loading or self.loading):
+            return
+        self.membership_refreshes += 1
+        self.request_page(self.folder, self.view_generation, 0)
+
+    def _request_status_patch(self, paths):
+        if self._status_loading:
+            self._status_pending.update(paths)
+            return
+        self._status_loading = True
+        self._status_generation = self.view_generation
+        self.status_getstates += 1
+        self.bus.call("GetStates", [sorted(paths)[:256]],
+                      callback=self._received_status_states)
+
+    def _received_status_states(self, data, error):
+        self._status_loading = False
+        current = (self._status_generation == self.view_generation
+                   and not error and self.isVisible()
+                   and self.files_button.isChecked()
+                   and isinstance(data, dict))
+        if current:
+            states = {entry["path"]: entry for entry in data.get("entries", [])
+                      if isinstance(entry, dict) and entry.get("path")}
+            patched = 0
+            dropped = 0
+            page_rows = []
+            for row in self.page_rows:
+                state = states.get(row.get("path"))
+                if state is None:
+                    page_rows.append(row)
+                elif state.get("error"):
+                    dropped += 1
+                else:
+                    row.update({key: value for key, value in state.items()
+                                if key != "path"})
+                    page_rows.append(row)
+                    patched += 1
+            self.page_rows = page_rows
+            self.status_patched_rows += patched
+            self.status_dropped_rows += dropped
+            if patched or dropped:
+                self.rows = list({
+                    row.get("id", row.get("path")): row
+                    for row in self.page_rows}.values())
+                self.render_rows()
+            if dropped:
+                self._queue_membership_refresh()
+        if self._status_pending:
+            pending = self._status_pending
+            self._status_pending = set()
+            self._request_status_patch(pending)
 
     def refresh_progress(self):
         if not self.isVisible():
@@ -1024,8 +1225,11 @@ class MainWindow(QMainWindow):
             self.auto_unlock_attempted = True
             self.keyring_job = secret_job(self.profile["task_id"], self.keyring_loaded)
         if data["mounted"] and self.isVisible() and self.files_button.isChecked():
-            self.page_rows = []
-            self.request_page(self.folder, self.view_generation, 0)
+            # Keep the current page accumulator until the replacement offset-0
+            # reply arrives; clearing it here dropped rows that the first page
+            # of a multi-page directory had already appended (issue #29).
+            if not self._directory_loading:
+                self.request_page(self.folder, self.view_generation, 0)
         else:
             self.loading = False
             self.ready.emit()
@@ -1049,6 +1253,8 @@ class MainWindow(QMainWindow):
             self.show_error(error)
 
     def request_page(self, path, generation, offset):
+        self.directory_queries += 1
+        self._directory_loading = True
         self.bus.call(
             "GetDirectory",
             [path, offset],
@@ -1056,6 +1262,10 @@ class MainWindow(QMainWindow):
         )
 
     def received_directory(self, path, generation, data, error):
+        # This callback closes one page; a multi-page traversal re-arms the
+        # flag in request_page. While it is set, received_overview must not
+        # start a duplicate offset-0 request (issue #29).
+        self._directory_loading = False
         if not self.isVisible() or not self.files_button.isChecked():
             self.loading = False
             self.followup_refresh()
@@ -1087,7 +1297,11 @@ class MainWindow(QMainWindow):
             return
         token = (data.get("preview_only") is True, data.get("preview_generation"))
         if data["offset"] == 0:
+            # Offset 0 starts a new listing: replace the accumulator here
+            # rather than in received_overview, so a reply that races an
+            # overview refresh cannot append the same first page twice.
             self.page_view_token = token
+            self.page_rows = list(data["entries"])
         elif token != getattr(self, "page_view_token", None):
             self.loading = False
             self.page_rows = []
@@ -1100,7 +1314,8 @@ class MainWindow(QMainWindow):
             self.ready.emit()
             self.followup_refresh()
             return
-        self.page_rows.extend(data["entries"])
+        else:
+            self.page_rows.extend(data["entries"])
         next_offset = data["offset"] + len(data["entries"])
         if data["entries"] and next_offset < min(self.display_limit, data["total"]):
             self.request_page(path, generation, next_offset)
@@ -1133,6 +1348,7 @@ class MainWindow(QMainWindow):
         # Keep item identities while status signals arrive. Rebuilding the tree
         # between press/release/double-click loses Qt's activation target and
         # also disrupts keyboard focus, selection and scrolling.
+        changed = False
         existing = {}
         for index in range(self.table.topLevelItemCount()):
             item = self.table.topLevelItem(index)
@@ -1145,12 +1361,14 @@ class MainWindow(QMainWindow):
         for key, item in existing.items():
             if key not in wanted:
                 self.table.takeTopLevelItem(self.table.indexOfTopLevelItem(item))
+                changed = True
         for index, row in enumerate(ordered):
             key = row.get("id", row["path"])
             item = existing.get(key)
             if item is None:
                 item = QTreeWidgetItem()
                 self.table.insertTopLevelItem(index, item)
+                changed = True
             elif self.table.indexOfTopLevelItem(item) != index:
                 self.table.takeTopLevelItem(self.table.indexOfTopLevelItem(item))
                 self.table.insertTopLevelItem(index, item)
@@ -1164,6 +1382,7 @@ class MainWindow(QMainWindow):
             ):
                 if item.text(column) != text:
                     item.setText(column, text)
+                    changed = True
             failure = row.get("sync_error")
             detail = ""
             if failure:
@@ -1174,20 +1393,38 @@ class MainWindow(QMainWindow):
                     detail += " · 仍可使用已有完整版本"
             item.setToolTip(1, detail)
             item.setData(0, Qt.UserRole, row)
-            item.setIcon(1, status_icon(status))
-            item.setIcon(
-                0,
-                self.style().standardIcon(
-                    QStyle.SP_DirIcon if row.get("directory") else QStyle.SP_FileIcon
-                ),
-            )
-        self.apply_filter()
+            if item.data(1, Qt.UserRole) != status:
+                item.setIcon(1, status_icon(status))
+                item.setData(1, Qt.UserRole, status)
+                self.icon_sets += 1
+            directory = bool(row.get("directory"))
+            if item.data(0, Qt.UserRole + 1) != directory:
+                item.setIcon(0, self._standard_icon(directory))
+                item.setData(0, Qt.UserRole + 1, directory)
+                self.icon_sets += 1
+        if changed:
+            self.apply_filter()
+
+    def _standard_icon(self, directory):
+        # QStyle returns the same standard icon every call, but resolving it
+        # per row per repaint is avoidable state lookup (issue #29).
+        if directory:
+            if self._dir_icon is None:
+                self._dir_icon = self.style().standardIcon(QStyle.SP_DirIcon)
+            return self._dir_icon
+        if self._file_icon is None:
+            self._file_icon = self.style().standardIcon(QStyle.SP_FileIcon)
+        return self._file_icon
 
     def apply_filter(self):
+        self.filter_passes += 1
         text = self.filter.text().casefold()
         for index in range(self.table.topLevelItemCount()):
             item = self.table.topLevelItem(index)
-            item.setHidden(text not in item.text(0).casefold())
+            hidden = text not in item.text(0).casefold()
+            if item.isHidden() != hidden:
+                item.setHidden(hidden)
+                self.filter_row_updates += 1
 
     def navigate(self, path):
         self.folder = path

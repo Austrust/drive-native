@@ -20,6 +20,7 @@ A, B = 'a' * 32, 'b' * 32
 
 class Bus(QObject):
     changed = Signal()
+    changed2 = Signal(object)
     progress_changed = Signal()
     availability = Signal(bool)
     owner = ':1.synthetic'
@@ -637,6 +638,103 @@ class UnifiedTests(unittest.TestCase):
         self.assertIs(self.window.page_focus_target(), self.window.problems_check)
         self.window.open_navigation_item(self.window.nav_items[('task', B)])
         self.assertIs(self.window.stack.currentWidget(), self.window.pages[B])
+
+
+    # Issue #31: the mount catalog only re-queries overview when the change set
+    # says the aggregate changed (or the revision stream had a gap/reset).
+    def drain_overviews(self):
+        for slot in (A, B):
+            bus = self.window.buses[slot]
+            while bus.waiting:
+                method, callback = bus.waiting.pop(0)
+                if method == 'GetOverview':
+                    callback({'task_id': 'task-' + slot, 'connection': 'online',
+                              'mounted': True}, None)
+
+    def test_status_only_event_does_not_query_overview(self):
+        from drive_native_gui.bus import StatusEvent
+        self.drain_overviews()
+        slot = A
+        bus = self.window.buses[slot]
+        bus.calls.clear()
+        bus.waiting.clear()
+        manager = self.window
+        manager.status2_seen[slot] = True
+        manager.status_epoch[slot] = 'e1'
+        manager.status_revision[slot] = 7
+        baseline = manager.overview_queries
+        for revision in range(8, 13):
+            bus.changed2.emit(StatusEvent(
+                revision - 1, revision, 'e1', False, False,
+                [{'path': self.tmp.name + '/' + slot + '/x', 'directory': False,
+                  'kind': 'status'}]))
+        APP.processEvents()
+        self.assertEqual(manager.overview_queries, baseline)
+        self.assertNotIn('GetOverview', bus.calls)
+
+    def test_overview_changed_event_queries_one_overview(self):
+        from drive_native_gui.bus import StatusEvent
+        self.drain_overviews()
+        slot = A
+        bus = self.window.buses[slot]
+        bus.calls.clear()
+        manager = self.window
+        manager.status2_seen[slot] = True
+        manager.status_epoch[slot] = 'e1'
+        manager.status_revision[slot] = 7
+        manager.status_queried[slot] = 0.0
+        bus.changed2.emit(StatusEvent(7, 8, 'e1', False, True, []))
+        APP.processEvents()
+        self.assertIn('GetOverview', bus.calls)
+
+    def test_status_gap_falls_back_to_overview(self):
+        from drive_native_gui.bus import StatusEvent
+        self.drain_overviews()
+        slot = B
+        bus = self.window.buses[slot]
+        bus.calls.clear()
+        manager = self.window
+        manager.status2_seen[slot] = True
+        manager.status_epoch[slot] = 'e1'
+        manager.status_revision[slot] = 7
+        manager.status_queried[slot] = 0.0
+        bus.changed2.emit(StatusEvent(9, 10, 'e1', False, False, []))
+        APP.processEvents()
+        self.assertIn('GetOverview', bus.calls)
+
+    def test_legacy_changed_signal_is_ignored_after_status2(self):
+        self.drain_overviews()
+        bus = self.window.buses[A]
+        bus.calls.clear()
+        self.window.status2_seen[A] = True
+        self.window.status_queried[A] = 0.0
+        bus.changed.emit()
+        APP.processEvents()
+        self.assertNotIn('GetOverview', bus.calls)
+
+
+    def test_status_signal_storm_coalesces_overview_queries(self):
+        from PySide6.QtTest import QTest
+        slot = A
+        bus = self.window.buses[slot]
+        bus.waiting.clear()
+        bus.calls.clear()
+        window = self.window
+
+        def call(method, args=(), callback=None):
+            bus.calls.append(method)
+            if callback:
+                callback({'task_id': 'task-' + slot, 'connection': 'online', 'mounted': True},
+                         None)
+
+        bus.call = call
+        baseline = window.overview_queries
+        for _ in range(12):
+            bus.changed.emit()
+            QTest.qWait(80)
+        QTest.qWait(700)
+        self.assertLessEqual(window.overview_queries - baseline, 2,
+                             'a signal burst must not issue more than one overview per second')
 
 
 if __name__ == '__main__': unittest.main()

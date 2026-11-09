@@ -44,9 +44,16 @@ pub mod directory_conflicts;
 
 pub mod transfer_policy;
 
+/// Bounded retention for operation/namespace/inbox bookkeeping. Deleting
+/// unobservable rows must never publish a semantic journal change.
+pub mod retention;
+
 pub mod desktop_status;
 pub mod status_aggregate;
 pub mod status_changes;
+/// The namespace semantic watermark/invalidation primitive: compare it instead
+/// of `total_changes` before serving or rebuilding a namespace projection.
+pub use status_changes::NamespaceWatermark;
 pub mod status_index;
 pub mod status_projection;
 pub mod status_snapshot;

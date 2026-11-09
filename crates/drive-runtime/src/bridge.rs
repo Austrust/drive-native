@@ -12,7 +12,7 @@ use std::{
     process::{Child, Command as Process, Stdio},
     sync::{
         Arc, Condvar, Mutex,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -71,6 +71,9 @@ impl Drop for WorkerProcess {
 enum Invalidation {
     Inode(u64),
     Entry(u64, String),
+    /// The whole committed namespace changed (a snapshot generation): one
+    /// message replaces a per-node invalidation list that cannot fit the queue.
+    All,
 }
 #[derive(Default)]
 struct Demand {
@@ -105,6 +108,12 @@ const UPLOAD_WAIT_INTERVAL: Duration = Duration::from_secs(1);
 /// every confirmed upload made each write pay that scan. Deferring it keeps
 /// the intent durable and bounds its worst-case latency.
 const UPLOAD_REFRESH_MAX_INTERVAL: Duration = Duration::from_secs(5);
+/// How often the idle upload tick prunes durable bookkeeping (superseded
+/// operations, terminal namespace history, applied inbox receipts). Startup and
+/// operation commits already bound the steady state; this only ages out rows a
+/// long-running mount would otherwise keep until the next restart. Pruning
+/// never publishes a semantic journal change, so it cannot wake the UI.
+const STORAGE_PRUNE_INTERVAL: Duration = Duration::from_secs(300);
 pub struct Bridge {
     pub store: Arc<drive_core::SharedStore>,
     recovery_gate: std::sync::RwLock<()>,
@@ -115,8 +124,15 @@ pub struct Bridge {
     session_pending: AtomicBool,
     flights: Mutex<HashMap<(String, String), Arc<Flight>>>,
     download_retry_clock: Mutex<crate::download_retry_clock::RetryClock>,
+    /// Wakes flights waiting for a retry deadline when another flight
+    /// publishes or clears a retry gate (#31).
+    retry_wake: (Mutex<()>, Condvar),
     notify_hub: Arc<Mutex<Option<drive_fs::NotifyHub>>>,
     notifications: std::sync::mpsc::SyncSender<Invalidation>,
+    /// Committed invalidations rejected by the bounded notification queue.
+    /// Non-zero means the mount suspended cacheable publication for one quiet
+    /// lease window and then resumed; it never needs a restart (#27).
+    notification_overflows: AtomicU64,
     pub downloads: AtomicUsize,
     pub download_failures_seen: AtomicUsize,
     pub last_download_failure: Mutex<Option<(DownloadFailureKind, Option<u32>)>>,
@@ -281,13 +297,14 @@ impl Bridge {
         std::thread::spawn(move || {
             for message in rx {
                 // The hub owns the publication gate, the kernel notifier and the
-                // fail-closed fallback; delivery order is decided there.
+                // degraded/recovery fallback; delivery order is decided there.
                 let Some(hub) = target.lock().unwrap().clone() else {
                     continue;
                 };
                 match message {
                     Invalidation::Inode(ino) => hub.invalidate_inode(ino),
                     Invalidation::Entry(parent, name) => hub.invalidate_entry(parent, &name),
+                    Invalidation::All => hub.invalidate_all(),
                 }
             }
         });
@@ -301,8 +318,10 @@ impl Bridge {
             connection: Mutex::new(rpc),
             flights: Mutex::new(HashMap::new()),
             download_retry_clock: Mutex::new(crate::download_retry_clock::RetryClock::default()),
+            retry_wake: (Mutex::new(()), Condvar::new()),
             notify_hub,
             notifications,
+            notification_overflows: AtomicU64::new(0),
             downloads: AtomicUsize::new(0),
             download_failures_seen: AtomicUsize::new(0),
             last_download_failure: Mutex::new(None),
@@ -316,10 +335,47 @@ impl Bridge {
             initialization: Arc::new(crate::initialization::Tracker::default()),
         })
     }
-    /// Every upstream queue failure must disable attribute leases, not silently
-    /// lose a committed mutation before it reaches the mount's notification hub.
+    /// Every upstream queue failure must suspend cacheable publication, not
+    /// silently lose a committed mutation before it reaches the mount's hub.
     fn enqueue_invalidation(&self, invalidation: Invalidation) {
-        enqueue_invalidation(&self.notifications, &self.notify_hub, invalidation);
+        if !enqueue_invalidation(&self.notifications, &self.notify_hub, invalidation) {
+            self.notification_overflows.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    /// Committed invalidations dropped by the bounded notification queue.
+    /// Observable for root diagnostics; the mount recovers without a restart.
+    pub fn notification_overflows(&self) -> u64 {
+        self.notification_overflows.load(Ordering::Relaxed)
+    }
+    /// Above this many per-node invalidations one generation message is cheaper
+    /// and bounded: a snapshot commit touches every node, and one message per
+    /// inode/entry cannot fit the bounded delivery queue (210k nodes ≈ 420k
+    /// messages).
+    const SNAPSHOT_GENERATION_THRESHOLD: usize = 64;
+    /// Publish the invalidation set of a whole-snapshot commit (first install or
+    /// recovery rebuild). Small sets keep precise per-node messages; a large
+    /// set collapses into one generation invalidation so the bounded channel
+    /// cannot lose any part of a commit that already replaced the namespace.
+    fn enqueue_snapshot_invalidations(
+        &self,
+        invalidations: Vec<(Option<u64>, Option<u64>, String)>,
+    ) {
+        let messages = invalidations
+            .iter()
+            .map(|(inode, parent, _)| usize::from(inode.is_some()) + usize::from(parent.is_some()))
+            .sum::<usize>();
+        if messages > Self::SNAPSHOT_GENERATION_THRESHOLD {
+            self.enqueue_invalidation(Invalidation::All);
+            return;
+        }
+        for (inode, parent, name) in invalidations {
+            if let Some(inode) = inode {
+                self.enqueue_invalidation(Invalidation::Inode(inode));
+            }
+            if let Some(parent) = parent {
+                self.enqueue_invalidation(Invalidation::Entry(parent, name));
+            }
+        }
     }
     /// Stop publishing cacheable metadata once background producers stop.
     pub fn clear_notifier(&self) {
@@ -520,14 +576,7 @@ impl Bridge {
             invalidations.extend(store.snapshot_invalidations().map_err(io::Error::other)?);
             invalidations
         };
-        for (inode, parent, name) in invalidations {
-            if let Some(ino) = inode {
-                self.enqueue_invalidation(Invalidation::Inode(ino));
-            }
-            if let Some(parent) = parent {
-                self.enqueue_invalidation(Invalidation::Entry(parent, name));
-            }
-        }
+        self.enqueue_snapshot_invalidations(invalidations);
         self.signal_upload();
         self.initialization.activity();
         Ok(true)
@@ -623,6 +672,7 @@ impl Bridge {
                 }
                 store.finish_download(&ticket).map_err(|_|libc::EIO)?;
                 self.download_retry_clock.lock().unwrap().clear(&ticket);
+                self.retry_wake.1.notify_all();
                 Ok(())
             }
             Err((errno, _, _)) if errno == libc::EINTR => {
@@ -808,6 +858,7 @@ impl Bridge {
         }
         let failure = store.download_failure(&ticket.id)?;
         self.download_retry_clock.lock().unwrap().publish(ticket, failure.as_ref(), wall, now);
+        self.retry_wake.1.notify_all();
         Ok(())
     }
     fn retry_clock_ready(&self, store: &drive_core::Store, ticket: &DownloadTicket, now: u64) -> drive_core::Result<bool> {
@@ -957,15 +1008,22 @@ impl Bridge {
                 if let Err(error) = permission {
                     return self.reject_download_flight(node, flight, &ticket, error);
                 }
-                if std::time::Instant::now() >= retry_deadline {
+                let remaining =
+                    retry_deadline.saturating_duration_since(std::time::Instant::now());
+                if remaining.is_zero() {
                     return Err(libc::EAGAIN);
                 }
                 if !self.connection().is_connected() {
                     return Err(libc::ENETDOWN);
                 }
-                // No flight-map/database locks while waiting. Other readers
-                // still attach to this flight and can cancel independently.
-                std::thread::sleep(Duration::from_millis(25));
+                // No flight-map/database locks while waiting. A bounded slice
+                // (≤250 ms) keeps cancellation observable, and another flight
+                // publishing or clearing this ticket wakes us early, instead of
+                // taking three Store locks and several SQL reads every 25 ms.
+                let wait = retry_wait_slice(remaining);
+                if let Ok(guard) = self.retry_wake.0.lock() {
+                    let _ = self.retry_wake.1.wait_timeout(guard, wait);
+                }
             }
             if std::time::Instant::now() >= retry_deadline {
                 return Err(libc::EAGAIN);
@@ -1309,6 +1367,7 @@ impl Bridge {
         // Set once a cycle confirmed an upload: the next iteration runs it
         // back-to-back without waiting for a wake or the poll timeout.
         let mut drain = false;
+        let mut last_storage_prune = Instant::now();
         while !stop.load(Ordering::Acquire) {
             let mut wake = self.upload_signal.0.lock().unwrap();
             if !*wake && !drain && !stop.load(Ordering::Acquire) {
@@ -1351,6 +1410,13 @@ impl Bridge {
             if !signaled && !retry_due && !auto {
                 // Idle poll: settle a deferred hydration refresh now that the
                 // queue is quiet, without competing with upload progress.
+                if last_storage_prune.elapsed() >= STORAGE_PRUNE_INTERVAL {
+                    last_storage_prune = Instant::now();
+                    // Bounded bookkeeping cleanup; failures keep the old rows
+                    // and are retried on the next interval.
+                    let mut store = self.store.lock().unwrap();
+                    let _ = store.prune_storage();
+                }
                 if refresh_pending && self.connection().is_connected() {
                     refresh_pending = false;
                     self.refresh_cached();
@@ -1764,6 +1830,11 @@ fn operation_error(body: Response) -> io::Error {
     if matches!(&body, Response::Failed { category } if category == "native_root_unavailable") {
         return io::Error::new(io::ErrorKind::InvalidData, RootUnavailable);
     }
+    if matches!(&body, Response::Failed { category } if category == crate::worker::WORKER_OVERLOADED_CATEGORY) {
+        // The bounded worker queue refused this command. It is retryable and
+        // session-preserving; it must not masquerade as a transport loss.
+        return io::Error::new(io::ErrorKind::TimedOut, Cause::WorkerOverloaded);
+    }
     if let Response::Failed { category } = &body {
         let timeout = match category.as_str() {
             "native_receive_idle" => Some(Cause::NativeReceiveIdle),
@@ -1810,6 +1881,19 @@ fn unix_seconds() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+#[cfg(test)]
+#[path = "overload_mapping_tests.rs"]
+mod overload_mapping_tests;
+
+/// A waiting reader re-checks the retry gate at most this often, so a
+/// cancellation or a republished retry deadline is observed without a busy
+/// 25 ms loop. The 35 s foreground window therefore needs ≤ 140 checks.
+const RETRY_WAIT_SLICE: Duration = Duration::from_millis(250);
+
+fn retry_wait_slice(remaining: Duration) -> Duration {
+    remaining.min(RETRY_WAIT_SLICE)
 }
 
 /// Transport loss during a read-only reconciliation attempt is not evidence
@@ -2225,19 +2309,23 @@ mod root_diagnostics_tests {
     }
 }
 
-/// Non-blocking on Store and kernel notification delivery. Also used for former
-/// blocking sends so a saturated channel cannot hold a state transaction open.
+/// Non-blocking on Store and kernel notification delivery; returns whether the
+/// bounded queue accepted the message. A rejected committed invalidation
+/// suspends the mount's cacheable publication for one quiet lease window (the
+/// hub recovers by itself), never a permanent fail-closed (#27).
 fn enqueue_invalidation(
     queue: &std::sync::mpsc::SyncSender<Invalidation>,
     hub: &Mutex<Option<drive_fs::NotifyHub>>,
     invalidation: Invalidation,
-) {
-    if queue.try_send(invalidation).is_err() {
+) -> bool {
+    let accepted = queue.try_send(invalidation).is_ok();
+    if !accepted {
         let hub = hub.lock().unwrap().clone();
         if let Some(hub) = hub {
             hub.invalidate_delivery_failed();
         }
     }
+    accepted
 }
 
 #[cfg(test)]

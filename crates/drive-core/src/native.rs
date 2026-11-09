@@ -174,6 +174,65 @@ impl NativeReadSession {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    static TRANSLATE_SERIALIZATIONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static TRANSLATE_HASHES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Serialize an event's version token exactly once. The resulting bytes are both
+/// stored in `Node.version` and fed into the event identity digest, so the
+/// receipt path never has to serialize the full `Change` a second time.
+fn serialize_version_token(token: &VersionToken) -> Result<String> {
+    #[cfg(test)]
+    TRANSLATE_SERIALIZATIONS.with(|count| count.set(count.get() + 1));
+    Ok(serde_json::to_string(token)?)
+}
+
+fn hash_event_bytes(bytes: &[u8]) -> String {
+    #[cfg(test)]
+    TRANSLATE_HASHES.with(|count| count.set(count.get() + 1));
+    crate::sha256(bytes)
+}
+
+/// Stable, content-derived event identity for an upsert event. The normalized
+/// byte buffer covers every field of the translated `Change` (identity, parent,
+/// name, version token, size/hash from the token, mtime and mode), but reuses
+/// the already serialized version token instead of reserializing the whole
+/// `Change`.
+fn upsert_event_digest(
+    file_id: &str,
+    mtime: u64,
+    name: &str,
+    parent: Option<&str>,
+    mode: u32,
+    token_json: &str,
+) -> String {
+    let mut canonical = Vec::with_capacity(token_json.len() + 128);
+    canonical.extend_from_slice(b"drive-native-event-v1\0");
+    canonical.push(1);
+    canonical.extend_from_slice(file_id.as_bytes());
+    canonical.push(0);
+    canonical.extend_from_slice(parent.unwrap_or("").as_bytes());
+    canonical.push(0);
+    canonical.extend_from_slice(name.as_bytes());
+    canonical.push(0);
+    canonical.extend_from_slice(&mtime.to_le_bytes());
+    canonical.extend_from_slice(&mode.to_le_bytes());
+    canonical.extend_from_slice(token_json.as_bytes());
+    hash_event_bytes(&canonical)
+}
+
+/// Delete events only carry the file identity, so the digest does not need a
+/// `Change` serialization at all.
+fn delete_event_digest(file_id: &str) -> String {
+    let mut canonical = Vec::with_capacity(file_id.len() + 32);
+    canonical.extend_from_slice(b"drive-native-event-v1\0");
+    canonical.push(2);
+    canonical.extend_from_slice(file_id.as_bytes());
+    hash_event_bytes(&canonical)
+}
+
 fn translate(scope: &Scope, restore: &str, from: &str, batch: EventBatch) -> Result<Option<Batch>> {
     Ok(translate_events(scope, restore, from, batch, false)?.map(|(batch, _)| batch))
 }
@@ -257,7 +316,9 @@ fn translate_events(
         if !scope.contains(&e.path) && !scope.contains(path) {
             return Err(Error::State("event outside selected native subtree".into()));
         }
+        let digest;
         let change = if e.removed || matches!(e.kind, EventKind::Remove) || !scope.contains(path) {
+            digest = delete_event_digest(&e.file_id);
             Change::Delete {
                 id: e.file_id.clone(),
             }
@@ -281,26 +342,42 @@ fn translate_events(
                 hash: e.hash,
                 directory: e.file_type == FileType::Dir,
             };
+            let directory = token.directory;
+            // Serialize the version token once; the same bytes become both the
+            // stored `Node.version` and part of the event identity digest.
+            let token_json = serialize_version_token(&token)?;
+            let name: String = if path == "/" {
+                "My Drive".into()
+            } else {
+                path.rsplit('/').next().unwrap().into()
+            };
+            let node_parent = if root { None } else { Some(parent.clone()) };
+            let mode = if directory { 0o755 } else { 0o644 };
+            digest = upsert_event_digest(
+                &e.file_id,
+                e.mtime,
+                &name,
+                node_parent.as_deref(),
+                mode,
+                &token_json,
+            );
             Change::Upsert(Node {
                 id: e.file_id.clone(),
-                parent: if root { None } else { Some(parent.clone()) },
-                name: if path == "/" {
-                    "My Drive".into()
-                } else {
-                    path.rsplit('/').next().unwrap().into()
-                },
-                version: serde_json::to_string(&token)?,
-                directory: token.directory,
+                parent: node_parent,
+                name,
+                version: token_json,
+                directory,
                 metadata: Some(crate::NodeMetadata {
                     size: e.size,
                     mtime: e.mtime,
-                    mode: if token.directory { 0o755 } else { 0o644 },
+                    mode,
                 }),
             })
         };
-        // Real historical events can carry current tombstone metadata. Hash the
-        // normalized change rather than treating sync_id as an immutable event ID.
-        let digest = crate::sha256(&serde_json::to_vec(&change)?);
+        // Real historical events can carry current tombstone metadata, so the
+        // identity is still a hash over the normalized event contents; it just
+        // reuses the serialized version token instead of reserializing the
+        // whole `Change`.
         let event_id = format!("native:{}:{}:{digest}", e.version.sync_id, e.file_id);
         if let Some(mut hint) = hint {
             hint.event_id = event_id.clone();
@@ -591,6 +668,102 @@ mod tests {
         let mut e = event();
         e.file_type = FileType::Symlink;
         assert!(translate(&scope(), "s", "", batch(e, 5)).is_err());
+    }
+    fn translation_work() -> (u64, u64) {
+        (
+            TRANSLATE_SERIALIZATIONS.with(|count| count.get()),
+            TRANSLATE_HASHES.with(|count| count.get()),
+        )
+    }
+    fn reset_translation_work() {
+        TRANSLATE_SERIALIZATIONS.with(|count| count.set(0));
+        TRANSLATE_HASHES.with(|count| count.set(0));
+    }
+    fn large_batch(count: usize, removed: bool) -> EventBatch {
+        let events = (0..count)
+            .map(|index| {
+                let mut e = event();
+                e.file_id = (1000 + index as u64).to_string();
+                e.path = format!("/lab/run/file-{index}.doc");
+                e.version = NativeVersion {
+                    sync_id: 5 + index as u64,
+                    max_id: 5 + index as u64,
+                };
+                e.removed = removed;
+                e
+            })
+            .collect();
+        EventBatch {
+            events,
+            next: EventCursor(4096 + count as u64),
+            recovery_required: false,
+        }
+    }
+    #[test]
+    fn initialization_translation_serializes_each_upsert_once_and_hashes_once() {
+        // A 4096-event page used to serialize every event twice: once for the
+        // version token and once for the whole normalized Change used as the
+        // event identity digest. The token bytes are now reused by the digest.
+        let count = 4096;
+        reset_translation_work();
+        let page = translate_initialization(&scope(), "s", "", large_batch(count, false))
+            .unwrap()
+            .unwrap();
+        assert_eq!(page.batch.events.len(), count);
+        assert_eq!(translation_work(), (count as u64, count as u64));
+        for (event, hint) in page.batch.events.iter().zip(&page.hints) {
+            assert_eq!(event.id, hint.event_id);
+        }
+        let Change::Upsert(node) = &page.batch.events[0].change else {
+            panic!()
+        };
+        let token: VersionToken = serde_json::from_str(&node.version).unwrap();
+        assert_eq!(token.file, "1000");
+    }
+    #[test]
+    fn delete_translation_needs_no_change_serialization() {
+        let count = 64;
+        reset_translation_work();
+        let page = translate_initialization(&scope(), "s", "", large_batch(count, true))
+            .unwrap()
+            .unwrap();
+        assert_eq!(page.batch.events.len(), count);
+        assert_eq!(translation_work(), (0, count as u64));
+        assert!(
+            page.batch
+                .events
+                .iter()
+                .all(|event| matches!(event.change, Change::Delete { .. }))
+        );
+    }
+    #[test]
+    fn event_identity_is_stable_and_covers_normalized_change_fields() {
+        let id = |event: NativeEvent| {
+            translate_initialization(&scope(), "s", "", batch(event, 5))
+                .unwrap()
+                .unwrap()
+                .batch
+                .events[0]
+                .id
+                .clone()
+        };
+        let base = id(event());
+        assert_eq!(base, id(event()));
+        let mut changed_parent = event();
+        changed_parent.parent_id = "other".into();
+        assert_ne!(base, id(changed_parent));
+        let mut changed_mtime = event();
+        changed_mtime.mtime = 7;
+        assert_ne!(base, id(changed_mtime));
+        let mut changed_name = event();
+        changed_name.path = "/lab/run/B.doc".into();
+        assert_ne!(base, id(changed_name));
+        let mut changed_content = event();
+        changed_content.hash = "fedcba9876543210fedcba9876543210".into();
+        assert_ne!(base, id(changed_content));
+        let mut removed = event();
+        removed.removed = true;
+        assert_ne!(base, id(removed));
     }
 }
 

@@ -27,21 +27,23 @@ pub struct KeptBoth {
     pub path: String,
 }
 
-/// Candidate identity query behind [`Store::sync_issues`].
+/// Candidate identity source shared by [`Store::sync_issues`] and
+/// [`Store::sync_issue_count`].
 ///
-/// The previous shape evaluated three correlated `EXISTS` subqueries for every
-/// node row: that forced a full `nodes` scan and, without a `node` index on
-/// `operations`/`namespace_ops`, a full scan of both tables per candidate row
-/// (issue #16). Expressing each issue source as its own `UNION` arm lets the
-/// planner start from the small partial indexes (conflict/pinned flags,
-/// unfinished operation states) and paginate the combined set.
+/// The previous count shape evaluated four correlated `EXISTS` subqueries for
+/// every node row: that forced a full `nodes` scan and, without a `node` index
+/// on `operations`/`namespace_ops`, a full scan of both tables per candidate row
+/// (issue #16), and cost ~52ms per GetOverview at 210k nodes (issue #21).
+/// Expressing each issue source as its own `UNION` arm lets the planner start
+/// from the small partial indexes (conflict/pinned flags, unfinished operation
+/// states) and walk only the combined candidate set.
 ///
 /// The unfinished operation arms use `INDEXED BY` so the plan does not depend
 /// on statistics the store deliberately does not maintain: the partial indexes
 /// hold only in-flight rows, while the plain `node` indexes would scan every
 /// finished operation. The redundant `state NOT IN (...)` terms make the
 /// partial predicates visible to the planner.
-const ISSUE_CANDIDATES: &str = "
+const ISSUE_CANDIDATE_SOURCES: &str = "
     SELECT id FROM (
         SELECT id FROM nodes WHERE conflict=1
         UNION
@@ -57,8 +59,10 @@ const ISSUE_CANDIDATES: &str = "
          WHERE o.state IN ('uncertain','cleanup_uncertain','conflict')
            AND o.state NOT IN ('committed','superseded')
            AND EXISTS(SELECT 1 FROM nodes n WHERE n.id=o.node)
-    )
-    WHERE id>?1 ORDER BY id LIMIT 257";
+    )";
+fn issue_candidates(tail: &str) -> String {
+    format!("{ISSUE_CANDIDATE_SOURCES} {tail}")
+}
 impl Store {
     // Conflict history includes tombstones hidden from ordinary filesystem lookup.
     // This accessor is local to the issue service and never makes deleted paths live.
@@ -238,8 +242,9 @@ impl Store {
         if after.len() > 8192 {
             return Err(Error::State("invalid issue cursor".into()));
         }
+        let query = issue_candidates("WHERE id>?1 ORDER BY id LIMIT 257");
         let ids = {
-            let mut q = self.db.prepare(ISSUE_CANDIDATES)?;
+            let mut q = self.db.prepare(&query)?;
             q.query_map([after], |r| r.get::<_, String>(0))?
                 .collect::<std::result::Result<Vec<_>, _>>()?
         };
@@ -257,8 +262,9 @@ impl Store {
     /// paginates; entries that resolve to no actionable issue are not counted.
     pub fn sync_issue_count(&self, root: &str) -> Result<u64> {
         self.node(root)?;
+        let query = issue_candidates("ORDER BY id");
         let ids = {
-            let mut q = self.db.prepare("SELECT id FROM nodes n WHERE (conflict=1 OR EXISTS(SELECT 1 FROM drafts d WHERE d.node=n.id AND d.dirty=1 AND (d.base!=n.remote_version OR n.deleted=1) AND NOT EXISTS(SELECT 1 FROM local_unlinks WHERE node=n.id)) OR EXISTS(SELECT 1 FROM operations WHERE node=n.id AND state='uncertain') OR EXISTS(SELECT 1 FROM namespace_ops WHERE node=n.id AND state IN ('uncertain','cleanup_uncertain','conflict'))) ORDER BY id")?;
+            let mut q = self.db.prepare(&query)?;
             q.query_map([], |r| r.get::<_, String>(0))?
                 .collect::<std::result::Result<Vec<_>, _>>()?
         };

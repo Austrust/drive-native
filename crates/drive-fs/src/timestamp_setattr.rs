@@ -98,13 +98,22 @@ pub(super) fn set_times(
         let job: Job = Box::new(move || {
             let result =
                 draft(&store, &handles, &updates, &hydrator, &id, body, false, permissions::Action::Setattr).and_then(|d| {
-                    let mut s = store.lock().unwrap();
-                    permissions::node(&s,&id,permissions::Action::Setattr).map_err(|e|errno(&e))?;
-                    // Recheck access after network hydration and before mutation.
-                    s.record_for_handle(&id).map_err(|e| errno(&e))?;
-                    s.draft_set_mtime(&d, mtime.unwrap())
+                    {
+                        let mut s = store.lock().unwrap();
+                        permissions::node(&s,&id,permissions::Action::Setattr).map_err(|e|errno(&e))?;
+                        // Recheck access after network hydration and before mutation.
+                        s.record_for_handle(&id).map_err(|e| errno(&e))?;
+                        // Only dirties the draft; the checkpoint below persists it.
+                        s.draft_set_mtime(&d, mtime.unwrap())
+                            .map_err(|e| errno(&e))?;
+                    }
+                    // SETATTR(mtime) needs its own durability barrier; the draft
+                    // file fsync runs outside the store lock (#24).
+                    let total = diagnostics::span(diagnostics::Stage::CheckpointTotal);
+                    drive_core::drafts::checkpoint_draft_shared(&store, &d)
                         .map_err(|e| errno(&e))?;
-                    s.checkpoint_draft(&d).map_err(|e| errno(&e))?;
+                    drop(total);
+                    let mut s = store.lock().unwrap();
                     s.creation_saved(&id).map_err(|e| errno(&e))?;
                     if let Some((sec, nsec)) = atime {
                         s.set_local_atime(&id, sec, nsec).map_err(|e| errno(&e))?;

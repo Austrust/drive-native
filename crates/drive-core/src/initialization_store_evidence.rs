@@ -1,6 +1,40 @@
 //! Private evidence sidecars. They never alter authoritative nodes or cursors.
 use super::*;
 
+#[cfg(test)]
+thread_local! {
+    static PAGE_HASHES: std::cell::Cell<u64> = std::cell::Cell::new(0);
+    static RECEIPT_PARSES: std::cell::Cell<u64> = std::cell::Cell::new(0);
+    static RECEIPT_VALIDATIONS: std::cell::Cell<u64> = std::cell::Cell::new(0);
+}
+/// Hash one authoritative page body. Tests count these calls to prove that a
+/// page translated and recorded in this process is not hashed again on apply.
+pub(crate) fn page_hash(bytes: &[u8]) -> String {
+    #[cfg(test)]
+    PAGE_HASHES.with(|count| count.set(count.get() + 1));
+    crate::sha256(bytes)
+}
+/// Parse one authoritative page body, counted by tests alongside `page_hash`.
+fn page_parse<T: serde::de::DeserializeOwned>(body: &str) -> Result<T> {
+    #[cfg(test)]
+    RECEIPT_PARSES.with(|count| count.set(count.get() + 1));
+    Ok(serde_json::from_str(body)?)
+}
+#[cfg(test)]
+pub(crate) fn page_work() -> (u64, u64, u64) {
+    (
+        PAGE_HASHES.with(|count| count.get()),
+        RECEIPT_PARSES.with(|count| count.get()),
+        RECEIPT_VALIDATIONS.with(|count| count.get()),
+    )
+}
+#[cfg(test)]
+pub(crate) fn reset_page_work() {
+    PAGE_HASHES.with(|count| count.set(0));
+    RECEIPT_PARSES.with(|count| count.set(0));
+    RECEIPT_VALIDATIONS.with(|count| count.set(0));
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct EventEnvelope {
@@ -15,6 +49,9 @@ pub(super) struct EventEnvelope {
 impl EventEnvelope {
     pub(super) fn hint(&self, ordinal: usize) -> Option<&InitializationEventHint> {
         self.hints.get(ordinal)
+    }
+    pub(super) fn hints(&self) -> &[InitializationEventHint] {
+        &self.hints
     }
     pub(super) fn matches_page(&self, page: &InitializationEventPage) -> bool {
         self.scope == page.scope && self.restore == page.restore && self.hints == page.hints
@@ -113,10 +150,10 @@ pub(super) fn read_event_receipt(
     let (body,hash,bytes,from,to):(String,String,u64,String,String)=db.query_row(
         "SELECT body,digest,bytes,from_cursor,to_cursor FROM initialization_events WHERE run=?1 AND seq=?2",
         params![status.run.run_id,number(sequence)?],|r|Ok((r.get(0)?,r.get(1)?,read_counter(r,2)?,r.get(3)?,r.get(4)?)))?;
-    if bytes != body.len() as u64 || crate::sha256(body.as_bytes()) != hash {
+    if bytes != body.len() as u64 || page_hash(body.as_bytes()) != hash {
         return Err(invalid("event receipt digest mismatch"));
     }
-    let batch: Batch = serde_json::from_str(&body)?;
+    let batch: Batch = page_parse(&body)?;
     if batch.from != from || batch.to != to || cursor(&to)? <= cursor(&from)? {
         return Err(invalid("event receipt cursor mismatch"));
     }
@@ -128,10 +165,10 @@ pub(super) fn read_event_receipt(
         )
         .optional()?;
     let page = if let Some((body, digest, bytes)) = side {
-        if bytes != body.len() as u64 || crate::sha256(body.as_bytes()) != digest {
+        if bytes != body.len() as u64 || page_hash(body.as_bytes()) != digest {
             return Err(invalid("event hint digest mismatch"));
         }
-        let envelope: EventEnvelope = serde_json::from_str(&body)?;
+        let envelope: EventEnvelope = page_parse(&body)?;
         if envelope.schema != 1
             || envelope.run_id != status.run.run_id
             || envelope.sequence != sequence
@@ -139,6 +176,8 @@ pub(super) fn read_event_receipt(
         {
             return Err(invalid("event hint receipt binding mismatch"));
         }
+        #[cfg(test)]
+        RECEIPT_VALIDATIONS.with(|count| count.set(count.get() + 1));
         validate_page(
             &status.binding,
             &batch,

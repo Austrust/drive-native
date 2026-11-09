@@ -170,13 +170,43 @@ impl Store {
         }
         file.sync_all()?;
         File::open(self.root.join("drafts"))?.sync_all()?;
+        self.draft_stats.draft_file_fsyncs += 2;
         self.db.execute("INSERT INTO drafts(node,token,base,generation,checkpoint,dirty) VALUES(?1,?2,?3,0,0,0) ON CONFLICT(node) DO UPDATE SET token=excluded.token,base=excluded.base,generation=0,checkpoint=0,dirty=0",params![id,token,base])?;
         Ok(self.retain_draft(id, token, base.into(), file))
     }
+    /// Resolve the working file for an edit and durably mark the edit epoch.
+    ///
+    /// The durable statement is issued only on the first edit after a
+    /// checkpoint: subsequent writes in the same dirty epoch do not commit
+    /// anything until one of them crosses a durability boundary (fsync/flush,
+    /// close, checkpoint). Before #24 every 4 KiB write autocommitted a
+    /// generation bump, which forced one WAL fsync per syscall (100 MiB
+    /// sequential write: 800 commits / ~817 fsyncs). The first dirty mark is
+    /// still committed before the writer returns, so an unclean reopen can
+    /// recover the draft and the upload gate still refuses an older snapshot.
     fn editing_file(&mut self, draft: &DraftHandle) -> Result<File> {
-        let changed=self.db.execute("UPDATE drafts SET generation=generation+1,dirty=1 WHERE node=?1 AND token=?2 AND EXISTS(SELECT 1 FROM nodes WHERE id=?1 AND (deleted=0 OR EXISTS(SELECT 1 FROM local_unlinks WHERE node=?1)))",params![draft.node,draft.token])?;
-        if changed != 1 {
+        let row: Option<(i64, i64, bool)> = self
+            .db
+            .query_row(
+                "SELECT d.generation,d.checkpoint,d.dirty FROM drafts d JOIN nodes n ON n.id=d.node \
+                 WHERE d.node=?1 AND d.token=?2 \
+                 AND (n.deleted=0 OR EXISTS(SELECT 1 FROM local_unlinks WHERE node=n.id))",
+                params![draft.node, draft.token],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+        let Some((generation, checkpoint, dirty)) = row else {
             return Err(Error::Io(std::io::Error::from_raw_os_error(libc::ESTALE)));
+        };
+        if !dirty || generation == checkpoint {
+            let changed = self.db.execute(
+                "UPDATE drafts SET generation=generation+1,dirty=1 WHERE node=?1 AND token=?2",
+                params![draft.node, draft.token],
+            )?;
+            if changed != 1 {
+                return Err(Error::Io(std::io::Error::from_raw_os_error(libc::ESTALE)));
+            }
+            self.draft_stats.metadata_commits += 1;
         }
         Ok(OpenOptions::new()
             .read(true)
@@ -192,6 +222,7 @@ impl Store {
     ) -> Result<usize> {
         let f = self.editing_file(draft)?;
         let offset = if append { f.metadata()?.len() } else { offset };
+        self.draft_stats.writes += 1;
         Ok(f.write_at(data, offset)?)
     }
     pub fn draft_truncate(&mut self, draft: &DraftHandle, size: u64) -> Result<()> {
@@ -200,41 +231,74 @@ impl Store {
     }
     /// Existing handles retain the same working inode; the generation prevents
     /// an older upload acknowledgement from clearing this timestamp edit.
+    /// No explicit fsync here: a timestamp edit is only observable through a
+    /// checkpoint, and that checkpoint fsyncs the same inode afterwards (#24).
     pub fn draft_set_mtime(&mut self, draft: &DraftHandle, seconds: u32) -> Result<()> {
         let file = self.editing_file(draft)?;
         file.set_modified(
             std::time::UNIX_EPOCH + std::time::Duration::from_secs(u64::from(seconds)),
         )?;
-        file.sync_all()?;
         Ok(())
     }
-    /// Local durability barrier. A failed snapshot leaves the durable draft intact
-    /// and prevents an older snapshot being uploaded as the latest saved content.
-    pub fn checkpoint_draft(&mut self, draft: &DraftHandle) -> Result<Option<String>> {
-        let (base, generation, checkpoint, dirty): (String, i64, i64, bool) = self.db.query_row(
-            "SELECT base,generation,checkpoint,dirty FROM drafts WHERE node=?1 AND token=?2",
+    fn checkpoint_needed(&self, draft: &DraftHandle) -> Result<bool> {
+        let needed: i64 = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM drafts WHERE node=?1 AND token=?2 AND dirty=1 AND generation!=checkpoint)",
             params![draft.node, draft.token],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            |r| r.get(0),
         )?;
+        Ok(needed != 0)
+    }
+    /// Complete a checkpoint whose working-file fsync already happened.
+    ///
+    /// The `checkpoint=generation` advance is folded into the snapshot
+    /// transaction (`save_draft_file_from_version`), so the snapshot and the
+    /// draft row become durable together.
+    fn checkpoint_after_sync(&mut self, draft: &DraftHandle) -> Result<Option<String>> {
+        let row: Option<(String, i64, i64, bool)> = self
+            .db
+            .query_row(
+                "SELECT base,generation,checkpoint,dirty FROM drafts WHERE node=?1 AND token=?2",
+                params![draft.node, draft.token],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .optional()?;
+        let Some((base, generation, checkpoint, dirty)) = row else {
+            return Ok(None);
+        };
         if !dirty || generation == checkpoint {
             return Ok(None);
         }
-        let mut f = File::open(self.draft_path(&draft.token)?)?;
-        f.sync_all()?;
         if self.locally_unlinked(&draft.node)? {
             self.db.execute(
                 "UPDATE drafts SET checkpoint=?3 WHERE node=?1 AND token=?2",
                 params![draft.node, draft.token, generation],
             )?;
+            self.draft_stats.metadata_commits += 1;
             return Ok(None);
         }
+        let mut f = File::open(self.draft_path(&draft.token)?)?;
         f.seek(SeekFrom::Start(0))?;
-        let op = self.save_draft_file_from_version(&draft.node, &base, &mut f)?;
-        self.db.execute(
-            "UPDATE drafts SET checkpoint=?3 WHERE node=?1 AND token=?2",
-            params![draft.node, draft.token, generation],
+        let op = self.save_draft_file_from_version(
+            &draft.node,
+            &base,
+            &mut f,
+            Some((&draft.token, generation)),
         )?;
+        // The checkpoint advance is one statement folded into the snapshot
+        // transaction, so it still costs one durable metadata commit.
+        self.draft_stats.metadata_commits += 1;
+        self.draft_stats.checkpoints += 1;
         Ok(Some(op))
+    }
+    /// Local durability barrier. A failed snapshot leaves the durable draft intact
+    /// and prevents an older snapshot being uploaded as the latest saved content.
+    pub fn checkpoint_draft(&mut self, draft: &DraftHandle) -> Result<Option<String>> {
+        if !self.checkpoint_needed(draft)? {
+            return Ok(None);
+        }
+        File::open(self.draft_path(&draft.token)?)?.sync_all()?;
+        self.draft_stats.draft_file_fsyncs += 1;
+        self.checkpoint_after_sync(draft)
     }
     pub fn checkpoint_recovered_drafts(&mut self) -> Result<usize> {
         let ids = {
@@ -254,4 +318,48 @@ impl Store {
         }
         Ok(count)
     }
+    /// Issue #24 diagnostics: monotonic counters for the draft write path.
+    pub fn draft_write_stats(&self) -> crate::DraftWriteStats {
+        self.draft_stats
+    }
 }
+
+/// Checkpoint a draft with the fsync barrier outside the store lock.
+///
+/// Phase one briefly locks the store to decide whether work is pending; phase
+/// two runs `sync_all` on the working file without the store lock, so flushing
+/// a large dirty draft does not stall unrelated readers and writers; phase
+/// three re-locks, re-validates the row (another actor may have checkpointed
+/// in between) and copies the synced file into an immutable snapshot.
+///
+/// Safety: every draft write runs while holding the store lock, so bytes
+/// written between the fsync and the snapshot copy are also copied; the copy
+/// itself cannot race a writer. A crash after the fsync but before the
+/// snapshot transaction commits leaves `generation != checkpoint`, which
+/// startup recovery treats as a dirty draft and re-checkpoints.
+pub fn checkpoint_draft_shared(
+    shared: &crate::SharedStore,
+    draft: &DraftHandle,
+) -> Result<Option<String>> {
+    let needed = {
+        let guard = shared
+            .lock()
+            .map_err(|_| Error::State("store lock poisoned".into()))?;
+        guard.checkpoint_needed(draft)?
+    };
+    if !needed {
+        return Ok(None);
+    }
+    // Same inode as every write through this handle: this is the barrier that
+    // used to run while the store lock was held.
+    draft.file.sync_all()?;
+    let mut guard = shared
+        .lock()
+        .map_err(|_| Error::State("store lock poisoned".into()))?;
+    guard.draft_stats.draft_file_fsyncs += 1;
+    guard.checkpoint_after_sync(draft)
+}
+
+#[cfg(test)]
+#[path = "draft_fsync_tests.rs"]
+mod draft_fsync_tests;

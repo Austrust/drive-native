@@ -5,6 +5,7 @@
 use super::list::parse_node_info;
 use super::{
     list::{FileType, NodeInfo},
+    mutations::ReadBackIndex,
     native::{EventBatch, EventKind, NativeEvent, NativeVersion, Watch, validate_path},
 };
 #[cfg(feature = "protocol-research")]
@@ -289,10 +290,23 @@ impl Client {
         destination: &str,
     ) -> Result<RenameReconciliation> {
         rename_fields(target, destination)?;
-        let source = self.current_path(target.view_id, &target.path).await?;
-        let dest = self.current_path(target.view_id, destination).await?;
-        let source_after = self.current_path(target.view_id, &target.path).await?;
-        let dest_after = self.current_path(target.view_id, destination).await?;
+        // One read-back pass observes source and destination from a single
+        // enumeration per parent; a second, fresh pass re-reads the server.
+        // Same-parent renames therefore cost two enumerations instead of four.
+        let mut first = ReadBackIndex::default();
+        let source = first
+            .current_path(self, target.view_id, &target.path)
+            .await?;
+        let dest = first
+            .current_path(self, target.view_id, destination)
+            .await?;
+        let mut second = ReadBackIndex::default();
+        let source_after = second
+            .current_path(self, target.view_id, &target.path)
+            .await?;
+        let dest_after = second
+            .current_path(self, target.view_id, destination)
+            .await?;
         if !same_optional(&source, &source_after) || !same_optional(&dest, &dest_after) {
             return Ok(RenameReconciliation::ChangedDuringVerification);
         }
@@ -306,9 +320,23 @@ impl Client {
         watch: &Watch,
     ) -> Result<RemoveReconciliation> {
         validate_watch(target, watch)?;
-        let before = self.current_path(target.view_id, &target.path).await?;
+        let mut index = ReadBackIndex::default();
+        let before = index
+            .current_path(self, target.view_id, &target.path)
+            .await?;
         let batch = self.pull_events(watch).await?;
-        let after = self.current_path(target.view_id, &target.path).await?;
+        // An advancing empty page proves the watched subtree did not change since
+        // `watch.cursor`, so the first observation is still authoritative and the
+        // read-back reuses its parent enumeration (2 -> 1 per-parent enumerations).
+        // Any event keeps the independent second observation.
+        let after = if batch.events.is_empty() {
+            before.clone()
+        } else {
+            let mut fresh = ReadBackIndex::default();
+            fresh
+                .current_path(self, target.view_id, &target.path)
+                .await?
+        };
         if !same_optional(&before, &after) {
             return Ok(RemoveReconciliation::ChangedDuringVerification);
         }

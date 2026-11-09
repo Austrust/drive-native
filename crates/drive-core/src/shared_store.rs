@@ -1,6 +1,9 @@
 //! Serialized Store boundaries with nonblocking, coalesced commit invalidation.
 //! The notification is a wakeup, never an atom/delta or a publication receipt.
-use crate::{Store, status_changes::StatusCursor};
+use crate::{
+    Store,
+    status_changes::{NamespaceWatermark, StatusCursor},
+};
 use std::{
     collections::HashMap,
     fmt,
@@ -44,6 +47,11 @@ fn boundary(store: &Store) -> crate::Result<Boundary> {
 struct Tracked {
     store: Store,
     boundary: Option<Boundary>,
+    /// Last confirmed namespace semantic watermark. The projection token is
+    /// derived from this value, never from `total_changes`: LRU, settings,
+    /// receipt and TEMP writes must not invalidate a namespace projection while
+    /// name/identity/visibility/attribute writes still must.
+    namespace: Option<NamespaceWatermark>,
     total_changes: u64,
     unverified: bool,
 }
@@ -63,11 +71,21 @@ pub struct SharedStore {
     permission_denials: AtomicBool,
     permission_publication: RwLock<()>,
     // Captured before the Store moves behind the mutex so read-only handles can
-    // be opened beside a live writer without acquiring either lock.
-    root: PathBuf,
+    // be opened beside a live writer without acquiring either lock. A whole
+    // Store replacement (DerefMut) may move the root, so the publication is
+    // refreshed from the writer boundary before readers may trust it.
+    root: Mutex<PathBuf>,
     // Shared with the writer's Store: off-lock readers must see the same open
     // handle set the writer protects in `cache_usage`.
     handles: Arc<Mutex<HashMap<String, (String, usize)>>>,
+    // Same reason as `handles`: desktop overview serves `queue_health` from a
+    // read-only connection, and its scheduler observations describe the writer's
+    // domain rather than that throwaway connection.
+    namespace_runtime: Arc<Mutex<crate::namespace_schedule::NamespaceRuntime>>,
+    // Lock-free mirror of `Store::local_revision()` (`total_changes`), published
+    // whenever a writer guard finishes, so off-lock projections keep the field's
+    // historical meaning instead of reading 0 from their own connection.
+    local_revision: AtomicU64,
 }
 
 /// A short metadata publication lease. It never holds SQLite/Store; callers
@@ -123,9 +141,13 @@ impl SharedStore {
         // Cloned before the Store moves into the mutex: read-only readers need
         // the same handle map to answer cache protection without a Store lock.
         let handles = store.handles.clone();
+        let namespace_runtime = store.namespace_runtime.clone();
         let permission_denials = crate::write_permissions::has_denials(&store).unwrap_or(true);
         let boundary = boundary(&store).ok();
-        let unverified = boundary.is_none();
+        // A projection may only be trusted when both the semantic journal and
+        // the namespace watermark were readable at construction time.
+        let namespace = store.namespace_watermark().ok();
+        let unverified = boundary.is_none() || namespace.is_none();
         let total_changes = store.db.total_changes();
         let (wake, receiver) = mpsc::sync_channel(1);
         if unverified {
@@ -139,6 +161,7 @@ impl SharedStore {
             inner: Mutex::new(Tracked {
                 store,
                 boundary,
+                namespace,
                 total_changes,
                 unverified,
             }),
@@ -147,14 +170,32 @@ impl SharedStore {
             projection_word: AtomicU64::new(if unverified { 1 } else { 0 }),
             permission_denials: AtomicBool::new(permission_denials),
             permission_publication: RwLock::new(()),
-            root,
+            root: Mutex::new(root),
             handles,
+            namespace_runtime,
+            local_revision: AtomicU64::new(total_changes),
         }
     }
     /// The state directory this handle owns. Answered from the captured path;
     /// it never acquires the Store or projection lock.
     pub fn root(&self) -> PathBuf {
-        self.root.clone()
+        self.root
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+    /// Read-only connection beside the live writer that shares the writer's
+    /// handle map and scheduler observations. The SQLite side still observes
+    /// only committed WAL, takes no `writer.lock` and cannot write.
+    pub fn read_only(&self) -> crate::Result<Store> {
+        let root = self.root();
+        Store::open_read_only_observing(&root, self.namespace_runtime.clone())
+    }
+    /// Lock-free mirror of [`Store::local_revision`] (SQLite `total_changes`).
+    /// Updated when a writer guard publishes its boundary, so desktop overview
+    /// can read it without acquiring the Store.
+    pub fn local_revision(&self) -> u64 {
+        self.local_revision.load(Ordering::Acquire)
     }
     /// Number of open cached/draft handles recorded by the writer (the sum of
     /// all reference counts). Answered from the shared handle map alone; it
@@ -292,41 +333,87 @@ impl StoreGuard<'_> {
         let poisoned = self.poisoned || std::thread::panicking();
         let before = self.shared.change_state();
         let projection_before = self.shared.projection_state();
-        let projection_changed = hint != guard.total_changes || self.mutable_access || poisoned;
-        let mut changed = false;
+        // A Store replaced through DerefMut may point at a different directory:
+        // publish the new root and invalidate every projection derived from the
+        // old namespace before releasing the write lease.
+        let root_changed = {
+            let current = guard.store.root();
+            let mut published = self.shared.root.lock().unwrap_or_else(PoisonError::into_inner);
+            if published.as_path() != current {
+                *published = current.to_owned();
+                true
+            } else {
+                false
+            }
+        };
+        let mut projection_changed = poisoned || root_changed;
+        let mut changed = root_changed;
         if hint != guard.total_changes
             || self.mutable_access
             || guard.unverified
             || poisoned
             || !guard.store.db.is_autocommit()
         {
+            // The projection token is the namespace semantic watermark, not
+            // total_changes: LRU, settings, receipt and TEMP writes must not
+            // force a projection rebuild. An open transaction or an unreadable
+            // watermark fails closed instead of publishing a guess.
+            let mut verified = true;
+            if guard.store.db.is_autocommit() {
+                match guard.store.namespace_watermark() {
+                    Ok(next) => {
+                        projection_changed |= guard.namespace.as_ref() != Some(&next);
+                        guard.namespace = Some(next);
+                    }
+                    Err(_) => {
+                        projection_changed = true;
+                        verified = false;
+                    }
+                }
+            } else {
+                projection_changed = true;
+                verified = false;
+            }
             match boundary(&guard.store) {
                 Ok(next) => {
                     changed = guard.boundary.as_ref() != Some(&next);
                     guard.boundary = Some(next);
-                    guard.unverified = poisoned;
                 }
                 Err(_) => {
                     // Never expose an internal/uncommitted sequence as a commit.
                     // Keep the last known boundary for a subsequent rollback or
                     // repair, and invalidate before releasing Store ownership.
                     changed = hint != guard.total_changes;
-                    guard.unverified = true;
+                    verified = false;
                 }
             }
+            guard.unverified = !verified || poisoned;
         }
+        changed |= root_changed;
+        let sql_changed = hint != guard.total_changes || self.mutable_access || poisoned;
         guard.total_changes = hint;
+        // Publish the same value `Store::local_revision` would answer under this
+        // guard, before any off-lock reader can ask for it.
+        self.shared
+            .local_revision
+            .store(hint, Ordering::Release);
         let verified = !guard.unverified;
         if projection_changed || projection_before.verified != verified {
+            let next = projection_before.revision.checked_add(1).filter(|n| *n < (1 << 63));
+            self.shared.projection_word.store(
+                next.map_or(u64::MAX, |n| (n << 1) | u64::from(!verified)), Ordering::Release,
+            );
+        }
+        if sql_changed || projection_before.verified != verified {
+            // `directory_permissions` is deliberately outside the namespace
+            // journal, so denial publication follows the SQLite write hint
+            // rather than the projection watermark: the first denial must wait
+            // for bounded cached replies before it becomes visible.
             let denied=crate::write_permissions::has_denials(&guard.store).unwrap_or(true);
             if denied != self.shared.has_permission_denials() {
                 let _publication=self.shared.permission_publication.write().unwrap_or_else(PoisonError::into_inner);
                 self.shared.permission_denials.store(denied,Ordering::Release);
             }
-            let next = projection_before.revision.checked_add(1).filter(|n| *n < (1 << 63));
-            self.shared.projection_word.store(
-                next.map_or(u64::MAX, |n| (n << 1) | u64::from(!verified)), Ordering::Release,
-            );
         }
         changed |= before.verified != verified;
         if changed {

@@ -1,6 +1,9 @@
 //! Reuse one bulk metadata read per status batch instead of N recursive SQL walks.
 use crate::status_cache::StatusProjection;
-use drive_core::{desktop_status::StatusSeed, Store};
+use drive_core::{
+    desktop_status::{desktop_status_details, StatusDetail, StatusSeed},
+    Store,
+};
 use std::{
     collections::{HashMap, HashSet},
     io,
@@ -51,6 +54,36 @@ fn detail_for(store: &Store, seed: &StatusSeed) -> io::Result<Detail> {
     };
     Ok((own, offline, failure))
 }
+fn to_detail(detail: &StatusDetail) -> Detail {
+    (
+        detail.status.clone(),
+        detail.offline,
+        detail.failure.clone(),
+    )
+}
+/// Fill the detail map for `seeds` with one batch read (issue #30) instead of
+/// three to four point queries per detailed node. Ids the batch cannot answer
+/// fall back to [`detail_for`], which preserves the single-node error reporting.
+fn load_details<'a>(
+    store: &Store,
+    seeds: impl Iterator<Item = &'a StatusSeed>,
+) -> HashMap<String, Result<Detail, ()>> {
+    let seeds: Vec<&StatusSeed> = seeds.collect();
+    let nodes: Vec<(String, bool)> = seeds
+        .iter()
+        .map(|seed| (seed.id.clone(), seed.directory))
+        .collect();
+    let batch = desktop_status_details(store, &nodes).ok();
+    let mut details = HashMap::with_capacity(seeds.len());
+    for seed in seeds {
+        let detail = match batch.as_ref().and_then(|batch| batch.get(&seed.id)) {
+            Some(detail) => Ok(to_detail(detail)),
+            None => detail_for(store, seed).map_err(|_| ()),
+        };
+        details.insert(seed.id.clone(), detail);
+    }
+    details
+}
 impl<'p> StatusTree<'p> {
     pub fn load(store: &Store, roots: &[String]) -> io::Result<Self> {
         // Only the requested roots' subtree plus their ancestor chain is read; a
@@ -76,10 +109,11 @@ impl<'p> StatusTree<'p> {
                 }
             }
         }
-        let mut details = HashMap::new();
-        for n in rows.iter().filter(|n| n.detailed && wanted.contains(&n.id)) {
-            details.insert(n.id.clone(), detail_for(store, n).map_err(|_| ()));
-        }
+        let details = load_details(
+            store,
+            rows.iter()
+                .filter(|n| n.detailed && wanted.contains(&n.id)),
+        );
         Ok(Self {
             details,
             backing: Backing::Loaded {
@@ -120,15 +154,16 @@ impl<'p> StatusTree<'p> {
                 cursor = seed.parent.as_deref();
             }
         }
-        let mut details = HashMap::new();
+        let mut detailed_seeds: Vec<&StatusSeed> = Vec::with_capacity(wanted.len());
         for id in &wanted {
             let seed = projection
                 .seed(id)
                 .ok_or_else(|| io::Error::other("status identity absent"))?;
             if seed.detailed {
-                details.insert(id.clone(), detail_for(store, seed).map_err(|_| ()));
+                detailed_seeds.push(seed);
             }
         }
+        let details = load_details(store, detailed_seeds.into_iter());
         Ok(Self {
             details,
             backing: Backing::Projected { projection, wanted },

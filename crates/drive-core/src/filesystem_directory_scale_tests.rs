@@ -153,3 +153,46 @@ fn unicode_budget_shadow_and_dirty_body_remain_metadata_only() {
         view.entries
     );
 }
+
+#[test]
+fn read_only_projection_requires_a_fully_mapped_namespace_and_never_writes() {
+    let (_t, s) = fixture();
+    let root = ino(&s, "root");
+    let count = |s: &Store| -> i64 {
+        s.db.query_row("SELECT count(*) FROM fs_inodes", [], |r| r.get(0))
+            .unwrap()
+    };
+    // The writer has not repaired these child mappings yet: the read-only
+    // projection must report "needs the writer" instead of allocating inodes.
+    s.db.execute("DELETE FROM fs_inodes WHERE node IN ('left','right')", [])
+        .unwrap();
+    let before = count(&s);
+    assert!(s.directory_snapshot_read(root, 1 << 20).unwrap().is_none());
+    assert_eq!(count(&s), before, "read-only projection must not allocate");
+    let full = s.directory_snapshot(root, 1 << 20).unwrap();
+    assert_eq!(count(&s), before + 2);
+    let read = s
+        .directory_snapshot_read(root, full.bytes)
+        .unwrap()
+        .expect("fully mapped namespace");
+    assert_eq!(read.entries, full.entries);
+    assert!(
+        s.directory_snapshot_read(root, full.bytes - 1).is_err(),
+        "budget is enforced without allocating"
+    );
+    assert_eq!(count(&s), before + 2);
+}
+
+#[test]
+fn directory_identity_rejects_unmapped_files_deleted_nodes_and_non_directories() {
+    let (_t, s) = fixture();
+    let root = ino(&s, "root");
+    s.directory_identity(root).unwrap();
+    let leaf = ino(&s, "leaf");
+    assert!(s.directory_identity(leaf).is_err(), "file must not pass identity");
+    assert!(s.directory_identity(u64::MAX).is_err(), "missing inode must fail");
+    let left = ino(&s, "left");
+    s.db.execute("UPDATE nodes SET deleted=1 WHERE id='left'", [])
+        .unwrap();
+    assert!(s.directory_identity(left).is_err(), "deleted directory must fail");
+}

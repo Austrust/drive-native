@@ -13,6 +13,7 @@ use std::{
     io,
     path::{Component, Path},
     sync::{Arc, atomic::Ordering},
+    time::Instant,
 };
 pub const BUS_NAME: &str = "org.drivenative.Client1";
 pub const OBJECT_PATH: &str = "/org/drivenative/Client1";
@@ -44,6 +45,8 @@ fn other() -> io::Error {
     io::Error::other("local state unavailable")
 }
 pub fn resolve(store: &Store, root: &str, mount: &Path, input: &str) -> io::Result<Node> {
+    #[cfg(test)]
+    counters::count_resolve();
     if input.len() > 8192 || input.contains('\0') {
         return Err(io::Error::other("invalid path"));
     }
@@ -232,10 +235,12 @@ fn entry(
 }
 /// Private read-only handle for desktop projections. Opening it neither takes
 /// the global `SharedStore` mutex nor `writer.lock`, so a long read (or the
-/// writer's own transaction) cannot stall FUSE and D-Bus replies. `None` keeps
-/// the historical serialized path available as a fail-safe.
+/// writer's own transaction) cannot stall FUSE and D-Bus replies. It shares the
+/// writer's handle map and scheduler observations, so derived fields keep the
+/// writer's meaning. `None` keeps the historical serialized path available as a
+/// fail-safe.
 fn read_only(service: &Service) -> Option<Store> {
-    Store::open_read_only(&service.bridge.store.root()).ok()
+    service.bridge.store.read_only().ok()
 }
 fn unix_now() -> u64 {
     std::time::SystemTime::now()
@@ -279,14 +284,8 @@ fn states_off_lock(
     }
     store.ensure_fs_root(root).map_err(|_| other())?;
     let resolved = resolve_all(store, service, paths);
-    // A ready projection answers folder aggregation without another scoped SQL
-    // read; unready (None) keeps the authoritative scoped read.
-    let projection = service.status_projection();
-    let mut tree = match projection.as_deref() {
-        Some(projection) => load_tree_with_projection(store, projection, &resolved)?,
-        None => load_tree(store, &resolved)?,
-    };
-    Ok(render_states(resolved, active, Some(store), &mut tree))
+    let entries = entries_off_lock(store, service, resolved, active)?;
+    Ok(states_document(entries))
 }
 fn states_locked(
     service: &Service,
@@ -359,6 +358,43 @@ fn tree_roots(resolved: &[(String, io::Result<Node>)]) -> Option<Vec<String>> {
 #[cfg(test)]
 static PROJECTION_TREE_LOADS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
+/// Test-only per-thread counters for one page request (issue #30): the desktop
+/// path must resolve each requested path once and serialize its document once.
+#[cfg(test)]
+mod counters {
+    use std::cell::Cell;
+    thread_local! {
+        static RESOLVE_CALLS: Cell<usize> = Cell::new(0);
+        static JSON_SERIALIZATIONS: Cell<usize> = Cell::new(0);
+        static JSON_PARSES: Cell<usize> = Cell::new(0);
+    }
+    pub(super) fn bump(counter: &'static std::thread::LocalKey<Cell<usize>>) {
+        counter.with(|value| value.set(value.get() + 1));
+    }
+    pub(super) fn reset() {
+        RESOLVE_CALLS.with(|value| value.set(0));
+        JSON_SERIALIZATIONS.with(|value| value.set(0));
+        JSON_PARSES.with(|value| value.set(0));
+    }
+    pub(super) fn resolve_calls() -> usize {
+        RESOLVE_CALLS.with(Cell::get)
+    }
+    pub(super) fn serializations() -> usize {
+        JSON_SERIALIZATIONS.with(Cell::get)
+    }
+    pub(super) fn parses() -> usize {
+        JSON_PARSES.with(Cell::get)
+    }
+    pub(super) fn count_resolve() {
+        bump(&RESOLVE_CALLS);
+    }
+    pub(super) fn count_serialize() {
+        bump(&JSON_SERIALIZATIONS);
+    }
+    pub(super) fn count_parse() {
+        bump(&JSON_PARSES);
+    }
+}
 /// Prefer the committed projection (issue #8): it answers the batch without a
 /// scoped SQLite read. A projection that cannot describe every resolved root
 /// (stale snapshot, missing ancestor, disabled cache) falls back to the
@@ -380,12 +416,12 @@ fn load_tree_with_projection<'p>(
         Err(_) => load_tree(store, resolved),
     }
 }
-fn render_states(
+fn render_entries(
     resolved: Vec<(String, io::Result<Node>)>,
     active: &HashSet<String>,
     store: Option<&Store>,
     tree: &mut Option<status_tree::StatusTree<'_>>,
-) -> String {
+) -> Vec<PathState> {
     let mut memo = HashMap::new();
     let mut out = Vec::new();
     for (path, node) in resolved {
@@ -414,7 +450,107 @@ fn render_states(
             },
         });
     }
-    serde_json::json!({"schema":1,"entries":out}).to_string()
+    out
+}
+/// Covered entries for a batch whose paths are already resolved: the same
+/// projection-or-scoped choice as [`states_off_lock`], without resolving again.
+fn entries_off_lock(
+    store: &Store,
+    service: &Service,
+    resolved: Vec<(String, io::Result<Node>)>,
+    active: &HashSet<String>,
+) -> io::Result<Vec<PathState>> {
+    // A ready projection answers folder aggregation without another scoped SQL
+    // read; unready (None) keeps the authoritative scoped read.
+    let projection = service.status_projection();
+    let mut tree = match projection.as_deref() {
+        Some(projection) => load_tree_with_projection(store, projection, &resolved)?,
+        None => load_tree(store, &resolved)?,
+    };
+    Ok(render_entries(resolved, active, Some(store), &mut tree))
+}
+/// Locked fall-back for [`entries_off_lock`]; the caller must not hold the
+/// writer mutex.
+fn entries_locked(
+    service: &Service,
+    resolved: Vec<(String, io::Result<Node>)>,
+    active: &HashSet<String>,
+) -> io::Result<Vec<PathState>> {
+    let store = service.bridge.store.lock().unwrap();
+    store
+        .ensure_fs_root(&service.profile.scope.file_id)
+        .map_err(|_| other())?;
+    let mut tree = load_tree(&store, &resolved)?;
+    // Folder aggregation is CPU-only after capture; release the writer's mutex
+    // before walking the tree so FUSE and overview keep making progress.
+    let guard = if tree.is_some() {
+        drop(store);
+        None
+    } else {
+        Some(store)
+    };
+    Ok(render_entries(
+        resolved,
+        active,
+        guard.as_deref(),
+        &mut tree,
+    ))
+}
+fn entries_with_fallback(
+    service: &Service,
+    resolved: Vec<(String, io::Result<Node>)>,
+    active: &HashSet<String>,
+) -> io::Result<Vec<PathState>> {
+    let Some(store) = read_only(service) else {
+        return entries_locked(service, resolved, active);
+    };
+    let paths: Vec<String> = resolved.iter().map(|(path, _)| path.clone()).collect();
+    match entries_off_lock(&store, service, resolved, active) {
+        Ok(entries) => Ok(entries),
+        // The private snapshot could not describe the page (stale projection,
+        // missing identity). Re-resolve under the writer lock so the fallback
+        // matches `states_locked` exactly.
+        Err(_) => entries_locked_paths(service, paths, active),
+    }
+}
+/// Locked fall-back for [`entries_with_fallback`] when only display paths are
+/// left: resolves and renders under the writer mutex, like [`states_locked`].
+fn entries_locked_paths(
+    service: &Service,
+    paths: Vec<String>,
+    active: &HashSet<String>,
+) -> io::Result<Vec<PathState>> {
+    let store = service.bridge.store.lock().unwrap();
+    store
+        .ensure_fs_root(&service.profile.scope.file_id)
+        .map_err(|_| other())?;
+    let resolved = resolve_all(&store, service, paths);
+    let mut tree = load_tree(&store, &resolved)?;
+    let guard = if tree.is_some() {
+        drop(store);
+        None
+    } else {
+        Some(store)
+    };
+    Ok(render_entries(
+        resolved,
+        active,
+        guard.as_deref(),
+        &mut tree,
+    ))
+}
+fn states_document(entries: Vec<PathState>) -> String {
+    #[cfg(test)]
+    counters::count_serialize();
+    serde_json::json!({"schema":1,"entries":entries}).to_string()
+}
+fn render_states(
+    resolved: Vec<(String, io::Result<Node>)>,
+    active: &HashSet<String>,
+    store: Option<&Store>,
+    tree: &mut Option<status_tree::StatusTree<'_>>,
+) -> String {
+    states_document(render_entries(resolved, active, store, tree))
 }
 pub fn transfers(service: &Service) -> io::Result<String> {
     let entries = service.bridge.transfer_entries();
@@ -467,22 +603,150 @@ pub fn initialization(service: &Service) -> String {
         "initialization":service.bridge.initialization.snapshot()})
     .to_string()
 }
+/// Cost breakdown for [`overview_measured`], covering the issue #21 acceptance
+/// segments. `query_us` is the Store read; `serialize_us` is JSON assembly off
+/// every lock. `lock_wait_us`/`lock_hold_us` are only non-zero on the fail-safe
+/// path that a writer-owned transaction forces.
+#[derive(Clone, Copy, Debug, Default, Serialize)]
+pub struct OverviewTimings {
+    pub total_us: u64,
+    pub query_us: u64,
+    pub serialize_us: u64,
+    pub lock_wait_us: u64,
+    pub lock_hold_us: u64,
+    pub read_only: bool,
+    pub derived_cached: bool,
+}
+/// Expensive counters reused while the committed Store generation is unchanged.
+/// `sync_issue_count` walks the issue candidate set and `cache_availability`
+/// scans every live node; both only depend on committed SQLite rows, which
+/// `key` identifies without taking the Store lock.
+#[derive(Clone, Copy)]
+pub(crate) struct OverviewDerived {
+    pub(crate) key: drive_core::shared_store::CommitState,
+    pub(crate) issue_count: Option<u64>,
+    pub(crate) cache: drive_core::CacheAvailability,
+}
+#[derive(Clone, Debug)]
+struct StoreOverview {
+    pending: i64,
+    preview_only: bool,
+    writable: bool,
+    permission: drive_core::write_permissions::Policy,
+    queue_health: drive_core::namespace_schedule::QueueHealth,
+    issue_count: Option<u64>,
+    cache: drive_core::CacheAvailability,
+    skipped_symlinks: u64,
+    inaccessible: i64,
+    download_errors: u64,
+}
+fn elapsed_us(start: Instant) -> u64 {
+    u64::try_from(start.elapsed().as_micros()).unwrap_or(u64::MAX)
+}
+/// Small metadata snapshot. Every read is a plain SELECT; on the private
+/// read-only connection it never touches the serialized writer.
+fn overview_store(
+    service: &Service,
+    store: &Store,
+    derived: Option<OverviewDerived>,
+) -> io::Result<StoreOverview> {
+    let root = &service.profile.scope.file_id;
+    let pending = store.pending_operations().map_err(|_| other())?
+        + store.pending_namespace_operations().map_err(|_| other())?;
+    let preview_only = preview::active(store, root)?;
+    let permission = drive_core::write_permissions::policy(store, root).map_err(|_| other())?;
+    let writable =
+        drive_core::write_permissions::mount_writable(store, root).map_err(|_| other())?;
+    let queue_health = store.queue_health().map_err(|_| other())?;
+    let (issue_count, cache) = match derived {
+        Some(derived) => (derived.issue_count, derived.cache),
+        None => (
+            store.sync_issue_count(root).ok(),
+            store.cache_availability().map_err(|_| other())?,
+        ),
+    };
+    Ok(StoreOverview {
+        pending,
+        preview_only,
+        writable,
+        permission,
+        queue_health,
+        issue_count,
+        cache,
+        skipped_symlinks: store.skipped_symlink_count().map_err(|_| other())?,
+        inaccessible: store.inaccessible_count().map_err(|_| other())?,
+        download_errors: store.download_failure_count().map_err(|_| other())?,
+    })
+}
 pub fn overview(service: &Service) -> io::Result<String> {
+    Ok(overview_measured(service)?.0)
+}
+/// Steady-state overview: a private read-only connection plus a generation-keyed
+/// derived cache, so neither FUSE nor other desktop reads queue behind
+/// GetOverview. The serialized writer remains a fail-safe; when used it is
+/// released before JSON assembly and its cost is reported in the timings.
+pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimings)> {
+    let started = Instant::now();
+    let mut timings = OverviewTimings::default();
     let (state, error, revision) = {
         let c = service.control.lock().unwrap();
         (c.state, c.error, c.revision)
     };
     let active_transfers = service.bridge.transfer_entries().len();
     let initialization = service.bridge.initialization.snapshot();
-    let store = service.bridge.store.lock().unwrap();
-    let pending = store.pending_operations().map_err(|_| other())?
-        + store.pending_namespace_operations().map_err(|_| other())?;
-    let preview_only = preview::active(&store, &service.profile.scope.file_id)?;
-    let permission = drive_core::write_permissions::policy(&store, &service.profile.scope.file_id).map_err(|_|other())?;
-    let writable = drive_core::write_permissions::mount_writable(&store, &service.profile.scope.file_id).map_err(|_|other())?;
-    let queue_health = store.queue_health().map_err(|_| other())?;
-    let issue_count = store.sync_issue_count(&service.profile.scope.file_id).ok();
-    let cache = store.cache_availability().map_err(|_| other())?;
+    let key = service.bridge.store.change_state();
+    let cached = service.overview_derived(key);
+    let ro = read_only(service);
+    let mut query_us = 0;
+    let mut snapshot = None;
+    if let Some(store) = ro.as_ref() {
+        let query = Instant::now();
+        if let Ok(found) = overview_store(service, store, cached) {
+            query_us = elapsed_us(query);
+            timings.read_only = true;
+            snapshot = Some(found);
+        }
+    }
+    timings.query_us = query_us;
+    let (store_overview, local_revision) = match snapshot {
+        Some(found) => (found, service.bridge.store.local_revision()),
+        None => {
+            let wait = Instant::now();
+            let guard = service.bridge.store.lock().unwrap();
+            timings.lock_wait_us = elapsed_us(wait);
+            let hold = Instant::now();
+            let found = overview_store(service, &guard, None)?;
+            let local_revision = guard.local_revision();
+            timings.lock_hold_us = elapsed_us(hold);
+            drop(guard);
+            (found, local_revision)
+        }
+    };
+    timings.derived_cached = timings.read_only && cached.is_some();
+    if timings.read_only && cached.is_none() {
+        // Only publish when no writer committed between the key read and the
+        // queries: a stale pair must never survive into the next projection.
+        let after = service.bridge.store.change_state();
+        if after == key {
+            service.cache_overview_derived(OverviewDerived {
+                key: after,
+                issue_count: store_overview.issue_count,
+                cache: store_overview.cache,
+            });
+        }
+    }
+    let StoreOverview {
+        pending,
+        preview_only,
+        writable,
+        permission,
+        queue_health,
+        issue_count,
+        cache,
+        skipped_symlinks,
+        inaccessible,
+        download_errors,
+    } = store_overview;
     let uncertain = queue_health.namespace_uncertain + queue_health.upload_uncertain;
     let sync_state = if error.is_some()
         || state == crate::service::ConnectionState::NeedsAttention
@@ -505,7 +769,15 @@ pub fn overview(service: &Service) -> io::Result<String> {
     let background_error = background.as_ref().map(|failure| failure.message);
     let background_error_kind = background.as_ref().map(|failure| failure.source.as_str());
     let background_error_since_ms = background.as_ref().map(|failure| failure.since_ms);
-    Ok(serde_json::json!({"schema":1,"task_id":service.profile.task_id,"mount":service.profile.mount,
+    // Issue #31: the status journal epoch lets a GUI tell a same-daemon delta
+    // from a restarted writer (its cursor epoch differs after a restart).
+    let status_epoch = ro
+        .as_ref()
+        .and_then(|store| store.status_change_watermark().ok())
+        .map(|watermark| watermark.cursor.epoch)
+        .unwrap_or_default();
+    let serialize = Instant::now();
+    let body = serde_json::json!({"schema":1,"task_id":service.profile.task_id,"mount":service.profile.mount,
         "connection":state,"error":error,"background_error":background_error,
         "background_error_kind":background_error_kind,
         "background_error_since_ms":background_error_since_ms,
@@ -515,12 +787,13 @@ pub fn overview(service: &Service) -> io::Result<String> {
         "writable_source":permission.writable_source,"local_policy":permission.local_policy,
         "server_capability":permission.server_capability,"write_policy_revision":permission.write_policy_revision,
         "configured_writable":service.profile.writable,"preview_only":preview_only,
-        "skipped_symlinks":store.skipped_symlink_count().map_err(|_|other())?,
-        "skipped_permission_directories":store.inaccessible_count().map_err(|_|other())?,
-        "pending_operations":pending,"revision":revision,"local_revision":store.local_revision(),
+        "skipped_symlinks":skipped_symlinks,
+        "skipped_permission_directories":inaccessible,
+        "pending_operations":pending,"revision":revision,"local_revision":local_revision,
+        "status_revision":key.revision,"status_verified":key.verified,"status_epoch":status_epoch,
         "queue_health":queue_health,
         "downloads_started":service.bridge.downloads.load(Ordering::Relaxed),
-        "download_errors":store.download_failure_count().map_err(|_|other())?,
+        "download_errors":download_errors,
         "download_diagnostics":{"failures_seen":service.bridge.download_failures_seen.load(Ordering::Relaxed),
             "last_failure":service.bridge.last_download_failure.lock().unwrap().as_ref().map(|(kind,code)|serde_json::json!({"kind":kind,"server_code":code}))},
         "connection_diagnostics":service.diagnostics.snapshot(),
@@ -529,7 +802,10 @@ pub fn overview(service: &Service) -> io::Result<String> {
         "version":{"build":env!("CARGO_PKG_VERSION"),"state_schema":drive_core::STATE_SCHEMA_VERSION,"ipc":crate::wire::VERSION},
         "shutdown":service.shutdown_diagnostics.snapshot(),
         "initialization":initialization,
-        "host":service.profile.host,"username":service.profile.username,"scope_path":service.profile.scope.path}).to_string())
+        "host":service.profile.host,"username":service.profile.username,"scope_path":service.profile.scope.path}).to_string();
+    timings.serialize_us = elapsed_us(serialize);
+    timings.total_us = elapsed_us(started);
+    Ok((body, timings))
 }
 
 fn history_request<T: serde::de::DeserializeOwned>(body: &str) -> io::Result<T> {
@@ -788,7 +1064,7 @@ fn release(service: &Service, path: &str) -> io::Result<String> {
 
 /// Read-only browser pages from local metadata, including before network unlock.
 pub fn directory(service: &Service, path: &str, offset: u32) -> io::Result<String> {
-    let (paths, total) = {
+    let (children, total) = {
         let store = service.bridge.store.lock().unwrap();
         if preview::active(&store, &service.profile.scope.file_id)? {
             return preview::directory(
@@ -809,26 +1085,37 @@ pub fn directory(service: &Service, path: &str, offset: u32) -> io::Result<Strin
             path,
         )?;
         let total = store.child_node_count(&node.id).map_err(|_| other())?;
-        let entries = store
+        let children = store
             .child_nodes_page(&node.id, offset as usize, 256)
             .map_err(|_| other())?;
-        let paths = entries
-            .into_iter()
-            .map(|r| {
-                if path.is_empty() {
-                    r.name
-                } else {
-                    format!("{}/{}", path.trim_end_matches('/'), r.name)
-                }
-            })
-            .collect();
-        (paths, total)
+        (children, total)
     };
-    let mut result: serde_json::Value = serde_json::from_str(&states(service, paths)?)?;
-    result["total"] = total.into();
-    result["offset"] = offset.into();
-    result["path"] = path.into();
-    Ok(result.to_string())
+    // The page snapshot already carries every child id, so only the requested
+    // directory path is resolved; the status batch reuses these nodes instead of
+    // resolving the page's 256 display paths again (issue #30).
+    let resolved: Vec<(String, io::Result<Node>)> = children
+        .into_iter()
+        .map(|child| {
+            let name = if path.is_empty() {
+                child.name.clone()
+            } else {
+                format!("{}/{}", path.trim_end_matches('/'), child.name)
+            };
+            (name, Ok(child))
+        })
+        .collect();
+    let active = service.bridge.active_downloads().into_iter().collect();
+    let entries = entries_with_fallback(service, resolved, &active)?;
+    #[cfg(test)]
+    counters::count_serialize();
+    Ok(serde_json::json!({
+        "schema": 1,
+        "entries": entries,
+        "total": total,
+        "offset": offset,
+        "path": path,
+    })
+    .to_string())
 }
 pub fn retry_downloads(service: &Service, path: &str) -> io::Result<String> {
     let mut store = service.bridge.store.lock().unwrap();
@@ -1147,6 +1434,20 @@ impl Desktop {
         emitter: &zbus::object_server::SignalEmitter<'_>,
         revision: u64,
     ) -> zbus::Result<()>;
+    /// Issue #31: one revisioned status-journal delta. `changes` is a JSON
+    /// document (schema 1) of absolute mount paths, so a consumer only re-reads
+    /// the paths a committed change actually touched. The legacy
+    /// `status_changed` signal is still emitted for older consumers.
+    #[zbus(signal)]
+    pub async fn status_changed2(
+        emitter: &zbus::object_server::SignalEmitter<'_>,
+        from_revision: u64,
+        to_revision: u64,
+        epoch: &str,
+        reset: bool,
+        overview_changed: bool,
+        changes: &str,
+    ) -> zbus::Result<()>;
     #[zbus(signal)]
     pub async fn shutdown_changed(
         emitter: &zbus::object_server::SignalEmitter<'_>,
@@ -1463,6 +1764,40 @@ mod readpath_tests {
         assert!(scoped_files.is_none() && projected_files.is_none());
     }
 
+    /// Issue #30: one GetDirectory page must reuse its own snapshot - one path
+    /// resolve and one document serialization, no second resolve pass over the
+    /// page, and no parse of its own JSON on the way out.
+    #[test]
+    fn directory_page_reuses_its_snapshot() {
+        let (_dir, service) = fixture();
+        super::counters::reset();
+        let page = directory(&service, "folder", 0).expect("directory page");
+        assert_eq!(
+            super::counters::resolve_calls(),
+            1,
+            "GetDirectory must resolve only the requested path"
+        );
+        assert_eq!(
+            super::counters::serializations(),
+            1,
+            "GetDirectory must serialize its page once"
+        );
+        assert_eq!(
+            super::counters::parses(),
+            0,
+            "GetDirectory must not round-trip its own JSON"
+        );
+        let expected: serde_json::Value =
+            serde_json::from_str(&states(&service, vec!["folder/one".to_string()]).unwrap())
+                .unwrap();
+        let page: serde_json::Value = serde_json::from_str(&page).unwrap();
+        assert_eq!(page["schema"], 1);
+        assert_eq!(page["path"], "folder");
+        assert_eq!(page["offset"], 0);
+        assert_eq!(page["total"], 1);
+        assert_eq!(page["entries"], expected["entries"]);
+    }
+
     #[test]
     fn stale_projection_falls_back_to_the_scoped_read() {
         let (_dir, service) = fixture();
@@ -1634,5 +1969,115 @@ mod readpath_tests {
         );
         service.shutdown();
         tasks.join();
+    }
+
+    fn overview_fields(body: &str) -> serde_json::Value {
+        serde_json::from_str(body).unwrap()
+    }
+
+    #[test]
+    fn overview_answers_while_the_writer_lock_is_held() {
+        let (_dir, service) = fixture();
+        let held = service.bridge.store.lock().unwrap();
+        let probe = service.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            let _ = tx.send(overview_measured(&probe));
+        });
+        // Issue #21: GetOverview used to take the global Store mutex, so a held
+        // writer (or a long FUSE operation) stalled every desktop poll.
+        let response = rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("GetOverview waited on the global Store lock");
+        drop(held);
+        thread.join().unwrap();
+        let (body, timings) = response.unwrap();
+        assert!(timings.read_only, "overview fell back to the writer lock");
+        assert_eq!(timings.lock_wait_us, 0);
+        assert_eq!(timings.lock_hold_us, 0);
+        let value = overview_fields(&body);
+        assert_eq!(value["schema"], 1);
+        assert_eq!(value["issue_count"], 0);
+        assert_eq!(value["cache_availability"]["total"], 1);
+    }
+
+    #[test]
+    fn overview_off_lock_snapshot_matches_the_locked_snapshot() {
+        let (_dir, service) = fixture();
+        let locked = {
+            let guard = service.bridge.store.lock().unwrap();
+            overview_store(&service, &guard, None).unwrap()
+        };
+        let (body, timings) = overview_measured(&service).unwrap();
+        assert!(timings.read_only, "expected the read-only path");
+        let value = overview_fields(&body);
+        assert_eq!(value["pending_operations"], locked.pending);
+        assert_eq!(value["preview_only"], locked.preview_only);
+        assert_eq!(value["writable"], locked.writable && !locked.preview_only);
+        assert_eq!(value["issue_count"], serde_json::json!(locked.issue_count));
+        assert_eq!(value["cache_availability"]["state"], locked.cache.state);
+        assert_eq!(value["cache_availability"]["total"], locked.cache.total);
+        assert_eq!(value["cache_availability"]["offline"], locked.cache.offline);
+        assert_eq!(value["cache_availability"]["pinned"], locked.cache.pinned);
+        assert_eq!(
+            value["queue_health"]["namespace_uncertain"],
+            serde_json::json!(locked.queue_health.namespace_uncertain)
+        );
+        assert_eq!(
+            value["skipped_symlinks"],
+            serde_json::json!(locked.skipped_symlinks)
+        );
+        assert_eq!(
+            value["skipped_permission_directories"],
+            serde_json::json!(locked.inaccessible)
+        );
+        assert_eq!(value["download_errors"], serde_json::json!(locked.download_errors));
+        assert_eq!(
+            value["local_policy"],
+            serde_json::json!(locked.permission.local_policy)
+        );
+    }
+
+    #[test]
+    fn overview_reuses_and_drops_counters_with_the_committed_generation() {
+        let (_dir, service) = fixture();
+        let (first, first_timings) = overview_measured(&service).unwrap();
+        assert!(first_timings.read_only);
+        assert!(
+            !first_timings.derived_cached,
+            "first overview has no committed generation to reuse"
+        );
+        let (second, second_timings) = overview_measured(&service).unwrap();
+        assert!(
+            second_timings.derived_cached,
+            "an unchanged generation must reuse the expensive counters"
+        );
+        assert_eq!(overview_fields(&first)["issue_count"], 0);
+        assert_eq!(
+            overview_fields(&first)["cache_availability"],
+            overview_fields(&second)["cache_availability"]
+        );
+        // Any committed write invalidates the cached pair; the new generation
+        // must report its own counters (pin changes the availability summary).
+        let before_revision = service.bridge.store.local_revision();
+        service
+            .bridge
+            .store
+            .lock()
+            .unwrap()
+            .pin("one", true)
+            .unwrap();
+        let (third, third_timings) = overview_measured(&service).unwrap();
+        assert!(
+            !third_timings.derived_cached,
+            "a committed write must drop the generation-keyed counters"
+        );
+        let value = overview_fields(&third);
+        assert_eq!(value["cache_availability"]["pinned"], 1);
+        assert_eq!(
+            value["local_revision"].as_u64().unwrap(),
+            service.bridge.store.local_revision()
+        );
+        assert!(service.bridge.store.local_revision() > before_revision);
     }
 }
