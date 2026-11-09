@@ -278,7 +278,10 @@ impl Peer {
                     log.push(label(&request.body));
                     log.len()
                 };
-                assert!(count < 128, "unexpected request loop");
+                // Wide first-install fixtures legitimately ask for more than
+                // the original five-node sample; the bound only rejects a
+                // request loop that never terminates.
+                assert!(count < 4096, "unexpected request loop");
                 let answer = reply(&request.body);
                 let (body, descriptor) = match answer {
                     Answer::Disconnect => break,
@@ -2105,4 +2108,336 @@ fn cold_preview_root_rejection_revokes_but_transport_and_generic_failure_preserv
         let log = peer.finish();
         assert_eq!(log.len(), 1);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Issue #8, acceptance criterion 4: browsing and status reads stay responsive
+// while initialization imports a replacement namespace.
+//
+// The owner below is the real one: it enumerates a synthetic replacement restore
+// over the local RPC fixture, commits directory receipts into the private
+// candidate store and only then swaps the namespace in, exactly like
+// production. The previously committed tree stays readable for the whole run,
+// so the queries are user-visible reads, not internal probes. Every query
+// brackets itself with tracker snapshots; a passing run therefore proves that
+// the read overlapped a live import (a directory receipt was committed between
+// the two snapshots while the query was executing), not that the import had
+// already finished. The directory reply is delayed slightly so the import
+// window reliably outlives the whole query burst. No NAS, worker process or
+// credentials are involved.
+const LATENCY_QUERIES: usize = 64;
+const LATENCY_THREADS: usize = 4;
+const LATENCY_IMPORT_DIRECTORIES: usize = 200;
+const LATENCY_IMPORT_FILES: usize = 3;
+
+fn latency_snapshot(
+    restore: &str,
+    cursor: u64,
+    directories: usize,
+    files: usize,
+) -> RemoteSnapshot {
+    let scope = Scope {
+        view_id: 1,
+        node_id: 1,
+        file_id: "100".into(),
+        path: "/Lab".into(),
+    };
+    let version = |id: &str, directory: bool| {
+        serde_json::json!({"schema":1,"restore":restore,"view":1,"root":"100",
+            "file":id,"sync":cursor,"max":cursor,"size":if directory {0} else {3},
+            "hash":"","directory":directory})
+        .to_string()
+    };
+    let metadata = |directory: bool| {
+        Some(NodeMetadata {
+            size: if directory { 0 } else { 3 },
+            mtime: 0,
+            mode: if directory { 0o755 } else { 0o644 },
+        })
+    };
+    let mut nodes = Vec::with_capacity(1 + directories * (1 + files));
+    nodes.push(Node {
+        id: "100".into(),
+        parent: None,
+        name: "Lab".into(),
+        directory: true,
+        version: version("100", true),
+        metadata: metadata(true),
+    });
+    for directory in 0..directories {
+        let directory_id = format!("5{directory:05}");
+        nodes.push(Node {
+            id: directory_id.clone(),
+            parent: Some("100".into()),
+            name: format!("dir-{directory:03}"),
+            directory: true,
+            version: version(&directory_id, true),
+            metadata: metadata(true),
+        });
+        for file in 0..files {
+            let file_id = format!("6{directory:03}{file:02}");
+            nodes.push(Node {
+                id: file_id.clone(),
+                parent: Some(directory_id.clone()),
+                name: format!("file-{file:03}.txt"),
+                directory: false,
+                version: version(&file_id, false),
+                metadata: metadata(false),
+            });
+        }
+    }
+    RemoteSnapshot {
+        scope,
+        restore: restore.into(),
+        cursor: format!("native-v1:{cursor}"),
+        nodes,
+        inaccessible: vec![],
+        skipped_symlinks: 0,
+    }
+}
+
+fn latency_profile(scope: Scope) -> crate::service::Profile {
+    crate::service::Profile {
+        schema: 1,
+        task_id: TASK.into(),
+        host: "example.invalid".into(),
+        tls_name: "example.invalid".into(),
+        trusted_ca_pem: vec![],
+        username: "test".into(),
+        device_id: "9f1c2f7e-2d7b-4c55-8a4a-3e2f5d6c7b8a".into(),
+        scope,
+        mount: std::path::PathBuf::from("/tmp/drive-native-test-mount"),
+        writable: false,
+        local_policy: None,
+        writable_source: None,
+    }
+}
+
+fn initialization_counter(snapshot: &crate::initialization::Snapshot, counter: Counter) -> u64 {
+    snapshot
+        .work
+        .counters
+        .iter()
+        .find(|(name, _)| *name == counter)
+        .map_or(0, |(_, count)| *count)
+}
+
+#[test]
+fn initialization_keeps_browsing_and_status_reads_responsive_under_concurrent_queries() {
+    let directory = tempfile::tempdir().unwrap();
+    let service = crate::service::Service::new(
+        latency_profile(snapshot("server", 7).scope),
+        complete_store(directory.path(), 7, false),
+        std::path::PathBuf::from("/nonexistent-worker"),
+    )
+    .unwrap();
+    // `Service::supervise` opens this window before the first owner pull; doing
+    // it here keeps the test independent of the worker process.
+    service.bridge.initialization.begin();
+    let replacement = latency_snapshot(
+        "new-server",
+        8,
+        LATENCY_IMPORT_DIRECTORIES,
+        LATENCY_IMPORT_FILES,
+    );
+    let replies = replacement.clone();
+    let peer = Peer::new(replacement.clone(), move |request| match request {
+        Command::Initialization(Request::Seed) => Answer::Body(Body::Seed {
+            cursor: replies.cursor.clone(),
+            root: replies.nodes[0].clone(),
+        }),
+        Command::Initialization(Request::Root) => Answer::Body(Body::Root {
+            node: replies.nodes[0].clone(),
+        }),
+        Command::Initialization(Request::Pull { .. }) => Answer::Body(Body::Events(None)),
+        Command::Initialization(Request::Directory { node, .. }) => {
+            // Keep the import window open for the whole query burst; a real
+            // round trip is orders of magnitude larger than this delay.
+            std::thread::sleep(Duration::from_millis(2));
+            Answer::Body(Body::Directory {
+                identity: node.id.clone(),
+                denied: false,
+                children: fixture_children(&replies, &node.id),
+            })
+        }
+        Command::Pull { .. } => Answer::Ordinary,
+        _ => Answer::Fail("synthetic_unexpected_command"),
+    });
+    service
+        .bridge
+        .attach(
+            peer.rpc.clone(),
+            "new-server",
+            &serde_json::to_string(&replacement.scope).unwrap(),
+        )
+        .unwrap();
+    let import_started = Instant::now();
+    let importing = {
+        let bridge = service.bridge.clone();
+        std::thread::spawn(move || bridge.initial_pull())
+    };
+    assert!(
+        wait_for(Duration::from_secs(30), || {
+            let snapshot = service.bridge.initialization.snapshot();
+            snapshot.active && snapshot.items > 0
+        }),
+        "the owner committed no import progress; the import window never opened"
+    );
+    let before = service.bridge.initialization.snapshot();
+    assert!(before.active);
+    assert!(before.units > 0 && before.items > 0);
+    // (elapsed, active before, active after, directory commits before, after)
+    let records: Mutex<Vec<(Duration, bool, bool, u64, u64)>> = Mutex::new(Vec::new());
+    std::thread::scope(|scope| {
+        for _ in 0..LATENCY_THREADS {
+            scope.spawn(|| {
+                let mut local = Vec::with_capacity(LATENCY_QUERIES / LATENCY_THREADS);
+                for index in 0..LATENCY_QUERIES / LATENCY_THREADS {
+                    let snapshot_before = service.bridge.initialization.snapshot();
+                    let commits_before =
+                        initialization_counter(&snapshot_before, Counter::DirectoryCommitted);
+                    let started = Instant::now();
+                    let kind = index % 4;
+                    let result = match kind {
+                        0 => crate::desktop::directory(&service, "", 0),
+                        1 => crate::desktop::states(
+                            &service,
+                            vec![String::new(), "A.txt".into(), "B.txt".into()],
+                        ),
+                        2 => crate::desktop::overview(&service),
+                        _ => Ok(crate::desktop::initialization(&service)),
+                    };
+                    let elapsed = started.elapsed();
+                    let snapshot_after = service.bridge.initialization.snapshot();
+                    let commits_after =
+                        initialization_counter(&snapshot_after, Counter::DirectoryCommitted);
+                    let Ok(body) = result else {
+                        panic!("desktop query kind {kind} failed during initialization");
+                    };
+                    let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+                    match kind {
+                        0 => {
+                            assert_eq!(json["schema"].as_u64(), Some(1));
+                            assert_eq!(json["total"].as_u64(), Some(3));
+                            let entries = json["entries"].as_array().unwrap();
+                            assert_eq!(entries.len(), 3);
+                            let ids: Vec<&str> = entries
+                                .iter()
+                                .map(|entry| entry["id"].as_str().unwrap())
+                                .collect();
+                            assert!(ids.contains(&"101") && ids.contains(&"102"));
+                            assert!(ids.contains(&"200"));
+                        }
+                        1 => {
+                            assert_eq!(json["schema"].as_u64(), Some(1));
+                            let entries = json["entries"].as_array().unwrap();
+                            assert_eq!(entries.len(), 3);
+                            assert_eq!(entries[0]["id"], "100");
+                            assert_eq!(entries[1]["id"], "101");
+                            assert_eq!(entries[2]["id"], "102");
+                            assert_eq!(entries[1]["directory"].as_bool(), Some(false));
+                            assert_eq!(entries[1]["error"], serde_json::Value::Null);
+                        }
+                        2 => {
+                            assert_eq!(json["schema"].as_u64(), Some(1));
+                            assert_eq!(json["sync_state"], "checking");
+                            assert_eq!(json["initialization"]["active"].as_bool(), Some(true));
+                        }
+                        _ => {
+                            assert_eq!(json["schema"].as_u64(), Some(1));
+                            assert_eq!(json["task_id"], TASK);
+                            assert_eq!(json["initialization"]["active"].as_bool(), Some(true));
+                            assert_ne!(json["initialization"]["phase"], "waiting");
+                        }
+                    }
+                    local.push((
+                        elapsed,
+                        snapshot_before.active,
+                        snapshot_after.active,
+                        commits_before,
+                        commits_after,
+                    ));
+                }
+                records.lock().unwrap().extend(local);
+            });
+        }
+    });
+    let after = service.bridge.initialization.snapshot();
+    let records = records.into_inner().unwrap();
+    assert_eq!(records.len(), LATENCY_QUERIES);
+    let active_throughout = records
+        .iter()
+        .all(|(_, before_active, after_active, ..)| *before_active && *after_active);
+    assert!(active_throughout, "a query ran outside the live import window");
+    let overlapping = records
+        .iter()
+        .filter(|(_, _, _, commits_before, commits_after)| commits_after > commits_before)
+        .count();
+    let mut millis: Vec<u128> = records.iter().map(|(elapsed, ..)| elapsed.as_millis()).collect();
+    millis.sort_unstable();
+    let rank = (millis.len() * 95 + 99) / 100;
+    let p95 = millis[rank - 1];
+    let max = *millis.last().unwrap();
+    let committed_before = initialization_counter(&before, Counter::DirectoryCommitted);
+    let committed_after = initialization_counter(&after, Counter::DirectoryCommitted);
+    assert!(after.active, "the import finished while the queries were running");
+    assert!(
+        after.items > before.items,
+        "no import progress was committed during the query burst: {} -> {}",
+        before.items,
+        after.items
+    );
+    assert!(
+        committed_after > committed_before,
+        "no directory receipt was committed during the query burst"
+    );
+    assert!(
+        overlapping > 0,
+        "no query observed a directory commit while it was executing"
+    );
+    let joined = importing.join();
+    assert!(joined.is_ok(), "the owner thread panicked");
+    let imported = joined.ok().unwrap().expect("the owner rebuild failed");
+    assert!(imported, "the owner did not rebuild the replacement namespace");
+    let import_ms = import_started.elapsed().as_millis();
+    service.bridge.initialization.end();
+    {
+        let store = service.bridge.store.lock().unwrap();
+        assert_eq!(store.cursor().unwrap(), replacement.cursor);
+        assert_eq!(store.native_scope_binding().unwrap().unwrap().0, "new-server");
+        assert_eq!(store.initialization_status().unwrap().unwrap().state, "ready");
+        assert_eq!(store.lookup_node("100", "dir-000").unwrap().id, "500000");
+        assert_eq!(store.lookup_node("500000", "file-000.txt").unwrap().id, "600000");
+    }
+    let log = peer.finish();
+    assert!(log.contains(&"seed".into()));
+    let reads = log
+        .iter()
+        .filter(|line| line.starts_with("directory:"))
+        .count();
+    assert!(
+        reads >= LATENCY_IMPORT_DIRECTORIES,
+        "the owner read fewer directories than the fixture contains: {reads}"
+    );
+    assert!(
+        p95 <= 500,
+        "p95 {p95}ms exceeds the 500ms acceptance bound (max {max}ms)"
+    );
+    assert!(
+        max < 5_000,
+        "a desktop query blocked for {max}ms during initialization"
+    );
+    println!(
+        "#8 INIT-QUERIES total={} threads={} p95_ms={p95} max_ms={max} \
+         import_ms={import_ms} directories={} nodes={} items_before={} items_after={} \
+         directory_commits_delta={} overlapping_queries={overlapping} \
+         active_throughout={active_throughout}",
+        records.len(),
+        LATENCY_THREADS,
+        LATENCY_IMPORT_DIRECTORIES,
+        replacement.nodes.len(),
+        before.items,
+        after.items,
+        committed_after - committed_before,
+    );
 }
