@@ -21,6 +21,11 @@
 - 全局设置页是真实设置，不再是占位文字：桌面通知两个开关、同步历史保留说明与“打开同步历史”入口、关闭／退出行为和键盘说明。
 - 设置写入配置根下的 `gui-settings.json`（`schema=1`），与任务 profile 分离；目录 0700、文件 0600、`O_NOFOLLOW`、临时文件加 `os.replace` 原子替换。损坏、权限不符或含未知 schema 的文件回退默认值，不阻止窗口启动。设置只保存布尔偏好，不保存账号、服务器或密码。
 
+### 排除规则（issue #50 阶段 4）
+
+- 侧栏“排除规则”打开当前挂载的排除规则编辑器：读取任务 profile 的 `exclude_patterns`（缺失视为空列表），支持添加、更新所选、删除所选与保存；空列表表示不排除任何路径。规则是 Rust `regex` 语法、区分大小写的正则，匹配相对同步目录根的 POSIX 路径，命中的文件、目录及其整个子树不会出现在挂载视图中，规则变更在下次启动挂载后完全生效。
+- 保存前复用 `config._validate_exclude_patterns` 预编译校验，非法正则就地提示原始 pattern 与编译错误且不改动 profile；保存只替换 `exclude_patterns` 键，沿用目录 0700、文件 0600 与临时文件 `os.replace` 原子替换，并对 `task_id` 做并发保护（窗口打开期间换了任务则拒绝写入）。所有控件有可读 accessible name 且可 Tab 到达，错误消息放在可读的提示标签中。
+
 ## 通知与全局设置
 
 - `NotificationCenter` 接收每次 `GetOverview`：`connection == locked` 提示需要登录；`needs_attention` 或 `error` 提示需要处理；`background_error` 持续满 60 秒提示持续同步失败。同一挂载的同一类问题在一个 episode 内只通知一次，条件消失后重置；同一挂载同类问题 30 分钟内合并，不同挂载、不同类别不合并。
@@ -61,4 +66,4 @@ GUI 使用会话 D-Bus 服务按配置根隔离单实例。再次启动激活同
 GUI_PYTHON=/path/to/gui-venv/bin/python bash scripts/test-gui.sh
 ```
 
-`scripts/test-gui.sh` 在 offscreen 环境逐个运行测试模块（含 `notification_tests`、`notification_dbus_tests`、`history_gui_tests`、`shutdown_diagnostic_tests`、`keyboard_gui_tests`、`window_transfer_tests`、`window_state_tests`）；脚本清除继承的 `DBUS_SESSION_BUS_ADDRESS`／`DBUS_SESSION_BUS_PID`，使通知投递测试使用注入的 fake 连接、绝不碰真实会话总线；`gui_instance_test` 在无会话总线且系统有 `dbus-run-session` 时自动套一层真实会话总线并设置 `DRIVE_NATIVE_GUI_REQUIRE_BUS=1`。测试不依赖真实托盘、D-Bus 或网络。渲染脚本 [`unified_gui_render.py`](../tests/unified_gui_render.py) 只使用合成挂载，不读取账号、访问 NAS 或连接后台。浅／深色截图只验证布局，不等同于 Mint/Cinnamon 托盘、通知和实机验收。完整包、真实 NAS、普通目录全量同步及其他最终门禁仍按仓库验收记录执行。
+`scripts/test-gui.sh` 在 offscreen 环境逐个运行测试模块（含 `notification_tests`、`notification_dbus_tests`、`history_gui_tests`、`shutdown_diagnostic_tests`、`keyboard_gui_tests`、`window_transfer_tests`、`release_gui_tests`、`exclude_gui_tests`、`window_state_tests`）；脚本清除继承的 `DBUS_SESSION_BUS_ADDRESS`／`DBUS_SESSION_BUS_PID`，使通知投递测试使用注入的 fake 连接、绝不碰真实会话总线；`gui_instance_test` 在无会话总线且系统有 `dbus-run-session` 时自动套一层真实会话总线并设置 `DRIVE_NATIVE_GUI_REQUIRE_BUS=1`。测试不依赖真实托盘、D-Bus 或网络。渲染脚本 [`unified_gui_render.py`](../tests/unified_gui_render.py) 只使用合成挂载，不读取账号、访问 NAS 或连接后台。浅／深色截图只验证布局，不等同于 Mint/Cinnamon 托盘、通知和实机验收。完整包、真实 NAS、普通目录全量同步及其他最终门禁仍按仓库验收记录执行。

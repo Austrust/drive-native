@@ -28,6 +28,7 @@ from .issues import IssuesDialog
 from .trust import TrustSettingsDialog
 from .transfers import TransfersDialog, transfer_overview_summary, transfer_rows
 from .cache_settings import CacheSettingsDialog, byte_text
+from .exclude_settings import ExcludeSettingsDialog
 from .bus import ClientBus
 from .config import load_profile, config_path, binary, archive_profile, restore_profile
 from .wizard import SetupWizard
@@ -301,6 +302,7 @@ class MainWindow(QMainWindow):
         left.addWidget(self.issues_button)
         self.issues_dialog = None
         self.cache_dialog = None
+        self.exclude_dialog = None
         self.trust_dialog = None
         self.trust_settings_button = QPushButton("连接证书")
         self.trust_settings_button.clicked.connect(self.show_trust_settings)
@@ -308,6 +310,10 @@ class MainWindow(QMainWindow):
         self.cache_settings_button = QPushButton("缓存设置")
         self.cache_settings_button.clicked.connect(self.show_cache_settings)
         left.addWidget(self.cache_settings_button)
+        self.exclude_settings_button = QPushButton("排除规则")
+        self.exclude_settings_button.setAccessibleName("排除规则设置")
+        self.exclude_settings_button.clicked.connect(self.show_exclude_settings)
+        left.addWidget(self.exclude_settings_button)
         self.open_folder = QPushButton("在文件管理器中打开")
         self.open_folder.clicked.connect(self.open_in_files)
         left.addWidget(self.open_folder)
@@ -674,6 +680,16 @@ class MainWindow(QMainWindow):
         self.cache_dialog.raise_()
         self.cache_dialog.activateWindow()
         self.cache_dialog.refresh()
+
+    def show_exclude_settings(self):
+        if self.exclude_dialog is None:
+            self.exclude_dialog = ExcludeSettingsDialog(
+                self, instance=self.instance
+            )
+        self.exclude_dialog.show()
+        self.exclude_dialog.raise_()
+        self.exclude_dialog.activateWindow()
+        self.exclude_dialog.reload()
 
     def show_issues(self):
         if self.issues_dialog is None:
