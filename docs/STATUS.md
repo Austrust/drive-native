@@ -4,6 +4,8 @@
 
 当前源码候选：`0.1.0~dev20261109.2`（`integration/fixes3`，schema v29、IPC21）；发布说明见 [RELEASE_NOTES.md](RELEASE_NOTES.md)，可复制的验收命令见 [ACCEPTANCE_COMMANDS.md](ACCEPTANCE_COMMANDS.md)。
 
+只读路径排除与预览挂载：[按任务正则排除（#50 P1–P3，含 B2 preview 修复）](EXCLUDE_PATTERNS.md)；跨平台移植（#11 stage0）：[Windows / CFAPI 移植路线与 core POSIX 门禁](WINDOWS_PORT.md)（`bash scripts/check-core-posix.sh`，当前为骨架阶段）。
+
 本地修复分支的证据入口：[索引与桌面历史](FIX_5_2_REPORT.md) · [逐目录权限](FIX_7_REPORT.md) · [DB 热点与增量状态投影（#15/#16/#8）](ISSUES_20261107.md)。
 
 已知 FUSE 限制：[硬链接不支持（#18）](FUSE_HARDLINK.md)。

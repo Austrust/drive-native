@@ -1,6 +1,6 @@
 # 验收命令（P032 / integration/fixes3 批次）
 
-本页是性能复核 issue [#1](https://github.com/Austrust/drive-native/issues/1)–[#14](https://github.com/Austrust/drive-native/issues/14) 与本批修复（#6/#8/#9 TB1/#14/#18/#19/#2 2a/#50 P1-P2/#53）的可复制验收命令。命令以最终合并树 `integration/fixes3`（`work/integ3/src`）为准；最终验收的验证代码树 = `integration/fixes3` 冻结 HEAD（`final-<tag>.log` 首行记录该真实 HEAD；本页编写时的复核树为 `aa36099`，task-21 修复并入后重冻结）。重负载必须在远端 Linux 构建机执行，不要在 WSL 或开发机跑长基准。
+本页是性能复核 issue [#1](https://github.com/Austrust/drive-native/issues/1)–[#14](https://github.com/Austrust/drive-native/issues/14) 与本批修复（#6/#8/#9 TB1/#14/#18/#19/#2 2a/#50 P1-P3（含 B2）/#11 stage0/#53）的可复制验收命令。命令以最终合并树 `integration/fixes3`（`work/integ3/src`）为准；最终验收的验证代码树 = `integration/fixes3` 冻结 HEAD（`final-<tag>.log` 首行记录该真实 HEAD；本页编写时的复核树为 `aa36099`，其后又合入 #50 P3/B2、#14 补漏、#11 stage0 与 #8 门禁稳健性，task-21 已并入，最终以冻结日志为准）。重负载必须在远端 Linux 构建机执行，不要在 WSL 或开发机跑长基准。
 
 ## 共同前提
 
@@ -11,11 +11,11 @@ export CARGO_TARGET_DIR=/tmp/p032-targets/t0
 #   flock ~/p032/test.lock cargo test ...
 ```
 
-- `#[ignore]` 用例不会随普通 `cargo test` 执行，必须显式 `-- --ignored --nocapture`。
+- `#[ignore]` 用例不会随普通 `cargo test` 执行，必须显式 `-- --ignored --nocapture`；lib 内 ignored 用例也可用 `-- --include-ignored --test-threads=1` 连同普通用例一起跑（见第 24 条）。
 - 内核测试（`--test mounted`、`permissions_kernel` 等）需要普通 Linux 用户 + `/dev/fuse`；WSL/容器不满足。FUSE 测试二进制之间并行执行会用错误的 OnceLock 顺序初始化 `DRIVE_NATIVE_FS_DIAGNOSTICS` 采样，必须逐二进制串行并显式传 `DRIVE_NATIVE_FS_DIAGNOSTICS=1`（最终验收脚本已按 `--test-threads=1` 执行；测试隔离 follow-up 见 #24）。
 - GUI 测试要求 `GUI_PYTHON` 指向锁定 venv 的 python：`GUI_PYTHON=$HOME/dn/.venv-build/bin/python bash scripts/test-gui.sh`。
 - `status_latency_210k` / `namespace_index_budget` / `scale_perf*` 在测试内自建合成夹具，无需外部 fixture 路径；需要数 GiB 临时盘与 `/dev/fuse`（210k 用例）；`LAT_CURVE_DIRS` / `LAT_CURVE_WARM_ITERS` 可控制规模曲线。
-- 当前合入状态（2026-11-09）：性能修复 `#21–#33` 已合入 `integration/fixes2`；本批 `#14/#19/#18/#53/#8/#6/#2 2a/#50 P1-P2/#9 TB1` 已合入 `integration/fixes3`（`22ba761` 之后，105 files +6388/−165，HEAD 复核于 `aa36099`）。task-21（abandoned 残留 pending op）为发布前必修，修复并入后重冻结。最终计数以最终验收日志的 SUMMARY 为准，本文件命令可直接在冻结树执行（验证树内容见本页开头）。
+- 当前合入状态（2026-11-09 增量）：性能修复 `#21–#33` 已合入 `integration/fixes2`；本批 `#14/#19/#18/#53/#8/#6/#2 2a/#50 P1-P3（含 B2 preview 修复）/#9 TB1/#11 stage0` 已合入 `integration/fixes3`（`22ba761` 之后；`aa36099` 复核后再增量合入 #50 P3/B2、#14 补漏、#11 stage0 与 #8 门禁稳健性）。task-21（abandoned 残留 pending op）已并入（`42580b5`）。#9 TB2（`commit_diagnostics` 消费面）仍在单独分支，随 replay commit 合入后补验收命令。最终计数以最终验收日志的 SUMMARY 为准，本文件命令可直接在冻结树执行（验证树内容见本页开头）。
 
 ## 按 issue
 
@@ -162,7 +162,7 @@ export CARGO_TARGET_DIR=/tmp/p032-targets/t0
     cargo test -p drive-runtime --all-features --locked --lib initialization_owner::tests
     cargo test -p drive-runtime --all-features --locked --test desktop initialization_remains_available
     ```
-    用例自建 210k 合成夹具并在共享构建机上对负载敏感；p95 门槛与分段统计以用例输出为准。该批只增测试，不改变运行时行为。
+    用例自建 210k 合成夹具并在共享构建机上对负载敏感；p95 门槛与分段统计以用例输出为准。门禁稳健性调整：并发查询证据改为单调计数（attempts_throughout/DirectoryCommitted），并把 delayed directory / FIFO 启动超时预算放宽到 60s/30s；该批只增/调整测试，不改变运行时行为。
 
 21. **#6 已绑定目录 stale conflict 自愈**
     ```sh
@@ -174,14 +174,30 @@ export CARGO_TARGET_DIR=/tmp/p032-targets/t0
     ```sh
     GUI_PYTHON=$HOME/dn/.venv-build/bin/python desktop/tests/notification_dbus_tests.py
     ```
-    覆盖托盘优先、托盘缺失/失败回退 freedesktop、jeepney/会话总线缺失安静降级、ActionInvoked 点击路由、通知 id 复用与 32 条映射淘汰。`scripts/test-gui.sh` 会一次性跑全部 25 个 GUI 模块，脚本没有单模块参数；单模块按上面直接执行，所需环境变量见 `scripts/test-gui.sh`。
+    覆盖托盘优先、托盘缺失/失败回退 freedesktop、jeepney/会话总线缺失安静降级、ActionInvoked 点击路由、通知 id 复用与 32 条映射淘汰。`scripts/test-gui.sh` 会一次性跑全部 26 个 GUI 模块，脚本没有单模块参数；单模块按上面直接执行，所需环境变量见 `scripts/test-gui.sh`。
 
 23. **#50 P1/P2 按任务正则排除**
     ```sh
     cargo test -p drive-core --all-features --locked --lib exclude_tests
     GUI_PYTHON=$HOME/dn/.venv-build/bin/python desktop/tests/gui_unit_tests.py
     ```
-    重点断言：初始化候选按规则整棵子树剪枝、祖先规则排除后代、root 永不被排除、非法正则报出 pattern 与编译错误、GUI 保存时用等价校验；FUSE 视图过滤、上传下载防御与存量清理属后续 P3/P4。
+    重点断言：初始化候选按规则整棵子树剪枝、祖先规则排除后代、root 永不被排除、非法正则报出 pattern 与编译错误、GUI 保存时用等价校验；FUSE 读路径过滤（P3）与 preview 挂载（B2）见第 24 条；上传/下载/缓存调度防御与规则变更后的存量清理属阶段 4。
+
+24. **#50 P3 读路径隐藏与 B2 preview 挂载**
+    ```sh
+    cargo test -p drive-core --all-features --locked --lib exclude_index_tests
+    DRIVE_NATIVE_FS_DIAGNOSTICS=1 cargo test -p drive-fs --all-features --locked --lib exclude_read_tests -- --ignored --nocapture
+    cargo test -p drive-runtime --all-features --locked --lib mount_exclusion -- --include-ignored --test-threads=1
+    ```
+    重点断言：排除路径在 FUSE 读路径返回 `ENOENT`（lookup/getattr/readdir(plus)/open/opendir），`readdir(plus)` 不显示且分页 cookie 保持原位置（允许空洞）；事件与恢复快照在入口剪枝；GetDirectory/GetStates 过滤自身与子树；未配置规则时保持零成本快路径；带规则的任务在初始化 preview 阶段挂载成功（空索引），初始化完成/快照安装后索引重建、排除路径不可见。`exclude_read_tests` 与 `mount_exclusion` 是内核用例，需普通 Linux 用户 + `/dev/fuse`；FUSE 测试二进制之间串行执行。
+
+25. **#11 stage0 core POSIX 门禁**
+    ```sh
+    bash scripts/check-core-posix.sh
+    bash scripts/check-core-posix.sh --list
+    bash scripts/check-core-posix.sh --strict || true
+    ```
+    默认模式扫描 `crates/drive-core` 的 POSIX 依赖，新增未列入 allowlist 的命中即失败（`scripts/verify.sh` 已接入，发生在 `--tests-only` 早退之前）；`--list` 输出扫描文件/命中/allowlist 清单；`--strict` 当前会把 allowlist 项也报为违规，仅用于收紧基线，不接入 CI。当前基线：63 个文件、108 处命中全部在 allowlist（0 violations）。迁移计划与三接口见 [WINDOWS_PORT.md](WINDOWS_PORT.md)。
 
 ## 与 issue #8 三树数字的关系
 

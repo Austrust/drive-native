@@ -1,18 +1,21 @@
 # 0.1.0~dev20261109.2：上传终态处理、缓存释放与 schema v29（候选）
 
-本批把 #14 未确认上传预算耗尽后的 `abandoned` 终态与「放弃本地文件」入口、#19 缓存释放后台作业与 GC 回收、#18 FUSE 硬链接拒绝语义、#53 后台提交推进后的托盘/导航计数刷新、#8 初始化期间桌面读响应性验收、#6 已绑定目录 stale conflict 标志自愈、#9 TB1 的 schema v29 诊断列与迁移回填、#2 2a 托盘不可用时的 freedesktop 系统通知回退、#50 P1/P2 的按任务正则排除合入 `integration/fixes3`（`22ba761` 之后的候选树）。schema29、IPC21：FSD 与 worker 必须成对更新，旧程序不能读取新 schema；升级前会自动 `VACUUM INTO` `state-before-v29-*.sqlite` 备份。
+本批把 #14 未确认上传预算耗尽后的 `abandoned` 终态与「放弃本地文件」入口、#19 缓存释放后台作业与 GC 回收、#18 FUSE 硬链接拒绝语义、#53 后台提交推进后的托盘/导航计数刷新、#8 初始化期间桌面读响应性验收、#6 已绑定目录 stale conflict 标志自愈、#9 TB1 的 schema v29 诊断列与迁移回填、#2 2a 托盘不可用时的 freedesktop 系统通知回退、#50 的按任务正则排除（P1/P2 初始化剪枝、P3 读路径隐藏与 B2 preview 挂载修复）、#11 stage0 的 core POSIX 门禁与 Windows 移植骨架、#14 残留 pending 上传补漏、#8 门禁稳健性合入 `integration/fixes3`（`22ba761` 之后的候选树）。schema29、IPC21：FSD 与 worker 必须成对更新，旧程序不能读取新 schema；升级前会自动 `VACUUM INTO` `state-before-v29-*.sqlite` 备份。
 
-- **#14**：未确认上传在 5 次核对后进入 `abandoned` 暂停态，不再无限占用 `pending_operations`；GetIssues 提供「放弃本地文件」（只删本地、不改服务器条目）与重新核对入口，overview 用 `paused_uploads` 单独提示。
+- **#14**：未确认上传在 5 次核对后进入 `abandoned` 暂停态，不再无限占用 `pending_operations`；GetIssues 提供「放弃本地文件」（只删本地、不改服务器条目）与重新核对入口，overview 用 `paused_uploads` 单独提示。放弃或本地删除时会一并作废该节点残留的 pending/uncertain 上传操作，避免遗留计数。
 - **#19**：释放空间改为后台作业，带进度、取消与 released/skipped/protected 分类；每 32 个文件触发一次 GC 回收已删除节点的正文；已在线文件不再报假成功。
 - **#18**：FUSE `link(2)` 现在返回 `EOPNOTSUPP`（Linux 上等同 `ENOTSUP`）而非 `EPERM`，工具可按标准语义降级为复制/改名；硬链接仍不支持，符号链接行为不变，详见 [FUSE_HARDLINK.md](FUSE_HARDLINK.md)。
 - **#53**：后台提交/安装推进已提交状态水位时，现在会刷新 overview，托盘「需要检查」徽标与导航计数不再过期。
-- **#8**：新增初始化期间桌面读响应性验收测试（210k 合成库、并发查询），本批无运行时行为变化；#8 全量门槛仍以 final-validate 为准。
+- **#8**：新增初始化期间桌面读响应性验收测试（210k 合成库、并发查询），本批无运行时行为变化；门禁稳健性调整为单调计数证据（attempts_throughout/DirectoryCommitted）并放宽并发用例超时预算（delayed directory 60s、FIFO 30s）；#8 全量门槛仍以 final-validate 为准。
 - **#6**：已绑定目录在快照安装、mkdir/rename 确认成功后自动清除残留的 conflict 标志；真实冲突（远端删除、本地脏内容、未终态操作等）保留，规则见 [STALE_CONFLICTS.md](STALE_CONFLICTS.md)。
 - **#9 TB1**：schema v29 只追加 `outcome`/诊断列、`schema_migrations`/`recovery_runs`/`platform_state_changes` 表与 `commit_diagnostics` 视图，并对历史 uncertain/inflight 行做幂等回填；本批只建抽象，不改变提交行为。
 - **#2 2a**：托盘不可用或 showMessage 失败时，通过 freedesktop D-Bus 发送系统通知；jeepney/会话总线缺失时安静降级，不影响主流程。
-- **#50 P1/P2**：profile 新增可选 `exclude_patterns`，初始化导入对匹配路径整棵子树剪枝，非法正则拒绝并报出 pattern 与编译错误，GUI 保存时做同样校验；详见 [EXCLUDE_PATTERNS.md](EXCLUDE_PATTERNS.md)。FUSE 视图过滤与存量清理属 P3/P4，未在本批。
+- **#50 P1/P2**：profile 新增可选 `exclude_patterns`，初始化导入对匹配路径整棵子树剪枝，非法正则拒绝并报出 pattern 与编译错误，GUI 保存时做同样校验；详见 [EXCLUDE_PATTERNS.md](EXCLUDE_PATTERNS.md)。FUSE 读路径过滤（P3）与初始化 preview 挂载修复（B2）已在本批，见下；上传/下载/缓存调度防御与规则变更后的存量清理属阶段 4。
+- **#50 P3**：配置了 `exclude_patterns` 的任务，读路径对匹配路径整棵子树返回 `ENOENT`（lookup/getattr/readdir(plus)/open/opendir），readdir 不显示且分页游标保持稳定；GetDirectory/GetStates 同样过滤，远端事件与恢复快照在入口剪枝；未配置规则时保持零成本快路径，规则变更后的本地存量清理属阶段 4，详见 [EXCLUDE_PATTERNS.md](EXCLUDE_PATTERNS.md)。
+- **#50 B2**：初始化 preview 阶段（committed root 尚未出现）带排除规则挂载不再因索引刷新失败导致后台退出；preview 阶段使用空索引，初始化完成或恢复快照安装后由 bridge 自动重建，排除路径随后保持不可见。
+- **#11 stage0**：新增 `scripts/check-core-posix.sh`，对 `drive-core` 的 POSIX 依赖做可审计门禁（默认模式已接入 `scripts/verify.sh`，当前基线为 63 个文件、108 处命中全部列在窄 allowlist；`--strict` 用于收紧基线）；同时新增 [WINDOWS_PORT.md](WINDOWS_PORT.md) 的 FileIdentity/StatePush/LocalChangeSource 三接口与去 POSIX 迁移计划，本阶段不改 Rust/schema/运行行为。
 
-验证状态：本批候选树为 `integration/fixes3`（HEAD 以 final-validate 日志首行为准）；正式计数、48 路与性能结论待 final-validate 完成后回填，本文不宣称最终验收通过。发布前必修的 task-21（abandoned 残留 pending op）须并入冻结树后再发布。
+验证状态：本批候选树为 `integration/fixes3`（HEAD 以 final-validate 日志首行为准）；正式计数、48 路与性能结论待 final-validate 完成后回填，本文不宣称最终验收通过。发布前必修的 task-21（abandoned 残留 pending op）已并入本树（`42580b5`），冻结前确认包含；#9 TB2 的 schema 诊断消费面随 replay commit 合入，不在本候选节声明范围。
 
 以下保留此前发布记录。
 
