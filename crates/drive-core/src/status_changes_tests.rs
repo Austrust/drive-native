@@ -451,7 +451,7 @@ fn related_status_tables_emit_and_download_error_clearing_is_not_lost() {
     s.db.execute_batch(
         "INSERT INTO drafts VALUES('a','token','v1',0,0,0);
         UPDATE drafts SET dirty=1,generation=1 WHERE node='a';
-        INSERT INTO transfers VALUES('t','a','v1','download','failed','{}');
+        INSERT INTO transfers(id,node,version,direction,state,error) VALUES('t','a','v1','download','failed','{}');
         UPDATE transfers SET state='pending',error=NULL WHERE id='t';
         INSERT INTO local_unlinks VALUES('a',0);
         INSERT INTO operations(id,node,kind,base,blob,generation,state) VALUES('o','a','upload','v1',NULL,1,'pending');
@@ -747,6 +747,12 @@ fn schema_inventory_requires_an_explicit_decision_for_new_tables_and_columns() {
         "preview_visibility",
         "preview_denied",
         "sqlite_sequence",
+        // Schema 29 commit-diagnostic support (#9 TB1): the migration ledger is
+        // not a status atom; recovery runs (#10) and platform state pushes
+        // (#11) are separate journals whose consumers publish their own atoms.
+        "schema_migrations",
+        "recovery_runs",
+        "platform_state_changes",
     ];
     let expected: BTreeSet<String> = SOURCES
         .iter()
@@ -769,10 +775,40 @@ fn schema_inventory_requires_an_explicit_decision_for_new_tables_and_columns() {
         let ignored: &[&str] = match table {
             // Reconcile bookkeeping is local retry scheduling, not an externally
             // visible status change, so the journal deliberately omits both
-            // columns (schema 27; see the operations SOURCES mapping).
-            "operations" => &["id", "reconcile_attempts", "reconcile_at"],
-            "transfers" => &["id"],
-            "namespace_ops" => &["seq", "id"],
+            // columns (schema 27; see the operations SOURCES mapping). Schema 29
+            // adds the same kind of local commit diagnosis (#9 TB1): outcome,
+            // category, last_error, retry time and update time are durable
+            // audit/retry bookkeeping, not icon/namespace atoms.
+            "operations" => &[
+                "id",
+                "reconcile_attempts",
+                "reconcile_at",
+                "outcome",
+                "outcome_category",
+                "last_error",
+                "next_retry_at",
+                "updated_at",
+            ],
+            "transfers" => &[
+                "id",
+                "outcome",
+                "outcome_category",
+                "last_error",
+                "next_retry_at",
+            ],
+            "namespace_ops" => &[
+                "seq",
+                "id",
+                "attempts",
+                "outcome",
+                "outcome_category",
+                "last_error",
+                "next_retry_at",
+                "updated_at",
+            ],
+            // #11 platform push state is orthogonal to the sync-state atoms and
+            // is published through `platform_state_changes`, not the nodes row.
+            "nodes" => &["in_sync"],
             "engine_bridge_intents" => &["key", "body", "baseline"],
             _ => &[],
         };
