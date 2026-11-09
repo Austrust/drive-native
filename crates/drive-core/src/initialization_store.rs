@@ -561,6 +561,21 @@ impl Store {
             _ => Err(invalid("incomplete native binding")),
         }
     }
+    /// Scope root file id from the persisted native binding, if any.
+    ///
+    /// Used by the exclusion index refresher, which only needs the identity of
+    /// the mounted root and must not depend on the native protocol types.
+    pub fn native_scope_root(&self) -> Result<Option<String>> {
+        let Some((_, scope)) = self.native_scope_binding()? else {
+            return Ok(None);
+        };
+        let scope: serde_json::Value =
+            serde_json::from_str(&scope).map_err(|_| invalid("invalid native scope binding"))?;
+        match scope.get("file_id").and_then(|value| value.as_str()) {
+            Some(id) if !id.is_empty() => Ok(Some(id.to_owned())),
+            _ => Err(invalid("invalid native scope binding")),
+        }
+    }
     pub fn initialization_directory_path(
         &self,
         run: &InitializationRun,

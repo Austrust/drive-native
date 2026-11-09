@@ -47,6 +47,46 @@ struct PathState {
 fn other() -> io::Error {
     io::Error::other("local state unavailable")
 }
+/// Issue #50: active exclusion rules for read-only desktop projections.
+/// `None` keeps every projection on its unfiltered fast path.
+fn exclusion_rules(service: &Service) -> Option<drive_core::exclude::ExcludeRules> {
+    let state = service.bridge.exclusion_state();
+    if state.is_active() {
+        Some(state.rules().clone())
+    } else {
+        None
+    }
+}
+/// Mount-relative representation of a desktop path, used to match rules with the
+/// same semantics as FUSE/initialization (POSIX path relative to the scope root).
+fn mount_relative<'a>(mount: &Path, input: &'a str) -> Option<&'a str> {
+    let path = Path::new(input);
+    let relative = if path.is_absolute() {
+        path.strip_prefix(mount).ok()?
+    } else {
+        path
+    };
+    relative.to_str()
+}
+fn path_excluded(
+    rules: &drive_core::exclude::ExcludeRules,
+    mount: &Path,
+    input: &str,
+    is_dir: bool,
+) -> bool {
+    mount_relative(mount, input).is_some_and(|relative| rules.matches(relative, is_dir))
+}
+fn excluded_error() -> io::Error {
+    io::Error::from_raw_os_error(libc::ENOENT)
+}
+/// Display path of a child of `parent` (the desktop API's mount-relative form).
+fn child_path(parent: &str, name: &str) -> String {
+    if parent.is_empty() {
+        name.to_owned()
+    } else {
+        format!("{}/{}", parent.trim_end_matches('/'), name)
+    }
+}
 pub fn resolve(store: &Store, root: &str, mount: &Path, input: &str) -> io::Result<Node> {
     #[cfg(test)]
     counters::count_resolve();
@@ -282,11 +322,12 @@ fn states_off_lock(
     active: &HashSet<String>,
 ) -> io::Result<String> {
     let root = &service.profile.scope.file_id;
+    let rules = exclusion_rules(service);
     if preview::active(store, root)? {
-        return preview::states(store, root, &service.profile.mount, paths);
+        return preview::states(store, root, &service.profile.mount, paths, rules.as_ref());
     }
     store.ensure_fs_root(root).map_err(|_| other())?;
-    let resolved = resolve_all(store, service, paths);
+    let resolved = resolve_all(store, service, paths, rules.as_ref());
     let entries = entries_off_lock(store, service, resolved, active)?;
     Ok(states_document(entries))
 }
@@ -297,11 +338,12 @@ fn states_locked(
 ) -> io::Result<String> {
     let root = &service.profile.scope.file_id;
     let store = service.bridge.store.lock().unwrap();
+    let rules = exclusion_rules(service);
     if preview::active(&store, root)? {
-        return preview::states(&store, root, &service.profile.mount, paths);
+        return preview::states(&store, root, &service.profile.mount, paths, rules.as_ref());
     }
     store.ensure_fs_root(root).map_err(|_| other())?;
-    let resolved = resolve_all(&store, service, paths);
+    let resolved = resolve_all(&store, service, paths, rules.as_ref());
     let mut tree = load_tree(&store, &resolved)?;
     // Folder aggregation is CPU-only after capture. Release the writer's mutex
     // before walking the tree, so FUSE and overview requests can make progress.
@@ -317,6 +359,7 @@ fn resolve_all(
     store: &Store,
     service: &Service,
     paths: Vec<String>,
+    rules: Option<&drive_core::exclude::ExcludeRules>,
 ) -> Vec<(String, io::Result<Node>)> {
     paths
         .into_iter()
@@ -326,7 +369,17 @@ fn resolve_all(
                 &service.profile.scope.file_id,
                 &service.profile.mount,
                 &path,
-            );
+            )
+            .and_then(|node| {
+                // Issue #50: excluded paths behave exactly like missing ones.
+                if rules.is_some_and(|rules| {
+                    path_excluded(rules, &service.profile.mount, &path, node.directory)
+                }) {
+                    Err(excluded_error())
+                } else {
+                    Ok(node)
+                }
+            });
             (path, node)
         })
         .collect()
@@ -527,7 +580,7 @@ fn entries_locked_paths(
     store
         .ensure_fs_root(&service.profile.scope.file_id)
         .map_err(|_| other())?;
-    let resolved = resolve_all(&store, service, paths);
+    let resolved = resolve_all(&store, service, paths, exclusion_rules(service).as_ref());
     let mut tree = load_tree(&store, &resolved)?;
     let guard = if tree.is_some() {
         drop(store);
@@ -1037,7 +1090,7 @@ fn release_ids(service: &Service, paths: &[String]) -> io::Result<Vec<String>> {
     let store = service.bridge.store.lock().unwrap();
     let mut ids = Vec::new();
     let mut covered = HashSet::new();
-    for (_, resolved) in resolve_all(&store, service, paths.to_vec()) {
+    for (_, resolved) in resolve_all(&store, service, paths.to_vec(), exclusion_rules(service).as_ref()) {
         let mut pending = vec![resolved?];
         let mut seen = HashSet::new();
         while let Some(node) = pending.pop() {
@@ -1315,6 +1368,7 @@ pub fn cancel_release(service: &Service, job_id: &str) -> io::Result<String> {
 
 /// Read-only browser pages from local metadata, including before network unlock.
 pub fn directory(service: &Service, path: &str, offset: u32) -> io::Result<String> {
+    let rules = exclusion_rules(service);
     let (children, total) = {
         let store = service.bridge.store.lock().unwrap();
         if preview::active(&store, &service.profile.scope.file_id)? {
@@ -1324,6 +1378,7 @@ pub fn directory(service: &Service, path: &str, offset: u32) -> io::Result<Strin
                 &service.profile.mount,
                 path,
                 offset,
+                rules.as_ref(),
             );
         }
         store
@@ -1335,10 +1390,28 @@ pub fn directory(service: &Service, path: &str, offset: u32) -> io::Result<Strin
             &service.profile.mount,
             path,
         )?;
+        // Issue #50: a directory that is itself excluded is indistinguishable
+        // from a missing one.
+        if rules
+            .as_ref()
+            .is_some_and(|rules| path_excluded(rules, &service.profile.mount, path, node.directory))
+        {
+            return Err(excluded_error());
+        }
         let total = store.child_node_count(&node.id).map_err(|_| other())?;
-        let children = store
+        let mut children = store
             .child_nodes_page(&node.id, offset as usize, 256)
             .map_err(|_| other())?;
+        if let Some(rules) = &rules {
+            children.retain(|child| {
+                !path_excluded(
+                    rules,
+                    &service.profile.mount,
+                    &child_path(path, &child.name),
+                    child.directory,
+                )
+            });
+        }
         (children, total)
     };
     // The page snapshot already carries every child id, so only the requested
@@ -1347,11 +1420,7 @@ pub fn directory(service: &Service, path: &str, offset: u32) -> io::Result<Strin
     let resolved: Vec<(String, io::Result<Node>)> = children
         .into_iter()
         .map(|child| {
-            let name = if path.is_empty() {
-                child.name.clone()
-            } else {
-                format!("{}/{}", path.trim_end_matches('/'), child.name)
-            };
+            let name = child_path(path, &child.name);
             (name, Ok(child))
         })
         .collect();
@@ -2025,20 +2094,20 @@ mod readpath_tests {
             "folder/one".to_string(),
             "missing".to_string(),
         ];
-        let resolved = resolve_all(&store, &service, paths.clone());
+        let resolved = resolve_all(&store, &service, paths.clone(), None);
         let mut scoped = load_tree(&store, &resolved).unwrap();
         let scoped_json = render_states(resolved, &active, Some(&store), &mut scoped);
-        let resolved = resolve_all(&store, &service, paths);
+        let resolved = resolve_all(&store, &service, paths, None);
         let mut projected = load_tree_with_projection(&store, &projection, &resolved).unwrap();
         let projected_json = render_states(resolved, &active, Some(&store), &mut projected);
         assert_eq!(scoped_json, projected_json);
         // File-only batches build no tree on either path.
         let files = vec!["folder/one".to_string(), "missing".to_string()];
-        let resolved_files = resolve_all(&store, &service, files.clone());
+        let resolved_files = resolve_all(&store, &service, files.clone(), None);
         let mut scoped_files = load_tree(&store, &resolved_files).unwrap();
         let scoped_files_json =
             render_states(resolved_files, &active, Some(&store), &mut scoped_files);
-        let resolved_files = resolve_all(&store, &service, files);
+        let resolved_files = resolve_all(&store, &service, files, None);
         let mut projected_files =
             load_tree_with_projection(&store, &projection, &resolved_files).unwrap();
         let projected_files_json =
@@ -2081,6 +2150,89 @@ mod readpath_tests {
         assert_eq!(page["entries"], expected["entries"]);
     }
 
+    fn service_with_excludes(
+        patterns: &[&str],
+        nodes: &[Node],
+    ) -> (tempfile::TempDir, Arc<Service>) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(dir.path()).unwrap();
+        store.install_remote_snapshot(nodes, "1", "server").unwrap();
+        store.ensure_fs_root("root").unwrap();
+        let mut profile = profile();
+        profile.exclude_patterns = patterns
+            .iter()
+            .map(|pattern| (*pattern).to_owned())
+            .collect();
+        (
+            dir,
+            Service::new(profile, store, PathBuf::from("/nonexistent-worker")).unwrap(),
+        )
+    }
+
+    /// Issue #50: GetDirectory hides excluded children and their subtrees. The
+    /// authoritative `total` still counts them until phase 4 cleans legacy rows.
+    #[test]
+    fn get_directory_hides_excluded_children_and_subtrees() {
+        let nodes = [
+            node("root", None, true),
+            node("folder", Some("root"), true),
+            node("one", Some("folder"), false),
+            node("notes", Some("root"), true),
+            node("install.iso", Some("root"), false),
+        ];
+        let (_dir, service) = service_with_excludes(&["^folder$", r"\.iso$"], &nodes);
+        let page: serde_json::Value =
+            serde_json::from_str(&directory(&service, "", 0).expect("root page")).unwrap();
+        let paths: Vec<&str> = page["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["path"].as_str().unwrap())
+            .collect();
+        assert_eq!(paths, ["notes"]);
+        assert_eq!(page["total"], 3);
+        for path in ["folder", "folder/one", "install.iso"] {
+            let error = directory(&service, path, 0).unwrap_err();
+            assert_eq!(
+                error.raw_os_error(),
+                Some(libc::ENOENT),
+                "excluded path must answer ENOENT: {path}"
+            );
+        }
+        assert!(directory(&service, "notes", 0).is_ok());
+    }
+
+    /// Issue #50: GetStates treats excluded paths like missing ones.
+    #[test]
+    fn states_treat_excluded_paths_as_unavailable() {
+        let nodes = [
+            node("root", None, true),
+            node("folder", Some("root"), true),
+            node("one", Some("folder"), false),
+            node("notes", Some("root"), true),
+        ];
+        let (_dir, service) = service_with_excludes(&["^folder$"], &nodes);
+        let value: serde_json::Value = serde_json::from_str(
+            &states(
+                &service,
+                vec![
+                    "folder".to_owned(),
+                    "folder/one".to_owned(),
+                    "notes".to_owned(),
+                ],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let entries = value["entries"].as_array().unwrap();
+        assert_eq!(entries[0]["path"], "folder");
+        assert_eq!(entries[0]["error"], "path_or_local_state_unavailable");
+        assert_eq!(entries[1]["path"], "folder/one");
+        assert_eq!(entries[1]["error"], "path_or_local_state_unavailable");
+        assert_eq!(entries[2]["path"], "notes");
+        assert!(entries[2]["error"].is_null());
+    }
+
     #[test]
     fn stale_projection_falls_back_to_the_scoped_read() {
         let (_dir, service) = fixture();
@@ -2103,7 +2255,7 @@ mod readpath_tests {
                 .unwrap();
         }
         let ro = read_only(&service).unwrap();
-        let resolved = resolve_all(&ro, &service, vec!["folder/lateDir".to_string()]);
+        let resolved = resolve_all(&ro, &service, vec!["folder/lateDir".to_string()], None);
         assert!(
             super::status_tree::StatusTree::load_with_projection(
                 &ro,

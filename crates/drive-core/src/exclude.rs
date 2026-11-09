@@ -148,6 +148,339 @@ pub fn join_relative(parent: &str, name: &str) -> String {
     }
 }
 
+/// Opt-in tracing for exclusion decisions. The mount is silent by default so a
+/// task without rules pays no logging cost.
+fn trace_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var_os("DRIVE_NATIVE_EXCLUDE_TRACE").is_some_and(|value| value == "1")
+    })
+}
+
+/// Record one excluded read-path decision when tracing is enabled.
+pub fn trace_hit(operation: &str) {
+    if trace_enabled() {
+        eprintln!("drive-native exclude: {operation} hidden by exclude_patterns");
+    }
+}
+
+/// Excluded names and subtree inodes for one committed namespace snapshot.
+///
+/// `entries` holds `(parent_inode, name)` for every directory entry the rules
+/// exclude, so readdir/lookup can answer with one hash probe. `inodes` holds
+/// every inode in the excluded subtrees, so getattr/open/opendir need no path
+/// walk. Both are rebuilt from the store; nothing is persisted.
+#[derive(Clone, Debug, Default)]
+pub struct ExclusionIndex {
+    entries: std::collections::HashSet<(u64, String)>,
+    inodes: std::collections::HashSet<u64>,
+}
+
+impl ExclusionIndex {
+    /// True when no entry and no inode is excluded.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty() && self.inodes.is_empty()
+    }
+
+    /// True when `parent` lists `name` and the rule excludes that entry.
+    pub fn entry_excluded(&self, parent_ino: u64, name: &str) -> bool {
+        self.entries.contains(&(parent_ino, name.to_owned()))
+    }
+
+    /// True when `ino` belongs to an excluded subtree.
+    pub fn inode_excluded(&self, ino: u64) -> bool {
+        self.inodes.contains(&ino)
+    }
+
+    /// Number of excluded direct entries (diagnostics/tests).
+    pub fn entries_len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Number of excluded inodes, including descendants (diagnostics/tests).
+    pub fn inodes_len(&self) -> usize {
+        self.inodes.len()
+    }
+
+    /// Build the index in one pass over the committed namespace.
+    ///
+    /// The store is queried once for every visible node and inode; matching runs
+    /// on the caller's thread after the SQL rows were collected, so no lock is
+    /// held while regular expressions run.
+    pub fn build(store: &crate::Store, root: &str, rules: &ExcludeRules) -> crate::Result<Self> {
+        if rules.is_empty() {
+            return Ok(Self::default());
+        }
+        // One projection of the committed namespace. Matching happens after the
+        // rows are owned by this thread, so the caller's store lock can be
+        // released before regular expressions run.
+        struct Row {
+            id: String,
+            parent: Option<String>,
+            name: String,
+            directory: bool,
+            ino: u64,
+        }
+        let mut statement = store.db.prepare_cached(
+            "SELECT n.id, n.parent, n.name, n.directory, i.ino \
+             FROM nodes n JOIN fs_inodes i ON i.node = n.id \
+             WHERE n.deleted = 0 ORDER BY n.id",
+        )?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok(Row {
+                    id: row.get(0)?,
+                    parent: row.get(1)?,
+                    name: row.get(2)?,
+                    directory: row.get(3)?,
+                    ino: {
+                        let ino: i64 = row.get(4)?;
+                        u64::try_from(ino)
+                            .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(4, ino))?
+                    },
+
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        let root_row = rows
+            .iter()
+            .find(|row| row.id == root)
+            .ok_or_else(|| crate::Error::State("mount root is missing from the namespace".into()))?;
+        if !root_row.directory {
+            return Err(crate::Error::State("mount root is not a directory".into()));
+        }
+        let root_ino = root_row.ino;
+        let mut children: std::collections::HashMap<&str, Vec<usize>> =
+            std::collections::HashMap::new();
+        for (index, row) in rows.iter().enumerate() {
+            if let Some(parent) = row.parent.as_deref() {
+                children.entry(parent).or_default().push(index);
+            }
+        }
+        let mut index = Self::default();
+        let mut queue: Vec<(&str, String, u64)> = vec![(root, String::new(), root_ino)];
+        while let Some((directory, relative, ino)) = queue.pop() {
+            let Some(kids) = children.get(directory) else {
+                continue;
+            };
+            for &kid in kids {
+                let row = &rows[kid];
+                let child_relative = join_relative(&relative, &row.name);
+                if rules.matches(&child_relative, row.directory) {
+                    index.entries.insert((ino, row.name.clone()));
+                    // Exclude the whole subtree: every descendant inode must
+                    // answer ENOENT even without a path walk.
+                    let mut pending = vec![kid];
+                    while let Some(current) = pending.pop() {
+                        let row = &rows[current];
+                        index.inodes.insert(row.ino);
+                        if let Some(grandchildren) = children.get(row.id.as_str()) {
+                            pending.extend(grandchildren.iter().copied());
+                        }
+                    }
+                } else if row.directory {
+                    queue.push((row.id.as_str(), child_relative, row.ino));
+                }
+            }
+        }
+        if !index.is_empty() && trace_enabled() {
+            eprintln!(
+                "drive-native exclude: index built with {} entries and {} inodes",
+                index.entries.len(),
+                index.inodes.len()
+            );
+        }
+        Ok(index)
+    }
+}
+
+/// Rules plus the current exclusion index, shared between the FUSE mount and
+/// the sync bridge. Reads only take a short `RwLock` and clone the `Arc`.
+pub struct ExclusionState {
+    rules: ExcludeRules,
+    index: std::sync::RwLock<std::sync::Arc<ExclusionIndex>>,
+}
+
+impl ExclusionState {
+    /// Create state for a task. An empty rule list leaves the index empty and
+    /// every fast-path check collapsed to one boolean read.
+    pub fn new(rules: ExcludeRules) -> Self {
+        Self {
+            rules,
+            index: std::sync::RwLock::new(std::sync::Arc::new(ExclusionIndex::default())),
+        }
+    }
+
+    /// The compiled rules (used by the initialization owner and the bridge).
+    pub fn rules(&self) -> &ExcludeRules {
+        &self.rules
+    }
+
+    /// True when at least one rule is configured.
+    pub fn is_active(&self) -> bool {
+        !self.rules.is_empty()
+    }
+
+    /// Current index snapshot. Cheap: one `RwLock` read plus an `Arc` clone.
+    pub fn current(&self) -> std::sync::Arc<ExclusionIndex> {
+        self.index
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Rebuild the index from the committed namespace. Called at mount time and
+    /// after every namespace swap (initialization install, recovery snapshot,
+    /// applied pull) so the index never describes a superseded snapshot.
+    pub fn refresh(&self, store: &crate::Store, root: &str) -> crate::Result<()> {
+        if !self.is_active() {
+            *self
+                .index
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                std::sync::Arc::new(ExclusionIndex::default());
+            return Ok(());
+        }
+        let index = ExclusionIndex::build(store, root, &self.rules)?;
+        *self
+            .index
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = std::sync::Arc::new(index);
+        Ok(())
+    }
+
+    /// `refresh` for a shared store boundary; takes and releases the store lock.
+    pub fn refresh_shared(
+        &self,
+        store: &crate::SharedStore,
+        root: &str,
+    ) -> crate::Result<()> {
+        if !self.is_active() {
+            return Ok(());
+        }
+        let guard = store
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.refresh(&guard, root)
+    }
+}
+
+/// Resolve the scope-relative path of `id` by walking its parent chain.
+///
+/// Returns `(relative_path, is_directory)`; the scope root resolves to `("",
+/// true)`. `None` means the node or one of its ancestors is unknown, which the
+/// event filter treats as excluded (an unresolvable event cannot be classified
+/// as visible).
+fn relative_path_of(
+    root: &str,
+    id: &str,
+    mut lookup: impl FnMut(&str) -> Option<crate::Node>,
+) -> Option<(String, bool)> {
+    let mut names: Vec<String> = Vec::new();
+    let mut current = id.to_owned();
+    let mut directory = true;
+    for _ in 0..256 {
+        if current == root {
+            let relative = names.iter().rev().cloned().collect::<Vec<_>>().join("/");
+            return Some((relative, directory));
+        }
+        let node = lookup(&current)?;
+        directory = node.directory;
+        names.push(node.name);
+        current = node.parent?;
+    }
+    None
+}
+
+/// Drop snapshot nodes whose scope-relative path is excluded. Returns the
+/// number of dropped nodes. The root itself is never excluded.
+pub fn retain_unexcluded_snapshot_nodes(
+    scope_file_id: &str,
+    rules: &ExcludeRules,
+    nodes: &mut Vec<crate::Node>,
+) -> usize {
+    if rules.is_empty() {
+        return 0;
+    }
+    let by_id: std::collections::HashMap<String, crate::Node> = nodes
+        .iter()
+        .cloned()
+        .map(|node| (node.id.clone(), node))
+        .collect();
+    let mut kept = Vec::with_capacity(nodes.len());
+    let mut dropped = 0usize;
+    for node in nodes.iter() {
+        if node.id == scope_file_id {
+            kept.push(node.clone());
+            continue;
+        }
+        let resolved = relative_path_of(scope_file_id, &node.id, |id| by_id.get(id).cloned());
+        match resolved {
+            Some((relative, is_dir)) if rules.matches(&relative, is_dir) => {
+                dropped += 1;
+                trace_hit("snapshot node");
+            }
+            _ => kept.push(node.clone()),
+        }
+    }
+    *nodes = kept;
+    dropped
+}
+
+/// Drop pull events whose node path is excluded, keeping parent/child
+/// consistency: a child of a dropped parent is dropped as well even when its
+/// own name does not match. Uses the same-batch upsert map before touching the
+/// store, then the committed nodes for events not in the batch.
+pub fn retain_unexcluded_events(
+    store: &crate::Store,
+    root: &str,
+    rules: &ExcludeRules,
+    events: &mut Vec<crate::Event>,
+) -> usize {
+    if rules.is_empty() {
+        return 0;
+    }
+    // New directories and files can arrive in one batch before any of them is
+    // committed; resolve those parent links from the batch itself first.
+    let batch: std::collections::HashMap<String, crate::Node> = events
+        .iter()
+        .filter_map(|event| match &event.change {
+            crate::Change::Upsert(node) => Some((node.id.clone(), node.clone())),
+            crate::Change::Delete { .. } => None,
+        })
+        .collect();
+    let mut kept = Vec::with_capacity(events.len());
+    let mut dropped = 0usize;
+    for event in events.drain(..) {
+        let id = match &event.change {
+            crate::Change::Upsert(node) => node.id.as_str(),
+            crate::Change::Delete { id } => id.as_str(),
+        };
+        let resolved = relative_path_of(root, id, |id| {
+            batch
+                .get(id)
+                .cloned()
+                .or_else(|| store.node(id).ok())
+        });
+        let excluded = match resolved {
+            Some((relative, is_dir)) => rules.matches(&relative, is_dir),
+            None => true,
+        };
+        if excluded {
+            dropped += 1;
+            trace_hit("pull event");
+        } else {
+            kept.push(event);
+        }
+    }
+    *events = kept;
+    dropped
+}
+
+#[cfg(test)]
+#[path = "exclude_index_tests.rs"]
+mod index_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;
