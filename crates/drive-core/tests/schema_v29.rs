@@ -260,17 +260,19 @@ fn v28_database_upgrades_with_backfill_backup_and_queries() {
         ),
         None
     );
-    // A pre-existing #14-style `abandoned` row is preserved verbatim by the
-    // v29 migration: no outcome is invented here, TB2 owns the mapping.
-    let abandoned: (String, Option<String>) = db
+    // A pre-existing #14-style `abandoned` row is a terminal queue outcome with
+    // an exhausted reconciliation budget: the migration maps it to
+    // confirmed/local_abandoned and keeps the row (TB2 semantics).
+    let abandoned: (String, Option<String>, Option<String>) = db
         .query_row(
-            "SELECT state,outcome FROM operations WHERE id='op-abandoned'",
+            "SELECT state,outcome,outcome_category FROM operations WHERE id='op-abandoned'",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .expect("abandoned row");
     assert_eq!(abandoned.0, "abandoned");
-    assert_eq!(abandoned.1, None);
+    assert_eq!(abandoned.1.as_deref(), Some("confirmed"));
+    assert_eq!(abandoned.2.as_deref(), Some("local_abandoned"));
     assert_eq!(
         single_text(
             &db,
@@ -337,7 +339,7 @@ fn v28_database_upgrades_with_backfill_backup_and_queries() {
             row.get(0)
         })
         .expect("view");
-    assert_eq!(diagnostics, 16);
+    assert_eq!(diagnostics, 17);
     let backfilled: i64 = db
         .query_row(
             "SELECT COUNT(*) FROM commit_diagnostics

@@ -620,7 +620,10 @@ impl Store {
             "INSERT INTO upload_times(operation,mtime) VALUES(?1,?2)",
             params![op, mtime],
         )?;
-        tx.execute("UPDATE operations SET state='superseded' WHERE node=?1 AND state IN ('pending','conflict')",[id])?;
+        // #9b TB2: keeping the remote copy resolves the queued local upload at
+        // the queue level. The local content is not replayed; the server copy is
+        // adopted instead, so the outcome is confirmed/local_abandoned.
+        tx.execute("UPDATE operations SET state='superseded', outcome='confirmed', outcome_category='local_abandoned', last_error='conflict resolution superseded the local upload', next_retry_at=0, updated_at=unixepoch() WHERE node=?1 AND state IN ('pending','conflict')",[id])?;
         tx.execute("DELETE FROM drafts WHERE node=?1", [id])?;
         tx.execute(
             "UPDATE nodes SET dirty_blob=NULL,base_version=NULL,conflict=0 WHERE id=?1",

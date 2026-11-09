@@ -421,6 +421,12 @@ fn overview_reports_exact_unknown_commits_without_running_dependency_scheduler()
     let after = service.bridge.store.lock().unwrap().queue_health().unwrap();
     assert!(after.schedule_age_ms >= before.schedule_age_ms);
     assert_eq!(after.recovery_attempts_observed, 0);
+    // #9b TB2: unknown commits are exposed additively with their scope, state
+    // and category without changing the existing queue_health payload.
+    let diagnostics = &overview["commit_diagnostics"];
+    assert_eq!(diagnostics["open_unknown"], 2);
+    assert_eq!(diagnostics["needs_attention"], 0);
+    assert_eq!(diagnostics["items"].as_array().unwrap().len(), 2);
 }
 
 #[test]
@@ -456,6 +462,17 @@ fn overview_surfaces_paused_uploads_as_an_explainable_count() {
     assert_eq!(overview["issue_count"], 1);
     assert!(overview["background_error"].is_null());
     assert!(overview["upload_block"].is_null());
+    // #9b TB2: the additive commit diagnostics block explains the paused row
+    // without counting it as open unknown work or an attention action.
+    let diagnostics = &overview["commit_diagnostics"];
+    assert_eq!(diagnostics["open_unknown"], 0);
+    assert_eq!(diagnostics["needs_attention"], 0);
+    let items = diagnostics["items"].as_array().unwrap();
+    assert!(items.iter().any(|item| {
+        item["state"] == "abandoned"
+            && item["outcome"] == "unknown_fatal"
+            && item["category"] == "reconcile_exhausted"
+    }));
 }
 
 #[test]

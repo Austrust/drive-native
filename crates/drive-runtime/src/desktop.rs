@@ -696,6 +696,9 @@ struct StoreOverview {
     skipped_symlinks: u64,
     inaccessible: i64,
     download_errors: u64,
+    open_unknown: i64,
+    needs_attention: i64,
+    commit_items: Vec<drive_core::commit_diagnostics::CommitDiagnosticRecord>,
 }
 fn elapsed_us(start: Instant) -> u64 {
     u64::try_from(start.elapsed().as_micros()).unwrap_or(u64::MAX)
@@ -735,10 +738,46 @@ fn overview_store(
         skipped_symlinks: store.skipped_symlink_count().map_err(|_| other())?,
         inaccessible: store.inaccessible_count().map_err(|_| other())?,
         download_errors: store.download_failure_count().map_err(|_| other())?,
+        open_unknown: drive_core::commit_diagnostics::open_unknown(store).map_err(|_| other())?,
+        needs_attention: drive_core::commit_diagnostics::needs_attention(store)
+            .map_err(|_| other())?,
+        commit_items: drive_core::commit_diagnostics::list(store, 20).map_err(|_| other())?,
     })
 }
 pub fn overview(service: &Service) -> io::Result<String> {
     Ok(overview_measured(service)?.0)
+}
+/// Serialize commit diagnoses outside the Store lock. `items` may contain
+/// terminal `abandoned` rows (so the user can inspect why retries stopped);
+/// only `open_unknown` and `needs_attention` exclude them.
+fn commit_diagnostics_json(
+    open_unknown: i64,
+    needs_attention: i64,
+    items: &[drive_core::commit_diagnostics::CommitDiagnosticRecord],
+) -> serde_json::Value {
+    let items: Vec<serde_json::Value> = items
+        .iter()
+        .map(|item| {
+            serde_json::json!({
+                "scope": item.scope,
+                "operation": item.operation,
+                "node": item.node,
+                "kind": item.kind,
+                "state": item.state,
+                "outcome": item.outcome.as_str(),
+                "category": item.category.as_str(),
+                "last_error": item.last_error,
+                "attempts": item.attempts,
+                "next_retry_at": item.next_retry_at,
+                "updated_at": item.updated_at,
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "open_unknown": open_unknown,
+        "needs_attention": needs_attention,
+        "items": items,
+    })
 }
 /// Steady-state overview: a private read-only connection plus a generation-keyed
 /// derived cache, so neither FUSE nor other desktop reads queue behind
@@ -806,6 +845,9 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
         skipped_symlinks,
         inaccessible,
         download_errors,
+        open_unknown,
+        needs_attention,
+        commit_items,
     } = store_overview;
     let uncertain = queue_health.namespace_uncertain + queue_health.upload_uncertain;
     let sync_state = if error.is_some()
@@ -822,10 +864,11 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
         "checking"
     } else if pending > 0 || uncertain > 0 {
         "pending"
-    } else if paused_uploads > 0 {
+    } else if paused_uploads > 0 || needs_attention > 0 {
         // Upload commitments that exhausted the read-only reconciliation budget
         // are no longer counted as pending work, but the user still needs a
-        // visible, explainable reason to open the issue center.
+        // visible, explainable reason to open the issue center. Conflicting or
+        // terminally unknown commits route the same way.
         "needs_attention"
     } else {
         "idle"
@@ -838,6 +881,10 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
     // one level per key, and the overview is already close to the recursion cap.
     let recovery_actions = serde_json::json!({"recheck_issues":true,"abandon_upload":true,
         "bound_directory_recovery":true});
+    let recovery_actions = serde_json::json!({"recheck_issues":true,"abandon_upload":true});
+    // Issue #9 TB2: additive, read-only diagnosis list. `items` may contain
+    // terminal abandoned rows; `open_unknown`/`needs_attention` exclude them.
+    let commit_diagnostics = commit_diagnostics_json(open_unknown, needs_attention, &commit_items);
     // Issue #31: the status journal epoch lets a GUI tell a same-daemon delta
     // from a restarted writer (its cursor epoch differs after a restart).
     let status_epoch = ro
@@ -869,6 +916,7 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
         "connection_diagnostics":service.diagnostics.snapshot(),
         "sync_state":sync_state,"active_transfers":active_transfers,"issue_count":issue_count,
         "cache_availability":{"state":cache.state,"total":cache.total,"offline":cache.offline,"pinned":cache.pinned},
+        "commit_diagnostics":commit_diagnostics,
         "release_job":release_job_summary(service),
         "version":{"build":env!("CARGO_PKG_VERSION"),"state_schema":drive_core::STATE_SCHEMA_VERSION,"ipc":crate::wire::VERSION},
         "shutdown":service.shutdown_diagnostics.snapshot(),

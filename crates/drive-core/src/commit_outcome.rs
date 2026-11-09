@@ -199,6 +199,20 @@ impl CommitDiagnostic {
         }
     }
 
+    /// A terminal, explained non-failure: the local intent was abandoned (or
+    /// retired after the local file disappeared), so the queue does not treat
+    /// the row as unknown pending work even though the server may or may not
+    /// have applied the original mutation.
+    pub fn confirmed_with_category(category: CommitCategory, last_error: Option<String>) -> Self {
+        Self {
+            outcome: CommitOutcome::Confirmed,
+            category,
+            last_error,
+            attempts: 1,
+            next_retry_at: 0,
+        }
+    }
+
     /// Unknown, but a later automatic attempt is justified.
     pub fn unknown_retryable(
         category: CommitCategory,
@@ -258,13 +272,14 @@ pub fn retry_delay(category: CommitCategory, attempts: u32) -> Option<u32> {
             })
         }
         // Permission responses: the server may have applied the mutation, so
-        // probe slowly and stop after a bounded budget (#14).
+        // probe slowly and stop after a bounded budget (#14). The budget is
+        // MAX_UPLOAD_RECONCILE_ATTEMPTS (5 attempts: attempts 0..=3 scheduled
+        // here, the fifth failure is terminal), so no slot for 600s exists.
         CommitCategory::PermissionUncertain => match attempts {
             0 => Some(10),
             1 => Some(30),
             2 => Some(120),
             3 => Some(300),
-            4 => Some(600),
             _ => None,
         },
         // Explicit rejection or exhausted budget: manual only.
@@ -334,15 +349,17 @@ mod tests {
         assert_eq!(retry_delay(CommitCategory::Interrupted, 2), Some(4));
         assert_eq!(retry_delay(CommitCategory::Transport, 4), Some(16));
         assert_eq!(retry_delay(CommitCategory::Transport, 9), Some(30));
-        // Permission: 10/30/120/300/600, then terminal.
+        // Permission: 10/30/120/300, then terminal (aligned with the
+        // MAX_UPLOAD_RECONCILE_ATTEMPTS budget; no 600s slot).
         assert_eq!(
             retry_delay(CommitCategory::PermissionUncertain, 0),
             Some(10)
         );
         assert_eq!(
-            retry_delay(CommitCategory::PermissionUncertain, 4),
-            Some(600)
+            retry_delay(CommitCategory::PermissionUncertain, 3),
+            Some(300)
         );
+        assert_eq!(retry_delay(CommitCategory::PermissionUncertain, 4), None);
         assert_eq!(retry_delay(CommitCategory::PermissionUncertain, 5), None);
         // Manual-only categories never schedule a retry.
         assert_eq!(retry_delay(CommitCategory::ServerRejected, 0), None);

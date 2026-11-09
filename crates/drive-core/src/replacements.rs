@@ -145,8 +145,10 @@ impl Store {
             [&target.id],
         )?;
         tx.execute("UPDATE nodes SET deleted=1 WHERE id=?1", [&target.id])?;
+        // #9b TB2: a queued upload replaced by the replacement upload is a
+        // queue-level terminal outcome; it was never submitted.
         tx.execute(
-            "UPDATE operations SET state='superseded' WHERE node IN (?1,?2) AND state='pending'",
+            "UPDATE operations SET state='superseded', outcome='confirmed', outcome_category='local_abandoned', last_error='superseded by a replacement upload', next_retry_at=0, updated_at=unixepoch() WHERE node IN (?1,?2) AND state='pending'",
             params![source.id, target.id],
         )?;
         tx.execute(
@@ -250,10 +252,37 @@ impl Store {
             return Err(Error::State("replacement source changed".into()));
         }
         self.db.execute("UPDATE namespace_ops SET state='inflight' WHERE id=?1 AND kind='replace' AND state='pending'",[id])?;
+        // #9b TB2: a fresh replacement submission supersedes a stale diagnosis.
+        crate::commit_diagnostics::clear_tx(&self.db, "namespace_ops", id)?;
         Ok(())
     }
     pub fn mark_replace_uncertain(&mut self, id: &str) -> Result<()> {
-        if self.db.execute("UPDATE namespace_ops SET state=CASE state WHEN 'inflight' THEN 'uncertain' ELSE 'cleanup_uncertain' END WHERE id=?1 AND kind='replace' AND state IN ('inflight','cleanup_inflight')",[id])?!=1{return Err(Error::State("replacement not in flight".into()));}
+        self.mark_replace_uncertain_diagnosed(
+            id,
+            crate::commit_outcome::CommitCategory::Interrupted,
+            Some("replacement commit outcome unknown; reconciliation required"),
+        )
+    }
+    pub fn mark_replace_uncertain_diagnosed(
+        &mut self,
+        id: &str,
+        category: crate::commit_outcome::CommitCategory,
+        last_error: Option<&str>,
+    ) -> Result<()> {
+        let tx = self.db.transaction()?;
+        if tx.execute("UPDATE namespace_ops SET state=CASE state WHEN 'inflight' THEN 'uncertain' ELSE 'cleanup_uncertain' END WHERE id=?1 AND kind='replace' AND state IN ('inflight','cleanup_inflight')",[id])?!=1{return Err(Error::State("replacement not in flight".into()));}
+        crate::commit_diagnostics::record(
+            &tx,
+            "namespace_ops",
+            id,
+            &crate::commit_outcome::CommitDiagnostic::unknown_retryable(
+                category,
+                last_error.map(str::to_owned),
+                0,
+                0,
+            ),
+        )?;
+        tx.commit()?;
         Ok(())
     }
     pub fn conflict_replace(&mut self, id: &str) -> Result<()> {
@@ -262,6 +291,14 @@ impl Store {
         tx.execute(
             "UPDATE nodes SET conflict=1 WHERE id=(SELECT node FROM namespace_ops WHERE id=?1)",
             [id],
+        )?;
+        crate::commit_diagnostics::record(
+            &tx,
+            "namespace_ops",
+            id,
+            &crate::commit_outcome::CommitDiagnostic::conflict(Some(
+                "remote changed before the replacement was confirmed".into(),
+            )),
         )?;
         tx.commit()?;
         Ok(())
@@ -413,6 +450,12 @@ impl Store {
         if next == "committed" {
             finish_overlay(&tx, &new.id)?;
         }
+        crate::commit_diagnostics::record(
+            &tx,
+            "namespace_ops",
+            id,
+            &crate::commit_outcome::CommitDiagnostic::confirmed(),
+        )?;
         tx.commit()?;
         Ok(())
     }
@@ -440,6 +483,8 @@ impl Store {
             "UPDATE namespace_ops SET state='cleanup_inflight' WHERE id=?1",
             [id],
         )?;
+        // #9b TB2: a fresh cleanup attempt supersedes a stale diagnosis.
+        crate::commit_diagnostics::clear_tx(&self.db, "namespace_ops", id)?;
         Ok(())
     }
     pub fn confirm_replace_cleanup(&mut self, id: &str, identity: &str) -> Result<()> {
@@ -464,6 +509,12 @@ impl Store {
             [id],
         )?;
         finish_overlay(&tx, &job.source.id)?;
+        crate::commit_diagnostics::record(
+            &tx,
+            "namespace_ops",
+            id,
+            &crate::commit_outcome::CommitDiagnostic::confirmed(),
+        )?;
         tx.commit()?;
         Ok(())
     }

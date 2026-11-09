@@ -1,3 +1,4 @@
+use crate::commit_outcome::{CommitCategory, CommitDiagnostic};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -284,9 +285,40 @@ fn add_missing_columns(db: &Connection, table: &str, columns: &[(&str, &str)]) -
 /// `abandoned` terminal state for exhausted reconcile budgets; TB2 remaps those
 /// old rows to `unknown_fatal`/`reconcile_exhausted`. TB1 intentionally neither
 /// emits nor depends on `abandoned`.
+/// (Re)create the read-only `commit_diagnostics` projection.
+///
+/// The view definition was refined in TB2 (stable `operation` column and
+/// `updated_at`) without a schema bump, because schema versions only grow. A
+/// database already migrated by an earlier build still carries the old column
+/// names, so every writer open re-creates the view before any reader queries it.
+/// DROP/CREATE is idempotent and stays inside the open transaction.
+fn install_commit_diagnostics_view(db: &Connection) -> Result<()> {
+    db.execute_batch(
+        "DROP VIEW IF EXISTS commit_diagnostics;
+        CREATE VIEW commit_diagnostics AS
+            SELECT 'operation' AS scope, o.id AS operation, o.node, o.kind, o.state,
+                   o.outcome, o.outcome_category, o.last_error,
+                   o.reconcile_attempts AS attempts, o.next_retry_at, o.updated_at
+              FROM operations o WHERE o.outcome IS NOT NULL
+            UNION ALL
+            SELECT 'namespace', n.id, n.node, n.kind, n.state,
+                   n.outcome, n.outcome_category, n.last_error,
+                   n.attempts, n.next_retry_at, n.updated_at
+              FROM namespace_ops n WHERE n.outcome IS NOT NULL
+            UNION ALL
+            SELECT 'transfer', t.id, t.node, t.direction, t.state,
+                   t.outcome, t.outcome_category, t.last_error,
+                   0, t.next_retry_at, 0
+              FROM transfers t WHERE t.outcome IS NOT NULL;",
+    )?;
+    Ok(())
+}
+
 fn migrate_v29(db: &Connection, version: i64) -> Result<()> {
     if version >= 29 {
-        return Ok(());
+        // Same-version DDL repair: the projection must match the current code
+        // even when the schema version was already raised by an earlier build.
+        return install_commit_diagnostics_view(db);
     }
     // (a) operations: unified commit diagnosis (#9 core).
     add_missing_columns(
@@ -388,27 +420,12 @@ fn migrate_v29(db: &Connection, version: i64) -> Result<()> {
         CREATE INDEX IF NOT EXISTS platform_state_pending
             ON platform_state_changes(seq) WHERE delivered_at IS NULL;
 
-        -- (g) One read-only join for the status interface: the authoritative
-        -- state stays in each journal, this view only normalises the diagnosis.
-        CREATE VIEW IF NOT EXISTS commit_diagnostics AS
-            SELECT 'operation' AS scope, o.id, o.node, o.kind AS op_kind, o.state,
-                   o.outcome, o.outcome_category, o.last_error,
-                   o.reconcile_attempts AS attempts, o.next_retry_at
-              FROM operations o WHERE o.outcome IS NOT NULL
-            UNION ALL
-            SELECT 'namespace', n.id, n.node, n.kind, n.state,
-                   n.outcome, n.outcome_category, n.last_error,
-                   n.attempts, n.next_retry_at
-              FROM namespace_ops n WHERE n.outcome IS NOT NULL
-            UNION ALL
-            SELECT 'transfer', t.id, t.node, t.direction, t.state,
-                   t.outcome, t.outcome_category, t.last_error,
-                   0, t.next_retry_at
-              FROM transfers t WHERE t.outcome IS NOT NULL;
-
         UPDATE metadata SET value='29' WHERE key='schema_version';
         ",
     )?;
+    // (g) One read-only join for the status interface; the authoritative state
+    // stays in each journal, this view only normalises the diagnosis.
+    install_commit_diagnostics_view(db)?;
     // (h) Legacy backfill. Idempotent: every statement is gated on
     // `outcome IS NULL`, so a re-run (or the fresh-database path, which has no
     // rows) cannot overwrite a diagnosis written by TB2 later.
@@ -439,6 +456,10 @@ fn migrate_v29(db: &Connection, version: i64) -> Result<()> {
         UPDATE operations SET outcome='confirmed', outcome_category='local_abandoned',
                updated_at=unixepoch()
          WHERE outcome IS NULL AND state='superseded';
+        UPDATE operations SET outcome='confirmed', outcome_category='local_abandoned',
+               last_error='legacy abandoned operation; reconcile budget was exhausted',
+               next_retry_at=0, updated_at=unixepoch()
+         WHERE outcome IS NULL AND state='abandoned';
 
         UPDATE namespace_ops SET outcome='unknown_retryable',
                outcome_category='interrupted',
@@ -459,6 +480,10 @@ fn migrate_v29(db: &Connection, version: i64) -> Result<()> {
         UPDATE namespace_ops SET outcome='confirmed', outcome_category='local_abandoned',
                updated_at=unixepoch()
          WHERE outcome IS NULL AND state='superseded';
+        UPDATE namespace_ops SET outcome='confirmed', outcome_category='local_abandoned',
+               last_error='legacy abandoned operation; reconcile budget was exhausted',
+               next_retry_at=0, updated_at=unixepoch()
+         WHERE outcome IS NULL AND state='abandoned';
 
         UPDATE transfers SET outcome='unknown_retryable',
                outcome_category=CASE json_extract(error,'$.kind')
@@ -601,9 +626,7 @@ impl Store {
                 .iter()
                 .any(|column| column.as_str() == name)
             {
-                db.execute_batch(&format!(
-                    "ALTER TABLE operations ADD COLUMN {definition};"
-                ))?;
+                db.execute_batch(&format!("ALTER TABLE operations ADD COLUMN {definition};"))?;
             }
         }
         // Schema 28 index candidates. They are created after every `ALTER TABLE`
@@ -645,6 +668,10 @@ impl Store {
             "UPDATE transfers SET state='pending' WHERE direction='download' AND state='inflight'",
             [],
         )?;
+        // #9b TB2: explain rows that startup recovery left unexplained and map
+        // legacy `abandoned` terminal rows (#14) to an explicit local_abandoned
+        // outcome, so a restart never leaves an anonymous pending item.
+        crate::commit_diagnostics::backfill_startup(&db)?;
         // Derived state starts after startup recovery. TEMP objects and a fresh
         // epoch keep the durable schema and external readers unchanged.
         crate::status_changes::install(&db)?;
@@ -1460,8 +1487,12 @@ impl Store {
         let base = base.unwrap_or_else(|| opened_version.to_string());
         let op = uuid::Uuid::new_v4().to_string();
         tx.execute("UPDATE nodes SET dirty_blob=?2,base_version=?3,dirty_generation=?4,conflict=CASE WHEN ?3!=remote_version OR ?5!=?3 THEN 1 ELSE conflict END WHERE id=?1",params![id,blob,base,generation+1,opened_version])?;
+        // #9b TB2: a newer local edit supersedes the previous queued submission
+        // (pending) or paused terminal (abandoned) at the queue level. Neither
+        // will be replayed; the server outcome stays unknown, so this is
+        // confirmed/local_abandoned rather than a failure.
         tx.execute(
-            "UPDATE operations SET state='superseded' WHERE node=?1 AND state IN ('pending','abandoned')",
+            "UPDATE operations SET state='superseded', outcome='confirmed', outcome_category='local_abandoned', last_error='superseded by a newer local edit', next_retry_at=0, updated_at=unixepoch() WHERE node=?1 AND state IN ('pending','abandoned')",
             [id],
         )?;
         tx.execute("INSERT INTO operations(id,node,kind,base,blob,generation) VALUES(?1,?2,'upload',?3,?4,?5)",params![op,id,base,blob,generation+1])?;
@@ -1515,16 +1546,89 @@ impl Store {
             "INSERT INTO upload_paths(operation,path) VALUES(?1,?2)",
             params![op, path],
         )?;
+        // #9b TB2: a fresh submission supersedes any stale diagnosis left by an
+        // earlier interrupted attempt.
+        crate::commit_diagnostics::clear_tx(&tx, "operations", op)?;
         tx.commit()?;
         Ok(())
     }
+    /// Record that a submitted upload's server outcome is unknown. Runtime
+    /// paths that know the failure category use
+    /// [`Store::mark_upload_uncertain_diagnosed`] instead.
     pub fn mark_upload_uncertain(&mut self, op: &str) -> Result<()> {
-        if self.db.execute(
+        self.mark_upload_uncertain_diagnosed(
+            op,
+            CommitCategory::Interrupted,
+            Some("commit outcome unknown; reconciliation required"),
+        )
+    }
+    /// Persist an unknown upload outcome together with the category, the last
+    /// error and the retry time (#9b TB2). The diagnostic is written in the same
+    /// transaction as the state change, so a crash cannot lose the reason.
+    pub fn mark_upload_uncertain_diagnosed(
+        &mut self,
+        op: &str,
+        category: CommitCategory,
+        last_error: Option<&str>,
+    ) -> Result<()> {
+        let tx = self.db.transaction()?;
+        if tx.execute(
             "UPDATE operations SET state='uncertain' WHERE id=?1 AND state='inflight'",
             [op],
         )? != 1
         {
             return Err(Error::State("operation not inflight".into()));
+        }
+        crate::commit_diagnostics::record(
+            &tx,
+            "operations",
+            op,
+            &CommitDiagnostic::unknown_retryable(category, last_error.map(str::to_owned), 0, 0),
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+    /// Refresh the upload diagnosis without consuming reconcile budget (for
+    /// transient transport loss during reconciliation). Existing attempts and a
+    /// scheduled retry time are preserved: a read-only observation must not
+    /// erase the bounded reconcile progress.
+    pub fn record_upload_commit_diagnostic(
+        &mut self,
+        op: &str,
+        category: CommitCategory,
+        last_error: Option<&str>,
+        next_retry_at: i64,
+    ) -> Result<()> {
+        let changed = self.db.execute(
+            "UPDATE operations SET outcome='unknown_retryable', outcome_category=?2, last_error=?3, updated_at=unixepoch(), next_retry_at=CASE WHEN ?4>0 THEN ?4 ELSE next_retry_at END WHERE id=?1",
+            params![op, category.as_str(), last_error, next_retry_at],
+        )?;
+        if changed == 0 {
+            return Err(Error::State(format!(
+                "commit diagnostic target {op} is missing from operations"
+            )));
+        }
+        Ok(())
+    }
+    /// Refresh the namespace diagnosis during read-only reconciliation. The
+    /// journal state is already `uncertain`; the next scheduling observation
+    /// rewrites `next_retry_at` with the real delay. An existing scheduled time
+    /// survives a transient observation.
+    pub fn record_namespace_commit_diagnostic(
+        &mut self,
+        op: &str,
+        category: CommitCategory,
+        last_error: Option<&str>,
+        next_retry_at: i64,
+    ) -> Result<()> {
+        let changed = self.db.execute(
+            "UPDATE namespace_ops SET outcome='unknown_retryable', outcome_category=?2, last_error=?3, updated_at=unixepoch(), next_retry_at=CASE WHEN ?4>0 THEN ?4 ELSE next_retry_at END WHERE id=?1",
+            params![op, category.as_str(), last_error, next_retry_at],
+        )?;
+        if changed == 0 {
+            return Err(Error::State(format!(
+                "commit diagnostic target {op} is missing from namespace_ops"
+            )));
         }
         Ok(())
     }
@@ -1564,6 +1668,14 @@ impl Store {
         {
             tx.execute("UPDATE nodes SET conflict=1 WHERE id=?1", [&id])?;
             tx.execute("UPDATE operations SET state='conflict' WHERE id=?1", [op])?;
+            crate::commit_diagnostics::record(
+                &tx,
+                "operations",
+                op,
+                &CommitDiagnostic::conflict(Some(
+                    "remote changed before commit reconciliation; preserve local content".into(),
+                )),
+            )?;
             tx.commit()?;
             return Err(Error::State(
                 "remote changed before commit reconciliation; preserve local content".into(),
@@ -1631,6 +1743,7 @@ impl Store {
         // forever. The delete is bookkeeping: the journal does not publish it.
         crate::retention::drop_committed_generations(&tx, &id, op)?;
         tx.execute("UPDATE node_metadata SET mtime=(SELECT mtime FROM upload_times WHERE operation=?1) WHERE node=?2 AND EXISTS(SELECT 1 FROM upload_times WHERE operation=?1)",params![op,id])?;
+        crate::commit_diagnostics::record(&tx, "operations", op, &CommitDiagnostic::confirmed())?;
         tx.commit()?;
         Ok(())
     }
@@ -1819,7 +1932,7 @@ impl Store {
             tx.execute("UPDATE nodes SET deleted=1,conflict=CASE WHEN dirty_blob IS NOT NULL AND id NOT IN (SELECT node FROM local_unlinks) THEN 1 ELSE conflict END WHERE id NOT IN (SELECT id FROM recovery_ids) AND id NOT IN (SELECT node FROM local_creations) AND id NOT IN (SELECT node FROM namespace_overlay)",[])?;
             // A missing/replaced remote object must not leave a pending upload
             // eligible for automatic recreation. Keep its blob for conflict resolution.
-            tx.execute("UPDATE operations SET state='conflict' WHERE kind='upload' AND state='pending' AND node IN (SELECT id FROM nodes WHERE deleted=1 AND conflict=1)", [])?;
+            tx.execute("UPDATE operations SET state='conflict', outcome='conflict', outcome_category='server_rejected', last_error='remote object changed before the upload was sent', next_retry_at=0, updated_at=unixepoch() WHERE kind='upload' AND state='pending' AND node IN (SELECT id FROM nodes WHERE deleted=1 AND conflict=1)", [])?;
             tx.execute("UPDATE namespace_overlay SET remote='null' WHERE node NOT IN (SELECT id FROM recovery_ids)",[])?;
             tx.execute("UPDATE nodes SET conflict=1 WHERE id IN (SELECT node FROM namespace_overlay WHERE remote='null') AND id NOT IN (SELECT node FROM local_unlinks)",[])?;
             {
@@ -1875,8 +1988,11 @@ impl Store {
                    AND NOT EXISTS(SELECT 1 FROM drafts WHERE node=nodes.id)",
                 params![crate::creations::CREATE_VERSION],
             )?;
+            // #9b TB2: an in-flight submission cannot survive a namespace swap
+            // with a known outcome. Its commit is unknown; record the diagnosis
+            // in the same transaction so a later restart cannot lose the reason.
             tx.execute(
-                "UPDATE operations SET state='uncertain' WHERE state='inflight'",
+                "UPDATE operations SET state='uncertain', outcome='unknown_retryable', outcome_category='interrupted', last_error='namespace snapshot replaced before the commit was observed', next_retry_at=unixepoch(), updated_at=unixepoch() WHERE state='inflight'",
                 [],
             )?;
             tx.execute("UPDATE transfers SET state='obsolete' WHERE direction='download' AND NOT EXISTS(SELECT 1 FROM nodes n WHERE n.id=transfers.node AND n.remote_version=transfers.version AND n.deleted=0)",[])?;
@@ -1941,6 +2057,24 @@ impl Store {
     /// `uncertain` row that would block pending work forever. Local content and
     /// the permission evidence are retained; a user recheck re-arms the row.
     pub fn note_upload_reconcile_attempt(&mut self, operation: &str, now: i64) -> Result<u32> {
+        self.note_upload_reconcile_attempt_diagnosed(
+            operation,
+            now,
+            CommitCategory::PermissionUncertain,
+            Some("server did not confirm the upload commit during reconciliation"),
+        )
+    }
+    /// Record one automatic attempt together with the category and last error
+    /// that triggered it (#9b TB2). The budget update and the diagnostic share
+    /// one transaction; the terminal attempt records `unknown_fatal` +
+    /// `reconcile_exhausted` while the operation becomes `abandoned` (#14).
+    pub fn note_upload_reconcile_attempt_diagnosed(
+        &mut self,
+        operation: &str,
+        now: i64,
+        category: CommitCategory,
+        last_error: Option<&str>,
+    ) -> Result<u32> {
         let tx = self.db.transaction()?;
         let (node, state, attempts): (String, String, i64) = tx.query_row(
             "SELECT node,state,reconcile_attempts FROM operations WHERE id=?1 AND kind='upload'",
@@ -1964,6 +2098,19 @@ impl Store {
                 &node,
                 attempts,
             )?;
+            let exhausted = last_error
+                .map(|error| format!("reconcile budget exhausted: {error}"))
+                .or_else(|| Some("reconcile budget exhausted".into()));
+            crate::commit_diagnostics::record(
+                &tx,
+                "operations",
+                operation,
+                &CommitDiagnostic::unknown_fatal(
+                    CommitCategory::ReconcileExhausted,
+                    exhausted,
+                    attempts,
+                ),
+            )?;
         } else {
             tx.execute(
                 "UPDATE operations SET reconcile_attempts=?2, reconcile_at=?3 WHERE id=?1 AND state='uncertain'",
@@ -1977,6 +2124,17 @@ impl Store {
                 &tx,
                 &format!("upload:{operation}"),
                 attempts,
+            )?;
+            crate::commit_diagnostics::record(
+                &tx,
+                "operations",
+                operation,
+                &CommitDiagnostic::unknown_retryable(
+                    category,
+                    last_error.map(str::to_owned),
+                    attempts,
+                    now.saturating_add(upload_reconcile_delay(attempts)),
+                ),
             )?;
         }
         tx.commit()?;
@@ -1998,6 +2156,14 @@ impl Store {
         };
         let changed = tx.execute(
             "UPDATE operations SET state='uncertain', reconcile_attempts=0, reconcile_at=0 WHERE kind='upload' AND state IN ('uncertain','abandoned')",
+            [],
+        )?;
+        // The user asked for a fresh recheck: the old diagnosis described the
+        // previous budget, so clear it instead of showing a stale retry time.
+        tx.execute(
+            "UPDATE operations SET outcome=NULL, outcome_category=NULL, last_error=NULL,
+                    next_retry_at=0, updated_at=unixepoch()
+              WHERE kind='upload' AND state='uncertain'",
             [],
         )?;
         for operation in &abandoned {
@@ -2050,6 +2216,15 @@ impl Store {
         }
         let tx = self.db.transaction()?;
         crate::removals::retire_creation_tx(&tx, operation, &node, "local_deleted")?;
+        crate::commit_diagnostics::record(
+            &tx,
+            "operations",
+            operation,
+            &CommitDiagnostic::confirmed_with_category(
+                CommitCategory::LocalAbandoned,
+                Some("local file was deleted; server creation outcome unconfirmed".into()),
+            ),
+        )?;
         tx.commit()?;
         Ok(true)
     }
@@ -2080,6 +2255,15 @@ impl Store {
         }
         let tx = self.db.transaction()?;
         crate::removals::retire_creation_tx(&tx, &operation, node, "user_discarded")?;
+        crate::commit_diagnostics::record(
+            &tx,
+            "operations",
+            &operation,
+            &CommitDiagnostic::confirmed_with_category(
+                CommitCategory::LocalAbandoned,
+                Some("user discarded the local creation; server outcome unconfirmed".into()),
+            ),
+        )?;
         tx.commit()?;
         Ok(true)
     }

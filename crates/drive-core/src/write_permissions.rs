@@ -608,7 +608,7 @@ fn reset_evidence(store: &Store, root: &str, observed_only: bool) -> Result<()> 
     // INSERT OR IGNORE preserves every existing user/service choice.
     tx.execute("INSERT OR IGNORE INTO write_policy VALUES(?1,'follow_remote','legacy','unknown','legacy',0,unixepoch())", [root])?;
     // Clear the terminal retry gate paired with a typed Read refusal as well.
-    tx.execute("UPDATE transfers SET state='pending',error=NULL WHERE direction='download' AND state IN ('failed','retry')
+    tx.execute("UPDATE transfers SET state='pending',error=NULL,outcome=NULL,outcome_category=NULL,last_error=NULL,next_retry_at=0 WHERE direction='download' AND state IN ('failed','retry')
       AND json_valid(error) AND json_extract(error,'$.kind')='server_rejected' AND json_extract(error,'$.server_code') IS NULL
       AND node IN (SELECT node FROM directory_permissions WHERE root=?1 AND action='read' AND state='denied' AND (?2=0 OR source='observed'))",params![root,observed_only])?;
     tx.execute(
@@ -635,7 +635,7 @@ pub fn session_revision(store: &Store) -> Result<Option<(String, u64)>> {
     }).transpose()
 }
 pub fn defer_stale_read_refusal(store: &Store, ticket: &crate::DownloadTicket) -> Result<()> {
-    store.db.execute("UPDATE transfers SET state='pending',error=NULL WHERE node=?1 AND version=?2 AND direction='download' AND state='inflight'",
+    store.db.execute("UPDATE transfers SET state='pending',error=NULL,outcome=NULL,outcome_category=NULL,last_error=NULL,next_retry_at=0 WHERE node=?1 AND version=?2 AND direction='download' AND state='inflight'",
         params![ticket.id,ticket.version])?;
     Ok(())
 }
@@ -723,6 +723,11 @@ pub fn refuse_operation(
     // The server proved this attempt did not commit. An already uncertain
     // reconciliation is never reset or resent by this method.
     let changed = tx.execute(&format!("UPDATE {table} SET state=CASE state WHEN 'cleanup_inflight' THEN 'cleanup_pending' ELSE 'pending' END WHERE id=?1 AND state IN ('inflight','cleanup_inflight')"),[operation])?;
+    if changed > 0 {
+        // The attempt was proven not to have committed, so any previous
+        // unknown diagnosis is stale: the next definite attempt starts fresh.
+        crate::commit_diagnostics::clear_tx(&tx, table, operation)?;
+    }
     if !namespace && changed > 0 {
         // A definite non-commit can capture the current path on the next
         // attempt. Keep content, origin and mtime intent; uncertain paths stay.
@@ -771,6 +776,23 @@ pub fn mutation_permission_uncertain(store: &Store, operation: &str, namespace: 
     tx.execute(&format!("UPDATE {table} SET state=CASE state WHEN 'cleanup_inflight' THEN 'cleanup_uncertain' ELSE 'uncertain' END WHERE id=?1"), [operation])?;
     crate::sync_history::record_permission_response(&tx, &format!("{prefix}:{operation}"), &node,
         if namespace { kind.as_str() } else { "upload" }, action, code)?;
+    // #9b TB2: a direct permission-related reply is an unknown-retryable commit
+    // outcome, not an anonymous pending row.
+    let retry_after = crate::commit_diagnostics::unix_now()
+        + if namespace { 2 } else { 10 };
+    crate::commit_diagnostics::record(
+        &tx,
+        table,
+        operation,
+        &crate::commit_outcome::CommitDiagnostic::unknown_retryable(
+            crate::commit_outcome::CommitCategory::PermissionUncertain,
+            Some(format!(
+                "permission response 0x{code:04x}; commit outcome unconfirmed"
+            )),
+            0,
+            retry_after,
+        ),
+    )?;
     tx.commit()?;
     Ok(())
 }

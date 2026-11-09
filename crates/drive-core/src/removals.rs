@@ -397,6 +397,22 @@ pub(crate) fn retire_creation_tx(
         "UPDATE operations SET state='superseded' WHERE id=?1 AND state IN ('uncertain','abandoned')",
         [operation],
     )?;
+    // #9b TB2: the retired operation and any residual sibling upload reach a
+    // queue-level terminal outcome here. They are never replayed, but the
+    // server-side creation may still exist, so they are confirmed/local_abandoned
+    // rather than an unknown retry. `inflight` siblings are resolved by the
+    // bridge from their response and keep their own diagnosis.
+    tx.execute(
+        "UPDATE operations SET outcome='confirmed', outcome_category='local_abandoned', last_error='local creation was retired before this upload was confirmed', next_retry_at=0, updated_at=unixepoch() WHERE node=?1 AND kind='upload' AND id<>?2 AND state='superseded' AND outcome IS NULL",
+        [node, operation],
+    )?;
+    tx.execute(
+        "UPDATE operations SET outcome='confirmed', outcome_category='local_abandoned', last_error=?2, next_retry_at=0, updated_at=unixepoch() WHERE id=?1",
+        rusqlite::params![
+            operation,
+            format!("local creation was retired ({reason}); server creation outcome unconfirmed")
+        ],
+    )?;
     // The operation trigger above writes a cancelled history row; recording the
     // abandoned outcome afterwards replaces it with the explanatory failure.
     crate::sync_history::record_abandoned_upload(
@@ -480,7 +496,7 @@ impl Store {
                 [&node.id],
             )?;
             tx.execute(
-                "UPDATE operations SET state='superseded' WHERE node=?1 AND state='pending'",
+                "UPDATE operations SET state='superseded', outcome='confirmed', outcome_category='local_abandoned', last_error='local file was deleted before this upload was sent', next_retry_at=0, updated_at=unixepoch() WHERE node=?1 AND state='pending'",
                 [&node.id],
             )?;
             retire_creation_tx(&tx, &operation, &node.id, "local_deleted")?;
@@ -501,7 +517,7 @@ impl Store {
         // An operation already sent must be reconciled before deletion. Later
         // unsent saves no longer have a name and must never reach the server.
         tx.execute(
-            "UPDATE operations SET state='superseded' WHERE node=?1 AND state='pending'",
+            "UPDATE operations SET state='superseded', outcome='confirmed', outcome_category='local_abandoned', last_error='local file was deleted before this upload was sent', next_retry_at=0, updated_at=unixepoch() WHERE node=?1 AND state='pending'",
             [&node.id],
         )?;
         if unsubmitted {
@@ -563,10 +579,37 @@ impl Store {
             return Err(Error::State("remove lost unlink intent".into()));
         }
         self.db.execute("UPDATE namespace_ops SET state='inflight' WHERE id=?1 AND kind='remove' AND state='pending'",[id])?;
+        // #9b TB2: a fresh remove submission supersedes a stale diagnosis.
+        crate::commit_diagnostics::clear_tx(&self.db, "namespace_ops", id)?;
         Ok(())
     }
     pub fn mark_remove_uncertain(&mut self, id: &str) -> Result<()> {
-        if self.db.execute("UPDATE namespace_ops SET state='uncertain' WHERE id=?1 AND kind='remove' AND state='inflight'",[id])? != 1 { return Err(Error::State("remove not inflight".into())); }
+        self.mark_remove_uncertain_diagnosed(
+            id,
+            crate::commit_outcome::CommitCategory::Interrupted,
+            Some("remove commit outcome unknown; reconciliation required"),
+        )
+    }
+    pub fn mark_remove_uncertain_diagnosed(
+        &mut self,
+        id: &str,
+        category: crate::commit_outcome::CommitCategory,
+        last_error: Option<&str>,
+    ) -> Result<()> {
+        let tx = self.db.transaction()?;
+        if tx.execute("UPDATE namespace_ops SET state='uncertain' WHERE id=?1 AND kind='remove' AND state='inflight'",[id])? != 1 { return Err(Error::State("remove not inflight".into())); }
+        crate::commit_diagnostics::record(
+            &tx,
+            "namespace_ops",
+            id,
+            &crate::commit_outcome::CommitDiagnostic::unknown_retryable(
+                category,
+                last_error.map(str::to_owned),
+                0,
+                0,
+            ),
+        )?;
+        tx.commit()?;
         Ok(())
     }
     pub fn conflict_remove(&mut self, id: &str) -> Result<()> {
@@ -575,6 +618,14 @@ impl Store {
         tx.execute(
             "UPDATE nodes SET conflict=1 WHERE id=(SELECT node FROM namespace_ops WHERE id=?1)",
             [id],
+        )?;
+        crate::commit_diagnostics::record(
+            &tx,
+            "namespace_ops",
+            id,
+            &crate::commit_outcome::CommitDiagnostic::conflict(Some(
+                "remote changed before the remove was confirmed".into(),
+            )),
         )?;
         tx.commit()?;
         Ok(())
@@ -605,6 +656,12 @@ impl Store {
         tx.execute("UPDATE local_unlinks SET confirmed=1 WHERE node=?1", [node])?;
         tx.execute("UPDATE nodes SET deleted=1,conflict=0 WHERE id=?1", [node])?;
         tx.execute("DELETE FROM namespace_overlay WHERE node=?1", [node])?;
+        crate::commit_diagnostics::record(
+            &tx,
+            "namespace_ops",
+            id,
+            &crate::commit_outcome::CommitDiagnostic::confirmed(),
+        )?;
         // Orphan bytes survive until no open handles need them. Recovery/GC of
         // orphan working copies is deliberately separate from NAS deletion.
         tx.commit()?;

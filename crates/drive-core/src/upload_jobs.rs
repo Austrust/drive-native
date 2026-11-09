@@ -91,6 +91,14 @@ impl Store {
             [op],
         )?;
         tx.execute("UPDATE operations SET state='conflict' WHERE id=?1 AND state IN ('inflight','uncertain')",[op])?;
+        crate::commit_diagnostics::record(
+            &tx,
+            "operations",
+            op,
+            &crate::commit_outcome::CommitDiagnostic::conflict(Some(
+                "server reported a conflict before the commit was confirmed".into(),
+            )),
+        )?;
         tx.commit()?;
         Ok(())
     }

@@ -419,6 +419,30 @@ impl Store {
                 outcome,
             },
         );
+        // #9b TB2: persist the observed category and the *actual* in-memory
+        // schedule so the status interface shows the same retry time the
+        // scheduler uses (restart re-arms the observation from 2s, documented).
+        let (category, last_error) = match outcome {
+            NamespaceRecoveryObservation::TransportUnavailable => (
+                crate::commit_outcome::CommitCategory::Transport,
+                "namespace transport unavailable; reconciliation retried",
+            ),
+            NamespaceRecoveryObservation::CommitUnconfirmed => (
+                crate::commit_outcome::CommitCategory::Protocol,
+                "namespace commit outcome unconfirmed; reconciling without replay",
+            ),
+        };
+        crate::commit_diagnostics::record(
+            &self.db,
+            "namespace_ops",
+            operation,
+            &crate::commit_outcome::CommitDiagnostic::unknown_retryable(
+                category,
+                Some(last_error.into()),
+                u32::try_from(attempts).unwrap_or(u32::MAX),
+                crate::commit_diagnostics::unix_now() + i64::try_from(delay).unwrap_or(i64::MAX),
+            ),
+        )?;
         Ok(true)
     }
     pub fn clear_namespace_observation(&mut self, operation: &str) {

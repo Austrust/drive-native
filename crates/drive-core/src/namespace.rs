@@ -386,16 +386,46 @@ impl Store {
             "UPDATE namespace_ops SET state='inflight' WHERE id=?1 AND state='pending'",
             [id],
         )?;
+        // #9b TB2: a fresh rename submission supersedes a stale diagnosis from
+        // an earlier attempt.
+        crate::commit_diagnostics::clear_tx(&self.db, "namespace_ops", id)?;
         Ok(())
     }
     pub fn mark_rename_uncertain(&mut self, id: &str) -> Result<()> {
-        if self.db.execute(
+        self.mark_rename_uncertain_diagnosed(
+            id,
+            crate::commit_outcome::CommitCategory::Interrupted,
+            Some("rename commit outcome unknown; reconciliation required"),
+        )
+    }
+    /// Persist the unknown rename outcome with its category and last error in
+    /// the same transaction as the state change (#9b TB2).
+    pub fn mark_rename_uncertain_diagnosed(
+        &mut self,
+        id: &str,
+        category: crate::commit_outcome::CommitCategory,
+        last_error: Option<&str>,
+    ) -> Result<()> {
+        let tx = self.db.transaction()?;
+        if tx.execute(
             "UPDATE namespace_ops SET state='uncertain' WHERE id=?1 AND state='inflight'",
             [id],
         )? != 1
         {
             return Err(Error::State("rename not inflight".into()));
         }
+        crate::commit_diagnostics::record(
+            &tx,
+            "namespace_ops",
+            id,
+            &crate::commit_outcome::CommitDiagnostic::unknown_retryable(
+                category,
+                last_error.map(str::to_owned),
+                0,
+                0,
+            ),
+        )?;
+        tx.commit()?;
         Ok(())
     }
     pub fn conflict_rename(&mut self, id: &str) -> Result<()> {
@@ -404,10 +434,20 @@ impl Store {
             "UPDATE nodes SET conflict=1 WHERE id=(SELECT node FROM namespace_ops WHERE id=?1)",
             [id],
         )?;
-        tx.execute(
+        let changed = tx.execute(
             "UPDATE namespace_ops SET state='conflict' WHERE id=?1 AND state NOT IN ('committed','superseded')",
             [id],
         )?;
+        if changed > 0 {
+            crate::commit_diagnostics::record(
+                &tx,
+                "namespace_ops",
+                id,
+                &crate::commit_outcome::CommitDiagnostic::conflict(Some(
+                    "remote changed before the rename was confirmed".into(),
+                )),
+            )?;
+        }
         tx.commit()?;
         Ok(())
     }
@@ -443,6 +483,14 @@ impl Store {
             tx.execute(
                 "UPDATE namespace_ops SET state='conflict' WHERE id=?1",
                 [id],
+            )?;
+            crate::commit_diagnostics::record(
+                &tx,
+                "namespace_ops",
+                id,
+                &crate::commit_outcome::CommitDiagnostic::conflict(Some(
+                    "rename object was deleted before the acknowledgement".into(),
+                )),
             )?;
             tx.commit()?;
             return Err(Error::State(
@@ -525,6 +573,12 @@ impl Store {
                 )?;
             }
         }
+        crate::commit_diagnostics::record(
+            &tx,
+            "namespace_ops",
+            id,
+            &crate::commit_outcome::CommitDiagnostic::confirmed(),
+        )?;
         tx.commit()?;
         Ok(())
     }

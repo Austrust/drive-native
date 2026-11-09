@@ -353,3 +353,50 @@ fn abandoned_resave_work_remains_clean_after_restart() {
     assert!(s.upload_operations("abandoned").unwrap().is_empty());
     assert!(s.lookup("1", "new").is_err());
 }
+
+/// The residual sibling upload retired by #14b must also carry a queue-level
+/// diagnosis, otherwise the status API exposes a `superseded` row with no
+/// outcome at all (#9b TB2).
+#[test]
+fn abandoning_after_resave_records_local_abandoned_for_residual_upload() {
+    let (_d, mut s) = fixture();
+    let (n, old) = uncertain_creation(&mut s);
+    let new_op = s.save_local(&n.id, b"edited after uncertainty").unwrap();
+    exhaust_budget(&mut s, &old);
+    assert!(s.abandon_unconfirmed_creation(&n.id).unwrap());
+
+    let diagnostics = drive_core::commit_diagnostics::list(&s, 200).unwrap();
+    let sibling = diagnostics
+        .iter()
+        .find(|d| d.operation == new_op)
+        .expect("residual sibling diagnostic");
+    assert_eq!(sibling.scope, "operation");
+    assert_eq!(sibling.state, "superseded");
+    assert_eq!(sibling.outcome, CommitOutcome::Confirmed);
+    assert_eq!(sibling.category, CommitCategory::LocalAbandoned);
+    assert_eq!(sibling.next_retry_at, 0);
+    assert!(sibling
+        .last_error
+        .as_deref()
+        .unwrap()
+        .contains("retired before"));
+
+    let retired = diagnostics
+        .iter()
+        .find(|d| d.operation == old)
+        .expect("retired upload diagnostic");
+    assert_eq!(retired.outcome, CommitOutcome::Confirmed);
+    assert_eq!(retired.category, CommitCategory::LocalAbandoned);
+    assert!(
+        retired
+            .last_error
+            .as_deref()
+            .unwrap_or("")
+            .contains("user discarded"),
+        "retired diagnostic = {retired:?}"
+    );
+    assert_eq!(
+        drive_core::commit_diagnostics::needs_attention(&s).unwrap(),
+        0
+    );
+}
