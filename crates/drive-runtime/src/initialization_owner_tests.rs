@@ -992,11 +992,16 @@ rules_digest: String::new(),
     };
     let bridge = bridge(store, &peer, "server");
     let mut completed = 0;
+    // The wall-clock budget only bounds the fake peer round trips. On a
+    // loaded shared build host 5s was not enough and the window returned a
+    // transient `initialization work budget exhausted` error before its
+    // assertions ran. The assertions below are about the invalidated path
+    // never being re-ticketed, a correctness property independent of time.
     let result = bridge.initialization_directory_window(
         &peer.rpc,
         &bridge.session().unwrap(),
         &run,
-        Instant::now() + Duration::from_secs(5),
+        Instant::now() + Duration::from_secs(60),
         false,
         1,
         &mut completed,
@@ -2301,16 +2306,39 @@ fn initialization_keeps_browsing_and_status_reads_responsive_under_concurrent_qu
     assert!(
         wait_for(Duration::from_secs(30), || {
             let snapshot = service.bridge.initialization.snapshot();
-            snapshot.active && snapshot.items > 0
+            snapshot.active
+                && initialization_counter(&snapshot, Counter::DirectoryCommitted) > 0
         }),
-        "the owner committed no import progress; the import window never opened"
+        "the owner committed no directory receipt; the import window never opened"
     );
     let before = service.bridge.initialization.snapshot();
     assert!(before.active);
-    assert!(before.units > 0 && before.items > 0);
+    let before_commits = initialization_counter(&before, Counter::DirectoryCommitted);
+    assert!(
+        before_commits > 0,
+        "the query burst started before any directory receipt committed"
+    );
     let load_start = system_load();
-    // (kind, elapsed, active before, active after, directory commits before, after)
-    let records: Mutex<Vec<(usize, Duration, bool, bool, u64, u64)>> = Mutex::new(Vec::new());
+    // Import progress is recorded through the monotonic DirectoryCommitted
+    // counter and the per-query before/after snapshots. `units`/`items` are a
+    // last-progress estimator: `Tracker::pulled` rebinds them to
+    // cursor_advances/events_applied, and `State::phase` clears them on every
+    // legacy phase transition, so they are kept as diagnostics only.
+    struct LatencyRecord {
+        kind: usize,
+        elapsed: Duration,
+        active_before: bool,
+        active_after: bool,
+        commits_before: u64,
+        commits_after: u64,
+        attempt_before: u64,
+        attempt_after: u64,
+        phase_before: crate::initialization::Phase,
+        phase_after: crate::initialization::Phase,
+        items_before: u64,
+        items_after: u64,
+    }
+    let records: Mutex<Vec<LatencyRecord>> = Mutex::new(Vec::new());
     std::thread::scope(|scope| {
         for _ in 0..LATENCY_THREADS {
             scope.spawn(|| {
@@ -2373,14 +2401,20 @@ fn initialization_keeps_browsing_and_status_reads_responsive_under_concurrent_qu
                             assert_ne!(json["initialization"]["phase"], "waiting");
                         }
                     }
-                    local.push((
+                    local.push(LatencyRecord {
                         kind,
                         elapsed,
-                        snapshot_before.active,
-                        snapshot_after.active,
+                        active_before: snapshot_before.active,
+                        active_after: snapshot_after.active,
                         commits_before,
                         commits_after,
-                    ));
+                        attempt_before: snapshot_before.attempt,
+                        attempt_after: snapshot_after.attempt,
+                        phase_before: snapshot_before.phase,
+                        phase_after: snapshot_after.phase,
+                        items_before: snapshot_before.items,
+                        items_after: snapshot_after.items,
+                    });
                 }
                 records.lock().unwrap().extend(local);
             });
@@ -2389,69 +2423,38 @@ fn initialization_keeps_browsing_and_status_reads_responsive_under_concurrent_qu
     let after = service.bridge.initialization.snapshot();
     let load_end = system_load();
     let records = records.into_inner().unwrap();
-    assert_eq!(records.len(), LATENCY_QUERIES);
     let active_throughout = records
         .iter()
-        .all(|(_, _, before_active, after_active, ..)| *before_active && *after_active);
-    assert!(active_throughout, "a query ran outside the live import window");
+        .all(|record| record.active_before && record.active_after);
+    let attempt_throughout = records.iter().all(|record| {
+        record.attempt_before == before.attempt
+            && record.attempt_after == before.attempt
+            && record.attempt_before == record.attempt_after
+    });
     let overlapping = records
         .iter()
-        .filter(|(_, _, _, _, commits_before, commits_after)| commits_after > commits_before)
+        .filter(|record| record.commits_after > record.commits_before)
         .count();
     let millis: Vec<u128> = records
         .iter()
-        .map(|(_, elapsed, ..)| elapsed.as_millis())
+        .map(|record| record.elapsed.as_millis())
         .collect();
     let (p50, p95, max) = latency_stats(millis);
-    let committed_before = initialization_counter(&before, Counter::DirectoryCommitted);
+    let committed_before = before_commits;
     let committed_after = initialization_counter(&after, Counter::DirectoryCommitted);
-    assert!(after.active, "the import finished while the queries were running");
-    assert!(
-        after.items > before.items,
-        "no import progress was committed during the query burst: {} -> {}",
-        before.items,
-        after.items
-    );
-    assert!(
-        committed_after > committed_before,
-        "no directory receipt was committed during the query burst"
-    );
-    assert!(
-        overlapping > 0,
-        "no query observed a directory commit while it was executing"
-    );
-    let joined = importing.join();
-    assert!(joined.is_ok(), "the owner thread panicked");
-    let imported = joined.ok().unwrap().expect("the owner rebuild failed");
-    assert!(imported, "the owner did not rebuild the replacement namespace");
-    let import_ms = import_started.elapsed().as_millis();
-    service.bridge.initialization.end();
-    {
-        let store = service.bridge.store.lock().unwrap();
-        assert_eq!(store.cursor().unwrap(), replacement.cursor);
-        assert_eq!(store.native_scope_binding().unwrap().unwrap().0, "new-server");
-        assert_eq!(store.initialization_status().unwrap().unwrap().state, "ready");
-        assert_eq!(store.lookup_node("100", "dir-000").unwrap().id, "500000");
-        assert_eq!(store.lookup_node("500000", "file-000.txt").unwrap().id, "600000");
-    }
-    let log = peer.finish();
-    assert!(log.contains(&"seed".into()));
-    let reads = log
+    let items_max = records
         .iter()
-        .filter(|line| line.starts_with("directory:"))
-        .count();
-    assert!(
-        reads >= LATENCY_IMPORT_DIRECTORIES,
-        "the owner read fewer directories than the fixture contains: {reads}"
-    );
-    assert!(
-        p95 <= 500,
-        "p95 {p95}ms exceeds the 500ms acceptance bound (max {max}ms)"
-    );
-    assert!(
-        max < 5_000,
-        "a desktop query blocked for {max}ms during initialization"
-    );
+        .flat_map(|record| [record.items_before, record.items_after])
+        .max()
+        .unwrap_or(0);
+    let mut phases: Vec<String> = records
+        .iter()
+        .flat_map(|record| [record.phase_before, record.phase_after])
+        .map(|phase| format!("{phase:?}").to_lowercase())
+        .collect();
+    phases.sort();
+    phases.dedup();
+    let phases_seen = phases.join(",");
     for (kind, call) in [
         "GetDirectory",
         "GetStates",
@@ -2463,8 +2466,8 @@ fn initialization_keeps_browsing_and_status_reads_responsive_under_concurrent_qu
     {
         let kind_millis: Vec<u128> = records
             .iter()
-            .filter(|(record_kind, ..)| *record_kind == kind)
-            .map(|(_, elapsed, ..)| elapsed.as_millis())
+            .filter(|record| record.kind == kind)
+            .map(|record| record.elapsed.as_millis())
             .collect();
         let count = kind_millis.len();
         let (kind_p50, kind_p95, kind_max) = latency_stats(kind_millis);
@@ -2474,11 +2477,11 @@ fn initialization_keeps_browsing_and_status_reads_responsive_under_concurrent_qu
         );
     }
     println!(
-        "#8 INIT-QUERIES total={} threads={} p50_ms={p50} p95_ms={p95} max_ms={max} \
-         import_ms={import_ms} directories={} nodes={} items_before={} items_after={} \
+        "#8 INIT-QUERIES-DIAG total={} threads={} p50_ms={p50} p95_ms={p95} max_ms={max} \
+         directories={} nodes={} items_before={} items_after={} items_max={items_max} \
          directory_commits_delta={} overlapping_queries={overlapping} \
-         active_throughout={active_throughout} loadavg_start=\"{load_start}\" \
-         loadavg_end=\"{load_end}\"",
+         active_throughout={active_throughout} attempt_throughout={attempt_throughout} \
+         phases_seen=\"{phases_seen}\" loadavg_start=\"{load_start}\" loadavg_end=\"{load_end}\"",
         records.len(),
         LATENCY_THREADS,
         LATENCY_IMPORT_DIRECTORIES,
@@ -2486,6 +2489,81 @@ fn initialization_keeps_browsing_and_status_reads_responsive_under_concurrent_qu
         before.items,
         after.items,
         committed_after - committed_before,
+    );
+    assert_eq!(records.len(), LATENCY_QUERIES);
+    let joined = importing.join();
+    let joined_ok = joined.is_ok();
+    let imported = joined.ok().and_then(|result| result.ok());
+    let import_ms = import_started.elapsed().as_millis();
+    service.bridge.initialization.end();
+    let (cursor, binding_restore, init_state, dir_node, file_node) = {
+        let store = service.bridge.store.lock().unwrap();
+        (
+            store.cursor().unwrap(),
+            store.native_scope_binding().unwrap().unwrap().0,
+            store.initialization_status().unwrap().unwrap().state,
+            store.lookup_node("100", "dir-000").unwrap().id,
+            store.lookup_node("500000", "file-000.txt").unwrap().id,
+        )
+    };
+    let log = peer.finish();
+    let seed_seen = log.contains(&"seed".into());
+    let reads = log
+        .iter()
+        .filter(|line| line.starts_with("directory:"))
+        .count();
+    println!(
+        "#8 INIT-QUERIES total={} threads={} p50_ms={p50} p95_ms={p95} max_ms={max} \
+         import_ms={import_ms} directories={} nodes={} items_before={} items_after={} \
+         items_max={items_max} directory_commits_delta={} overlapping_queries={overlapping} \
+         active_throughout={active_throughout} attempt_throughout={attempt_throughout} \
+         phases_seen=\"{phases_seen}\" loadavg_start=\"{load_start}\" loadavg_end=\"{load_end}\" \
+         joined_ok={joined_ok} imported={imported:?} seed_seen={seed_seen} directory_reads={reads}",
+        records.len(),
+        LATENCY_THREADS,
+        LATENCY_IMPORT_DIRECTORIES,
+        replacement.nodes.len(),
+        before.items,
+        after.items,
+        committed_after - committed_before,
+    );
+    assert!(active_throughout, "a query ran outside the live import window");
+    assert!(
+        attempt_throughout,
+        "the initialization attempt changed while the queries were running"
+    );
+    assert!(
+        committed_after > committed_before,
+        "no directory receipt was committed during the query burst"
+    );
+    assert!(
+        overlapping > 0,
+        "no query observed a directory commit while it was executing"
+    );
+    assert!(after.active, "the import finished while the queries were running");
+    assert!(joined_ok, "the owner thread panicked");
+    assert_eq!(
+        imported,
+        Some(true),
+        "the owner did not rebuild the replacement namespace"
+    );
+    assert_eq!(cursor, replacement.cursor);
+    assert_eq!(binding_restore, "new-server");
+    assert_eq!(init_state, "ready");
+    assert_eq!(dir_node, "500000");
+    assert_eq!(file_node, "600000");
+    assert!(seed_seen, "the owner did not use the seed step");
+    assert!(
+        reads >= LATENCY_IMPORT_DIRECTORIES,
+        "the owner read fewer directories than the fixture contains: {reads}"
+    );
+    assert!(
+        p95 <= 500,
+        "p95 {p95}ms exceeds the 500ms acceptance bound (max {max}ms)"
+    );
+    assert!(
+        max < 5_000,
+        "a desktop query blocked for {max}ms during initialization"
     );
 }
 
