@@ -73,9 +73,15 @@ fn unknown_mkdir_keeps_children_and_drafts_but_independent_shared_parent_rename_
     s.save_local(&file.id, b"unuploaded draft").unwrap();
     s.creation_saved(&file.id).unwrap();
     s.rename_local("1", "A", "1", "renamed", false).unwrap();
-    assert_eq!(s.next_namespace_operation().unwrap().unwrap().operation, op);
-    defer(&mut s, &op);
+    // #57 pending-first: the independent rename is selected even though the
+    // mkdir reconcile is due; the dependent child still cannot pass it.
     let rename = s.scheduled_rename().unwrap().unwrap();
+    assert_eq!(
+        s.next_namespace_operation().unwrap().unwrap().operation,
+        rename.job.operation
+    );
+    assert_ne!(rename.job.operation, op);
+    defer(&mut s, &op);
     assert_eq!(rename.job.node.id, "2");
     s.mark_rename_started(&rename.job.operation).unwrap();
     assert_eq!(
@@ -284,4 +290,238 @@ fn inflight_outside_budget_owns_the_serial_lane_and_truncation_is_explicit() {
         "fixture-256"
     );
     assert!(s.mark_directory_started(&op).is_err());
+}
+
+// ---- #57: namespace dispatch starvation (P0) -------------------------------
+
+const SYNTH_ROOT: &str = "1";
+
+/// Build a store whose remote snapshot has `count` independent root files, then
+/// inject synthetic remove journal rows (the field shape: a low-seq `uncertain`
+/// block ahead of a large high-seq `pending` tail).
+fn synthetic_remove_store(count: usize) -> (tempfile::TempDir, Store) {
+    let d = tempfile::tempdir().unwrap();
+    let mut s = Store::open(d.path()).unwrap();
+    let mut nodes = vec![n("1", None, "root", true)];
+    for i in 0..count {
+        nodes.push(n(
+            &format!("f{i}"),
+            Some(SYNTH_ROOT),
+            &format!("f{i}"),
+            false,
+        ));
+    }
+    s.install_remote_snapshot(&nodes, "1", "server").unwrap();
+    s.ensure_fs_root(SYNTH_ROOT).unwrap();
+    (d, s)
+}
+
+fn insert_removes(
+    d: &tempfile::TempDir,
+    first: usize,
+    count: usize,
+    state: &str,
+    prefix: &str,
+) -> Vec<String> {
+    let db = rusqlite::Connection::open(d.path().join("state.sqlite")).unwrap();
+    let mut ids = Vec::new();
+    for i in first..first + count {
+        let id = format!("{prefix}-{i}");
+        let node = n(&format!("f{i}"), Some(SYNTH_ROOT), &format!("f{i}"), false);
+        let job = drive_core::removals::RemoveJob {
+            operation: id.clone(),
+            node: node.clone(),
+            path: format!("f{i}"),
+            cursor: "synthetic".into(),
+        };
+        db.execute(
+            "INSERT INTO namespace_ops(id,node,body,state,kind) VALUES(?1,?2,?3,?4,'remove')",
+            rusqlite::params![id, node.id, serde_json::to_string(&job).unwrap(), state],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT OR REPLACE INTO local_unlinks(node,confirmed) VALUES(?1,0)",
+            [&node.id],
+        )
+        .unwrap();
+        ids.push(id);
+    }
+    ids
+}
+
+fn journal_attempts(d: &tempfile::TempDir, id: &str) -> (i64, i64) {
+    let db = rusqlite::Connection::open(d.path().join("state.sqlite")).unwrap();
+    db.query_row(
+        "SELECT attempts,updated_at FROM namespace_ops WHERE id=?1",
+        [id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )
+    .unwrap()
+}
+
+fn journal_commit(d: &tempfile::TempDir, id: &str) {
+    let db = rusqlite::Connection::open(d.path().join("state.sqlite")).unwrap();
+    db.execute(
+        "UPDATE namespace_ops SET state='committed' WHERE id=?1",
+        [id],
+    )
+    .unwrap();
+}
+
+/// Acceptance criterion: 55 due `uncertain` removes whose seq precedes a 100-row
+/// `pending` tail must not monopolize the single dispatch lane. Before #57 each
+/// dispatch round selects the low-seq reconcile head, so every assertion below
+/// observes `uncertain` instead of a pending attempt.
+#[test]
+fn due_uncertain_block_does_not_starve_the_pending_remove_tail() {
+    let (d, mut s) = synthetic_remove_store(160);
+    let _uncertain = insert_removes(&d, 0, 55, "uncertain", "u");
+    let pending = insert_removes(&d, 55, 100, "pending", "p");
+    let mut attempted = Vec::new();
+    for round in 0..10 {
+        let selected = s
+            .next_namespace_operation()
+            .unwrap()
+            .unwrap_or_else(|| panic!("round {round}: no namespace candidate"));
+        assert_eq!(
+            selected.state, "pending",
+            "round {round}: reconcile candidate {} starved the pending tail",
+            selected.operation
+        );
+        assert!(pending.contains(&selected.operation));
+        // The runtime always marks a selected submission started; the journal
+        // must show evidence of the attempt instead of attempts=0/updated_at=0.
+        s.mark_remove_started(&selected.operation).unwrap();
+        let (_attempts, updated_at) = journal_attempts(&d, &selected.operation);
+        assert!(
+            updated_at > 0,
+            "round {round}: dispatch never stamped updated_at"
+        );
+        journal_commit(&d, &selected.operation);
+        attempted.push(selected.operation);
+    }
+    attempted.sort();
+    attempted.dedup();
+    assert_eq!(
+        attempted.len(),
+        10,
+        "fewer than 10 distinct pending attempts"
+    );
+    let h = s.queue_health().unwrap();
+    assert_eq!(h.namespace_uncertain, 55);
+    assert_eq!(h.namespace_unfinished, 55 + 100 - 10);
+}
+
+/// Acceptance criterion: replaying the frozen field shape (conflicts + a mid-seq
+/// uncertain block + a large pending tail) after a restart must advance the tail.
+#[test]
+fn frozen_field_shape_advances_the_pending_tail_after_restart() {
+    let (d, s) = synthetic_remove_store(160);
+    insert_removes(&d, 0, 4, "conflict", "c");
+    insert_removes(&d, 4, 55, "uncertain", "u");
+    insert_removes(&d, 59, 100, "pending", "p");
+    drop(s);
+    let mut s = Store::open(d.path()).unwrap();
+    for round in 0..10 {
+        let selected = s
+            .next_namespace_operation()
+            .unwrap()
+            .unwrap_or_else(|| panic!("round {round}: no namespace candidate"));
+        assert_eq!(
+            selected.state, "pending",
+            "round {round}: post-restart dispatch selected {} instead of the pending tail",
+            selected.state
+        );
+        s.mark_remove_started(&selected.operation).unwrap();
+        journal_commit(&d, &selected.operation);
+    }
+    let h = s.queue_health().unwrap();
+    let schedule = h.schedule.unwrap();
+    assert!(schedule.selected);
+    assert!(!schedule.unresolved_barrier);
+    assert_eq!(schedule.permission_blocked, 0);
+    assert_eq!(h.namespace_uncertain, 55);
+}
+
+/// Acceptance criterion: a slow (up to 120 s) read-only reconcile must not
+/// head-of-line block later candidates. At the selector level the reconcile is
+/// represented by the armed 2 s observation: the next dispatch cycle must pick
+/// the pending candidate, not re-own the lane with the deferred reconcile.
+#[test]
+fn slow_read_only_reconcile_does_not_head_of_line_block_pending_work() {
+    let (d, mut s) = synthetic_remove_store(8);
+    insert_removes(&d, 0, 1, "uncertain", "u");
+    let first = s.next_namespace_operation().unwrap().unwrap();
+    assert_eq!(first.state, "uncertain");
+    // The 120 s reconcile returned "cannot prove": arm the backoff.
+    assert!(
+        s.observe_namespace_unresolved(&first.operation, Observation::CommitUnconfirmed)
+            .unwrap()
+    );
+    // Pending remove appears while the reconcile lane is still blocked.
+    insert_removes(&d, 1, 1, "pending", "p");
+    let second = s.next_namespace_operation().unwrap().unwrap();
+    assert_eq!(
+        second.state, "pending",
+        "the deferred reconcile re-owned the dispatch lane"
+    );
+    assert!(second.operation.starts_with("p-"));
+    s.mark_remove_started(&second.operation).unwrap();
+}
+
+/// Acceptance criterion: `namespace.pending_starved` is emitted after 3
+/// consecutive dispatch rounds without a pending attempt and surfaced
+/// additively through `queue_health`/`GetOverview`.
+#[test]
+fn pending_starvation_is_observable_after_three_rounds_without_a_pending_attempt() {
+    let (_d, mut s) = fixture();
+    let (dir, op) = uncertain(&mut s);
+    // The only pending mutation depends on the unresolved intent: ordering is
+    // correct, but the scheduler must still report that pending never ran.
+    s.create_local_directory(&dir.id, "blocked", 0o700).unwrap();
+    let first = s.dispatch_namespace_operation().unwrap().unwrap();
+    assert_eq!(first.operation, op);
+    assert_eq!(first.state, "uncertain");
+    defer(&mut s, &op);
+    assert!(s.dispatch_namespace_operation().unwrap().is_none());
+    s.request_namespace_recheck();
+    assert!(s.dispatch_namespace_operation().unwrap().is_some());
+    let h = s.queue_health().unwrap();
+    assert_eq!(h.consecutive_pending_starved_rounds, 3);
+    assert!(h.pending_starved);
+    assert_eq!(h.pending_starved_events, 1);
+    assert_eq!(
+        h.last_starvation_event.as_deref(),
+        Some("namespace.pending_starved")
+    );
+    assert!(h.pending_last_attempt_age_ms.is_none());
+    let snapshot = h.schedule.unwrap();
+    assert_eq!(snapshot.selected_state.as_deref(), Some("uncertain"));
+    assert_eq!(snapshot.eligible_pending, 0);
+}
+
+/// Acceptance criterion: `pending_last_attempt_age_ms` is exposed by the
+/// dispatch accounting (the field the issue asks to add additively).
+#[test]
+fn dispatch_rounds_report_the_last_pending_attempt_age() {
+    let (d, mut s) = synthetic_remove_store(8);
+    insert_removes(&d, 0, 1, "uncertain", "u");
+    insert_removes(&d, 1, 3, "pending", "p");
+    assert!(
+        s.queue_health()
+            .unwrap()
+            .pending_last_attempt_age_ms
+            .is_none()
+    );
+    let selected = s.dispatch_namespace_operation().unwrap().unwrap();
+    assert_eq!(selected.state, "pending");
+    let h = s.queue_health().unwrap();
+    let age = h.pending_last_attempt_age_ms.expect("pending attempt age");
+    assert!(age < 300_000, "pending_last_attempt_age_ms={age}");
+    assert!(!h.pending_starved);
+    assert_eq!(h.consecutive_pending_starved_rounds, 0);
+    assert_eq!(
+        h.schedule.unwrap().selected_state.as_deref(),
+        Some("pending")
+    );
 }
