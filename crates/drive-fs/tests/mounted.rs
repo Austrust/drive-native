@@ -749,15 +749,18 @@ fn fuse_connections() -> std::collections::BTreeSet<u32> {
         .map(|entries| {
             entries
                 .filter_map(|entry| entry.ok())
-                .filter_map(|entry| entry.file_name().to_str().and_then(|name| name.parse().ok()))
+                .filter_map(|entry| {
+                    entry
+                        .file_name()
+                        .to_str()
+                        .and_then(|name| name.parse().ok())
+                })
                 .collect()
         })
         .unwrap_or_default()
 }
 
-fn wait_for_new_connection(
-    before: &std::collections::BTreeSet<u32>,
-) -> Option<u32> {
+fn wait_for_new_connection(before: &std::collections::BTreeSet<u32>) -> Option<u32> {
     let started = Instant::now();
     while started.elapsed() < StdDuration::from_secs(2) {
         let now = fuse_connections();
@@ -769,6 +772,16 @@ fn wait_for_new_connection(
         }
     }
     None
+}
+
+/// Restore an environment variable that biases the global request budgets,
+/// even when an assertion panics. The mounted suite runs serially in one
+/// process, so a leaked override would affect later kernel tests.
+struct EnvGuard(&'static str);
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        unsafe { std::env::remove_var(self.0) };
+    }
 }
 
 fn sysfs_u16(connection: u32, name: &str) -> u16 {
@@ -852,12 +865,8 @@ fn kernel_metadata_store_busy_returns_retryable_eagain_within_bounded_wait() {
     let mount = d.path().join("mount");
     std::fs::create_dir(&mount).unwrap();
     let mut s = Store::open(d.path().join("state")).unwrap();
-    s.install_remote_snapshot(
-        &[node("root", 0, "1"), node("a", 3, "1")],
-        "1",
-        "test",
-    )
-    .unwrap();
+    s.install_remote_snapshot(&[node("root", 0, "1"), node("a", 3, "1")], "1", "test")
+        .unwrap();
     s.publish_download(
         &DownloadTicket {
             id: "a".into(),
@@ -868,7 +877,21 @@ fn kernel_metadata_store_busy_returns_retryable_eagain_within_bounded_wait() {
     )
     .unwrap();
     let s = Arc::new(drive_core::SharedStore::new(s));
+    // Exercise the configured hard metadata bound instead of sleeping the
+    // production 5 s default: the soft 50 ms threshold still fires first, the
+    // retryable error is only produced when the whole budget is exhausted.
+    let _env = EnvGuard("DRIVE_NATIVE_FUSE_DEADLINE_METADATA_MS");
+    unsafe { std::env::set_var("DRIVE_NATIVE_FUSE_DEADLINE_METADATA_MS", "300") };
     let fs = drive_fs::CacheFilesystem::new(s.clone(), "root", uid, gid).unwrap();
+    assert_eq!(
+        drive_fs::request::snapshot()
+            .budgets_ms
+            .iter()
+            .find(|(name, _)| *name == "metadata")
+            .map(|(_, value)| *value),
+        Some(300),
+        "the metadata deadline override must reach the request budgets"
+    );
     let session = fuser::spawn_mount2(
         fs,
         &mount,
@@ -883,6 +906,15 @@ fn kernel_metadata_store_busy_returns_retryable_eagain_within_bounded_wait() {
     .unwrap();
     // Warm the kernel inode so the metadata request reaches the FUSE handler.
     std::fs::metadata(mount.join("A.doc")).unwrap();
+    assert_eq!(
+        drive_fs::request::snapshot()
+            .budgets_ms
+            .iter()
+            .find(|(name, _)| *name == "metadata")
+            .map(|(_, value)| *value),
+        Some(300),
+        "the request budgets must still carry the override after mount"
+    );
     let before = drive_fs::request::snapshot();
     // Hold the serialized writer; the metadata path must answer retryable
     // EAGAIN after its bounded wait instead of pinning the queue worker.
@@ -892,14 +924,23 @@ fn kernel_metadata_store_busy_returns_retryable_eagain_within_bounded_wait() {
     let probe = std::thread::spawn(move || {
         let started = Instant::now();
         let result = std::fs::metadata(&path);
-        let _ = tx.send((result.err().and_then(|e| e.raw_os_error()), started.elapsed()));
+        let _ = tx.send((
+            result.err().and_then(|e| e.raw_os_error()),
+            started.elapsed(),
+        ));
     });
-    let outcome = rx.recv_timeout(StdDuration::from_secs(1));
+    let outcome = rx.recv_timeout(StdDuration::from_secs(3));
     drop(guard);
     match outcome {
         Ok((Some(libc::EAGAIN), elapsed)) => {
+            // The soft threshold (50 ms) only records degradation; the reply
+            // must wait for the 300 ms budget and then fail retryably.
             assert!(
-                elapsed < StdDuration::from_secs(1),
+                elapsed >= StdDuration::from_millis(150),
+                "EAGAIN arrived before the configured budget was exhausted: {elapsed:?}"
+            );
+            assert!(
+                elapsed < StdDuration::from_secs(3),
                 "bounded wait answered after {elapsed:?}"
             );
         }
@@ -921,8 +962,18 @@ fn kernel_metadata_store_busy_returns_retryable_eagain_within_bounded_wait() {
         after.retryable_replies,
         before.lock_wait_timeouts,
         after.lock_wait_timeouts,
-        before.ops.iter().find(|op| op.op == "getattr").unwrap().retryable,
-        after.ops.iter().find(|op| op.op == "getattr").unwrap().retryable,
+        before
+            .ops
+            .iter()
+            .find(|op| op.op == "getattr")
+            .unwrap()
+            .retryable,
+        after
+            .ops
+            .iter()
+            .find(|op| op.op == "getattr")
+            .unwrap()
+            .retryable,
         before.request_timeouts,
         after.request_timeouts,
     );

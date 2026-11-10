@@ -12,7 +12,7 @@
 drive-native fuse.request_timeout op=getattr elapsed_ms=... budget_ms=... detail=...
 ```
 
-**有界 Store 等待。** metadata 读路径（`lookup`/`getattr` 的排队分支）把无界的 `store.lock()` 换成 `SharedStore::lock_timeout(50ms)`；超时返回可重试的 `EAGAIN`，记录 `fuse.degraded_reason=store_lock_timeout` 事件、`retryable`/`lock_wait_timeout` 计数和 lock-wait 直方图。仅改 metadata/cache-hit 路径，不动 Store 结构与 #23/#24 的持有期。
+**有界 Store 等待（两级）。** metadata 读路径（`lookup`/`getattr` 的排队分支）把无界的 `store.lock()` 换成两级等待：先等 50 ms（`SharedStore::lock_timeout`，指数退避轮询）——这只是**软阈值**，超过时记录 `fuse.degraded_reason=store_lock_timeout`、`lock_wait_timeout` 计数和 lock-wait 直方图，**不返回错误、继续等待**；随后继续等到该 opcode 的预算（metadata 默认 5 s，可用 `DRIVE_NATIVE_FUSE_DEADLINE_METADATA_MS` 调整）——只有**整个预算耗尽**才返回可重试 `EAGAIN` 并记一次 `fuse.request_timeout`。原因：`std::fs`/`stat`/`ls` 不重试 `EAGAIN`，把 50 ms 瞬时写者竞争漏成 `EAGAIN` 会让 cache-hit 路径在普通应用里表现为失败；语义应为"瞬时竞争透明等待、真正长期阻塞才降级报错"。仅改 metadata/cache-hit 路径，不动 Store 结构与 #23/#24 的持有期。
 
 **GetOverview 指标。** `GetOverview` 增加 additive 的 `fuse` 对象（`schema` 仍为 1，IPC 版本不变）：`configured_tuning`/`effective_tuning`、`request_budget_ms`、每 opcode `count/total_us/max_us/p50_us/p95_us/p99_us/timeouts/retryable`（分位数为 2 的幂桶上界）、`request_timeouts`、`retryable_replies`、`lock_wait` 直方图、`lock_wait_timeouts`、`degraded_events` 和 `deadline_capability`。
 

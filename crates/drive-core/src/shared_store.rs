@@ -285,6 +285,7 @@ impl SharedStore {
     /// a partial guard between attempts.
     pub fn lock_timeout(&self, timeout: Duration) -> Option<StoreGuard<'_>> {
         let started = Instant::now();
+        let mut backoff = Duration::from_millis(1);
         loop {
             match self.try_lock() {
                 Ok(guard) => return Some(guard),
@@ -295,7 +296,11 @@ impl SharedStore {
             if remaining.is_zero() {
                 return None;
             }
-            std::thread::sleep(remaining.min(Duration::from_millis(1)));
+            // Exponential backoff caps the polling rate of all metadata
+            // workers under a long writer hold (issue #59); it never extends
+            // the deadline.
+            std::thread::sleep(remaining.min(backoff));
+            backoff = (backoff * 2).min(Duration::from_millis(25));
         }
     }
     pub fn is_poisoned(&self) -> bool {

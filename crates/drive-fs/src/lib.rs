@@ -345,6 +345,36 @@ fn errno(error: &Error) -> i32 {
         _ => libc::EIO,
     }
 }
+/// Issue #59: acquire the serialized Store for a metadata reply with a
+/// two-tier bounded wait.
+///
+/// A fixed single-shot timeout (e.g. 50 ms) must not surface transient writer
+/// contention as `EAGAIN`: plain `std::fs`/`stat`/`ls` do not retry `EAGAIN`,
+/// so a cache-hit request would appear broken while the writer was merely
+/// busy. The soft threshold only records the degradation; the wait then keeps
+/// going with the shared exponential backoff until the opcode's own deadline.
+/// `EAGAIN` is produced only when the whole budget is exhausted, which is the
+/// documented, monitored degradation instead of an unbounded handler stall.
+fn bounded_metadata_guard<'a>(
+    store: &'a drive_core::SharedStore,
+    op: request::Op,
+    detail: &'static str,
+) -> Option<drive_core::shared_store::StoreGuard<'a>> {
+    let started = Instant::now();
+    let soft = request::metadata_lock_wait();
+    if let Some(guard) = store.lock_timeout(soft) {
+        request::record_lock_wait(started.elapsed());
+        return Some(guard);
+    }
+    // Soft threshold crossed: one degraded observation, then keep waiting
+    // inside the opcode budget so a cache-hit reply still succeeds.
+    request::record_store_busy(op, started.elapsed(), detail);
+    let budget = request::budgets().for_op(op);
+    let remaining = budget.saturating_sub(started.elapsed());
+    let guard = store.lock_timeout(remaining);
+    request::record_lock_wait(started.elapsed());
+    guard
+}
 fn filetype(record: &FileRecord) -> FileType {
     if record.node.directory {
         FileType::Directory
@@ -691,17 +721,13 @@ impl Filesystem for CacheFilesystem {
             // serialized writer. The queue worker keeps its own result and the
             // kernel retries EAGAIN instead of the whole mount stalling.
             let wait = diagnostics::span(diagnostics::Stage::LookupStoreWait);
-            let wait_started = Instant::now();
-            let Some(store) = store.lock_timeout(request::metadata_lock_wait()) else {
-                let waited = wait_started.elapsed();
-                request::record_lock_wait(waited);
-                request::record_store_busy(request::Op::Lookup, waited, "detail=lookup");
+            let Some(store) = bounded_metadata_guard(&store, request::Op::Lookup, "detail=lookup")
+            else {
                 request::record_retryable(request::Op::Lookup);
                 deadline.timeout("detail=lookup");
                 reply.error(libc::EAGAIN);
                 return;
             };
-            request::record_lock_wait(wait_started.elapsed());
             drop(wait);
             let projection = diagnostics::span(diagnostics::Stage::LookupProjection);
             let result = preview::lookup(&store, parent, &name);
@@ -793,18 +819,15 @@ impl Filesystem for CacheFilesystem {
             drop(queued);
             let publication = notify.reply_guard();
             let wait = diagnostics::span(diagnostics::Stage::GetattrStoreWait);
-            let wait_started = Instant::now();
-            // Issue #59: bounded wait, retryable EAGAIN on expiry (see lookup).
-            let Some(guard) = store.lock_timeout(request::metadata_lock_wait()) else {
-                let waited = wait_started.elapsed();
-                request::record_lock_wait(waited);
-                request::record_store_busy(request::Op::Getattr, waited, "detail=getattr");
+            // Issue #59: bounded two-tier wait; EAGAIN only after the opcode
+            // budget is exhausted (see bounded_metadata_guard).
+            let Some(guard) = bounded_metadata_guard(&store, request::Op::Getattr, "detail=getattr")
+            else {
                 request::record_retryable(request::Op::Getattr);
                 deadline.timeout("detail=getattr");
                 reply.error(libc::EAGAIN);
                 return;
             };
-            request::record_lock_wait(wait_started.elapsed());
             drop(wait);
             let projection = diagnostics::span(diagnostics::Stage::GetattrProjection);
             let result = preview::metadata(&guard, ino);

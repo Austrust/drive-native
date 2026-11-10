@@ -2527,7 +2527,10 @@ mod readpath_tests {
         // latency/timeout counters and the metadata lock-wait histogram.
         assert_eq!(value["fuse"]["schema"], 1);
         assert_eq!(value["fuse"]["configured_tuning"]["max_background"], 64);
-        assert_eq!(value["fuse"]["configured_tuning"]["congestion_threshold"], 48);
+        assert_eq!(
+            value["fuse"]["configured_tuning"]["congestion_threshold"],
+            48
+        );
         assert_eq!(value["fuse"]["effective_tuning"]["max_background"], 64);
         assert_eq!(value["fuse"]["request_budget_ms"]["metadata"], 5000);
         assert_eq!(value["fuse"]["request_budget_ms"]["read"], 30000);
@@ -2535,7 +2538,10 @@ mod readpath_tests {
         assert_eq!(value["fuse"]["request_budget_ms"]["readdir"], 10000);
         assert!(value["fuse"]["ops"]["lookup"]["count"].is_u64());
         assert!(value["fuse"]["lock_wait"]["p95_us"].is_u64());
-        assert_eq!(value["fuse"]["deadline_capability"], "detect-and-report+bounded-store-wait");
+        assert_eq!(
+            value["fuse"]["deadline_capability"],
+            "detect-and-report+bounded-store-wait"
+        );
     }
 
     #[test]
