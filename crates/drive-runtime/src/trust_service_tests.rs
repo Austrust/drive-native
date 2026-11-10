@@ -371,14 +371,63 @@ fn live_transfer_setting_acknowledgement_is_required_without_losing_saved_policy
     }
 }
 
+/// Issue #61: pause is a session control. A stop/crash while paused must not
+/// silently pause the next process (that is a persisted-only pause and is
+/// auto-resumed), while the one-shot `startup-pause-v1.json` handover intent
+/// still keeps the new owner paused until the user resumes.
 #[test]
-fn durable_pause_controls_handover_and_unlock() {
+fn startup_intent_controls_handover_and_unlock() {
     let (d, service) = fixture();
     service.pause().unwrap();
     let profile = service.profile.clone();
     drop(service);
-    let store = Store::open(d.path()).unwrap();
-    let service = Service::new(profile, store, PathBuf::from("/unused-worker")).unwrap();
+
+    // No fresh handover intent: the persisted pause is auto-resumed.
+    let resumed = Service::new(
+        profile.clone(),
+        Store::open(d.path()).unwrap(),
+        PathBuf::from("/unused-worker"),
+    )
+    .unwrap();
+    assert!(!resumed.control.lock().unwrap().paused);
+    assert_eq!(
+        resumed.control.lock().unwrap().state,
+        ConnectionState::Locked
+    );
+    assert!(
+        !resumed
+            .bridge
+            .store
+            .lock()
+            .unwrap()
+            .sync_paused()
+            .unwrap()
+    );
+    assert_eq!(
+        resumed
+            .startup_pause_recovery()
+            .expect("startup decision")
+            .auto_resumed,
+        true
+    );
+    drop(resumed);
+
+    // A fresh one-shot intent (what the GUI publishes for a handover) keeps the
+    // new owner paused and is consumed exactly once.
+    let intent = d.path().join("startup-pause-v1.json");
+    std::fs::write(
+        &intent,
+        serde_json::json!({"schema":1,"task_id":profile.task_id}).to_string(),
+    )
+    .unwrap();
+    std::fs::set_permissions(&intent, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let service = Service::new(
+        profile,
+        Store::open(d.path()).unwrap(),
+        PathBuf::from("/unused-worker"),
+    )
+    .unwrap();
+    assert!(!intent.exists(), "the handover intent is one-shot");
     assert_eq!(service.control.lock().unwrap().state, ConnectionState::Paused);
     service.unlock("synthetic-unused".into()).unwrap();
     assert_eq!(service.control.lock().unwrap().state, ConnectionState::Paused);

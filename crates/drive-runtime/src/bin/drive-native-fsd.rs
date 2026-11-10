@@ -159,8 +159,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .ok_or("no user data directory")?;
     let state = prepare_paths(&profile, &base)?;
     let worker = std::env::current_exe()?.with_file_name("drive-native-worker");
-    let mut store = drive_core::Store::open(&state)?;
-    store.consume_startup_pause(&profile.task_id)?;
+    let store = drive_core::Store::open(&state)?;
+    // Issue #61: Service::new consumes the one-shot startup-pause handover
+    // intent (still exactly once, before unlock) and applies the persisted-pause
+    // startup policy, so the decision is made by the same code path in tests.
     let service = Service::new(profile, store, worker)?;
     let conn = zbus::connection::Builder::session()
         .name(drive_runtime::instance::bus_name(

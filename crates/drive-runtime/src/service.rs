@@ -204,12 +204,40 @@ pub struct RecoveryRequest {
     pub paused_preserved: bool,
     pub message_code: &'static str,
 }
+/// Issue #61: origin of the current pause, reported additively as
+/// `GetOverview.paused_by`. `None` covers a normally running session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PauseOrigin {
+    None,
+    /// The user paused in this session.
+    User,
+    /// A fresh `startup-pause-v1.json` handover intent paused the new owner.
+    StartupIntent,
+    /// A persisted pause from a previous process lifetime was auto-resumed at
+    /// startup; reported for the rest of this session as the last pause event.
+    PersistedAutoResumed,
+}
+
+impl PauseOrigin {
+    pub(crate) fn as_str(self) -> Option<&'static str> {
+        match self {
+            Self::None => None,
+            Self::User => Some("user"),
+            Self::StartupIntent => Some("startup_intent"),
+            Self::PersistedAutoResumed => Some("persisted_flag_auto_resumed"),
+        }
+    }
+}
+
 pub struct Control {
     pub state: ConnectionState,
     pub error: Option<&'static str>,
     pub revision: u64,
     generation: u64,
-    paused: bool,
+    pub(crate) paused: bool,
+    /// Issue #61: why `paused` is set (or why the last startup pause was
+    /// auto-resumed). Never persisted; a process lifetime concept only.
+    pub(crate) pause_origin: PauseOrigin,
     attention: bool,
     password: Option<String>,
     active: Option<Arc<Rpc>>,
@@ -264,6 +292,9 @@ pub struct Service {
     #[cfg(test)]
     cache_trim_runs: AtomicUsize,
     pub mounted: AtomicBool,
+    /// Issue #61: structured startup pause decision, exposed additively in
+    /// `GetOverview.startup_pause`. `None` for a store that could not be read.
+    startup_pause: Mutex<Option<drive_core::task_control::StartupPauseRecovery>>,
     pub shutdown_diagnostics: crate::shutdown::Diagnostics,
     // Keep the matching worker inode alive across atomic package replacement.
     worker_image: Option<fs::File>,
@@ -315,11 +346,27 @@ impl Service {
     }
     fn new_with_trust_sync(
         profile: Profile,
-        store: Store,
+        mut store: Store,
         worker: PathBuf,
         sync: impl Fn(&Path) -> io::Result<()>,
     ) -> io::Result<Arc<Self>> {
         profile.validate()?;
+        // Issue #61: a pause is a session control, not a durable preference.
+        // Consume a fresh one-shot handover intent exactly once; otherwise
+        // auto-resume a pause persisted by a previous process lifetime (stop,
+        // crash, kill -9) and report the decision. An explicit pause issued
+        // later in this session is never touched here.
+        let startup_pause = store
+            .reconcile_startup_pause(&profile.task_id)
+            .map_err(io::Error::other)?;
+        let paused = startup_pause.paused;
+        let pause_origin = if paused && startup_pause.maintenance_intent {
+            PauseOrigin::StartupIntent
+        } else if startup_pause.auto_resumed {
+            PauseOrigin::PersistedAutoResumed
+        } else {
+            PauseOrigin::None
+        };
         let trust = crate::trust::TrustSettings::read(
             store.storage_directory(),
             &profile.task_id,
@@ -329,7 +376,6 @@ impl Service {
         drive_core::write_permissions::initialize_policy(&store, &profile.scope.file_id,
             profile.effective_local_policy(), profile.writable_source.as_deref().unwrap_or("legacy"))
             .map_err(io::Error::other)?;
-        let paused = store.sync_paused().map_err(io::Error::other)?;
         let trust_pending_durability = sync(store.storage_directory()).is_err();
         let diagnostics = crate::connection_diagnostics::Recorder::open(store.storage_directory());
         let bridge = Arc::new(Bridge::offline(Arc::new(drive_core::SharedStore::new(
@@ -360,6 +406,7 @@ impl Service {
                 revision: 0,
                 generation: 0,
                 paused,
+                pause_origin,
                 attention: trust_pending_durability,
                 password: None,
                 active: None,
@@ -381,6 +428,7 @@ impl Service {
             mounted: AtomicBool::new(false),
             shutdown_diagnostics: crate::shutdown::Diagnostics::default(),
             worker_image,
+            startup_pause: Mutex::new(Some(startup_pause)),
             diagnostics,
         }))
     }
@@ -565,6 +613,13 @@ impl Service {
     pub(crate) fn set_release_step_delay(&self, ms: u64) {
         self.release_step_delay.store(ms, Ordering::Release);
     }
+    /// Issue #61: structured startup pause decision for this process. Exposed
+    /// additively as `GetOverview.startup_pause`; `None` only if this service
+    /// was built without a readable store decision (tests/legacy fixtures).
+    pub fn startup_pause_recovery(&self) -> Option<drive_core::task_control::StartupPauseRecovery> {
+        self.startup_pause.lock().unwrap().clone()
+    }
+
     fn cache_loop(&self) {
         self.cache_loop_with(CACHE_LOOP_INTERVAL);
     }
@@ -690,6 +745,7 @@ impl Service {
             .set_sync_paused(true)
             .map_err(io::Error::other)?;
         c.paused = true;
+        c.pause_origin = PauseOrigin::User;
         c.state = ConnectionState::Paused;
         self.interrupt(&mut c);
         Ok(())
@@ -706,6 +762,7 @@ impl Service {
             .set_sync_paused(false)
             .map_err(io::Error::other)?;
         c.paused = false;
+        c.pause_origin = PauseOrigin::None;
         drive_core::write_permissions::reset_session(&self.bridge.store.lock().unwrap()).map_err(io::Error::other)?;
         // Authentication/certificate/recovery failures require a fresh explicit
         // unlock; pause/resume must not silently retry rejected credentials.
@@ -1127,3 +1184,7 @@ mod cache_loop_tests;
 #[cfg(test)]
 #[path = "mount_exclusion_tests.rs"]
 mod mount_exclusion_tests;
+
+#[cfg(test)]
+#[path = "startup_pause_tests.rs"]
+mod startup_pause_tests;
