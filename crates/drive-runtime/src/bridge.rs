@@ -3066,3 +3066,7 @@ fn enqueue_invalidation(
 #[cfg(test)]
 #[path = "notification_queue_tests.rs"]
 mod notification_queue_tests;
+
+#[cfg(test)]
+#[path = "catch_up_watchdog_tests.rs"]
+mod catch_up_watchdog_tests;
