@@ -1,12 +1,94 @@
 //! Durable mutable working copies. Immutable upload snapshots remain separate.
 use crate::{Error, ReadHandle, Result, Store};
 use rusqlite::{OptionalExtension, params};
+use serde::{Deserialize, Serialize};
 use std::{
     fs::{File, OpenOptions},
     io::{Seek, SeekFrom},
     os::unix::fs::FileExt,
 };
 type Handles = std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, (String, usize)>>>;
+
+// ---- issue #60: drafts quota + orphan quarantine ---------------------------
+
+/// Default drafts quota: `min(5 GiB, 2 % of the filesystem total)`. The quota
+/// is a soft admission/diagnostic bound; it never hard-deletes user state.
+pub const DEFAULT_DRAFT_QUOTA_CAP_BYTES: u64 = 5 * 1024 * 1024 * 1024;
+pub const DEFAULT_DRAFT_QUOTA_PERCENT: u64 = 2;
+/// A working copy with no queue/namespace parent, a deleted node and no open
+/// handle is an orphan. It is only touched after this age window.
+pub const DRAFT_ORPHAN_AGE_SECONDS: u64 = 30 * 24 * 60 * 60;
+/// Recoverable holding area: orphan bodies are moved here, never deleted.
+pub const DRAFT_QUARANTINE_DIR: &str = "drafts-quarantine";
+/// Metadata key holding the quarantine index (token/node/bytes/age). A
+/// recoverable quarantine needs no schema change.
+const DRAFT_QUARANTINE_KEY: &str = "drafts_quarantined";
+/// Metadata key for an explicit drafts quota override. 0 disables the quota
+/// report (the orphan GC itself still uses the age window).
+const DRAFT_QUOTA_KEY: &str = "draft_quota_bytes";
+
+pub fn default_draft_quota_bytes(total_disk_bytes: u64) -> u64 {
+    if total_disk_bytes == 0 {
+        return DEFAULT_DRAFT_QUOTA_CAP_BYTES;
+    }
+    let percent = u128::from(total_disk_bytes) * u128::from(DEFAULT_DRAFT_QUOTA_PERCENT) / 100;
+    u64::try_from(percent.min(u128::from(DEFAULT_DRAFT_QUOTA_CAP_BYTES)))
+        .unwrap_or(DEFAULT_DRAFT_QUOTA_CAP_BYTES)
+}
+
+/// Per-category drafts accounting for `GetCacheSettings`/overview (#60).
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct DraftUsage {
+    pub total_bytes: u64,
+    pub count: u64,
+    /// Working copies with no `operations` and no `namespace_ops` row at all:
+    /// invisible to every queue/health surface before this field existed.
+    pub unreferenced_bytes: u64,
+    pub unreferenced_count: u64,
+    pub quota_bytes: u64,
+    pub over_quota_bytes: u64,
+    pub quarantine_bytes: u64,
+    pub quarantine_count: u64,
+    /// Orphan bodies already past the age window (eligible for quarantine now)
+    /// and the rest (still protected by age/open-handle/queue references).
+    pub reclaimable_bytes: u64,
+    pub protected_bytes: u64,
+}
+
+/// One working copy moved to the recoverable quarantine. Only size/age are
+/// exposed; the token is already a random local identity, not a file name.
+#[derive(Clone, Debug, Serialize)]
+pub struct DraftQuarantineEntry {
+    pub token: String,
+    pub node: String,
+    pub bytes: u64,
+    pub quarantined_at: u64,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct DraftQuarantine {
+    pub quarantined: Vec<DraftQuarantineEntry>,
+    pub quarantined_bytes: u64,
+    pub skipped_open: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct QuarantinedDraftRecord {
+    token: String,
+    node: String,
+    bytes: u64,
+    quarantined_at: u64,
+}
+
+#[derive(Clone, Debug)]
+struct DraftRowInfo {
+    node: String,
+    dirty: bool,
+    has_operations: bool,
+    has_namespace_ops: bool,
+    has_local_creation: bool,
+    node_deleted: bool,
+}
 pub struct DraftHandle {
     pub node: String,
     pub token: String,
@@ -172,6 +254,12 @@ impl Store {
         File::open(self.root.join("drafts"))?.sync_all()?;
         self.draft_stats.draft_file_fsyncs += 2;
         self.db.execute("INSERT INTO drafts(node,token,base,generation,checkpoint,dirty) VALUES(?1,?2,?3,0,0,0) ON CONFLICT(node) DO UPDATE SET token=excluded.token,base=excluded.base,generation=0,checkpoint=0,dirty=0",params![id,token,base])?;
+        // Issue #60: a draft created for an already-deleted node with no queued
+        // operation can never be uploaded. Count it at creation time so this
+        // class of orphan is visible instead of silently accumulating.
+        if self.draft_created_for_tombstone(id)? {
+            self.draft_stats.unreferenced_draft_begins += 1;
+        }
         Ok(self.retain_draft(id, token, base.into(), file))
     }
     /// Resolve the working file for an edit and durably mark the edit epoch.
@@ -317,6 +405,266 @@ impl Store {
             }
         }
         Ok(count)
+    }
+    // ---- issue #60: drafts quota, orphan quarantine and recovery ----------
+
+    /// Effective drafts quota in bytes: an explicit `draft_quota_bytes`
+    /// metadata override wins, otherwise `min(5 GiB, 2 % disk)`. `0` means the
+    /// quota is reported as disabled; the orphan GC keeps using its age window.
+    pub fn draft_quota(&self) -> Result<u64> {
+        let value: Option<String> = self
+            .db
+            .query_row(
+                "SELECT value FROM metadata WHERE key=?1",
+                [DRAFT_QUOTA_KEY],
+                |r| r.get(0),
+            )
+            .optional()?;
+        match value {
+            None => Ok(self.default_draft_quota),
+            Some(value) => value
+                .parse::<u64>()
+                .map_err(|_| Error::State("invalid drafts quota".into())),
+        }
+    }
+    pub fn set_draft_quota(&mut self, bytes: u64) -> Result<()> {
+        if bytes > crate::cache_policy::MAX_CACHE_LIMIT {
+            return Err(Error::State("drafts quota out of range".into()));
+        }
+        self.db.execute(
+            "INSERT INTO metadata(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            params![DRAFT_QUOTA_KEY, bytes.to_string()],
+        )?;
+        Ok(())
+    }
+    fn draft_dir_entries(&self, dir: &str) -> Result<Vec<(String, u64, u64)>> {
+        let mut files = Vec::new();
+        let entries = match std::fs::read_dir(self.root.join(dir)) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(files),
+            Err(error) => return Err(error.into()),
+        };
+        for entry in entries {
+            let entry = entry?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if uuid::Uuid::parse_str(&name).is_err() || !entry.file_type()?.is_file() {
+                continue;
+            }
+            let metadata = entry.metadata()?;
+            let modified = metadata
+                .modified()
+                .ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|elapsed| elapsed.as_secs())
+                .unwrap_or(0);
+            files.push((name, metadata.len(), modified));
+        }
+        Ok(files)
+    }
+    fn draft_rows(&self) -> Result<std::collections::HashMap<String, DraftRowInfo>> {
+        let mut query = self.db.prepare(
+            "SELECT d.token,d.node,d.dirty, \
+                    EXISTS(SELECT 1 FROM operations o WHERE o.node=d.node), \
+                    EXISTS(SELECT 1 FROM namespace_ops n WHERE n.node=d.node), \
+                    EXISTS(SELECT 1 FROM local_creations c WHERE c.node=d.node), \
+                    COALESCE(n.deleted,1) \
+               FROM drafts d LEFT JOIN nodes n ON n.id=d.node",
+        )?;
+        let rows = query
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    DraftRowInfo {
+                        node: row.get(1)?,
+                        dirty: row.get(2)?,
+                        has_operations: row.get(3)?,
+                        has_namespace_ops: row.get(4)?,
+                        has_local_creation: row.get(5)?,
+                        node_deleted: row.get(6)?,
+                    },
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows.into_iter().collect())
+    }
+    fn open_draft_tokens(&self) -> std::collections::HashSet<String> {
+        self.handles
+            .lock()
+            .unwrap()
+            .keys()
+            .filter_map(|key| key.strip_prefix("draft:").map(str::to_owned))
+            .collect()
+    }
+    /// An orphan is a dirty working copy whose node is a tombstone, that no
+    /// `operations`/`namespace_ops`/`local_creations` row references, with no
+    /// open handle, past the age window. Unuploaded edits for live nodes are
+    /// protected and never touched by this rule.
+    fn draft_is_orphan(
+        &self,
+        info: &DraftRowInfo,
+        open: &std::collections::HashSet<String>,
+        token: &str,
+        modified: u64,
+        now: u64,
+    ) -> bool {
+        info.dirty
+            && info.node_deleted
+            && !info.has_operations
+            && !info.has_namespace_ops
+            && !info.has_local_creation
+            && !open.contains(token)
+            && now.saturating_sub(modified) >= DRAFT_ORPHAN_AGE_SECONDS
+    }
+    fn quarantine_records(&self) -> Result<Vec<QuarantinedDraftRecord>> {
+        let value: Option<String> = self
+            .db
+            .query_row(
+                "SELECT value FROM metadata WHERE key=?1",
+                [DRAFT_QUARANTINE_KEY],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(value
+            .and_then(|value| serde_json::from_str(&value).ok())
+            .unwrap_or_default())
+    }
+    fn set_quarantine_records(&self, records: &[QuarantinedDraftRecord]) -> Result<()> {
+        self.db.execute(
+            "INSERT INTO metadata(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            params![DRAFT_QUARANTINE_KEY, serde_json::to_string(records)?],
+        )?;
+        Ok(())
+    }
+    /// Per-category drafts accounting: totals, queue-unreferenced bytes (the
+    /// 1.571 GB invisible class), quota pressure and the recoverable quarantine.
+    pub fn draft_usage(&self, now: u64) -> Result<DraftUsage> {
+        let mut usage = DraftUsage {
+            quota_bytes: self.draft_quota()?,
+            ..DraftUsage::default()
+        };
+        let rows = self.draft_rows()?;
+        let open = self.open_draft_tokens();
+        for (token, bytes, modified) in self.draft_dir_entries("drafts")? {
+            usage.total_bytes = usage.total_bytes.saturating_add(bytes);
+            usage.count += 1;
+            let info = rows.get(&token);
+            let unreferenced = info
+                .map(|info| !info.has_operations && !info.has_namespace_ops)
+                .unwrap_or(true);
+            if unreferenced {
+                usage.unreferenced_bytes = usage.unreferenced_bytes.saturating_add(bytes);
+                usage.unreferenced_count += 1;
+            }
+            if info.is_some_and(|info| self.draft_is_orphan(info, &open, &token, modified, now)) {
+                usage.reclaimable_bytes = usage.reclaimable_bytes.saturating_add(bytes);
+            }
+        }
+        usage.protected_bytes = usage.total_bytes.saturating_sub(usage.reclaimable_bytes);
+        usage.over_quota_bytes = if usage.quota_bytes == 0 {
+            0
+        } else {
+            usage.total_bytes.saturating_sub(usage.quota_bytes)
+        };
+        for record in self.quarantine_records()? {
+            let path = self.root.join(DRAFT_QUARANTINE_DIR).join(&record.token);
+            if let Ok(metadata) = std::fs::metadata(&path) {
+                if metadata.is_file() {
+                    usage.quarantine_bytes = usage.quarantine_bytes.saturating_add(metadata.len());
+                    usage.quarantine_count += 1;
+                }
+            }
+        }
+        Ok(usage)
+    }
+    /// Move orphan bodies into the recoverable quarantine directory. Nothing is
+    /// deleted: `restore_quarantined_drafts` puts a body back into `drafts/`.
+    /// Only bodies past [`DRAFT_ORPHAN_AGE_SECONDS`] with no queue reference move.
+    pub fn collect_orphan_drafts(&mut self, now: u64) -> Result<DraftQuarantine> {
+        let rows = self.draft_rows()?;
+        let open = self.open_draft_tokens();
+        let mut records = self.quarantine_records()?;
+        let mut result = DraftQuarantine::default();
+        let quarantine_dir = self.root.join(DRAFT_QUARANTINE_DIR);
+        for (token, bytes, modified) in self.draft_dir_entries("drafts")? {
+            let Some(info) = rows.get(&token) else {
+                continue;
+            };
+            if open.contains(&token) {
+                result.skipped_open += 1;
+                continue;
+            }
+            if !self.draft_is_orphan(info, &open, &token, modified, now) {
+                continue;
+            }
+            std::fs::create_dir_all(&quarantine_dir)?;
+            let destination = quarantine_dir.join(&token);
+            if destination.exists() {
+                continue;
+            }
+            std::fs::rename(self.root.join("drafts").join(&token), &destination)?;
+            self.draft_stats.orphan_drafts_quarantined += 1;
+            records.push(QuarantinedDraftRecord {
+                token: token.clone(),
+                node: info.node.clone(),
+                bytes,
+                quarantined_at: now,
+            });
+            result.quarantined.push(DraftQuarantineEntry {
+                token,
+                node: info.node.clone(),
+                bytes,
+                quarantined_at: now,
+            });
+            result.quarantined_bytes = result.quarantined_bytes.saturating_add(bytes);
+        }
+        if !result.quarantined.is_empty() {
+            self.set_quarantine_records(&records)?;
+            #[cfg(unix)]
+            {
+                File::open(self.root.join("drafts"))?.sync_all()?;
+                File::open(&quarantine_dir)?.sync_all()?;
+            }
+        }
+        Ok(result)
+    }
+    /// Undo [`Self::collect_orphan_drafts`]: move every indexed body back into
+    /// `drafts/` without overwriting a newer working copy. Returns how many
+    /// bodies were restored.
+    pub fn restore_quarantined_drafts(&mut self) -> Result<u64> {
+        let records = self.quarantine_records()?;
+        if records.is_empty() {
+            return Ok(0);
+        }
+        let quarantine_dir = self.root.join(DRAFT_QUARANTINE_DIR);
+        let drafts_dir = self.root.join("drafts");
+        std::fs::create_dir_all(&drafts_dir)?;
+        let mut restored = 0u64;
+        let mut remaining = Vec::new();
+        for record in records {
+            let source = quarantine_dir.join(&record.token);
+            let destination = drafts_dir.join(&record.token);
+            if !source.is_file() || destination.exists() {
+                remaining.push(record);
+                continue;
+            }
+            std::fs::rename(&source, &destination)?;
+            self.draft_stats.quarantined_drafts_restored += 1;
+            restored += 1;
+        }
+        self.set_quarantine_records(&remaining)?;
+        Ok(restored)
+    }
+    /// Creation-time detection (#60): a working copy created for a node that is
+    /// already a tombstone has no live namespace object to attach to. Typical
+    /// path: the user deletes a file that still has an open write handle, so a
+    /// later write creates a draft on the tombstone. Counting it here makes the
+    /// class visible instead of only appearing as unexplained draft bytes.
+    fn draft_created_for_tombstone(&self, id: &str) -> Result<bool> {
+        Ok(self.db.query_row(
+            "SELECT NOT EXISTS(SELECT 1 FROM nodes WHERE id=?1 AND deleted=0)",
+            [id],
+            |r| r.get::<_, bool>(0),
+        )?)
     }
     /// Issue #24 diagnostics: monotonic counters for the draft write path.
     pub fn draft_write_stats(&self) -> crate::DraftWriteStats {

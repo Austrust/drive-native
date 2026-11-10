@@ -195,3 +195,156 @@ fn checkpointed_edit_during_upload_advances_base_without_losing_content() {
     s.open_cached("a").unwrap().read_to_end(&mut bytes).unwrap();
     assert_eq!(bytes, b"XYcdef");
 }
+
+// ---- issue #60: orphan draft lifecycle ------------------------------------
+
+/// The 763,913,234 B aborted-zip leftover has zero `operations` and zero
+/// `namespace_ops` rows and its node is deleted, so no code path can ever
+/// consume it. Past the orphan age window its body must move to a recoverable
+/// quarantine instead of staying in `drafts/` forever (and must not be
+/// hard-deleted).
+#[test]
+fn aged_unreferenced_draft_is_quarantined_and_recoverable() {
+    let (dir, mut s) = setup();
+    let mut source = s.open_cached("a").unwrap();
+    let working = s.begin_draft("a", "1", Some(&mut source)).unwrap();
+    drop(source);
+    s.draft_write(&working, 0, b"partial", false).unwrap();
+    let token = working.token.clone();
+    drop(working);
+    // The server drops the object: the node becomes a tombstone but no local
+    // operation or namespace intent references the working copy.
+    s.install_remote_snapshot(&[node("root", "2", true)], "2", "server")
+        .unwrap();
+    let body = dir.path().join("drafts").join(&token);
+    assert!(body.is_file(), "draft body must exist before GC");
+    // Fresh bodies stay: the default orphan age window is 30 days.
+    s.collect_garbage().unwrap();
+    assert!(
+        !dir.path().join("drafts-quarantine").join(&token).exists(),
+        "a fresh draft must not be quarantined"
+    );
+    // Backdate the body past the orphan age window.
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&body)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(31 * 24 * 3600))
+        .unwrap();
+    s.collect_garbage().unwrap();
+    let quarantined = dir.path().join("drafts-quarantine").join(&token);
+    assert!(
+        quarantined.is_file(),
+        "orphan draft body must be quarantined, not deleted"
+    );
+    assert!(!body.exists(), "draft body must leave drafts/");
+    let restored = std::fs::read(quarantined).unwrap();
+    assert_eq!(restored, b"partial");
+}
+
+/// The 805,129,740 B archive: upload committed at 21:07:16, deleted locally,
+/// remote `remove` stuck. The working copy must become reclaimable once the
+/// remove reaches a terminal state.
+#[test]
+fn committed_upload_deleted_locally_releases_draft_after_remove_commits() {
+    let (dir, mut s) = setup();
+    let mut source = s.open_cached("a").unwrap();
+    let working = s.begin_draft("a", "1", Some(&mut source)).unwrap();
+    drop(source);
+    s.draft_write(&working, 0, b"X", false).unwrap();
+    let op = s.checkpoint_draft(&working).unwrap().unwrap();
+    s.mark_upload_started(&op).unwrap();
+    s.confirm_upload(&op, "2").unwrap();
+    // A later local edit keeps the working copy dirty after the commit.
+    s.draft_write(&working, 1, b"Y", false).unwrap();
+    let token = working.token.clone();
+    drop(working);
+    let body = dir.path().join("drafts").join(&token);
+    assert!(body.is_file());
+    s.unlink_local("root", "a", "a", false).unwrap();
+    let remove = s.next_remove().unwrap().expect("remove intent");
+    s.mark_remove_started(&remove.job.operation).unwrap();
+    s.confirm_remove(&remove.job.operation, "a").unwrap();
+    s.collect_garbage().unwrap();
+    assert!(
+        !body.exists(),
+        "a confirmed remove must not retain the deleted node's working copy"
+    );
+}
+
+/// Recovery path for the quarantine: a restored body returns to `drafts/` and
+/// stays openable, so quarantine is a recoverable holding area, not a delete.
+#[test]
+fn quarantined_orphan_draft_can_be_restored() {
+    let (dir, mut s) = setup();
+    let mut source = s.open_cached("a").unwrap();
+    let working = s.begin_draft("a", "1", Some(&mut source)).unwrap();
+    drop(source);
+    s.draft_write(&working, 0, b"partial", false).unwrap();
+    let token = working.token.clone();
+    drop(working);
+    s.install_remote_snapshot(&[node("root", "2", true)], "2", "server")
+        .unwrap();
+    let body = dir.path().join("drafts").join(&token);
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&body)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(31 * 24 * 3600))
+        .unwrap();
+    s.collect_garbage().unwrap();
+    assert!(dir.path().join("drafts-quarantine").join(&token).is_file());
+    assert_eq!(s.restore_quarantined_drafts().unwrap(), 1);
+    assert!(body.is_file());
+    assert_eq!(std::fs::read(&body).unwrap(), b"partial");
+    assert!(s.open_dirty_draft("a").unwrap().is_some());
+}
+
+/// A remove that stays unresolved is terminal for automatic reconciliation, so
+/// the user needs an explicit abandon action. It must retire the local
+/// tombstone without ever replaying a remote delete.
+#[test]
+fn unresolved_remove_can_be_abandoned_locally_without_remote_delete() {
+    let (dir, mut s) = setup();
+    let mut source = s.open_cached("a").unwrap();
+    let working = s.begin_draft("a", "1", Some(&mut source)).unwrap();
+    drop(source);
+    s.draft_write(&working, 0, b"leftover", false).unwrap();
+    let token = working.token.clone();
+    drop(working);
+    s.unlink_local("root", "a", "a", false).unwrap();
+    assert_eq!(s.pending_namespace_operations().unwrap(), 1);
+    let remove = s.next_remove().unwrap().expect("remove intent");
+    let remove_id = remove.job.operation.clone();
+    assert!(s.abandon_unresolved_remove("a").unwrap());
+    assert_eq!(s.pending_namespace_operations().unwrap(), 0);
+    assert!(s.locally_unlinked("a").unwrap());
+    assert!(
+        s.next_remove().unwrap().is_none(),
+        "no remote delete re-armed"
+    );
+    s.collect_garbage().unwrap();
+    assert!(
+        !dir.path().join("drafts").join(&token).exists(),
+        "abandoning the local tombstone must release the draft body"
+    );
+    // The abandoned intent is terminal: it can never be resubmitted.
+    assert!(s.mark_remove_started(&remove_id).is_err());
+}
+
+/// Issue #60: a working copy created for a node that is already a tombstone
+/// (delete an open file, then keep writing) has no live namespace object. It
+/// must be detectable at creation time, not only as unexplained draft bytes.
+#[test]
+fn draft_creation_on_tombstone_node_is_reported() {
+    let (_dir, mut s) = setup();
+    s.unlink_local("root", "a", "a", false).unwrap();
+    let before = s.draft_write_stats().unreferenced_draft_begins;
+    let working = s.begin_draft("a", "1", None).unwrap();
+    assert_eq!(
+        s.draft_write_stats().unreferenced_draft_begins,
+        before + 1,
+        "a draft created on a tombstone must be counted at creation"
+    );
+    drop(working);
+}

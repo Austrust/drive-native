@@ -5,6 +5,39 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 pub const RECENT_DOWNLOAD_SECONDS: u64 = 60;
 pub const MAX_CACHE_LIMIT: u64 = 1024 * 1024 * 1024 * 1024 * 1024;
+/// Issue #60: an unset `cache_limit_bytes` is a bounded default now, not an
+/// implicit "never evict". The cap keeps a large working set from pinning the
+/// whole disk; the fraction scales down on small disks.
+pub const DEFAULT_CACHE_LIMIT_CAP_BYTES: u64 = 10 * 1024 * 1024 * 1024;
+pub const DEFAULT_CACHE_LIMIT_PERCENT: u64 = 10;
+
+/// Bounded default cache budget: `min(10 GiB, 10 % of the filesystem total)`.
+/// A zero total (statvfs unavailable) falls back to the cap so the default is
+/// always bounded and never accidentally disables eviction.
+pub fn default_cache_limit_bytes(total_disk_bytes: u64) -> u64 {
+    if total_disk_bytes == 0 {
+        return DEFAULT_CACHE_LIMIT_CAP_BYTES;
+    }
+    let percent = u128::from(total_disk_bytes) * u128::from(DEFAULT_CACHE_LIMIT_PERCENT) / 100;
+    u64::try_from(percent.min(u128::from(DEFAULT_CACHE_LIMIT_CAP_BYTES)))
+        .unwrap_or(DEFAULT_CACHE_LIMIT_CAP_BYTES)
+}
+
+/// Where the effective cache limit came from. `Disabled` is the documented
+/// explicit opt-out (`cache_limit_bytes=0`); absence of the setting is reported
+/// as `Default` so existing profiles see the bounded default instead of a
+/// silent behavior change.
+pub(crate) fn unix_now() -> u64 {
+    u64::try_from(crate::commit_diagnostics::unix_now()).unwrap_or(0)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CacheLimitSource {
+    Default,
+    Explicit,
+    Disabled,
+}
 /// Bound for the deferred recency ledger. Eviction order only needs to be exact
 /// for the working set a budget decision can actually see; dropping the oldest
 /// hints keeps one long session from pinning unbounded memory, and the next
@@ -119,6 +152,26 @@ pub struct CacheUsage {
     pub reclaimable_bytes: u64,
     pub protected_bytes: u64,
     pub over_target_bytes: u64,
+    /// Issue #60 additive fields: the effective limit's origin and the bounded
+    /// default a profile would get, so an existing profile can be told what its
+    /// "recommended limit" is instead of silently staying at the old 0.
+    pub limit_source: CacheLimitSource,
+    pub recommended_limit_bytes: u64,
+    /// Content split by category: cache bodies, working copies and migration
+    /// snapshots. `cache_*` is the existing blob eviction path; drafts and
+    /// backups have their own lifecycle and protected sets.
+    pub blobs_bytes: u64,
+    pub cache_reclaimable_bytes: u64,
+    pub cache_protected_bytes: u64,
+    pub drafts_bytes: u64,
+    pub drafts_unreferenced_bytes: u64,
+    pub drafts_reclaimable_bytes: u64,
+    pub drafts_protected_bytes: u64,
+    pub draft_quota_bytes: u64,
+    pub drafts_over_quota_bytes: u64,
+    pub backup_bytes: u64,
+    pub backup_reclaimable_bytes: u64,
+    pub backup_protected_bytes: u64,
 }
 #[derive(Debug, Serialize)]
 pub struct CacheTrim {
@@ -141,9 +194,9 @@ impl Store {
         self.db.execute("INSERT INTO metadata(key,value) VALUES('official_downloads_paused',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [if value {"1"} else {"0"}])?;
         Ok(())
     }
-    /// Zero disables automatic eviction. Existing profiles retain all contents
-    /// until the user explicitly enables a limit in settings.
-    pub fn cache_limit(&self) -> Result<u64> {
+    /// Raw stored setting: `None` means the profile never configured a limit,
+    /// `Some(0)` is the explicit no-eviction opt-out.
+    fn cache_limit_setting(&self) -> Result<Option<u64>> {
         let value: Option<String> = self
             .db
             .query_row(
@@ -157,12 +210,35 @@ impl Store {
                 v.parse::<u64>()
                     .map_err(|_| Error::State("invalid cache policy".into()))
             })
-            .transpose()?
-            .unwrap_or(0);
-        if limit > MAX_CACHE_LIMIT {
+            .transpose()?;
+        if limit.is_some_and(|limit| limit > MAX_CACHE_LIMIT) {
             return Err(Error::State("cache limit out of range".into()));
         }
         Ok(limit)
+    }
+    /// Where the effective limit comes from (`default` / `explicit` /
+    /// `disabled`) so profile diagnostics and the GUI can explain it.
+    pub fn cache_limit_source(&self) -> Result<CacheLimitSource> {
+        Ok(match self.cache_limit_setting()? {
+            None => CacheLimitSource::Default,
+            Some(0) => CacheLimitSource::Disabled,
+            Some(_) => CacheLimitSource::Explicit,
+        })
+    }
+    /// Effective soft budget. Issue #60: an unset profile gets the bounded
+    /// default `min(10 GiB, 10 % disk)` instead of 0 ("no eviction"); an
+    /// explicit 0 still disables automatic eviction (documented opt-out).
+    pub fn cache_limit(&self) -> Result<u64> {
+        Ok(match self.cache_limit_setting()? {
+            Some(limit) => limit,
+            None => self.default_cache_limit,
+        })
+    }
+    /// One-time report value for existing profiles: the limit they would get
+    /// without any explicit setting. Never applied silently over an explicit
+    /// value.
+    pub fn recommended_cache_limit(&self) -> u64 {
+        self.default_cache_limit
     }
     pub fn set_cache_limit(&mut self, bytes: u64) -> Result<()> {
         if bytes > MAX_CACHE_LIMIT {
@@ -310,36 +386,47 @@ impl Store {
         }
         Ok(result)
     }
-    /// Logical content bytes, not filesystem allocation or NAS quota. Drafts,
-    /// older versions and temporary content count toward usage but remain protected.
-    fn content_bytes(&self) -> Result<u64> {
+    /// Logical blob bytes, not filesystem allocation or NAS quota.
+    fn blobs_bytes(&self) -> Result<u64> {
         let mut bytes = 0u64;
-        for name in ["blobs", "drafts"] {
-            let entries = match std::fs::read_dir(self.root.join(name)) {
-                Ok(v) => v,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(e) => return Err(e.into()),
-            };
-            for entry in entries {
-                let entry = entry?;
-                if entry.file_type()?.is_file() {
-                    bytes = bytes
-                        .checked_add(entry.metadata()?.len())
-                        .ok_or_else(|| Error::State("content size overflow".into()))?;
-                }
+        let entries = match std::fs::read_dir(self.root.join("blobs")) {
+            Ok(v) => v,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+            Err(e) => return Err(e.into()),
+        };
+        for entry in entries {
+            let entry = entry?;
+            if entry.file_type()?.is_file() {
+                bytes = bytes
+                    .checked_add(entry.metadata()?.len())
+                    .ok_or_else(|| Error::State("content size overflow".into()))?;
             }
         }
         Ok(bytes)
     }
+    /// Logical content bytes, not filesystem allocation or NAS quota. Drafts,
+    /// older versions and temporary content count toward usage but remain protected.
+    fn content_bytes(&self) -> Result<u64> {
+        self.blobs_bytes()?
+            .checked_add(self.draft_usage(unix_now())?.total_bytes)
+            .ok_or_else(|| Error::State("content size overflow".into()))
+    }
     pub fn cache_usage(&self, now: u64, active: &HashSet<String>) -> Result<CacheUsage> {
         let limit_bytes = self.cache_limit()?;
-        let content_bytes = self.content_bytes()?;
+        let limit_source = self.cache_limit_source()?;
+        let recommended_limit_bytes = self.recommended_cache_limit();
+        let blobs_bytes = self.blobs_bytes()?;
+        let drafts = self.draft_usage(now)?;
+        let backups = self.backup_inventory()?;
+        let content_bytes = blobs_bytes
+            .checked_add(drafts.total_bytes)
+            .ok_or_else(|| Error::State("content size overflow".into()))?;
         let reclaimable_bytes = self
             .cache_candidates(now, active)?
             .iter()
             .map(|(_, size)| *size)
             .sum::<u64>()
-            .min(content_bytes);
+            .min(blobs_bytes);
         Ok(CacheUsage {
             limit_bytes,
             content_bytes,
@@ -350,6 +437,20 @@ impl Store {
             } else {
                 content_bytes.saturating_sub(limit_bytes)
             },
+            limit_source,
+            recommended_limit_bytes,
+            blobs_bytes,
+            cache_reclaimable_bytes: reclaimable_bytes,
+            cache_protected_bytes: blobs_bytes - reclaimable_bytes,
+            drafts_bytes: drafts.total_bytes,
+            drafts_unreferenced_bytes: drafts.unreferenced_bytes,
+            drafts_reclaimable_bytes: drafts.reclaimable_bytes,
+            drafts_protected_bytes: drafts.protected_bytes,
+            draft_quota_bytes: drafts.quota_bytes,
+            drafts_over_quota_bytes: drafts.over_quota_bytes,
+            backup_bytes: backups.total_bytes,
+            backup_reclaimable_bytes: backups.cleanable_bytes,
+            backup_protected_bytes: backups.retained_bytes,
         })
     }
     /// Official-engine mode must release both its private copy and our blob.
