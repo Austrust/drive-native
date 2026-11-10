@@ -368,9 +368,9 @@ fn cache_usage_exposes_draft_and_migration_backup_categories() {
     drop(source);
     s.draft_write(&draft, 0, b"orphan", false).unwrap();
     drop(draft);
-    let backup = dir.path().join(
-        "state-before-v29-00000000-0000-0000-0000-000000000060.sqlite",
-    );
+    let backup = dir
+        .path()
+        .join("state-before-v29-00000000-0000-0000-0000-000000000060.sqlite");
     std::fs::write(&backup, vec![0u8; 4096]).unwrap();
 
     let usage = serde_json::to_value(s.cache_usage(now(), &HashSet::new()).unwrap()).unwrap();

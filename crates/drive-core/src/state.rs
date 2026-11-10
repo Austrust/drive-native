@@ -668,7 +668,11 @@ fn partition_migration_backups(
     mut files: Vec<MigrationBackupFile>,
     now: u64,
 ) -> (Vec<MigrationBackupFile>, Vec<MigrationBackupFile>) {
-    files.sort_by(|a, b| b.modified.cmp(&a.modified).then_with(|| b.name.cmp(&a.name)));
+    files.sort_by(|a, b| {
+        b.modified
+            .cmp(&a.modified)
+            .then_with(|| b.name.cmp(&a.name))
+    });
     let mut retained = Vec::new();
     let mut cleanable = Vec::new();
     for (index, file) in files.into_iter().enumerate() {
@@ -1406,7 +1410,7 @@ impl Store {
         Ok(())
     }
     pub fn downloads_needed(&self) -> Result<Vec<DownloadTicket>> {
-        let mut q=self.db.prepare(DOWNLOAD_CANDIDATES)?;
+        let mut q = self.db.prepare(DOWNLOAD_CANDIDATES)?;
         let candidates = q
             .query_map([], |r| {
                 Ok((
@@ -1579,10 +1583,14 @@ impl Store {
             )
             .optional()?;
         let Some((has_blob, dirty, conflict)) = cached else {
-            return Err(Error::State("content is dirty, conflicted, or absent".into()));
+            return Err(Error::State(
+                "content is dirty, conflicted, or absent".into(),
+            ));
         };
         if dirty || conflict {
-            return Err(Error::State("content is dirty, conflicted, or absent".into()));
+            return Err(Error::State(
+                "content is dirty, conflicted, or absent".into(),
+            ));
         }
         if !has_blob {
             // There is no local body left to reclaim, so report the no-op as
@@ -2440,9 +2448,10 @@ impl Store {
         let mut q = self.db.prepare(
             "SELECT id FROM operations WHERE kind='upload' AND node NOT IN (SELECT id FROM access_blocked) AND state='uncertain' AND reconcile_attempts < ?1 AND reconcile_at <= ?2 ORDER BY reconcile_at",
         )?;
-        Ok(q.query_map(params![i64::from(MAX_UPLOAD_RECONCILE_ATTEMPTS), now], |r| {
-            r.get::<_, String>(0)
-        })?
+        Ok(q.query_map(
+            params![i64::from(MAX_UPLOAD_RECONCILE_ATTEMPTS), now],
+            |r| r.get::<_, String>(0),
+        )?
         .collect::<std::result::Result<Vec<_>, _>>()?)
     }
 
@@ -2554,9 +2563,8 @@ impl Store {
     pub fn reset_upload_reconcile_budget(&mut self) -> Result<usize> {
         let tx = self.db.transaction()?;
         let abandoned: Vec<String> = {
-            let mut q = tx.prepare(
-                "SELECT id FROM operations WHERE kind='upload' AND state='abandoned'",
-            )?;
+            let mut q =
+                tx.prepare("SELECT id FROM operations WHERE kind='upload' AND state='abandoned'")?;
             q.query_map([], |r| r.get::<_, String>(0))?
                 .collect::<std::result::Result<Vec<_>, _>>()?
         };
@@ -2827,7 +2835,10 @@ mod cache_availability_tests {
         assert_eq!(s.cache_availability().unwrap().state, "online_only");
         publish(&mut s, "a", b"a");
         let c = s.cache_availability().unwrap();
-        assert_eq!((c.state, c.total, c.offline, c.pinned), ("partial", 2, 1, 0));
+        assert_eq!(
+            (c.state, c.total, c.offline, c.pinned),
+            ("partial", 2, 1, 0)
+        );
         publish(&mut s, "b", b"b");
         assert_eq!(s.cache_availability().unwrap().state, "complete");
         s.pin("root", true).unwrap();
@@ -2864,15 +2875,16 @@ mod cache_availability_tests {
         s.install_remote_snapshot_with_access(&nodes, "2", "server", &["folder".into()])
             .unwrap();
         let c = s.cache_availability().unwrap();
-        assert_eq!((c.state, c.total, c.offline, c.pinned), ("partial", 2, 1, 0));
+        assert_eq!(
+            (c.state, c.total, c.offline, c.pinned),
+            ("partial", 2, 1, 0)
+        );
     }
 }
 
 #[cfg(test)]
 mod storage_lifecycle_tests {
-    use super::{
-        MigrationBackupFile, backup_headroom_check, partition_migration_backups,
-    };
+    use super::{MigrationBackupFile, backup_headroom_check, partition_migration_backups};
 
     fn backup(name: &str, modified: u64, bytes: u64) -> MigrationBackupFile {
         MigrationBackupFile {
@@ -2902,10 +2914,7 @@ mod storage_lifecycle_tests {
         assert_eq!(cleanable, vec!["older2", "older3"]);
 
         // A newest-pair member that is older than the window is cleanable too.
-        let files = vec![
-            backup("new", now, 3),
-            backup("stale", now - 31 * day, 2),
-        ];
+        let files = vec![backup("new", now, 3), backup("stale", now - 31 * day, 2)];
         let (retained, cleanable) = partition_migration_backups(files, now);
         assert_eq!(retained.len(), 1);
         assert_eq!(cleanable.len(), 1);

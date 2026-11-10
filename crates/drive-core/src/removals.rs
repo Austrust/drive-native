@@ -2,8 +2,8 @@
 //! separate, ordered operation and requires an identity-specific tombstone.
 use crate::{Error, Node, Result, Store};
 use rusqlite::{OptionalExtension, params};
-use std::collections::{BTreeMap, HashMap};
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashMap};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RemoveJob {
@@ -158,11 +158,10 @@ pub(crate) fn install_barrier_versions(db: &rusqlite::Connection) -> Result<()> 
 }
 impl RemoveBarrierCache {
     fn refresh(&mut self, db: &rusqlite::Connection) -> Result<()> {
-        let (ops, paths): (i64, i64) = db.query_row(
-            "SELECT ops,paths FROM dn_barrier_version",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )?;
+        let (ops, paths): (i64, i64) =
+            db.query_row("SELECT ops,paths FROM dn_barrier_version", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })?;
         if self.initialized && ops == self.ops_version && paths == self.paths_version {
             return Ok(());
         }
@@ -207,8 +206,8 @@ impl RemoveBarrierCache {
         };
         if !targets.is_empty() {
             let ids: Vec<String> = targets.iter().map(|&i| self.rows[i].node.clone()).collect();
-            let resolved = live_paths(db, &ids)
-                .map_err(|_| Error::State("remove path unreadable".into()))?;
+            let resolved =
+                live_paths(db, &ids).map_err(|_| Error::State("remove path unreadable".into()))?;
             for (&index, path) in targets.iter().zip(resolved) {
                 self.rows[index].live_path = path;
             }
@@ -293,8 +292,9 @@ impl RemoveBarrierCache {
         candidates.dedup();
         // Blocked operations are derived through a recursive view; permission
         // blocks are rare, so only pay for them when denied roots exist.
-        let denied: bool =
-            db.query_row("SELECT EXISTS(SELECT 1 FROM access_denied)", [], |r| r.get(0))?;
+        let denied: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM access_denied)", [], |r| {
+            r.get(0)
+        })?;
         let blocked = if denied {
             let mut q = db.prepare("SELECT operation FROM access_blocked_operations")?;
             q.query_map([], |r| r.get::<_, String>(0))?
@@ -666,10 +666,7 @@ impl Store {
             "INSERT OR REPLACE INTO local_unlinks(node,confirmed) VALUES(?1,1)",
             [node],
         )?;
-        tx.execute(
-            "UPDATE nodes SET deleted=1,conflict=0 WHERE id=?1",
-            [node],
-        )?;
+        tx.execute("UPDATE nodes SET deleted=1,conflict=0 WHERE id=?1", [node])?;
         tx.execute("DELETE FROM namespace_overlay WHERE node=?1", [node])?;
         tx.execute("DELETE FROM drafts WHERE node=?1", [node])?;
         tx.commit()?;

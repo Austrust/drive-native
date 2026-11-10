@@ -229,9 +229,7 @@ fn aged_unreferenced_draft_is_quarantined_and_recoverable() {
         .write(true)
         .open(&body)
         .unwrap()
-        .set_modified(
-            std::time::SystemTime::now() - std::time::Duration::from_secs(31 * 24 * 3600),
-        )
+        .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(31 * 24 * 3600))
         .unwrap();
     s.collect_garbage().unwrap();
     let quarantined = dir.path().join("drafts-quarantine").join(&token);
@@ -274,7 +272,6 @@ fn committed_upload_deleted_locally_releases_draft_after_remove_commits() {
     );
 }
 
-
 /// Recovery path for the quarantine: a restored body returns to `drafts/` and
 /// stays openable, so quarantine is a recoverable holding area, not a delete.
 #[test]
@@ -293,16 +290,10 @@ fn quarantined_orphan_draft_can_be_restored() {
         .write(true)
         .open(&body)
         .unwrap()
-        .set_modified(
-            std::time::SystemTime::now() - std::time::Duration::from_secs(31 * 24 * 3600),
-        )
+        .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(31 * 24 * 3600))
         .unwrap();
     s.collect_garbage().unwrap();
-    assert!(dir
-        .path()
-        .join("drafts-quarantine")
-        .join(&token)
-        .is_file());
+    assert!(dir.path().join("drafts-quarantine").join(&token).is_file());
     assert_eq!(s.restore_quarantined_drafts().unwrap(), 1);
     assert!(body.is_file());
     assert_eq!(std::fs::read(&body).unwrap(), b"partial");
@@ -328,7 +319,10 @@ fn unresolved_remove_can_be_abandoned_locally_without_remote_delete() {
     assert!(s.abandon_unresolved_remove("a").unwrap());
     assert_eq!(s.pending_namespace_operations().unwrap(), 0);
     assert!(s.locally_unlinked("a").unwrap());
-    assert!(s.next_remove().unwrap().is_none(), "no remote delete re-armed");
+    assert!(
+        s.next_remove().unwrap().is_none(),
+        "no remote delete re-armed"
+    );
     s.collect_garbage().unwrap();
     assert!(
         !dir.path().join("drafts").join(&token).exists(),
