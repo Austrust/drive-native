@@ -338,3 +338,38 @@ fn monotonic_catch_up_completes_without_watchdog_interference() {
     assert!(runner.join().unwrap().is_err());
     server.join().unwrap();
 }
+
+/// AC #58-2 wiring: an attempt that is old and business-silent while work is
+/// still owed is detected even though the notification wait would be renewed by
+/// keep-alives. The detector latches the stall and closes the connection so the
+/// supervisor performs one bounded rebuild.
+///
+/// Run with short attempt limits (`--ignored`):
+/// `DRIVE_NATIVE_ATTEMPT_STALL_MIN_ELAPSED_MS=200`
+/// `DRIVE_NATIVE_ATTEMPT_NO_PROGRESS_TIMEOUT_MS=100`.
+#[test]
+#[ignore = "needs DRIVE_NATIVE_* short limits; see notes/work/issue-58.md"]
+fn attempt_watchdog_detects_keep_alive_flooded_silence() {
+    let (_dir, store) = store_fixture();
+    let bridge = Arc::new(Bridge::offline(store).unwrap());
+    bridge.initialization.begin();
+    assert_eq!(
+        bridge.initialization.begin_catch_up(),
+        crate::initialization::CatchUpDecision::Enter
+    );
+    // Inject the elapsed window: the attempt is old and only keep-alives would
+    // have arrived since the last business progress.
+    bridge
+        .initialization
+        .shift_clock_back_for_test(Duration::from_secs(5));
+    let stop = Arc::new(AtomicBool::new(false));
+    let reason = bridge.attempt_watchdog_loop(&stop);
+    assert_eq!(
+        reason,
+        Some(crate::initialization::StallReason::NoBusinessProgress)
+    );
+    assert!(
+        bridge.take_attempt_stall(),
+        "the stall must be latched for the supervisor diagnostic"
+    );
+}

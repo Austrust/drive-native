@@ -336,6 +336,9 @@ impl Service {
             store,
         )))?);
         bridge.enable_initialization_owner(&profile.task_id)?;
+        // Issue #58: catch-up/attempt supervision deadlines (env-overridable,
+        // production defaults) are shared with the event-loop tracker.
+        bridge.configure_initialization_limits(crate::initialization::Limits::from_env());
         // Issue #50: compile the exclusion rules once and share the state with
         // both the initialization owner (import pruning) and the mount (read
         // path filtering). Empty rules never build or consult an index.
@@ -919,6 +922,8 @@ impl Service {
     fn supervise(&self) {
         use crate::connection_diagnostics::{ProcessState, Record, Stage};
         let mut delay = 1;
+        // Issue #58: bounded attempt-stall rebuild accounting (rolling hour).
+        let mut stalls = crate::attempt_watchdog::StallTracker::new();
         // Explicit unlock/resume/trust changes create a new generation and
         // refresh quarantined permissions. A transport reconnect in the same
         // generation resumes the cursor instead of re-enumerating every denied
@@ -1023,7 +1028,26 @@ impl Service {
                     c.revision += 1;
                 }
                 delay = 1;
-                self.bridge.event_loop_observed(|current| stage = current)
+                // A keep-alive-renewed notification wait can hide an attempt
+                // that is alive but making no business progress. The watchdog
+                // shares the bridge state and closes the connection on a stall,
+                // which ends the event loop and lands in the bounded rebuild
+                // path below.
+                self.bridge.take_attempt_stall();
+                let stop_watchdog = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                let watchdog = {
+                    let bridge = self.bridge.clone();
+                    let stop = stop_watchdog.clone();
+                    std::thread::spawn(move || bridge.attempt_watchdog_loop(&stop))
+                };
+                let result = self.bridge.event_loop_observed(|current| stage = current);
+                stop_watchdog.store(true, Ordering::Release);
+                // Join after the loop ends: the stop flag bounds the wait. The
+                // latch is authoritative even if the loop observed the stall
+                // itself before the watchdog did.
+                let watchdog_stall = watchdog.join().ok().flatten();
+                let _ = watchdog_stall;
+                result
             })();
             self.bridge.initialization.end();
             let requested = self.stop.load(Ordering::Acquire)
@@ -1035,14 +1059,33 @@ impl Service {
                 .unwrap_or(ProcessState::NotStarted);
             // Save the reason and child state before close/kill/wait can obscure
             // the original failure. No control or Store lock spans diagnostic IO.
-            self.diagnostics.record(Record::new(
+            let stalled = self
+                .bridge
+                .take_attempt_stall()
+                .then_some(crate::initialization::StallReason::NoBusinessProgress);
+            let stall_action =
+                stalled.map(|reason| (reason, stalls.observe(std::time::Instant::now())));
+            let last_business_progress = self
+                .bridge
+                .initialization
+                .last_business_progress_at_unix_ms();
+            let mut record = Record::new(
                 stage,
                 &result,
                 requested,
                 started.elapsed(),
                 worker_pid,
                 before_cleanup,
-            ));
+            )
+            .with_business_progress(last_business_progress);
+            if let Some((reason, action)) = stall_action {
+                record = record.with_stall(
+                    reason,
+                    last_business_progress,
+                    matches!(action, crate::attempt_watchdog::StallAction::NeedsAttention),
+                );
+            }
+            self.diagnostics.record(record);
             if let Some(mut worker) = worker {
                 worker.stop();
             }
@@ -1052,6 +1095,29 @@ impl Service {
             }
             c.active = None;
             self.bridge.disconnect();
+            if let Some((_reason, action)) = stall_action {
+                use crate::attempt_watchdog::StallAction;
+                match action {
+                    StallAction::Rebuild(wait) => {
+                        // One controlled rebuild after a bounded delay; nothing
+                        // persisted (cursor, catalog, queue) is reset.
+                        c.state = ConnectionState::Offline;
+                        c.error = Some("worker_stalled");
+                        c.revision += 1;
+                        let _ = self.changed.wait_timeout_while(c, wait, |c| {
+                            c.generation == generation && !self.stop.load(Ordering::Acquire)
+                        });
+                        continue;
+                    }
+                    StallAction::NeedsAttention => {
+                        c.state = ConnectionState::NeedsAttention;
+                        c.error = Some("worker_stalled");
+                        c.attention = true;
+                        c.revision += 1;
+                        continue;
+                    }
+                }
+            }
             if let Err(error) = result {
                 let retry = crate::connection_diagnostics::retryable(&error)
                     || crate::connection_diagnostics::recovery_cause(&error).is_some();
