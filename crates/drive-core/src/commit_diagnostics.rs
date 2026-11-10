@@ -47,6 +47,15 @@ fn invalid(message: String) -> Error {
 /// Write one diagnostic row inside the caller's transaction. `table` is the
 /// journal table that owns the commitment (`operations`, `namespace_ops` or
 /// `transfers`); the caller has already checked that `operation` exists.
+///
+/// #57: the durable attempt counter is written here as well, and only ever
+/// moves forward (`MAX`). A restart clears the process-local reconciliation
+/// map, so `namespace_ops.attempts` is the only counter that can describe the
+/// real retry history (and the one `commit_diagnostics`/`GetIssues`/CLI read).
+/// For `operations` the projection reads `reconcile_attempts`, which the upload
+/// reconcile budget already owns; the same forward-only write keeps the two in
+/// agreement without letting a terminal `confirmed`/`conflict` diagnostic
+/// rewind or inflate the budget.
 pub(crate) fn record(
     tx: &Connection,
     table: &str,
@@ -56,27 +65,35 @@ pub(crate) fn record(
     let outcome = diagnostic.outcome.as_str();
     let category = diagnostic.category.as_str();
     let error = diagnostic.last_error.as_deref();
+    let attempts = i64::from(diagnostic.attempts);
     let changed = match table {
         "operations" => tx.execute(
             "UPDATE operations SET outcome=?2, outcome_category=?3, last_error=?4,
-                    next_retry_at=?5, updated_at=unixepoch() WHERE id=?1",
+                    next_retry_at=?5, updated_at=unixepoch(),
+                    reconcile_attempts=CASE
+                        WHEN ?2 IN ('unknown_retryable','unknown_fatal')
+                        THEN MAX(reconcile_attempts,?6) ELSE reconcile_attempts END
+             WHERE id=?1",
             params![
                 operation,
                 outcome,
                 category,
                 error,
-                diagnostic.next_retry_at
+                diagnostic.next_retry_at,
+                attempts
             ],
         )?,
         "namespace_ops" => tx.execute(
             "UPDATE namespace_ops SET outcome=?2, outcome_category=?3, last_error=?4,
-                    next_retry_at=?5, updated_at=unixepoch() WHERE id=?1",
+                    next_retry_at=?5, updated_at=unixepoch(),
+                    attempts=MAX(attempts,?6) WHERE id=?1",
             params![
                 operation,
                 outcome,
                 category,
                 error,
-                diagnostic.next_retry_at
+                diagnostic.next_retry_at,
+                attempts
             ],
         )?,
         "transfers" => tx.execute(
