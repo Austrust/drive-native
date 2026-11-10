@@ -503,7 +503,13 @@ impl Views {
     }
 }
 
-pub(super) fn open(fs: &mut CacheFilesystem, ino: u64, flags: i32, reply: ReplyOpen) {
+pub(super) fn open(
+    fs: &mut CacheFilesystem,
+    ino: u64,
+    flags: i32,
+    reply: ReplyOpen,
+    deadline: request::RequestDeadline,
+) {
     diagnostics::count(diagnostics::Stage::OpendirRequests);
     if flags & libc::O_ACCMODE != libc::O_RDONLY {
         reply.error(libc::EISDIR);
@@ -530,6 +536,7 @@ pub(super) fn open(fs: &mut CacheFilesystem, ino: u64, flags: i32, reply: ReplyO
     let store = fs.store.clone();
     let queued = diagnostics::span(diagnostics::Stage::OpendirQueue);
     fs.queue.submit(Box::new(move || {
+        let _deadline = deadline;
         drop(queued);
         match views.open(&store, ino) {
             Ok(fh) => reply.opened(fh, 0),
@@ -567,6 +574,7 @@ pub(super) fn read_plus(
     fh: u64,
     offset: i64,
     mut reply: fuser::ReplyDirectoryPlus,
+    deadline: request::RequestDeadline,
 ) {
     diagnostics::count(diagnostics::Stage::ReaddirPlusRequests);
     let Ok(offset) = usize::try_from(offset) else {
@@ -622,6 +630,7 @@ pub(super) fn read_plus(
     let exclusion = exclusion.clone();
     let queued = diagnostics::span(diagnostics::Stage::ReaddirPlusQueue);
     fs.read_queue.submit(Box::new(move || {
+        let _deadline = deadline;
         drop(queued);
         let view = match views.get(ino, fh) {
             Ok(view) => view,
@@ -784,6 +793,7 @@ pub(super) fn read(
     fh: u64,
     offset: i64,
     reply: ReplyDirectory,
+    deadline: request::RequestDeadline,
 ) {
     diagnostics::count(diagnostics::Stage::ReaddirRequests);
     let Ok(offset) = usize::try_from(offset) else {
@@ -812,6 +822,7 @@ pub(super) fn read(
     let exclusion = exclusion.clone();
     let queued = diagnostics::span(diagnostics::Stage::ReaddirQueue);
     fs.read_queue.submit(Box::new(move || {
+        let _deadline = deadline;
         drop(queued);
         match views.get(ino, fh) {
             Ok(view) => {

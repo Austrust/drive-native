@@ -25,6 +25,7 @@ pub mod publication;
 pub use publication::{NotifyHub, ENTRY_TTL};
 pub use namespace_index_glue::enabled as namespace_index_enabled;
 mod read_requests;
+pub mod request;
 #[cfg(test)]
 mod shutdown_tests;
 mod writable;
@@ -44,7 +45,7 @@ use std::{
         Arc, Mutex,
         mpsc::{SyncSender, sync_channel},
     },
-    time::{Duration, UNIX_EPOCH},
+    time::{Duration, Instant, UNIX_EPOCH},
 };
 
 const TTL: Duration = Duration::ZERO;
@@ -164,6 +165,10 @@ pub struct CacheFilesystem {
     /// Issue #50: shared exclusion rules and derived namespace index. `None`
     /// (or empty rules) keeps every read-path check a constant-time no-op.
     exclusion: Option<Arc<drive_core::exclude::ExclusionState>>,
+    /// Issue #59: kernel FUSE queue tuning applied at FUSE_INIT. Defaults are
+    /// resolved from `DRIVE_NATIVE_FUSE_MAX_BACKGROUND` /
+    /// `DRIVE_NATIVE_FUSE_CONGESTION_THRESHOLD` (64/48 when unset).
+    fuse_tuning: request::FuseTuning,
     uid: u32,
     gid: u32,
 }
@@ -186,6 +191,14 @@ impl CacheFilesystem {
     }
     pub fn with_writes_enabled(mut self) -> Self {
         self.writable = true;
+        self
+    }
+
+    /// Issue #59: override the kernel queue tuning for this mount and publish
+    /// it to the diagnostics snapshot. Effective at the next FUSE_INIT.
+    pub fn with_fuse_tuning(mut self, tuning: request::FuseTuning) -> Self {
+        self.fuse_tuning = tuning;
+        request::install(tuning, request::budgets());
         self
     }
 
@@ -316,6 +329,7 @@ impl CacheFilesystem {
             notify: NotifyHub::from_env(),
             readdirplus: false,
             exclusion: None,
+            fuse_tuning: request::configure(),
             uid,
             gid,
         })
@@ -330,6 +344,36 @@ fn errno(error: &Error) -> i32 {
         Error::Io(e) => e.raw_os_error().unwrap_or(libc::EIO),
         _ => libc::EIO,
     }
+}
+/// Issue #59: acquire the serialized Store for a metadata reply with a
+/// two-tier bounded wait.
+///
+/// A fixed single-shot timeout (e.g. 50 ms) must not surface transient writer
+/// contention as `EAGAIN`: plain `std::fs`/`stat`/`ls` do not retry `EAGAIN`,
+/// so a cache-hit request would appear broken while the writer was merely
+/// busy. The soft threshold only records the degradation; the wait then keeps
+/// going with the shared exponential backoff until the opcode's own deadline.
+/// `EAGAIN` is produced only when the whole budget is exhausted, which is the
+/// documented, monitored degradation instead of an unbounded handler stall.
+fn bounded_metadata_guard<'a>(
+    store: &'a drive_core::SharedStore,
+    op: request::Op,
+    detail: &'static str,
+) -> Option<drive_core::shared_store::StoreGuard<'a>> {
+    let started = Instant::now();
+    let soft = request::metadata_lock_wait();
+    if let Some(guard) = store.lock_timeout(soft) {
+        request::record_lock_wait(started.elapsed());
+        return Some(guard);
+    }
+    // Soft threshold crossed: one degraded observation, then keep waiting
+    // inside the opcode budget so a cache-hit reply still succeeds.
+    request::record_store_busy(op, started.elapsed(), detail);
+    let budget = request::budgets().for_op(op);
+    let remaining = budget.saturating_sub(started.elapsed());
+    let guard = store.lock_timeout(remaining);
+    request::record_lock_wait(started.elapsed());
+    guard
 }
 fn filetype(record: &FileRecord) -> FileType {
     if record.node.directory {
@@ -384,6 +428,18 @@ impl Filesystem for CacheFilesystem {
         config
             .set_time_granularity(Duration::from_secs(1))
             .map_err(|_| libc::EINVAL)?;
+        // Issue #59: never inherit the vendored fuser defaults (16/12). One
+        // slow family must not occupy every background slot; the configured
+        // values are applied here and become visible to the kernel in
+        // /sys/fs/fuse/connections/<id>/{max_background,congestion_threshold}.
+        let tuning = self.fuse_tuning;
+        config
+            .set_max_background(tuning.max_background)
+            .map_err(|_| libc::EINVAL)?;
+        // Only 0 is rejected; normalized tuning is never 0, but a future fuser
+        // clamp must not fail the mount handshake just for the threshold.
+        let _ = config.set_congestion_threshold(tuning.congestion_threshold);
+        request::publish_effective(tuning);
         // READDIRPLUS pays off only with a bounded TTL and only when the mount
         // owner declared that it installs an invalidation notifier (see the
         // `readdirplus` field); otherwise the mount keeps the safe-stage profile.
@@ -427,6 +483,7 @@ impl Filesystem for CacheFilesystem {
         umask: u32,
         reply: ReplyEntry,
     ) {
+        let deadline = request::RequestDeadline::new(request::Op::Mkdir);
         if !self.writable {
             reply.error(libc::EROFS);
             return;
@@ -448,6 +505,7 @@ impl Filesystem for CacheFilesystem {
         let notify = self.notify.clone();
         let (uid, gid) = (self.uid, self.gid);
         self.queue.submit(Box::new(move || {
+            let _deadline = deadline;
             let result = (|| -> drive_core::Result<_> {
                 let mut s = store.lock().unwrap();
                 let p = preview::authoritative(&s, parent, libc::EROFS)?;
@@ -472,8 +530,10 @@ impl Filesystem for CacheFilesystem {
     }
 
     fn statfs(&mut self, _req: &Request<'_>, _ino: u64, reply: fuser::ReplyStatfs) {
+        let deadline = request::RequestDeadline::new(request::Op::Statfs);
         let storage = self.storage.clone();
         self.queue.submit(Box::new(move || {
+            let _deadline = deadline;
             use std::os::fd::AsRawFd;
             let mut stat = std::mem::MaybeUninit::<libc::statvfs>::uninit();
             // fstatvfs initializes the complete buffer on success. The open FD
@@ -575,6 +635,7 @@ impl Filesystem for CacheFilesystem {
         flags: i32,
         reply: fuser::ReplyCreate,
     ) {
+        let deadline = request::RequestDeadline::new(request::Op::Create);
         // Issue #50: an excluded target or excluded parent directory answers
         // ENOENT before any local creation is recorded.
         if name
@@ -585,9 +646,10 @@ impl Filesystem for CacheFilesystem {
             reply.error(libc::ENOENT);
             return;
         }
-        writable::create(self, parent, name, mode, umask, flags, reply)
+        writable::create(self, parent, name, mode, umask, flags, reply, deadline)
     }
     fn lookup(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEntry) {
+        let deadline = request::RequestDeadline::new(request::Op::Lookup);
         diagnostics::count(diagnostics::Stage::LookupRequests);
         let Some(name) = name.to_str() else {
             reply.error(libc::ENOENT);
@@ -655,8 +717,17 @@ impl Filesystem for CacheFilesystem {
         self.queue.submit(Box::new(move || {
             drop(queued);
             let publication = notify.reply_guard();
+            // Issue #59: a metadata reply must not wait unbounded on the
+            // serialized writer. The queue worker keeps its own result and the
+            // kernel retries EAGAIN instead of the whole mount stalling.
             let wait = diagnostics::span(diagnostics::Stage::LookupStoreWait);
-            let store = store.lock().unwrap();
+            let Some(store) = bounded_metadata_guard(&store, request::Op::Lookup, "detail=lookup")
+            else {
+                request::record_retryable(request::Op::Lookup);
+                deadline.timeout("detail=lookup");
+                reply.error(libc::EAGAIN);
+                return;
+            };
             drop(wait);
             let projection = diagnostics::span(diagnostics::Stage::LookupProjection);
             let result = preview::lookup(&store, parent, &name);
@@ -682,6 +753,7 @@ impl Filesystem for CacheFilesystem {
         }));
     }
     fn getattr(&mut self, _req: &Request<'_>, ino: u64, fh: Option<u64>, reply: ReplyAttr) {
+        let deadline = request::RequestDeadline::new(request::Op::Getattr);
         diagnostics::count(diagnostics::Stage::GetattrRequests);
         // Handle-relative attributes, mutable drafts and unlinked objects retain
         // their original descriptor-aware SQL path.
@@ -747,7 +819,16 @@ impl Filesystem for CacheFilesystem {
             drop(queued);
             let publication = notify.reply_guard();
             let wait = diagnostics::span(diagnostics::Stage::GetattrStoreWait);
-            let guard = store.lock().unwrap();
+            // Issue #59: bounded two-tier wait; EAGAIN only after the opcode
+            // budget is exhausted (see bounded_metadata_guard).
+            let Some(guard) =
+                bounded_metadata_guard(&store, request::Op::Getattr, "detail=getattr")
+            else {
+                request::record_retryable(request::Op::Getattr);
+                deadline.timeout("detail=getattr");
+                reply.error(libc::EAGAIN);
+                return;
+            };
             drop(wait);
             let projection = diagnostics::span(diagnostics::Stage::GetattrProjection);
             let result = preview::metadata(&guard, ino);
@@ -826,12 +907,13 @@ impl Filesystem for CacheFilesystem {
         }));
     }
     fn opendir(&mut self, _req: &Request<'_>, ino: u64, flags: i32, reply: ReplyOpen) {
+        let deadline = request::RequestDeadline::new(request::Op::Opendir);
         if self.inode_excluded(ino) {
             drive_core::exclude::trace_hit("opendir");
             reply.error(libc::ENOENT);
             return;
         }
-        directory::open(self, ino, flags, reply)
+        directory::open(self, ino, flags, reply, deadline)
     }
     fn readdir(
         &mut self,
@@ -841,12 +923,13 @@ impl Filesystem for CacheFilesystem {
         offset: i64,
         reply: ReplyDirectory,
     ) {
+        let deadline = request::RequestDeadline::new(request::Op::Readdir);
         if self.inode_excluded(ino) {
             drive_core::exclude::trace_hit("readdir");
             reply.error(libc::ENOENT);
             return;
         }
-        directory::read(self, ino, fh, offset, reply)
+        directory::read(self, ino, fh, offset, reply, deadline)
     }
     fn readdirplus(
         &mut self,
@@ -856,12 +939,13 @@ impl Filesystem for CacheFilesystem {
         offset: i64,
         reply: ReplyDirectoryPlus,
     ) {
+        let deadline = request::RequestDeadline::new(request::Op::ReaddirPlus);
         if self.inode_excluded(ino) {
             drive_core::exclude::trace_hit("readdirplus");
             reply.error(libc::ENOENT);
             return;
         }
-        directory::read_plus(self, ino, fh, offset, reply)
+        directory::read_plus(self, ino, fh, offset, reply, deadline)
     }
     fn releasedir(
         &mut self,
@@ -874,12 +958,13 @@ impl Filesystem for CacheFilesystem {
         directory::release(self, ino, fh, reply)
     }
     fn open(&mut self, _req: &Request<'_>, ino: u64, flags: i32, reply: ReplyOpen) {
+        let deadline = request::RequestDeadline::new(request::Op::Open);
         if self.inode_excluded(ino) {
             drive_core::exclude::trace_hit("open");
             reply.error(libc::ENOENT);
             return;
         }
-        writable::open(self, ino, flags, reply)
+        writable::open(self, ino, flags, reply, deadline)
     }
     fn write(
         &mut self,
@@ -895,15 +980,17 @@ impl Filesystem for CacheFilesystem {
     ) {
         // Issue #50: writes to an excluded inode are ENOENT and never promote a
         // handle into a draft upload operation.
+        let deadline = request::RequestDeadline::new(request::Op::Write);
         if self.inode_excluded(ino) {
             drive_core::exclude::trace_hit("write");
             reply.error(libc::ENOENT);
             return;
         }
-        writable::write(self, ino, fh, offset, data, reply)
+        writable::write(self, ino, fh, offset, data, reply, deadline)
     }
     fn fsync(&mut self, _req: &Request<'_>, ino: u64, fh: u64, _datasync: bool, reply: ReplyEmpty) {
-        writable::sync(self, ino, fh, false, reply)
+        let deadline = request::RequestDeadline::new(request::Op::Flush);
+        writable::sync(self, ino, fh, false, reply, deadline)
     }
     fn flush(
         &mut self,
@@ -913,7 +1000,8 @@ impl Filesystem for CacheFilesystem {
         _lock_owner: u64,
         reply: ReplyEmpty,
     ) {
-        writable::sync(self, ino, fh, false, reply)
+        let deadline = request::RequestDeadline::new(request::Op::Flush);
+        writable::sync(self, ino, fh, false, reply, deadline)
     }
     fn setattr(
         &mut self,
@@ -935,6 +1023,7 @@ impl Filesystem for CacheFilesystem {
     ) {
         // Issue #50: metadata/size changes on an excluded inode are missing-path
         // errors and must not create dirty drafts or upload operations.
+        let deadline = request::RequestDeadline::new(request::Op::Setattr);
         if self.inode_excluded(ino) {
             drive_core::exclude::trace_hit("setattr");
             reply.error(libc::ENOENT);
@@ -942,7 +1031,7 @@ impl Filesystem for CacheFilesystem {
         }
         writable::setattr(
             self, ino, mode, uid, gid, size, atime, mtime, ctime, fh, crtime, chgtime, bkuptime,
-            flags, reply,
+            flags, reply, deadline,
         )
     }
     fn read(
@@ -960,6 +1049,9 @@ impl Filesystem for CacheFilesystem {
             reply.error(libc::EINVAL);
             return;
         }
+        // Issue #59: a cache-miss read can wait for a slow worker download; the
+        // deadline reports (and degrades on) that wait instead of hiding it.
+        let deadline = request::RequestDeadline::new(request::Op::Read);
         let reply = self.reads.register(req.unique(), reply);
         let cancel = reply.cancellation();
         let handles = self.handles.clone();
@@ -1002,6 +1094,14 @@ impl Filesystem for CacheFilesystem {
             network_queue.submit(Box::new(move || {
                 match hydrator.hydrate_cancellable(&missing.unwrap(), &cancel) {
                     Ok(content) => {
+                        if deadline.expired() {
+                            // The worker call cannot be preempted; the budget is
+                            // enforced at the reply boundary with one event and
+                            // a defined error instead of an invisible stall.
+                            deadline.timeout(&format!("detail=worker_wait ino={ino}"));
+                            reply.error(libc::EIO);
+                            return;
+                        }
                         if let Err(e)=permissions::read_on_worker(&store,ino,permissions::Action::Read){reply.error(e);return;}
                         let mut h = handles.lock().unwrap();
                         let Some(entry) = h.entries.get_mut(&fh) else {
@@ -1043,7 +1143,8 @@ impl Filesystem for CacheFilesystem {
         _flush: bool,
         reply: ReplyEmpty,
     ) {
-        writable::sync(self, ino, fh, true, reply)
+        let deadline = request::RequestDeadline::new(request::Op::Release);
+        writable::sync(self, ino, fh, true, reply, deadline)
     }
 }
 

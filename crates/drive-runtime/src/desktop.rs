@@ -907,6 +907,10 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
         .map(|watermark| watermark.cursor.epoch)
         .unwrap_or_default();
     let recovery = service.bridge.recovery_status();
+    // Issue #59: additive FUSE data-plane observability. Configured/effective
+    // kernel queue tuning, per-opcode latency buckets, timeout counters and the
+    // metadata lock-wait histogram. `schema` stays 1 (additive field only).
+    let fuse = drive_fs::request::snapshot().to_json();
     let serialize = Instant::now();
     let body = serde_json::json!({"schema":1,"task_id":service.profile.task_id,"mount":service.profile.mount,
         "connection":state,"error":error,"paused":paused,"paused_by":paused_by,
@@ -939,6 +943,7 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
         "shutdown":service.shutdown_diagnostics.snapshot(),
         "initialization":initialization,
         "recovery":recovery,
+        "fuse":fuse,
         "host":service.profile.host,"username":service.profile.username,"scope_path":service.profile.scope.path}).to_string();
     timings.serialize_us = elapsed_us(serialize);
     timings.total_us = elapsed_us(started);
@@ -2534,6 +2539,26 @@ mod readpath_tests {
         assert_eq!(value["schema"], 1);
         assert_eq!(value["issue_count"], 0);
         assert_eq!(value["cache_availability"]["total"], 1);
+        // Issue #59: the FUSE section is additive, schema-compatible and
+        // reports the configured/effective kernel queue tuning plus per-opcode
+        // latency/timeout counters and the metadata lock-wait histogram.
+        assert_eq!(value["fuse"]["schema"], 1);
+        assert_eq!(value["fuse"]["configured_tuning"]["max_background"], 64);
+        assert_eq!(
+            value["fuse"]["configured_tuning"]["congestion_threshold"],
+            48
+        );
+        assert_eq!(value["fuse"]["effective_tuning"]["max_background"], 64);
+        assert_eq!(value["fuse"]["request_budget_ms"]["metadata"], 5000);
+        assert_eq!(value["fuse"]["request_budget_ms"]["read"], 30000);
+        assert_eq!(value["fuse"]["request_budget_ms"]["write"], 60000);
+        assert_eq!(value["fuse"]["request_budget_ms"]["readdir"], 10000);
+        assert!(value["fuse"]["ops"]["lookup"]["count"].is_u64());
+        assert!(value["fuse"]["lock_wait"]["p95_us"].is_u64());
+        assert_eq!(
+            value["fuse"]["deadline_capability"],
+            "detect-and-report+bounded-store-wait"
+        );
     }
 
     #[test]

@@ -15,7 +15,7 @@ use std::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TryRecvError},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -274,6 +274,33 @@ impl SharedStore {
             Err(TryLockError::Poisoned(error)) => Err(TryLockError::Poisoned(PoisonError::new(
                 self.guard(error.into_inner(), projection, true),
             ))),
+        }
+    }
+    /// Bounded wait for the serialized writer boundary (issue #59).
+    ///
+    /// Metadata read paths must not wait forever on one slow FUSE writer or
+    /// rescan; callers pass a small budget and answer a retryable error when it
+    /// expires. The standard `Mutex` has no timed lock, so this polls
+    /// `try_lock` with a short sleep — bounded by construction and never holds
+    /// a partial guard between attempts.
+    pub fn lock_timeout(&self, timeout: Duration) -> Option<StoreGuard<'_>> {
+        let started = Instant::now();
+        let mut backoff = Duration::from_millis(1);
+        loop {
+            match self.try_lock() {
+                Ok(guard) => return Some(guard),
+                Err(TryLockError::Poisoned(error)) => return Some(error.into_inner()),
+                Err(TryLockError::WouldBlock) => {}
+            }
+            let remaining = timeout.saturating_sub(started.elapsed());
+            if remaining.is_zero() {
+                return None;
+            }
+            // Exponential backoff caps the polling rate of all metadata
+            // workers under a long writer hold (issue #59); it never extends
+            // the deadline.
+            std::thread::sleep(remaining.min(backoff));
+            backoff = (backoff * 2).min(Duration::from_millis(25));
         }
     }
     pub fn is_poisoned(&self) -> bool {
