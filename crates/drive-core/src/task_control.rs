@@ -37,10 +37,7 @@ fn unix_seconds() -> u64 {
 impl Store {
     /// Read and validate the one-shot handover intent, if present. The file is
     /// not consumed here: the caller decides whether it is fresh or stale.
-    fn startup_pause_intent(
-        &self,
-        task_id: &str,
-    ) -> Result<Option<(std::path::PathBuf, u64)>> {
+    fn startup_pause_intent(&self, task_id: &str) -> Result<Option<(std::path::PathBuf, u64)>> {
         use std::io::Read;
         use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
         let path = self.storage_directory().join("startup-pause-v1.json");

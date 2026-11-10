@@ -116,13 +116,7 @@ fn persisted_pause_from_a_previous_lifetime_is_auto_resumed_and_reported() {
         "a persisted pause from a previous lifetime must not silently pause the new process"
     );
     assert!(
-        !service
-            .bridge
-            .store
-            .lock()
-            .unwrap()
-            .sync_paused()
-            .unwrap(),
+        !service.bridge.store.lock().unwrap().sync_paused().unwrap(),
         "auto-resume must clear the persisted flag"
     );
     let overview = overview_json(&service);
