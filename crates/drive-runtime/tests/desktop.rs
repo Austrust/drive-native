@@ -1085,7 +1085,16 @@ fn cache_settings_are_task_bound_and_never_erase_content_while_paused() {
     let (_dir, s) = fixture();
     let before = desktop::cache_settings(&s).unwrap();
     let before: serde_json::Value = serde_json::from_str(&before).unwrap();
-    assert_eq!(before["usage"]["limit_bytes"], 0);
+    // Issue #60: an unset limit is a bounded default now, reported as such.
+    assert!(before["usage"]["limit_bytes"].as_u64().unwrap() > 0);
+    assert_eq!(before["usage"]["limit_source"], "default");
+    // Issue #60 additive per-category accounting.
+    assert!(before["usage"]["drafts_bytes"].is_u64());
+    assert!(before["usage"]["drafts_unreferenced_bytes"].is_u64());
+    assert!(before["usage"]["backup_bytes"].is_u64());
+    assert!(before["usage"]["cache_reclaimable_bytes"].is_u64());
+    assert!(before["usage"]["drafts_reclaimable_bytes"].is_u64());
+    assert!(before["usage"]["backup_reclaimable_bytes"].is_u64());
     for invalid in [
         serde_json::json!({"schema":1,"task_id":"other","limit_bytes":1048576}),
         serde_json::json!({"schema":1,"task_id":s.profile.task_id,"limit_bytes":1}),
@@ -1471,6 +1480,12 @@ fn overview_reports_sync_state_cache_availability_and_version() {
     );
     assert_eq!(overview["version"]["ipc"], 21);
     assert_eq!(overview["schema"], 1);
+    // Issue #60: additive drafts/migration-backup storage block.
+    let storage = &overview["storage"];
+    assert!(storage["drafts_bytes"].is_u64());
+    assert!(storage["drafts_unreferenced_bytes"].is_u64());
+    assert!(storage["backup_bytes"].is_u64());
+    assert!(storage["draft_quota_bytes"].as_u64().unwrap() > 0);
 }
 
 /// Issue #50: a profile written before exclusion rules existed still loads.

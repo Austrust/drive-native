@@ -39,6 +39,43 @@ pub enum Error {
     Native(#[from] sproto::Error),
 }
 pub type Result<T> = std::result::Result<T, Error>;
+
+/// Total bytes of the filesystem holding `path`, or 0 when it cannot be
+/// determined. Used only to size the bounded cache/drafts defaults (#60).
+pub(crate) fn filesystem_total_bytes(path: &Path) -> u64 {
+    statvfs_bytes(path).map(|(total, _)| total).unwrap_or(0)
+}
+
+/// Free bytes available to the current process on the filesystem holding
+/// `path`, or `None` when it cannot be determined.
+pub(crate) fn filesystem_available_bytes(path: &Path) -> Option<u64> {
+    statvfs_bytes(path).map(|(_, available)| available)
+}
+
+/// One `statvfs` for both numbers: (total, available). `f_frsize` carries the
+/// allocation unit on Linux, but some filesystems leave it zero; fall back to
+/// `f_bsize` so the accounting never collapses to zero.
+fn statvfs_bytes(path: &Path) -> Option<(u64, u64)> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    let path = CString::new(path.as_os_str().as_bytes()).ok()?;
+    let mut stats = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+    // SAFETY: `statvfs` only writes to the provided buffer and we read it only
+    // after a zero return code.
+    if unsafe { libc::statvfs(path.as_ptr(), stats.as_mut_ptr()) } != 0 {
+        return None;
+    }
+    // SAFETY: initialized by the successful call above.
+    let stats = unsafe { stats.assume_init() };
+    let unit = if stats.f_frsize == 0 {
+        stats.f_bsize
+    } else {
+        stats.f_frsize
+    } as u128;
+    let total = (stats.f_blocks as u128 * unit).min(u128::from(u64::MAX)) as u64;
+    let available = (stats.f_bavail as u128 * unit).min(u128::from(u64::MAX)) as u64;
+    Some((total, available))
+}
 impl Error {
     pub fn is_not_found(&self) -> bool {
         matches!(self, Self::Db(rusqlite::Error::QueryReturnedNoRows))
@@ -147,6 +184,13 @@ pub struct Store {
     /// invalidated wholesale whenever a transaction commits, so it never
     /// outlives a permission, policy or namespace write.
     pub(crate) permission_cache: Mutex<crate::write_permissions::PermissionCache>,
+    /// Issue #60: effective cache budget used when the profile never stored
+    /// `cache_limit_bytes` (a bounded default instead of the old "no eviction").
+    /// Memoized at open because a statvfs per budget decision is pointless.
+    pub(crate) default_cache_limit: u64,
+    /// Issue #60: drafts quota used when the profile never stored
+    /// `draft_quota_bytes`.
+    pub(crate) default_draft_quota: u64,
     // Fields drop in order: close SQLite before releasing writer ownership.
     // Read-only handles own no lock and therefore carry None.
     _writer_lock: Option<WriterLock>,
@@ -167,6 +211,13 @@ pub struct DraftWriteStats {
     pub draft_file_fsyncs: u64,
     /// Checkpoints that produced an upload snapshot.
     pub checkpoints: u64,
+    /// Issue #60: drafts created for an already-deleted node (they have no live
+    /// namespace object; counted so this orphan class is visible at creation).
+    pub unreferenced_draft_begins: u64,
+    /// Issue #60: orphan bodies moved to the recoverable quarantine.
+    pub orphan_drafts_quarantined: u64,
+    /// Issue #60: quarantined bodies restored to `drafts/`.
+    pub quarantined_drafts_restored: u64,
 }
 
 /// A handle retains its immutable version even if a newer blob is published.
@@ -512,6 +563,190 @@ fn migrate_v29(db: &Connection, version: i64) -> Result<()> {
     Ok(())
 }
 
+// ---- issue #60: bounded migration-backup lifetime --------------------------
+
+/// Prefix and suffix of the pre-migration `VACUUM INTO` snapshots written by
+/// [`Store::open`]. Matching is name-based so an inventory never follows
+/// symlinks or reads file content.
+pub const MIGRATION_BACKUP_PREFIX: &str = "state-before-v";
+/// Newest snapshots always kept, regardless of age.
+pub const MIGRATION_BACKUP_RETAIN: usize = 2;
+/// A backup older than this is cleanable even when it is one of the newest two.
+pub const MIGRATION_BACKUP_MAX_AGE_SECONDS: u64 = 30 * 24 * 60 * 60;
+/// Pre-flight headroom required before `VACUUM INTO`: the backup itself plus
+/// room for the migration that follows.
+pub const MIGRATION_BACKUP_SPACE_FACTOR: u64 = 3;
+
+/// One reusable/cleanable migration backup. Only the file name is exposed
+/// (never an absolute path) so it is safe to put into diagnostics.
+#[derive(Clone, Debug, Serialize)]
+pub struct MigrationBackupEntry {
+    pub name: String,
+    pub bytes: u64,
+    pub age_seconds: u64,
+}
+
+/// Additive storage diagnostics: how much the migration snapshots occupy and
+/// which ones the rotation may clean up. `cleanable_bytes` is what the next
+/// rotation actually deletes.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct MigrationBackupInventory {
+    pub count: usize,
+    pub total_bytes: u64,
+    pub retained_bytes: u64,
+    pub cleanable_bytes: u64,
+    pub cleanable: Vec<MigrationBackupEntry>,
+}
+
+/// Additive cheap storage block for `GetOverview` (issue #60). Names follow the
+/// `GetCacheSettings.usage` fields so both surfaces stay self-consistent.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct StorageSummary {
+    pub drafts_bytes: u64,
+    pub drafts_unreferenced_bytes: u64,
+    pub drafts_reclaimable_bytes: u64,
+    pub drafts_protected_bytes: u64,
+    pub draft_quota_bytes: u64,
+    pub drafts_over_quota_bytes: u64,
+    pub quarantine_bytes: u64,
+    pub backup_bytes: u64,
+    pub backup_reclaimable_bytes: u64,
+    pub backup_protected_bytes: u64,
+}
+
+#[derive(Clone, Debug)]
+struct MigrationBackupFile {
+    path: PathBuf,
+    name: String,
+    bytes: u64,
+    modified: u64,
+}
+
+fn unix_seconds() -> u64 {
+    u64::try_from(crate::commit_diagnostics::unix_now()).unwrap_or(0)
+}
+
+/// List `state-before-v*.sqlite` snapshots in the profile root. A missing
+/// directory is an empty inventory, not an error: read-only handles open an
+/// existing database inside a root that may not list backups yet.
+fn migration_backup_files(root: &Path) -> Result<Vec<MigrationBackupFile>> {
+    let entries = match fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error.into()),
+    };
+    let mut files = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.starts_with(MIGRATION_BACKUP_PREFIX) || !name.ends_with(".sqlite") {
+            continue;
+        }
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let metadata = entry.metadata()?;
+        let modified = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|elapsed| elapsed.as_secs())
+            .unwrap_or(0);
+        files.push(MigrationBackupFile {
+            path: entry.path(),
+            name,
+            bytes: metadata.len(),
+            modified,
+        });
+    }
+    Ok(files)
+}
+
+/// Newest two by mtime (name breaks ties deterministically), except snapshots
+/// older than the retention window. Everything else is cleanable.
+fn partition_migration_backups(
+    mut files: Vec<MigrationBackupFile>,
+    now: u64,
+) -> (Vec<MigrationBackupFile>, Vec<MigrationBackupFile>) {
+    files.sort_by(|a, b| b.modified.cmp(&a.modified).then_with(|| b.name.cmp(&a.name)));
+    let mut retained = Vec::new();
+    let mut cleanable = Vec::new();
+    for (index, file) in files.into_iter().enumerate() {
+        let age = now.saturating_sub(file.modified);
+        if index < MIGRATION_BACKUP_RETAIN && age <= MIGRATION_BACKUP_MAX_AGE_SECONDS {
+            retained.push(file);
+        } else {
+            cleanable.push(file);
+        }
+    }
+    (retained, cleanable)
+}
+
+fn migration_backup_inventory_at(root: &Path, now: u64) -> Result<MigrationBackupInventory> {
+    let files = migration_backup_files(root)?;
+    let total_bytes = files.iter().map(|file| file.bytes).sum();
+    let (retained, cleanable) = partition_migration_backups(files, now);
+    Ok(MigrationBackupInventory {
+        count: retained.len() + cleanable.len(),
+        total_bytes,
+        retained_bytes: retained.iter().map(|file| file.bytes).sum(),
+        cleanable_bytes: cleanable.iter().map(|file| file.bytes).sum(),
+        cleanable: cleanable
+            .into_iter()
+            .map(|file| MigrationBackupEntry {
+                name: file.name,
+                bytes: file.bytes,
+                age_seconds: now.saturating_sub(file.modified),
+            })
+            .collect(),
+    })
+}
+
+/// Apply retention to the snapshots on disk. Deletion failures are ignored:
+/// a read-only or busy file must not block startup, and the next open retries.
+fn rotate_migration_backups(root: &Path, now: u64) -> Result<u64> {
+    let files = migration_backup_files(root)?;
+    let (_, cleanable) = partition_migration_backups(files, now);
+    let mut removed = 0;
+    for file in cleanable {
+        if fs::remove_file(&file.path).is_ok() {
+            removed += file.bytes;
+        }
+    }
+    Ok(removed)
+}
+
+/// Size the pre-migration snapshot conservatively: the live database plus its
+/// WAL upper-bounds the pages `VACUUM INTO` copies.
+fn migration_backup_estimate_bytes(root: &Path) -> u64 {
+    ["state.sqlite", "state.sqlite-wal"]
+        .iter()
+        .filter_map(|name| fs::metadata(root.join(name)).ok())
+        .map(|metadata| metadata.len())
+        .sum()
+}
+
+/// Pure headroom rule so the refusal path is testable without filling a disk.
+fn backup_headroom_check(required: u64, available: Option<u64>) -> Result<()> {
+    match available {
+        // statvfs failed: do not block an otherwise healthy upgrade.
+        None => Ok(()),
+        Some(available) if available < required => Err(Error::State(format!(
+            "insufficient free space for the pre-migration state backup: need {required} bytes, {available} available; free disk space and retry"
+        ))),
+        Some(_) => Ok(()),
+    }
+}
+
+/// Refuse a migration when the snapshot plus the migration itself cannot fit.
+/// Returning an error (instead of silently skipping the backup) keeps the
+/// "a pre-migration snapshot always exists" guarantee.
+fn check_migration_backup_space(root: &Path) -> Result<()> {
+    let estimate = migration_backup_estimate_bytes(root);
+    let required = estimate.saturating_mul(MIGRATION_BACKUP_SPACE_FACTOR);
+    backup_headroom_check(required, filesystem_available_bytes(root))
+}
+
 impl Store {
     /// One store per account + sync root. Independent accounts never share event IDs or cursors.
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
@@ -537,7 +772,15 @@ impl Store {
             return Err(Error::State("database is newer than this build".into()));
         }
         crate::download_publication::cleanup_staging(&root)?;
+        // Issue #60: this profile accumulated ten `state-before-v*` snapshots
+        // (2.25 GB). Rotate on every writer open so existing profiles heal even
+        // when this build does not migrate them again.
+        let now = unix_seconds();
+        rotate_migration_backups(&root, now)?;
         if version > 0 && version < STATE_SCHEMA_VERSION {
+            // Refuse rather than migrate without the documented rollback
+            // artifact when the disk cannot hold it (issue #60 AC).
+            check_migration_backup_space(&root)?;
             // SQLite writes a coherent snapshot including committed WAL contents.
             let backup = root.join(format!(
                 "state-before-v{}-{}.sqlite",
@@ -545,6 +788,8 @@ impl Store {
                 uuid::Uuid::new_v4()
             ));
             db.execute("VACUUM INTO ?1", [backup.to_string_lossy().as_ref()])?;
+            // The fresh snapshot joins the same retention rule immediately.
+            rotate_migration_backups(&root, unix_seconds())?;
         }
         db.execute_batch("
             BEGIN IMMEDIATE;
@@ -683,6 +928,7 @@ impl Store {
         // epoch keep the durable schema and external readers unchanged.
         crate::status_changes::install(&db)?;
         crate::removals::install_barrier_versions(&db)?;
+        let disk_total = filesystem_total_bytes(&root);
         let mut store = Self {
             _writer_lock: Some(writer_lock),
             db,
@@ -691,6 +937,8 @@ impl Store {
             namespace_runtime: Arc::new(Mutex::new(Default::default())),
             cache_recency: Mutex::new(crate::cache_policy::CacheRecency::new()),
             draft_stats: DraftWriteStats::default(),
+            default_cache_limit: crate::cache_policy::default_cache_limit_bytes(disk_total),
+            default_draft_quota: crate::drafts::default_draft_quota_bytes(disk_total),
             permission_cache: Mutex::new(crate::write_permissions::PermissionCache::new()),
             barrier: Default::default(),
         };
@@ -753,6 +1001,7 @@ impl Store {
         // Defence in depth for a connection whose file flags were bypassed:
         // every accidental write is rejected before it can touch the database.
         db.pragma_update(None, "query_only", true)?;
+        let disk_total = filesystem_total_bytes(&root);
         Ok(Self {
             _writer_lock: None,
             db,
@@ -761,8 +1010,36 @@ impl Store {
             namespace_runtime,
             cache_recency: Mutex::new(crate::cache_policy::CacheRecency::new()),
             draft_stats: DraftWriteStats::default(),
+            default_cache_limit: crate::cache_policy::default_cache_limit_bytes(disk_total),
+            default_draft_quota: crate::drafts::default_draft_quota_bytes(disk_total),
             permission_cache: Mutex::new(crate::write_permissions::PermissionCache::new()),
             barrier: Default::default(),
+        })
+    }
+    /// Issue #60: additive migration-backup storage diagnostics. Read-only
+    /// handles scan the same profile root and report the same numbers.
+    pub fn backup_inventory(&self) -> Result<MigrationBackupInventory> {
+        migration_backup_inventory_at(&self.root, unix_seconds())
+    }
+    /// Cheap storage projection for `GetOverview`: drafts and migration
+    /// snapshots only. Cache-body reclaim accounting stays in
+    /// `cache_usage`/`GetCacheSettings` because candidate discovery walks the
+    /// blob directory and must not run on the overview hot path.
+    pub fn storage_summary(&self) -> Result<StorageSummary> {
+        let now = unix_seconds();
+        let drafts = self.draft_usage(now)?;
+        let backups = self.backup_inventory()?;
+        Ok(StorageSummary {
+            drafts_bytes: drafts.total_bytes,
+            drafts_unreferenced_bytes: drafts.unreferenced_bytes,
+            drafts_reclaimable_bytes: drafts.reclaimable_bytes,
+            drafts_protected_bytes: drafts.protected_bytes,
+            draft_quota_bytes: drafts.quota_bytes,
+            drafts_over_quota_bytes: drafts.over_quota_bytes,
+            quarantine_bytes: drafts.quarantine_bytes,
+            backup_bytes: backups.total_bytes,
+            backup_reclaimable_bytes: backups.cleanable_bytes,
+            backup_protected_bytes: backups.retained_bytes,
         })
     }
     /// Memoized effective decision for the writer connection (#26). Read-only
@@ -1341,10 +1618,13 @@ impl Store {
         // `abandoned` is #14's terminal upload state, but it is only terminal for
         // automatic reconcile: an explicit retry re-arms it as `uncertain`, so its
         // body still has to survive garbage collection.
-        let mut q=self.db.prepare("SELECT blob FROM nodes WHERE blob IS NOT NULL AND (deleted=0 OR conflict=1) UNION SELECT dirty_blob FROM nodes WHERE dirty_blob IS NOT NULL UNION SELECT blob FROM operations WHERE blob IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict','abandoned') UNION SELECT json_extract(body,'$.blob') FROM namespace_ops WHERE kind='replace' AND state NOT IN ('committed','superseded')")?;
-        let mut keep = q
-            .query_map([], |r| r.get::<_, String>(0))?
-            .collect::<std::result::Result<std::collections::HashSet<_>, _>>()?;
+        // Scope the statement so the draft quarantine pass below can take
+        // `&mut self` after the blob keep-set is materialized.
+        let mut keep = {
+            let mut q=self.db.prepare("SELECT blob FROM nodes WHERE blob IS NOT NULL AND (deleted=0 OR conflict=1) UNION SELECT dirty_blob FROM nodes WHERE dirty_blob IS NOT NULL UNION SELECT blob FROM operations WHERE blob IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict','abandoned') UNION SELECT json_extract(body,'$.blob') FROM namespace_ops WHERE kind='replace' AND state NOT IN ('committed','superseded')")?;
+            q.query_map([], |r| r.get::<_, String>(0))?
+                .collect::<std::result::Result<std::collections::HashSet<_>, _>>()?
+        };
         keep.extend(self.handles.lock().unwrap().keys().cloned());
         let parent = self.root.join("blobs");
         let mut removed = 0;
@@ -1412,6 +1692,10 @@ impl Store {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(e.into()),
         }
+        // Issue #60: aged zero-reference working copies move to the recoverable
+        // quarantine instead of staying forever. Their bytes are recoverable,
+        // so they are deliberately not counted as `removed`.
+        self.collect_orphan_drafts(unix_seconds())?;
         Ok(removed)
     }
 
@@ -2581,5 +2865,59 @@ mod cache_availability_tests {
             .unwrap();
         let c = s.cache_availability().unwrap();
         assert_eq!((c.state, c.total, c.offline, c.pinned), ("partial", 2, 1, 0));
+    }
+}
+
+#[cfg(test)]
+mod storage_lifecycle_tests {
+    use super::{
+        MigrationBackupFile, backup_headroom_check, partition_migration_backups,
+    };
+
+    fn backup(name: &str, modified: u64, bytes: u64) -> MigrationBackupFile {
+        MigrationBackupFile {
+            path: std::path::PathBuf::from(name),
+            name: name.into(),
+            bytes,
+            modified,
+        }
+    }
+
+    /// Issue #60 AC: after three upgrades only the newest two backups remain;
+    /// anything older than 30 days is cleanable even inside that pair.
+    #[test]
+    fn migration_backup_retention_keeps_newest_two_within_thirty_days() {
+        let now = 1_000_000_000u64;
+        let day = 24 * 60 * 60;
+        let files = vec![
+            backup("new", now, 3),
+            backup("older", now - day, 2),
+            backup("older2", now - 2 * day, 1),
+            backup("older3", now - 3 * day, 1),
+        ];
+        let (retained, cleanable) = partition_migration_backups(files, now);
+        let retained: Vec<&str> = retained.iter().map(|file| file.name.as_str()).collect();
+        let cleanable: Vec<&str> = cleanable.iter().map(|file| file.name.as_str()).collect();
+        assert_eq!(retained, vec!["new", "older"]);
+        assert_eq!(cleanable, vec!["older2", "older3"]);
+
+        // A newest-pair member that is older than the window is cleanable too.
+        let files = vec![
+            backup("new", now, 3),
+            backup("stale", now - 31 * day, 2),
+        ];
+        let (retained, cleanable) = partition_migration_backups(files, now);
+        assert_eq!(retained.len(), 1);
+        assert_eq!(cleanable.len(), 1);
+        assert_eq!(cleanable[0].name, "stale");
+    }
+
+    /// The pre-VACUUM check refuses a migration without the 3x headroom.
+    #[test]
+    fn migration_backup_space_check_refuses_insufficient_headroom() {
+        assert!(backup_headroom_check(300, Some(299)).is_err());
+        assert!(backup_headroom_check(300, Some(300)).is_ok());
+        // Unknown available space must not block a healthy upgrade.
+        assert!(backup_headroom_check(300, None).is_ok());
     }
 }

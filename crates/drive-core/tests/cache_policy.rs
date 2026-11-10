@@ -43,9 +43,11 @@ fn setup() -> (tempfile::TempDir, Store) {
     (dir, s)
 }
 #[test]
-fn default_disabled_and_lru_survives_restart_without_icon_query_touching_it() {
+fn bounded_default_and_lru_survives_restart_without_icon_query_touching_it() {
     let (dir, mut s) = setup();
-    assert_eq!(s.cache_limit().unwrap(), 0);
+    // Issue #60: no setting now means a bounded default, not "no eviction".
+    // The explicit `set_cache_limit(0)` opt-out is covered separately.
+    assert!(s.cache_limit().unwrap() > 0);
     assert!(
         s.trim_cache(now() + 120, &HashSet::new())
             .unwrap()
@@ -170,7 +172,8 @@ fn schema_11_upgrade_keeps_contents_and_creates_backup_and_policy_tables() {
     drop(db);
     let s = Store::open(dir.path()).unwrap();
     assert!(s.open_cached("a").is_ok());
-    assert_eq!(s.cache_limit().unwrap(), 0);
+    // Issue #60: the upgraded profile gets the bounded default too.
+    assert!(s.cache_limit().unwrap() > 0);
     s.note_cache_use("a").unwrap();
     assert!(std::fs::read_dir(dir.path()).unwrap().any(|e| {
         e.unwrap()
@@ -317,4 +320,127 @@ fn release_reports_released_then_skipped_and_keeps_protected_writes() {
     assert!(s.release("b").is_err());
     s.save_local("c", b"conflict").unwrap();
     assert!(s.release("c").is_err());
+}
+
+// ---- issue #60: storage lifecycle bounds ----------------------------------
+
+/// A profile that never set `cache_limit_bytes` must not silently opt into
+/// "no eviction". The effective limit is bounded (min(10 GiB, 10 % disk)); an
+/// explicit `0` keeps the documented opt-out and is surfaced as such.
+#[test]
+fn unset_cache_limit_defaults_to_a_bounded_value_with_reported_source() {
+    let (_dir, mut s) = setup();
+    let limit = s.cache_limit().unwrap();
+    assert!(limit > 0, "unset cache limit must be bounded, got {limit}");
+    assert!(
+        limit <= 10 * 1024 * 1024 * 1024,
+        "default cache limit must stay bounded: {limit}"
+    );
+    let usage = serde_json::to_value(s.cache_usage(now(), &HashSet::new()).unwrap()).unwrap();
+    assert_eq!(usage["limit_bytes"], limit);
+    assert_eq!(usage["limit_source"], "default");
+    assert_eq!(usage["recommended_limit_bytes"], limit);
+    assert_eq!(usage["over_target_bytes"], 0);
+
+    // Explicit opt-out: no automatic eviction, and no over-target pressure.
+    s.set_cache_limit(0).unwrap();
+    assert_eq!(s.cache_limit().unwrap(), 0);
+    let usage = serde_json::to_value(s.cache_usage(now(), &HashSet::new()).unwrap()).unwrap();
+    assert_eq!(usage["limit_source"], "disabled");
+    assert_eq!(usage["over_target_bytes"], 0);
+
+    // Explicit positive limits always win over the bounded default.
+    s.set_cache_limit(8).unwrap();
+    assert_eq!(s.cache_limit().unwrap(), 8);
+    let usage = serde_json::to_value(s.cache_usage(now(), &HashSet::new()).unwrap()).unwrap();
+    assert_eq!(usage["limit_source"], "explicit");
+    assert_eq!(usage["content_bytes"], 16);
+    assert_eq!(usage["over_target_bytes"], 8);
+}
+
+/// The 1.571 GB of drafts and 2.25 GB of migration backups were invisible in
+/// every surface. Usage must expose them per category (additive fields).
+#[test]
+fn cache_usage_exposes_draft_and_migration_backup_categories() {
+    let (dir, mut s) = setup();
+    let mut source = s.open_cached("a").unwrap();
+    let draft = s.begin_draft("a", "1", Some(&mut source)).unwrap();
+    drop(source);
+    s.draft_write(&draft, 0, b"orphan", false).unwrap();
+    drop(draft);
+    let backup = dir.path().join(
+        "state-before-v29-00000000-0000-0000-0000-000000000060.sqlite",
+    );
+    std::fs::write(&backup, vec![0u8; 4096]).unwrap();
+
+    let usage = serde_json::to_value(s.cache_usage(now(), &HashSet::new()).unwrap()).unwrap();
+    assert_eq!(usage["drafts_bytes"], 6);
+    // No operations/namespace_ops row references this working copy yet.
+    assert_eq!(usage["drafts_unreferenced_bytes"], 6);
+    assert_eq!(usage["backup_bytes"], 4096);
+    assert!(usage["draft_quota_bytes"].as_u64().unwrap() > 0);
+    assert!(usage["drafts_over_quota_bytes"].is_u64());
+    assert!(usage["drafts_reclaimable_bytes"].is_u64());
+    assert!(usage["drafts_protected_bytes"].is_u64());
+    assert!(usage["cache_reclaimable_bytes"].is_u64());
+    assert!(usage["cache_protected_bytes"].is_u64());
+    assert!(usage["backup_reclaimable_bytes"].is_u64());
+    assert!(usage["backup_protected_bytes"].is_u64());
+}
+
+/// Migration backups are never rotated today: ten `state-before-v*` files from
+/// v22-v29 (2.25 GB) accumulate. Three upgrades must leave only the newest two,
+/// and the space pre-check must refuse a backup larger than the free space.
+#[test]
+fn migration_backups_rotate_and_leverage_a_space_precheck() {
+    let dir = tempfile::tempdir().unwrap();
+    {
+        let store = Store::open(dir.path()).unwrap();
+        drop(store);
+    }
+    let base = std::time::SystemTime::now();
+    for index in 0..4u64 {
+        let path = dir.path().join(format!(
+            "state-before-v29-00000000-0000-0000-0000-0000000000{index:02}.sqlite"
+        ));
+        std::fs::write(&path, vec![0u8; 1024 * (index as usize + 1)]).unwrap();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(base - std::time::Duration::from_secs(86_400 * (index + 1)))
+            .unwrap();
+    }
+    {
+        let db = rusqlite::Connection::open(dir.path().join("state.sqlite")).unwrap();
+        db.pragma_update(None, "user_version", 28).unwrap();
+    }
+    let store = Store::open(dir.path()).unwrap();
+    let backups: Vec<String> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with("state-before-v"))
+        .collect();
+    assert_eq!(
+        backups.len(),
+        2,
+        "migration backup rotation must keep the newest two: {backups:?}"
+    );
+    // The fresh pre-migration snapshot plus the newest pre-existing backup
+    // (1024 B = the 1-day-old fixture).
+    let retained_sizes: Vec<u64> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .filter_map(|entry| {
+            let entry = entry.unwrap();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            name.starts_with("state-before-v")
+                .then(|| entry.metadata().unwrap().len())
+        })
+        .collect();
+    assert!(
+        retained_sizes.contains(&1024),
+        "the newest pre-existing backup must survive: {retained_sizes:?}"
+    );
+    let usage = serde_json::to_value(store.cache_usage(now(), &HashSet::new()).unwrap()).unwrap();
+    assert!(usage["backup_bytes"].as_u64().unwrap() > 0);
 }

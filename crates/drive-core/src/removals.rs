@@ -624,6 +624,57 @@ impl Store {
         tx.commit()?;
         Ok(())
     }
+    /// Issue #60: explicitly retire one unresolved local remove tombstone so
+    /// the working copy becomes reclaimable, without ever replaying a remote
+    /// delete. This is the user-visible escape hatch for a remove stuck as
+    /// `pending` (the 805 MB incident) or one whose automatic reconciliation
+    /// stopped at a terminal-unresolved diagnosis.
+    ///
+    /// It only touches local state: the queued intent is superseded (never
+    /// resubmitted), the unlink is confirmed and the draft row is released.
+    /// It refuses while the remove is `inflight`, because a remote delete may
+    /// already be in progress and the local view must not diverge first.
+    pub fn abandon_unresolved_remove(&mut self, node: &str) -> Result<bool> {
+        let removes: Vec<(String, String)> = {
+            let mut query = self.db.prepare(
+                "SELECT id,state FROM namespace_ops WHERE node=?1 AND kind='remove' \
+                 AND state NOT IN ('committed','superseded')",
+            )?;
+            query
+                .query_map([node], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        if removes.is_empty() {
+            return Ok(false);
+        }
+        if removes
+            .iter()
+            .any(|(_, state)| matches!(state.as_str(), "inflight" | "cleanup_inflight"))
+        {
+            return Err(os(libc::EBUSY));
+        }
+        let tx = self.db.transaction()?;
+        tx.execute(
+            "UPDATE namespace_ops SET state='superseded', outcome='confirmed', \
+                outcome_category='local_abandoned', \
+                last_error='local remove abandoned; no remote delete was replayed', \
+                next_retry_at=0, updated_at=unixepoch() \
+             WHERE node=?1 AND kind='remove' AND state NOT IN ('committed','superseded')",
+            [node],
+        )?;
+        tx.execute(
+            "INSERT OR REPLACE INTO local_unlinks(node,confirmed) VALUES(?1,1)",
+            [node],
+        )?;
+        tx.execute(
+            "UPDATE nodes SET deleted=1,conflict=0 WHERE id=?1",
+            [node],
+        )?;
+        tx.execute("DELETE FROM namespace_overlay WHERE node=?1", [node])?;
+        tx.execute("DELETE FROM drafts WHERE node=?1", [node])?;
+        tx.commit()?;
+        Ok(true)
+    }
     pub fn conflict_remove(&mut self, id: &str) -> Result<()> {
         let tx = self.db.transaction()?;
         if tx.execute("UPDATE namespace_ops SET state='conflict' WHERE id=?1 AND kind='remove' AND state IN ('pending','inflight','uncertain')",[id])? != 1 { return Err(Error::State("remove not active".into())); }
@@ -668,6 +719,11 @@ impl Store {
         tx.execute("UPDATE local_unlinks SET confirmed=1 WHERE node=?1", [node])?;
         tx.execute("UPDATE nodes SET deleted=1,conflict=0 WHERE id=?1", [node])?;
         tx.execute("DELETE FROM namespace_overlay WHERE node=?1", [node])?;
+        // Issue #60: once the remote remove reached its terminal confirmed
+        // state the working copy can never be uploaded again, so its body must
+        // become reclaimable instead of pinning the drafts file forever. The
+        // following `collect_garbage` removes the now-unreferenced file.
+        tx.execute("DELETE FROM drafts WHERE node=?1", [node])?;
         crate::commit_diagnostics::record(
             &tx,
             "namespace_ops",

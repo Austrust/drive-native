@@ -150,7 +150,9 @@ fn cache_tick_policy_change_is_never_debounced() {
 #[test]
 fn cache_tick_reruns_on_limit_change_and_skips_without_a_limit() {
     let (_d, service) = fixture();
-    // Default limit 0 disables trimming entirely.
+    // Issue #60: only an *explicit* limit 0 disables trimming; the unset
+    // default is bounded (covered in drive-core cache_policy tests).
+    set_limit(&service, 0);
     let mut state = CacheLoopState::default();
     assert!(matches!(service.cache_tick(&mut state), CacheTick::Skipped));
     assert_eq!(runs(&service), 0);
