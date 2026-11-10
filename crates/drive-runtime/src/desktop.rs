@@ -860,14 +860,16 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
         commit_items,
     } = store_overview;
     let uncertain = queue_health.namespace_uncertain + queue_health.upload_uncertain;
-    let sync_state = if error.is_some() || state == crate::service::ConnectionState::NeedsAttention
+    let sync_state = if error.is_some()
+        || state == crate::service::ConnectionState::NeedsAttention
     {
         "needs_attention"
     } else if state == crate::service::ConnectionState::Paused {
         "paused"
     } else if active_transfers > 0 {
         "transferring"
-    } else if initialization.active && initialization.phase != crate::initialization::Phase::Waiting
+    } else if initialization.active
+        && initialization.phase != crate::initialization::Phase::Waiting
     {
         "checking"
     } else if pending > 0 || uncertain > 0 {
@@ -939,13 +941,9 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
 
 fn history_request<T: serde::de::DeserializeOwned>(body: &str) -> io::Result<T> {
     if body.len() > 8192 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "history query too large",
-        ));
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "history query too large"));
     }
-    serde_json::from_str(body)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid history query"))
+    serde_json::from_str(body).map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid history query"))
 }
 
 /// History never waits on Store/control while transfers or shutdown own them.
@@ -961,26 +959,18 @@ pub fn sync_history(service: &Service, body: &str) -> io::Result<String> {
 pub fn recent_activity(service: &Service, body: &str) -> io::Result<String> {
     #[derive(serde::Deserialize)]
     #[serde(deny_unknown_fields)]
-    struct Query {
-        limit: Option<u32>,
-    }
+    struct Query { limit: Option<u32> }
     let request: Query = history_request(body)?;
     let limit = request.limit.unwrap_or(12);
     if limit == 0 || limit > 100 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "invalid recent activity limit",
-        ));
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid recent activity limit"));
     }
     let Ok(store) = service.bridge.store.try_lock() else {
         return Ok(serde_json::json!({"error":"busy"}).to_string());
     };
-    let page = store
-        .sync_history(&drive_core::sync_history::HistoryQuery {
-            limit: Some(limit),
-            ..Default::default()
-        })
-        .map_err(|_| other())?;
+    let page = store.sync_history(&drive_core::sync_history::HistoryQuery {
+        limit: Some(limit), ..Default::default()
+    }).map_err(|_| other())?;
     Ok(serde_json::json!({"records":page.records}).to_string())
 }
 
@@ -1000,11 +990,8 @@ pub fn get_sync_history_retention(service: &Service) -> io::Result<String> {
         return Ok(serde_json::json!({"error":"busy"}).to_string());
     };
     let (days, records) = store.sync_history_retention().map_err(|_| other())?;
-    Ok(
-        serde_json::json!({"schema":1,"task_id":service.profile.task_id,
-        "days":days,"records":records})
-        .to_string(),
-    )
+    Ok(serde_json::json!({"schema":1,"task_id":service.profile.task_id,
+        "days":days,"records":records}).to_string())
 }
 
 pub fn set_sync_history_retention(service: &Service, body: &str) -> io::Result<String> {
@@ -1030,8 +1017,7 @@ pub fn set_sync_history_retention(service: &Service, body: &str) -> io::Result<S
         .set_sync_history_retention(request.days, request.records)
         .map_err(|_| other())?;
     Ok(serde_json::json!({"saved":true,"days":request.days,
-        "records":request.records})
-    .to_string())
+        "records":request.records}).to_string())
 }
 
 /// Slot identifier of the D-Bus instance serving this mount. Legacy
@@ -1048,16 +1034,9 @@ fn mount_slot() -> Option<String> {
 pub fn resolve_history_target(service: &Service, body: &str) -> io::Result<String> {
     #[derive(serde::Deserialize)]
     #[serde(deny_unknown_fields)]
-    struct Query {
-        id: i64,
-    }
+    struct Query { id: i64 }
     let request: Query = history_request(body)?;
-    if request.id <= 0 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "invalid history id",
-        ));
-    }
+    if request.id<=0 { return Err(io::Error::new(io::ErrorKind::InvalidInput,"invalid history id")); }
     let Ok(control) = service.control.try_lock() else {
         return Ok(serde_json::json!({"error":"busy"}).to_string());
     };
@@ -1071,15 +1050,9 @@ pub fn resolve_history_target(service: &Service, body: &str) -> io::Result<Strin
     let mut response = serde_json::json!({"path":null,"exists":false,"mount_online":online,
         "reason":"not_found","parent_path":null,"offline_available":false,"cached":false,
         "mount_slot":mount_slot(),"suggested_action":null,"node":null});
-    let Some(record) = record else {
-        return Ok(response.to_string());
-    };
-    if record.mount != service.profile.scope.file_id {
-        return Ok(response.to_string());
-    }
-    let Some(id) = record.node else {
-        return Ok(response.to_string());
-    };
+    let Some(record) = record else { return Ok(response.to_string()); };
+    if record.mount != service.profile.scope.file_id { return Ok(response.to_string()); }
+    let Some(id) = record.node else { return Ok(response.to_string()); };
     let id = store.local_identity(&id).map_err(|_| other())?;
     response["node"] = id.clone().into();
     // Parent fallback comes from the current node identity, never by joining an
@@ -1087,30 +1060,11 @@ pub fn resolve_history_target(service: &Service, body: &str) -> io::Result<Strin
     if mounted {
         if let Some(parent) = store.sync_history_parent(&id).map_err(|_| other())? {
             if let Some(path) = history_current_path(&store, service, &parent)? {
-                if drive_core::write_permissions::decide(
-                    &store,
-                    &service.profile.scope.file_id,
-                    &parent,
-                    drive_core::write_permissions::Action::List,
-                )
-                .map_err(|_| other())?
-                    != drive_core::write_permissions::Decision::Deny
-                {
-                    response["parent_path"] = path.into();
-                }
+                if drive_core::write_permissions::decide(&store,&service.profile.scope.file_id,&parent,drive_core::write_permissions::Action::List).map_err(|_|other())?!=drive_core::write_permissions::Decision::Deny {response["parent_path"] = path.into();}
             }
         }
     }
-    if store.is_inaccessible(&id).map_err(|_| other())?
-        || drive_core::write_permissions::decide(
-            &store,
-            &service.profile.scope.file_id,
-            &id,
-            drive_core::write_permissions::Action::Read,
-        )
-        .map_err(|_| other())?
-            == drive_core::write_permissions::Decision::Deny
-    {
+    if store.is_inaccessible(&id).map_err(|_| other())? || drive_core::write_permissions::decide(&store,&service.profile.scope.file_id,&id,drive_core::write_permissions::Action::Read).map_err(|_|other())?==drive_core::write_permissions::Decision::Deny {
         response["reason"] = "permission_denied".into();
         return Ok(response.to_string());
     }
@@ -1120,10 +1074,7 @@ pub fn resolve_history_target(service: &Service, body: &str) -> io::Result<Strin
             response["reason"] = "deleted".into();
             return Ok(response.to_string());
         }
-        Err(_) => {
-            response["reason"] = "unavailable".into();
-            return Ok(response.to_string());
-        }
+        Err(_) => { response["reason"]="unavailable".into(); return Ok(response.to_string()); }
     };
     let cached = node.directory
         || store.open_dirty_draft(&id).map_err(|_| other())?.is_some()
@@ -1144,11 +1095,7 @@ pub fn resolve_history_target(service: &Service, body: &str) -> io::Result<Strin
     };
     if cached || online {
         response["path"] = path.into();
-        response["reason"] = if cached {
-            serde_json::Value::Null
-        } else {
-            "online_only".into()
-        };
+        response["reason"] = if cached { serde_json::Value::Null } else { "online_only".into() };
     } else {
         response["reason"] = "offline".into();
     }
@@ -1156,93 +1103,32 @@ pub fn resolve_history_target(service: &Service, body: &str) -> io::Result<Strin
 }
 
 fn history_current_path(store: &Store, service: &Service, id: &str) -> io::Result<Option<String>> {
-    if store.is_inaccessible(id).map_err(|_| other())? {
-        return Ok(None);
-    }
-    if drive_core::write_permissions::decide(
-        store,
-        &service.profile.scope.file_id,
-        id,
-        drive_core::write_permissions::Action::Traverse,
-    )
-    .map_err(|_| other())?
-        == drive_core::write_permissions::Decision::Deny
-    {
-        return Ok(None);
-    }
-    let relative = match store.transfer_path(id) {
-        Ok(path) => path,
-        Err(_) => return Ok(None),
+    if store.is_inaccessible(id).map_err(|_| other())? { return Ok(None); }
+    if drive_core::write_permissions::decide(store,&service.profile.scope.file_id,id,drive_core::write_permissions::Action::Traverse).map_err(|_|other())?==drive_core::write_permissions::Decision::Deny{return Ok(None);}
+    let relative = match store.transfer_path(id) { Ok(path)=>path,Err(_)=>return Ok(None) };
+    let resolved = match resolve(store,&service.profile.scope.file_id,&service.profile.mount,&relative) {
+        Ok(node)=>node,Err(_)=>return Ok(None)
     };
-    let resolved = match resolve(
-        store,
-        &service.profile.scope.file_id,
-        &service.profile.mount,
-        &relative,
-    ) {
-        Ok(node) => node,
-        Err(_) => return Ok(None),
-    };
-    if resolved.id != id {
-        return Ok(None);
-    }
-    Ok(Some(
-        service
-            .profile
-            .mount
-            .join(relative)
-            .to_string_lossy()
-            .into_owned(),
-    ))
+    if resolved.id!=id { return Ok(None); }
+    Ok(Some(service.profile.mount.join(relative).to_string_lossy().into_owned()))
 }
-pub fn directory_permissions(service: &Service, body: &str) -> io::Result<String> {
-    #[derive(serde::Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Query {
-        path: String,
-    }
-    let q: Query = history_request(body)?;
-    let store = service.bridge.store.lock().unwrap();
-    let node = resolve(
-        &store,
-        &service.profile.scope.file_id,
-        &service.profile.mount,
-        &q.path,
-    )?;
-    let mut value =
-        drive_core::write_permissions::snapshot(&store, &service.profile.scope.file_id, &node.id)
-            .map_err(io::Error::other)?;
-    value["task_id"] = service.profile.task_id.clone().into();
-    value["path"] = q.path.into();
+pub fn directory_permissions(service:&Service,body:&str)->io::Result<String> {
+    #[derive(serde::Deserialize)] #[serde(deny_unknown_fields)] struct Query{path:String}
+    let q:Query=history_request(body)?;
+    let store=service.bridge.store.lock().unwrap();
+    let node=resolve(&store,&service.profile.scope.file_id,&service.profile.mount,&q.path)?;
+    let mut value=drive_core::write_permissions::snapshot(&store,&service.profile.scope.file_id,&node.id).map_err(io::Error::other)?;
+    value["task_id"]=service.profile.task_id.clone().into();value["path"]=q.path.into();
     Ok(value.to_string())
 }
-pub fn set_write_policy(service: &Service, body: &str) -> io::Result<String> {
-    #[derive(serde::Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Query {
-        task_id: String,
-        expected_revision: u64,
-        local_policy: drive_core::write_permissions::LocalPolicy,
-    }
-    let q: Query = history_request(body)?;
-    if q.task_id != service.profile.task_id {
-        return Err(io::Error::other("wrong task"));
-    }
-    if q.local_policy == drive_core::write_permissions::LocalPolicy::FollowRemote
-        && !cfg!(feature = "native-research")
-    {
-        return Err(io::Error::other(
-            "writable native protocol release gate is closed",
-        ));
-    }
-    let store = service.bridge.store.lock().unwrap();
-    drive_core::write_permissions::set_local_policy_checked(
-        &store,
-        &service.profile.scope.file_id,
-        q.local_policy,
-        q.expected_revision,
-    )
-    .map_err(io::Error::other)?;
+pub fn set_write_policy(service:&Service,body:&str)->io::Result<String> {
+    #[derive(serde::Deserialize)] #[serde(deny_unknown_fields)]
+    struct Query{task_id:String,expected_revision:u64,local_policy:drive_core::write_permissions::LocalPolicy}
+    let q:Query=history_request(body)?;
+    if q.task_id!=service.profile.task_id{return Err(io::Error::other("wrong task"));}
+    if q.local_policy==drive_core::write_permissions::LocalPolicy::FollowRemote && !cfg!(feature="native-research"){return Err(io::Error::other("writable native protocol release gate is closed"));}
+    let store=service.bridge.store.lock().unwrap();
+    drive_core::write_permissions::set_local_policy_checked(&store,&service.profile.scope.file_id,q.local_policy,q.expected_revision).map_err(io::Error::other)?;
     Ok(serde_json::json!({"saved":true,"remount_required":service.mounted.load(Ordering::Acquire)}).to_string())
 }
 fn pin(service: &Service, path: &str, value: bool) -> io::Result<()> {
@@ -1265,12 +1151,7 @@ fn release_ids(service: &Service, paths: &[String]) -> io::Result<Vec<String>> {
     let store = service.bridge.store.lock().unwrap();
     let mut ids = Vec::new();
     let mut covered = HashSet::new();
-    for (_, resolved) in resolve_all(
-        &store,
-        service,
-        paths.to_vec(),
-        exclusion_rules(service).as_ref(),
-    ) {
+    for (_, resolved) in resolve_all(&store, service, paths.to_vec(), exclusion_rules(service).as_ref()) {
         let mut pending = vec![resolved?];
         let mut seen = HashSet::new();
         while let Some(node) = pending.pop() {
@@ -1511,7 +1392,9 @@ pub fn release_job(service: &Service, job_id: &str) -> io::Result<String> {
     let state = service.release.lock().unwrap();
     match state.job.as_ref().filter(|job| job.id == job_id) {
         Some(job) => Ok(job_snapshot(job).to_string()),
-        None => Ok(serde_json::json!({"schema":1,"job_id":job_id,"available":false}).to_string()),
+        None => Ok(
+            serde_json::json!({"schema":1,"job_id":job_id,"available":false}).to_string(),
+        ),
     }
 }
 
@@ -1678,7 +1561,10 @@ fn issues_locked(service: &Service, after: &str) -> io::Result<String> {
         .map_err(io::Error::other)?;
     Ok(issues_json(page, service.bridge.recovery_status()))
 }
-fn issues_json(page: drive_core::conflicts::IssuePage, recovery: serde_json::Value) -> String {
+fn issues_json(
+    page: drive_core::conflicts::IssuePage,
+    recovery: serde_json::Value,
+) -> String {
     serde_json::json!({"schema":1,"entries":page.entries,"next":page.next,"recovery":recovery})
         .to_string()
 }
@@ -1711,35 +1597,29 @@ pub fn keep_directory_local(service: &Service, id: &str, token: &str) -> io::Res
         service
             .bridge
             .keep_directory_local(&service.profile.scope.file_id, id, token)?;
-    Ok(
-        serde_json::json!({"schema":1,"directory_id":node.id,"path":path,"kept_local":true})
-            .to_string(),
-    )
+    Ok(serde_json::json!({"schema":1,"directory_id":node.id,"path":path,"kept_local":true})
+        .to_string())
 }
 /// Accept the remote deletion of a bound directory. Only advertised when no
 /// surviving local-only content would be lost (`can_keep_remote`).
 pub fn keep_directory_remote(service: &Service, id: &str, token: &str) -> io::Result<String> {
-    let path = service
-        .bridge
-        .keep_directory_remote(&service.profile.scope.file_id, id, token)?;
+    let path =
+        service
+            .bridge
+            .keep_directory_remote(&service.profile.scope.file_id, id, token)?;
     Ok(serde_json::json!({"schema":1,"directory_id":id,"path":path,
-        "kept_remote":true,"deleted_local":false})
-    .to_string())
+        "kept_remote":true,"deleted_local":false}).to_string())
 }
 /// Abandon one unconfirmed local creation: the operation moves to the persistent
 /// `abandoned` terminal state and the local-only file is retired. The remote
 /// side is never touched, so the reply always reports `server_changed: false`.
 pub fn abandon_upload(service: &Service, id: &str, token: &str) -> io::Result<String> {
-    let path =
-        service
-            .bridge
-            .abandon_unconfirmed_upload(&service.profile.scope.file_id, id, token)?;
-    Ok(
-        serde_json::json!({"schema":1,"abandoned":true,"id":id,"path":path,
+    let path = service
+        .bridge
+        .abandon_unconfirmed_upload(&service.profile.scope.file_id, id, token)?;
+    Ok(serde_json::json!({"schema":1,"abandoned":true,"id":id,"path":path,
         "deleted_local":true,"server_changed":false,
-        "summary":"已放弃本次本地待上传并删除本地文件；未修改服务器条目"})
-        .to_string(),
-    )
+        "summary":"已放弃本次本地待上传并删除本地文件；未修改服务器条目"}).to_string())
 }
 pub fn trust_settings(service: &Service) -> io::Result<String> {
     let settings = service.trust_settings();
@@ -1829,28 +1709,26 @@ async fn local<T: Send + 'static>(
 #[zbus::interface(name = "org.drivenative.Client1")]
 impl Desktop {
     async fn get_sync_history(&self, body: String) -> zbus::fdo::Result<String> {
-        let s = self.0.clone();
-        local(move || sync_history(&s, &body)).await
+        let s=self.0.clone();
+        local(move || sync_history(&s,&body)).await
     }
     async fn get_recent_activity(&self, body: String) -> zbus::fdo::Result<String> {
-        let s = self.0.clone();
-        local(move || recent_activity(&s, &body)).await
+        let s=self.0.clone();
+        local(move || recent_activity(&s,&body)).await
     }
     async fn resolve_history_target(&self, body: String) -> zbus::fdo::Result<String> {
-        let s = self.0.clone();
-        local(move || resolve_history_target(&s, &body)).await
+        let s=self.0.clone();
+        local(move || resolve_history_target(&s,&body)).await
     }
-    async fn get_directory_permissions(&self, body: String) -> zbus::fdo::Result<String> {
-        let s = self.0.clone();
-        local(move || directory_permissions(&s, &body)).await
+    async fn get_directory_permissions(&self,body:String)->zbus::fdo::Result<String>{
+        let s=self.0.clone();local(move||directory_permissions(&s,&body)).await
     }
-    async fn set_write_policy(&self, body: String) -> zbus::fdo::Result<String> {
-        let s = self.0.clone();
-        local(move || set_write_policy(&s, &body)).await
+    async fn set_write_policy(&self,body:String)->zbus::fdo::Result<String>{
+        let s=self.0.clone();local(move||set_write_policy(&s,&body)).await
     }
     async fn clear_sync_history(&self, body: String) -> zbus::fdo::Result<String> {
-        let s = self.0.clone();
-        local(move || clear_sync_history(&s, &body)).await
+        let s=self.0.clone();
+        local(move || clear_sync_history(&s,&body)).await
     }
     async fn get_sync_history_retention(&self) -> zbus::fdo::Result<String> {
         let s = self.0.clone();
@@ -2125,10 +2003,7 @@ mod readpath_tests {
         let value: serde_json::Value = serde_json::from_str(&off_lock).unwrap();
         assert_eq!(value["schema"], 1);
         assert_eq!(value["entries"].as_array().unwrap().len(), 3);
-        assert_eq!(
-            value["entries"][2]["error"],
-            "path_or_local_state_unavailable"
-        );
+        assert_eq!(value["entries"][2]["error"], "path_or_local_state_unavailable");
         // File-only batches have no StatusTree; `entry` then reads status/pins
         // straight from the handle argument, so compare that branch as well.
         let files = vec!["folder/one".to_string(), "missing".to_string()];
@@ -2219,7 +2094,10 @@ mod readpath_tests {
         seen.sort();
         seen
     }
-    fn children_sorted(tree: &super::status_tree::StatusTree<'_>, id: &str) -> Vec<(String, bool)> {
+    fn children_sorted(
+        tree: &super::status_tree::StatusTree<'_>,
+        id: &str,
+    ) -> Vec<(String, bool)> {
         let mut children = tree.children(id);
         children.sort();
         children
@@ -2558,11 +2436,10 @@ mod readpath_tests {
             }
         }
         let node_count = nodes.len();
-        store
-            .install_remote_snapshot(&nodes, "1", "server")
-            .unwrap();
+        store.install_remote_snapshot(&nodes, "1", "server").unwrap();
         store.ensure_fs_root("root").unwrap();
-        let service = Service::new(profile(), store, PathBuf::from("/nonexistent-worker")).unwrap();
+        let service =
+            Service::new(profile(), store, PathBuf::from("/nonexistent-worker")).unwrap();
         let ro = read_only(&service).expect("read-only handle");
         let rows = {
             let store = service.bridge.store.lock().unwrap();
@@ -2612,10 +2489,7 @@ mod readpath_tests {
         let held_lock_ms = started.elapsed().as_millis();
         drop(held);
         assert_eq!(legacy, held_json);
-        assert!(
-            held_lock_ms < 5_000,
-            "held-lock batch took {held_lock_ms}ms"
-        );
+        assert!(held_lock_ms < 5_000, "held-lock batch took {held_lock_ms}ms");
         eprintln!(
             "PROJECTION_TIMING nodes={node_count} seed_rows={seed_rows} \
              scoped_load_ms={scoped_load_ms} projected_load_ms={projected_load_ms} \
@@ -2686,10 +2560,7 @@ mod readpath_tests {
             value["skipped_permission_directories"],
             serde_json::json!(locked.inaccessible)
         );
-        assert_eq!(
-            value["download_errors"],
-            serde_json::json!(locked.download_errors)
-        );
+        assert_eq!(value["download_errors"], serde_json::json!(locked.download_errors));
         assert_eq!(
             value["local_policy"],
             serde_json::json!(locked.permission.local_policy)
@@ -2855,9 +2726,7 @@ mod release_job_tests {
     }
 
     fn finished(service: &Service, job: &str) -> Value {
-        wait_for(service, job, "finished", |current| {
-            current["finished"] == true
-        })
+        wait_for(service, job, "finished", |current| current["finished"] == true)
     }
 
     fn begin(service: &Arc<Service>) -> String {
@@ -2886,10 +2755,7 @@ mod release_job_tests {
             }
             std::thread::sleep(Duration::from_millis(5));
         };
-        assert!(
-            saw_intermediate,
-            "the job finished too fast to observe progress"
-        );
+        assert!(saw_intermediate, "the job finished too fast to observe progress");
         assert_eq!(final_state["done"], 4);
         assert_eq!(final_state["released_count"], 4);
         assert_eq!(final_state["reclaimed_bytes"], 12);
@@ -2929,10 +2795,7 @@ mod release_job_tests {
         let final_state = finished(&service, &job);
         assert_eq!(final_state["cancelled"], true);
         let done = final_state["done"].as_u64().unwrap();
-        assert!(
-            done < 4,
-            "cancel must stop the remaining files: {final_state}"
-        );
+        assert!(done < 4, "cancel must stop the remaining files: {final_state}");
         assert_eq!(final_state["released_count"], done);
         assert_eq!(final_state["skipped_count"], 0);
         // Bytes are counted exactly once: the committed prefix only.
@@ -2941,13 +2804,7 @@ mod release_job_tests {
         let released = final_state["released"].as_array().unwrap().len();
         assert_eq!(released as u64, done);
         assert_eq!(
-            service
-                .bridge
-                .store
-                .lock()
-                .unwrap()
-                .collect_garbage()
-                .unwrap(),
+            service.bridge.store.lock().unwrap().collect_garbage().unwrap(),
             0,
             "a second GC must not find or double-count freeable bytes"
         );
