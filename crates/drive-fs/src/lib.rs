@@ -821,7 +821,8 @@ impl Filesystem for CacheFilesystem {
             let wait = diagnostics::span(diagnostics::Stage::GetattrStoreWait);
             // Issue #59: bounded two-tier wait; EAGAIN only after the opcode
             // budget is exhausted (see bounded_metadata_guard).
-            let Some(guard) = bounded_metadata_guard(&store, request::Op::Getattr, "detail=getattr")
+            let Some(guard) =
+                bounded_metadata_guard(&store, request::Op::Getattr, "detail=getattr")
             else {
                 request::record_retryable(request::Op::Getattr);
                 deadline.timeout("detail=getattr");
