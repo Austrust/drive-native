@@ -47,6 +47,10 @@ pub(crate) enum Cause {
     CertificateOrConfiguration,
     ProtocolOrLocal,
     Interrupted,
+    /// Issue #58: the attempt stayed online but recorded no business progress
+    /// for the configured window. The supervisor turns this into one bounded
+    /// rebuild instead of a silent multi-hour attempt.
+    AttemptStalled,
 }
 impl std::fmt::Display for Cause {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -121,7 +125,25 @@ pub(crate) enum Recovery {
 #[serde(deny_unknown_fields)]
 pub(crate) struct Record {
     pub unix_ms: u64,
+    /// Lifetime of the whole worker online attempt (`Record::new` receives the
+    /// supervisor's attempt clock). This is not the block time of a single RPC;
+    /// single requests are bounded separately. [`Self::attempt_lifetime_ms`]
+    /// carries the same value under an unambiguous name.
     pub attempt_elapsed_ms: u64,
+    /// Compatibility alias of [`Self::attempt_elapsed_ms`]. Older diagnostic
+    /// files predate it and deserialize as `0`; new records always carry the
+    /// real attempt lifetime in both fields.
+    #[serde(default)]
+    pub attempt_lifetime_ms: u64,
+    /// Unix ms of the last *business* progress observed in this attempt
+    /// (cursor advance, applied events, index units). Notification keep-alive
+    /// reads never refresh it.
+    #[serde(default)]
+    pub last_business_progress_at: Option<u64>,
+    /// Why the supervisor treated the attempt as stalled; `None` for ordinary
+    /// transport transitions.
+    #[serde(default)]
+    pub stalled_reason: Option<String>,
     pub worker_pid: Option<u32>,
     pub stage: Stage,
     pub cause: Option<Cause>,
@@ -144,6 +166,9 @@ impl Record {
                 .as_millis()
                 .min(u64::MAX as u128) as u64,
             attempt_elapsed_ms: elapsed.as_millis().min(u64::MAX as u128) as u64,
+            attempt_lifetime_ms: elapsed.as_millis().min(u64::MAX as u128) as u64,
+            last_business_progress_at: None,
+            stalled_reason: None,
             worker_pid,
             stage,
             cause: result.as_ref().err().map(Cause::from_io),
@@ -158,6 +183,30 @@ impl Record {
             },
             before_cleanup,
         }
+    }
+    /// Attach the attempt's business heartbeat to an ordinary transition so the
+    /// payload honestly shows how long the attempt had been productive.
+    pub(crate) fn with_business_progress(mut self, at_unix_ms: Option<u64>) -> Self {
+        self.last_business_progress_at = at_unix_ms;
+        self
+    }
+    /// Mark the transition as an attempt-level stall. `needs_attention` is set
+    /// only when the bounded rebuild loop is exhausted for the hour. The cause
+    /// is rewritten because the watchdog closes the connection, which would
+    /// otherwise look like an ordinary transport failure.
+    pub(crate) fn with_stall(
+        mut self,
+        reason: crate::initialization::StallReason,
+        last_business_progress_at: Option<u64>,
+        needs_attention: bool,
+    ) -> Self {
+        self.stalled_reason = Some(reason.as_str().to_owned());
+        self.last_business_progress_at = last_business_progress_at;
+        self.cause = Some(Cause::AttemptStalled);
+        if needs_attention {
+            self.recovery = Recovery::NeedsAttention;
+        }
+        self
     }
 }
 

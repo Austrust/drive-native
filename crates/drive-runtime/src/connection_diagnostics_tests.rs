@@ -164,3 +164,67 @@ fn recovery_required_marker_is_retried_instead_of_attention() {
     assert!(crate::connection_diagnostics::recovery_cause(&exhausted).is_none());
     assert!(!crate::connection_diagnostics::retryable(&exhausted));
 }
+#[test]
+fn attempt_lifetime_alias_and_stall_heartbeat_are_recorded() {
+    let mut record = failure()
+        .with_business_progress(Some(1_700_000_000_000))
+        .with_stall(
+            crate::initialization::StallReason::NoBusinessProgress,
+            Some(1_700_000_000_000),
+            false,
+        );
+    assert_eq!(record.attempt_lifetime_ms, record.attempt_elapsed_ms);
+    let json = serde_json::to_value(&record).unwrap();
+    assert_eq!(json["attempt_elapsed_ms"], json["attempt_lifetime_ms"]);
+    assert_eq!(json["stalled_reason"], "no_business_progress");
+    assert_eq!(json["last_business_progress_at"], 1_700_000_000_000u64);
+    // The watchdog closes the connection; the diagnostic must still name the
+    // real cause instead of the resulting transport error.
+    assert_eq!(json["cause"]["kind"], "attempt_stalled");
+    assert_eq!(json["recovery"], "reconnect");
+    record = failure().with_stall(
+        crate::initialization::StallReason::NoBusinessProgress,
+        None,
+        true,
+    );
+    assert_eq!(record.recovery, Recovery::NeedsAttention);
+    assert_eq!(
+        serde_json::to_value(&record).unwrap()["recovery"],
+        "needs_attention"
+    );
+}
+
+#[test]
+fn diagnostic_file_without_issue58_fields_still_loads() {
+    let root = tempfile::tempdir().unwrap();
+    let old = serde_json::json!({
+        "schema": 1u8,
+        "last_transition": {
+            "unix_ms": 1u64,
+            "attempt_elapsed_ms": 2000u64,
+            "worker_pid": 7u32,
+            "stage": "wait_notification",
+            "cause": {"kind": "native_receive_idle"},
+            "recovery": "reconnect",
+            "before_cleanup": {"state": "running"}
+        },
+        "last_failure": null,
+        "load_failed": false,
+        "persistence_failed": false,
+    });
+    fs::write(
+        root.path().join("connection-diagnostics.json"),
+        old.to_string(),
+    )
+    .unwrap();
+    let saved = Recorder::open(root.path()).snapshot();
+    assert!(!saved.load_failed);
+    let transition = saved.last_transition.expect("older record loads");
+    assert_eq!(transition.attempt_elapsed_ms, 2000);
+    assert_eq!(
+        transition.attempt_lifetime_ms, 0,
+        "older files predate the alias"
+    );
+    assert!(transition.last_business_progress_at.is_none());
+    assert!(transition.stalled_reason.is_none());
+}

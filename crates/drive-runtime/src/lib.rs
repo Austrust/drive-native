@@ -3,6 +3,7 @@
 #![recursion_limit = "256"]
 
 pub mod background;
+mod attempt_watchdog;
 pub mod bridge;
 mod connection_diagnostics;
 mod download_retry_clock;

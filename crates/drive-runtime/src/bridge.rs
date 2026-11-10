@@ -142,6 +142,10 @@ pub struct Bridge {
     pub last_download_failure: Mutex<Option<(DownloadFailureKind, Option<u32>)>>,
     upload_signal: (Mutex<bool>, Condvar),
     recheck_requested: AtomicBool,
+    /// Issue #58: latched by the attempt watchdog when a business-progress
+    /// stall forced the connection closed. The supervisor converts it into an
+    /// `attempt_stalled` diagnostic plus a bounded rebuild.
+    attempt_stalled: AtomicBool,
     /// Test-only observation of how many hydration refreshes ran.
     #[cfg(test)]
     refresh_runs: AtomicUsize,
@@ -337,6 +341,7 @@ impl Bridge {
             last_download_failure: Mutex::new(None),
             upload_signal: (Mutex::new(false), Condvar::new()),
             recheck_requested: AtomicBool::new(false),
+            attempt_stalled: AtomicBool::new(false),
             #[cfg(test)]
             refresh_runs: AtomicUsize::new(0),
             failure: Mutex::new(None),
@@ -538,8 +543,10 @@ impl Bridge {
         self.pull_after_notification(false)
     }
     fn pull_after_notification(&self, changed_notification: bool) -> io::Result<bool> {
-        self.initialization
-            .phase(crate::initialization::Phase::CatchingUp);
+        // Issue #58: an exhausted catch-up budget keeps this pull incremental
+        // but the runtime stops claiming `catching_up`; cached reads and
+        // incremental catch-up stay available instead of silently looping.
+        self.initialization.begin_catch_up();
         let _event = self.event_gate.lock().unwrap();
         if self.owner_candidate_pending()? {
             let result = self
@@ -1061,6 +1068,58 @@ impl Bridge {
             }
         }
     }
+    /// Issue #58 supervision limits (production: `initialization::Limits::from_env`).
+    pub fn configure_initialization_limits(&self, limits: crate::initialization::Limits) {
+        self.initialization.configure_limits(limits);
+    }
+    /// True while the attempt still owes business progress: an unsettled
+    /// catch-up or an initialization session that has not committed. Transport
+    /// keep-alives cannot make this true.
+    fn pending_business(&self) -> bool {
+        self.session_pending.load(Ordering::Acquire) || self.initialization.catch_up_pending()
+    }
+    fn attempt_stall_check(&self) -> Option<crate::initialization::StallReason> {
+        self.initialization.attempt_stall(self.pending_business())
+    }
+    /// Supervisor-facing latch: whether the watchdog detected a stall.
+    pub(crate) fn take_attempt_stall(&self) -> bool {
+        self.attempt_stalled.swap(false, Ordering::AcqRel)
+    }
+    /// Issue #58 attempt heartbeat. Runs beside `event_loop_observed` so a
+    /// notification wait that keep-alives renew cannot hide an attempt that is
+    /// alive but making no business progress; a stall closes the RPC to trigger
+    /// one bounded rebuild in the supervisor. Also spends an expired catch-up
+    /// budget and emits the no-progress event while the loop is blocked.
+    pub(crate) fn attempt_watchdog_loop(
+        &self,
+        stop: &AtomicBool,
+    ) -> Option<crate::initialization::StallReason> {
+        let limits = self.initialization.limits();
+        let tick = (limits.attempt_no_progress_timeout / 20)
+            .clamp(Duration::from_millis(20), Duration::from_secs(1));
+        loop {
+            // Sleep in small slices so a finished attempt never waits a tick.
+            let mut slept = Duration::ZERO;
+            while slept < tick {
+                if stop.load(Ordering::Acquire) {
+                    return None;
+                }
+                let slice = (tick - slept).min(Duration::from_millis(20));
+                std::thread::sleep(slice);
+                slept += slice;
+            }
+            if stop.load(Ordering::Acquire) {
+                return None;
+            }
+            self.initialization.no_progress_check();
+            self.initialization.enforce_catch_up_budget();
+            if let Some(reason) = self.attempt_stall_check() {
+                self.attempt_stalled.store(true, Ordering::Release);
+                self.disconnect();
+                return Some(reason);
+            }
+        }
+    }
     pub fn event_loop(&self) -> io::Result<()> {
         self.event_loop_observed(|_| {})
     }
@@ -1072,6 +1131,14 @@ impl Bridge {
         let mut digest = String::new();
         let mut changed_notification = false;
         loop {
+            // Issue #58: consume the "no business progress" observations the
+            // tracker already counts. Keep-alive reads and
+            // `changed_without_advance` never refresh the business heartbeat.
+            self.initialization.no_progress_check();
+            if let Some(reason) = self.attempt_stall_check() {
+                self.attempt_stalled.store(true, Ordering::Release);
+                return Err(attempt_stalled_error(reason));
+            }
             stage(Stage::PullEvents);
             self.pull_after_notification(changed_notification)?;
             // The persistent transfer scheduler owns hydration. Waiting for a
@@ -3044,6 +3111,16 @@ mod root_diagnostics_tests {
     }
 }
 
+/// Issue #58: typed error the supervisor classifies as an attempt stall rather
+/// than an ordinary transport failure, so it takes the bounded stall-rebuild
+/// path and records `cause=attempt_stalled` instead of a silent reconnect.
+fn attempt_stalled_error(_reason: crate::initialization::StallReason) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::TimedOut,
+        crate::connection_diagnostics::Cause::AttemptStalled,
+    )
+}
+
 /// Non-blocking on Store and kernel notification delivery; returns whether the
 /// bounded queue accepted the message. A rejected committed invalidation
 /// suspends the mount's cacheable publication for one quiet lease window (the
@@ -3066,3 +3143,7 @@ fn enqueue_invalidation(
 #[cfg(test)]
 #[path = "notification_queue_tests.rs"]
 mod notification_queue_tests;
+
+#[cfg(test)]
+#[path = "catch_up_watchdog_tests.rs"]
+mod catch_up_watchdog_tests;
