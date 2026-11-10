@@ -10,6 +10,9 @@ use std::{
 
 const LIMIT: usize = 256;
 const BODY_BUDGET: usize = 4 * 1024 * 1024;
+/// #57: consecutive dispatch rounds without a pending attempt that raise the
+/// structured `namespace.pending_starved` diagnostic.
+const PENDING_STARVED_ROUNDS: u32 = 3;
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NamespaceRecoveryObservation {
@@ -24,10 +27,21 @@ struct Recovery {
     next: Instant,
     outcome: NamespaceRecoveryObservation,
 }
+/// #57 starvation accounting for the single serial dispatch lane. Counted by
+/// [`Store::dispatch_namespace_operation`] only, so mutation gates that re-enter
+/// the selector between `mark_started` and the RPC do not inflate the counter.
+#[derive(Default)]
+struct DispatchRuntime {
+    rounds: u64,
+    consecutive_without_pending: u32,
+    pending_starved_events: u64,
+    last_pending_attempt: Option<Instant>,
+}
 #[derive(Default)]
 pub(crate) struct NamespaceRuntime {
     recovery: HashMap<String, Recovery>,
     observed: Option<(Instant, NamespaceScheduleSnapshot)>,
+    dispatch: DispatchRuntime,
 }
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct NamespaceScheduleSnapshot {
@@ -38,6 +52,12 @@ pub struct NamespaceScheduleSnapshot {
     pub permission_blocked: u64,
     pub unresolved_barrier: bool,
     pub selected: bool,
+    /// #57 additive: journal state of the selected operation (`pending`,
+    /// `uncertain`, ...), so a dispatch round is explainable from status alone.
+    pub selected_state: Option<String>,
+    /// #57 additive: independent `pending` candidates observed while scanning.
+    /// Zero with `selected_state = "uncertain"` is the starvation signature.
+    pub eligible_pending: u64,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct QueueHealth {
@@ -50,6 +70,20 @@ pub struct QueueHealth {
     pub recovery_attempts_observed: u64,
     pub next_recovery_ms: Option<u64>,
     pub last_recovery_outcome: Option<NamespaceRecoveryObservation>,
+    /// #57 additive: age of the most recent dispatched `pending` mutation.
+    pub pending_last_attempt_age_ms: Option<u64>,
+    /// #57 additive: `pending` work existed but was not attempted for
+    /// [`PENDING_STARVED_ROUNDS`] consecutive dispatch rounds.
+    pub pending_starved: bool,
+    /// #57 additive: number of completed starvation streaks.
+    pub pending_starved_events: u64,
+    /// #57 additive: current consecutive rounds without a pending attempt.
+    pub consecutive_pending_starved_rounds: u32,
+    /// #57 additive: structured diagnostic name while starved
+    /// (`namespace.pending_starved`), `None` otherwise.
+    pub last_starvation_event: Option<String>,
+    /// #57 additive: dispatch rounds accounted in this process.
+    pub dispatch_rounds: u64,
 }
 #[derive(Clone)]
 pub(crate) struct NamespaceSelection {
@@ -244,7 +278,9 @@ impl Store {
         };
         let mut preceding = Vec::<Footprint>::new();
         let mut total = 0usize;
-        let mut selection = None;
+        let mut selected_inflight = None;
+        let mut pending_candidate = None;
+        let mut reconcile_candidate = None;
         let now = Instant::now();
         for (operation, kind, state, bytes, denied) in headers.into_iter().take(LIMIT) {
             observation.observed += 1;
@@ -283,8 +319,7 @@ impl Store {
             // Keep at most one native mutation in flight, including callers
             // that re-enter a selector between mark_started and sending RPC.
             if matches!(q.state.as_str(), "inflight" | "cleanup_inflight") {
-                selection = Some(q);
-                observation.selected = true;
+                selected_inflight = Some(q);
                 break;
             }
             let shape = match footprint(self, &q) {
@@ -319,28 +354,88 @@ impl Store {
             if deferred {
                 observation.deferred_reconciliation += 1;
             }
-            if !dependent
-                && !denied
-                && !deferred
-                && matches!(
-                    q.state.as_str(),
-                    "pending" | "cleanup_pending" | "uncertain" | "cleanup_uncertain"
-                )
-            {
-                selection = Some(q);
-                observation.selected = true;
-                break;
+            if !dependent && !denied && !deferred {
+                match q.state.as_str() {
+                    // #57 pending-first: an independent mutation must never
+                    // queue behind a read-only reconcile, so it wins the
+                    // dispatch slot immediately. This is the reserved quota
+                    // that keeps the 3,114-row pending tail moving.
+                    "pending" | "cleanup_pending" => {
+                        observation.eligible_pending += 1;
+                        pending_candidate = Some(q);
+                        break;
+                    }
+                    // Remember the first due reconcile but keep scanning: the
+                    // scan must continue to prove whether a pending candidate
+                    // exists, while every skipped intent still constrains later
+                    // operations through `preceding`.
+                    "uncertain" | "cleanup_uncertain" => {
+                        if reconcile_candidate.is_none() {
+                            reconcile_candidate = Some(q);
+                        }
+                    }
+                    _ => {}
+                }
             }
             // Conflict, uncertain and permission-gated intents still constrain
             // every later operation. Shared read-only parents alone do not.
             preceding.push(shape);
         }
         observation.truncated |= observation.observed < header_count as u64;
+        // At most one read-only reconcile per dispatch round; pending work has
+        // priority, so a reconcile is selected only when no independent pending
+        // candidate exists in this scan window.
+        let selection = selected_inflight
+            .or(pending_candidate)
+            .or(reconcile_candidate);
+        observation.selected = selection.is_some();
+        observation.selected_state = selection.as_ref().map(|q| q.state.clone());
         self.namespace_runtime.lock().unwrap().observed = Some((now, observation));
         Ok(selection)
     }
     pub fn next_namespace_operation(&self) -> Result<Option<NamespaceOperation>> {
         Ok(self.namespace_selection()?.map(|q| NamespaceOperation {
+            operation: q.operation,
+            kind: q.kind,
+            state: q.state,
+        }))
+    }
+    /// One dispatch round of the serial namespace lane (#57).
+    ///
+    /// Selection itself is [`Store::namespace_selection`] (pending-first); this
+    /// wrapper only accounts the round so starvation is observable without the
+    /// mutation gates (which re-enter the selector between `mark_started` and the
+    /// RPC) inflating the counter. The structured diagnostic is
+    /// `namespace.pending_starved` and is exposed through
+    /// [`Store::queue_health`].
+    pub fn dispatch_namespace_operation(&mut self) -> Result<Option<NamespaceOperation>> {
+        let selected = self.namespace_selection()?;
+        let now = Instant::now();
+        let pending_selected = selected
+            .as_ref()
+            .is_some_and(|q| matches!(q.state.as_str(), "pending" | "cleanup_pending"));
+        let pending_exists: bool = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM namespace_ops WHERE state IN ('pending','cleanup_pending'))",
+            [],
+            |r| r.get(0),
+        )?;
+        let mut runtime = self.namespace_runtime.lock().unwrap();
+        let dispatch = &mut runtime.dispatch;
+        dispatch.rounds = dispatch.rounds.saturating_add(1);
+        if pending_selected {
+            dispatch.consecutive_without_pending = 0;
+            dispatch.last_pending_attempt = Some(now);
+        } else if pending_exists {
+            dispatch.consecutive_without_pending =
+                dispatch.consecutive_without_pending.saturating_add(1);
+            if dispatch.consecutive_without_pending == PENDING_STARVED_ROUNDS {
+                dispatch.pending_starved_events = dispatch.pending_starved_events.saturating_add(1);
+            }
+        } else {
+            // No pending work exists: the reconcile lane is not starving it.
+            dispatch.consecutive_without_pending = 0;
+        }
+        Ok(selected.map(|q| NamespaceOperation {
             operation: q.operation,
             kind: q.kind,
             state: q.state,
@@ -372,26 +467,35 @@ impl Store {
         operation: &str,
         outcome: NamespaceRecoveryObservation,
     ) -> Result<bool> {
-        let row: Option<(String, String)> = self
+        let row: Option<(String, String, i64)> = self
             .db
             .query_row(
-                "SELECT body,state FROM namespace_ops WHERE id=?1",
+                "SELECT body,state,attempts FROM namespace_ops WHERE id=?1",
                 [operation],
-                |r| Ok((r.get(0)?, r.get(1)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .optional()?;
         let mut runtime = self.namespace_runtime.lock().unwrap();
-        let Some((body, state)) = row.filter(|(_, state)| uncertain(state)) else {
+        let Some((body, state, durable_attempts)) = row.filter(|(_, state, _)| uncertain(state))
+        else {
             runtime.recovery.remove(operation);
             return Ok(false);
         };
         let _ = state;
+        let durable_attempts = u64::try_from(durable_attempts).unwrap_or(0);
         let digest = crate::sha256(body.as_bytes());
+        // #57: the durable journal counter is authoritative. A restart clears
+        // the in-process map, so the next observation must continue from
+        // `namespace_ops.attempts` instead of restarting the ladder at 1 (the
+        // field DB would then look like a fresh linear recovery forever).
         let attempts = runtime
             .recovery
             .get(operation)
             .filter(|r| r.digest == digest)
-            .map_or(1, |r| r.attempts.saturating_add(1));
+            .map_or(durable_attempts.saturating_add(1), |r| {
+                r.attempts.saturating_add(1)
+            })
+            .max(durable_attempts.saturating_add(1));
         let delay = match attempts {
             1 => 2,
             2 => 10,
@@ -421,7 +525,8 @@ impl Store {
         );
         // #9b TB2: persist the observed category and the *actual* in-memory
         // schedule so the status interface shows the same retry time the
-        // scheduler uses (restart re-arms the observation from 2s, documented).
+        // scheduler uses. #57: the durable attempt counter now continues the
+        // ladder across a restart instead of re-arming from 2s.
         let (category, last_error) = match outcome {
             NamespaceRecoveryObservation::TransportUnavailable => (
                 crate::commit_outcome::CommitCategory::Transport,
@@ -509,6 +614,21 @@ impl Store {
                 })
                 .min(),
             last_recovery_outcome: current.iter().max_by_key(|r| r.at).map(|r| r.outcome),
+            pending_last_attempt_age_ms: runtime
+                .dispatch
+                .last_pending_attempt
+                .map(|at| now.duration_since(at).as_millis().min(u64::MAX as u128) as u64),
+            pending_starved: runtime.dispatch.consecutive_without_pending >= PENDING_STARVED_ROUNDS,
+            pending_starved_events: runtime.dispatch.pending_starved_events,
+            consecutive_pending_starved_rounds: runtime.dispatch.consecutive_without_pending,
+            last_starvation_event: if runtime.dispatch.consecutive_without_pending
+                >= PENDING_STARVED_ROUNDS
+            {
+                Some("namespace.pending_starved".into())
+            } else {
+                None
+            },
+            dispatch_rounds: runtime.dispatch.rounds,
         })
     }
 }

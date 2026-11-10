@@ -192,11 +192,14 @@ impl Bridge {
         }
         let mut done = 0;
         for _ in 0..64 {
+            // #57: every iteration of the serial commit lane is one accounted
+            // dispatch round, so `namespace.pending_starved` reflects real
+            // attempts rather than selector re-entries from mutation gates.
             let selected = self
                 .store
                 .lock()
                 .unwrap()
-                .next_namespace_operation()
+                .dispatch_namespace_operation()
                 .map_err(io::Error::other)?;
             let Some(selected) = selected else {
                 self.clear_namespace_failure_if_drained()?;
