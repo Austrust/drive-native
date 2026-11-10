@@ -26,6 +26,7 @@ pub(super) fn set_times(
     atime: Option<TimeOrNow>,
     mtime: Option<TimeOrNow>,
     reply: ReplyAttr,
+    deadline: request::RequestDeadline,
 ) {
     let (atime, mtime) = match times(atime, mtime, SystemTime::now()) {
         Ok(v) => v,
@@ -42,6 +43,7 @@ pub(super) fn set_times(
     let network = fs.network_queue.clone();
     let (uid, gid) = (fs.uid, fs.gid);
     fs.queue.submit(Box::new(move || {
+        let _deadline = deadline;
         let held = if let Some(fh) = fh {
             match handles.lock().unwrap().entries.get(&fh) {
                 Some(h) if h.ino == ino => Some((h.node.clone(), h.content.clone())),
