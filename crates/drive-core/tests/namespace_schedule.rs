@@ -1,5 +1,7 @@
 use drive_core::{namespace_schedule::NamespaceRecoveryObservation as Observation, *};
+use std::collections::HashMap;
 use std::io::Read;
+use std::time::{Duration, Instant};
 
 fn n(id: &str, parent: Option<&str>, name: &str, directory: bool) -> Node {
     Node {
@@ -523,5 +525,313 @@ fn dispatch_rounds_report_the_last_pending_attempt_age() {
     assert_eq!(
         h.schedule.unwrap().selected_state.as_deref(),
         Some("pending")
+    );
+}
+
+// ---- #57 scale regression: frozen incident shape (3,114 pending removes) ---
+//
+// This is a scale/timing regression, deliberately `#[ignore]`d so it does not
+// run with the default suite. Run it explicitly on the remote build host:
+//
+//   cargo test -p drive-core --release --all-features --locked \
+//       --test namespace_schedule -- --ignored --nocapture frozen_incident_shape
+//
+// Thresholds are calibrated from the release measurement recorded in
+// notes/work/issue-57.md (workstation202611, target i57, 2026-11-11) and kept
+// loose enough to catch gross dispatch regressions rather than machine load
+// jitter:
+//   - frozen-shape construction (fixture + one INSERT transaction): < 2,000 ms
+//     (measured 143 ms)
+//   - per-dispatch-round p95, including mark_remove_started + confirm_remove,
+//     which is what the single upload/commit lane pays per attempt: < 60,000 us
+//     (measured 20.1 ms; p50 19.1 ms, max 24.1 ms)
+//   - selector-only scan p95 at the 3,173-row shape: < 30,000 us
+//     (measured 5.9 ms; the scan stops after the 4 conflict + 55 uncertain
+//     barriers and the first pending candidate)
+// Every run prints the measured values with the `#57 SCALE` prefix.
+
+const INCIDENT_CONFLICTS: usize = 4;
+const INCIDENT_UNCERTAIN: usize = 55;
+const INCIDENT_PENDING: usize = 3_114;
+const INCIDENT_SCAN_SAMPLES: usize = 50;
+const INCIDENT_WARMUP_ROUNDS: usize = 10;
+const INCIDENT_MEASURE_ROUNDS: usize = 200;
+/// A dispatch round must stay far below the 120 s single-RPC budget. The
+/// release measurement is ~20 ms per round (dominated by two selector scans of
+/// the 59 unresolved barriers); 60 ms is ~3x headroom so an O(queue)-per-round
+/// regression is still caught without tripping on a loaded build host.
+const INCIDENT_ROUND_P95_BUDGET_US: u128 = 60_000;
+/// The selector-only scan at the frozen shape measures ~5.9 ms; 30 ms gives
+/// ~5x headroom while still failing loudly if the scan becomes linear in the
+/// 3,114-row pending tail.
+const INCIDENT_SCAN_P95_BUDGET_US: u128 = 30_000;
+
+/// Bulk variant of [`insert_removes`] for the frozen shape: all rows go in one
+/// transaction. The incident has 3,114+ journal rows; one autocommit per row
+/// would dominate fixture construction instead of measuring dispatch.
+fn insert_removes_bulk(
+    d: &tempfile::TempDir,
+    first: usize,
+    count: usize,
+    state: &str,
+    prefix: &str,
+) -> Vec<(String, String)> {
+    let mut db = rusqlite::Connection::open(d.path().join("state.sqlite")).unwrap();
+    let tx = db.transaction().unwrap();
+    let mut ids = Vec::with_capacity(count);
+    {
+        let mut insert = tx
+            .prepare("INSERT INTO namespace_ops(id,node,body,state,kind) VALUES(?1,?2,?3,?4,'remove')")
+            .unwrap();
+        let mut unlink = tx
+            .prepare("INSERT OR REPLACE INTO local_unlinks(node,confirmed) VALUES(?1,0)")
+            .unwrap();
+        for i in first..first + count {
+            let id = format!("{prefix}-{i}");
+            let node = n(&format!("f{i}"), Some(SYNTH_ROOT), &format!("f{i}"), false);
+            let job = drive_core::removals::RemoveJob {
+                operation: id.clone(),
+                node: node.clone(),
+                path: format!("f{i}"),
+                cursor: "synthetic".into(),
+            };
+            insert
+                .execute(rusqlite::params![
+                    id,
+                    node.id,
+                    serde_json::to_string(&job).unwrap(),
+                    state
+                ])
+                .unwrap();
+            unlink.execute([&node.id]).unwrap();
+            ids.push((id, node.id));
+        }
+    }
+    tx.commit().unwrap();
+    ids
+}
+
+fn percentile(samples: &[Duration], percentile: f64) -> Duration {
+    assert!(!samples.is_empty());
+    let mut sorted = samples.to_vec();
+    sorted.sort_unstable();
+    let rank = ((sorted.len() - 1) as f64 * percentile / 100.0).round() as usize;
+    sorted[rank]
+}
+
+/// One real dispatch round for the frozen shape. A selected `pending` remove is
+/// attempted and committed through the same `Store` API the worker uses
+/// (`mark_remove_started` + `confirm_remove`, which also stamps the durable
+/// attempts/updated_at evidence); a due `uncertain` reconcile is observed as
+/// unprovable, exactly like a lost response.
+fn dispatch_incident_round(
+    s: &mut Store,
+    pending_nodes: &HashMap<String, String>,
+    attempted: &mut usize,
+) -> drive_core::namespace_schedule::NamespaceOperation {
+    let selected = s
+        .dispatch_namespace_operation()
+        .unwrap()
+        .expect("frozen shape must always have a namespace candidate");
+    match selected.state.as_str() {
+        "pending" => {
+            let node_id = pending_nodes
+                .get(&selected.operation)
+                .expect("pending remove must reference the synthetic node")
+                .clone();
+            s.mark_remove_started(&selected.operation).unwrap();
+            s.confirm_remove(&selected.operation, &node_id).unwrap();
+            *attempted += 1;
+        }
+        "uncertain" => {
+            assert!(
+                s.observe_namespace_unresolved(
+                    &selected.operation,
+                    Observation::CommitUnconfirmed
+                )
+                .unwrap()
+            );
+        }
+        state => panic!("unexpected selected state {state} in the frozen shape"),
+    }
+    selected
+}
+
+/// Frozen incident shape: 4 `conflict`, 55 low-seq due `uncertain` removes and
+/// 3,114 high-seq `pending` removes (`attempts=0`, `updated_at=0`).
+///
+/// Before #57 every round selected the low-seq reconcile head, so none of the
+/// 3,114 pending removes was ever attempted. After #57 the pending tail must be
+/// dispatched at a stable per-round cost; this test replays the shape at real
+/// scale and prints the timings needed for baseline/integration comparisons.
+#[test]
+#[ignore = "scale/timing regression for the frozen 3,114-row incident shape; run with --ignored --nocapture"]
+fn frozen_incident_shape_dispatches_pending_tail_at_scale() {
+    // --- construction: one remote snapshot transaction + one journal tx ---
+    let construction_started = Instant::now();
+    let (d, mut s) = synthetic_remove_store(
+        INCIDENT_CONFLICTS + INCIDENT_UNCERTAIN + INCIDENT_PENDING,
+    );
+    insert_removes_bulk(&d, 0, INCIDENT_CONFLICTS, "conflict", "c");
+    let uncertain = insert_removes_bulk(
+        &d,
+        INCIDENT_CONFLICTS,
+        INCIDENT_UNCERTAIN,
+        "uncertain",
+        "u",
+    );
+    let pending = insert_removes_bulk(
+        &d,
+        INCIDENT_CONFLICTS + INCIDENT_UNCERTAIN,
+        INCIDENT_PENDING,
+        "pending",
+        "p",
+    );
+    let construction = construction_started.elapsed();
+    // Field evidence: every pending row is still attempts=0/updated_at=0 before
+    // the first dispatch. Sample the head of the tail (all 3,114 stay untouched
+    // until dispatched by the rounds below).
+    for (operation, _) in pending.iter().take(16) {
+        assert_eq!(
+            journal_attempts(&d, operation),
+            (0, 0),
+            "pending {operation} must start un-attempted"
+        );
+    }
+
+    // The uncertain block was retried on a fixed cadence with an unprovable
+    // outcome. Arm the process-local observation, then make it due again so
+    // every measured round faces the same reconcile pressure as the field.
+    let arm_started = Instant::now();
+    for (operation, _) in &uncertain {
+        assert!(
+            s.observe_namespace_unresolved(operation, Observation::CommitUnconfirmed)
+                .unwrap()
+        );
+    }
+    s.request_namespace_recheck();
+    let arm = arm_started.elapsed();
+    let node_count = INCIDENT_CONFLICTS + INCIDENT_UNCERTAIN + INCIDENT_PENDING + 1;
+    println!(
+        "#57 SCALE construction_ms={} arm_ms={} nodes={node_count} conflict={INCIDENT_CONFLICTS} uncertain={INCIDENT_UNCERTAIN} pending={INCIDENT_PENDING}",
+        construction.as_millis(),
+        arm.as_millis(),
+    );
+    assert!(
+        construction.as_millis() < 2_000,
+        "frozen shape construction took {} ms (target < 2000 ms)",
+        construction.as_millis()
+    );
+
+    // --- selector-only scan cost at full incident size (no state changes) ---
+    let mut scans = Vec::with_capacity(INCIDENT_SCAN_SAMPLES);
+    for _ in 0..INCIDENT_SCAN_SAMPLES {
+        let started = Instant::now();
+        let selected = s
+            .next_namespace_operation()
+            .unwrap()
+            .expect("pending candidate");
+        scans.push(started.elapsed());
+        assert_eq!(selected.state, "pending");
+    }
+    let scan_p50 = percentile(&scans, 50.0);
+    let scan_p95 = percentile(&scans, 95.0);
+    let scan_max = *scans.iter().max().unwrap();
+    println!(
+        "#57 SCALE selector_scan_p50_us={} p95_us={} max_us={} rows_scanned={}",
+        scan_p50.as_micros(),
+        scan_p95.as_micros(),
+        scan_max.as_micros(),
+        INCIDENT_CONFLICTS + INCIDENT_UNCERTAIN + 1,
+    );
+
+    // --- warmup, then timed dispatch rounds through the real Store API ---
+    let pending_nodes: HashMap<String, String> = pending.iter().cloned().collect();
+    let mut attempted = 0usize;
+    for _ in 0..INCIDENT_WARMUP_ROUNDS {
+        dispatch_incident_round(&mut s, &pending_nodes, &mut attempted);
+    }
+    assert_eq!(attempted, INCIDENT_WARMUP_ROUNDS);
+
+    let measure_started = Instant::now();
+    let mut rounds = Vec::with_capacity(INCIDENT_MEASURE_ROUNDS);
+    let mut first_ten = Vec::new();
+    let mut distinct_first_ten = std::collections::HashSet::new();
+    for round in 0..INCIDENT_MEASURE_ROUNDS {
+        let started = Instant::now();
+        let selected = dispatch_incident_round(&mut s, &pending_nodes, &mut attempted);
+        rounds.push(started.elapsed());
+        assert_eq!(
+            selected.state, "pending",
+            "round {round}: reconcile candidate {} starved the pending tail",
+            selected.operation
+        );
+        if round < 10 {
+            distinct_first_ten.insert(selected.operation.clone());
+            first_ten.push(selected.operation);
+        }
+    }
+    let measure = measure_started.elapsed();
+    let round_p50 = percentile(&rounds, 50.0);
+    let round_p95 = percentile(&rounds, 95.0);
+    let round_max = *rounds.iter().max().unwrap();
+
+    // --- behavior assertions: attempts are real and starvation-free ---
+    assert_eq!(
+        distinct_first_ten.len(),
+        10,
+        "fewer than 10 distinct pending removes attempted in the first 10 rounds"
+    );
+    for operation in &first_ten {
+        let (attempts, updated_at) = journal_attempts(&d, operation);
+        assert!(
+            attempts > 0,
+            "pending {operation} was dispatched but attempts={attempts}"
+        );
+        assert!(
+            updated_at > 0,
+            "pending {operation} was dispatched but updated_at={updated_at}"
+        );
+    }
+    let health = s.queue_health().unwrap();
+    assert!(!health.pending_starved);
+    assert_eq!(health.consecutive_pending_starved_rounds, 0);
+    let age_ms = health
+        .pending_last_attempt_age_ms
+        .expect("pending attempts must be accounted");
+    assert!(
+        age_ms < 5_000,
+        "pending_last_attempt_age_ms={age_ms} exceeds the 5 s bound"
+    );
+    assert_eq!(
+        health.namespace_unfinished,
+        (INCIDENT_CONFLICTS + INCIDENT_UNCERTAIN + INCIDENT_PENDING - attempted) as u64
+    );
+
+    let attempts_per_second = attempted as f64 / measure.as_secs_f64();
+    println!(
+        "#57 SCALE dispatch_rounds={} attempted_total={} measured_rounds={} elapsed_ms={:.1} round_p50_us={} round_p95_us={} round_max_us={} pending_attempts_per_sec={attempts_per_second:.0} pending_last_attempt_age_ms={age_ms}",
+        INCIDENT_MEASURE_ROUNDS,
+        attempted,
+        INCIDENT_MEASURE_ROUNDS,
+        measure.as_secs_f64() * 1_000.0,
+        round_p50.as_micros(),
+        round_p95.as_micros(),
+        round_max.as_micros(),
+    );
+    println!(
+        "#57 SCALE thresholds construction_ms<2000 round_p95_us<{INCIDENT_ROUND_P95_BUDGET_US} selector_scan_p95_us<{INCIDENT_SCAN_P95_BUDGET_US}"
+    );
+    assert!(
+        round_p95.as_micros() < INCIDENT_ROUND_P95_BUDGET_US,
+        "dispatch round p95 {} us exceeds {} us budget",
+        round_p95.as_micros(),
+        INCIDENT_ROUND_P95_BUDGET_US
+    );
+    assert!(
+        scan_p95.as_micros() < INCIDENT_SCAN_P95_BUDGET_US,
+        "selector scan p95 {} us exceeds {} us budget",
+        scan_p95.as_micros(),
+        INCIDENT_SCAN_P95_BUDGET_US
     );
 }
