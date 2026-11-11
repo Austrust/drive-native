@@ -581,7 +581,9 @@ fn insert_removes_bulk(
     let mut ids = Vec::with_capacity(count);
     {
         let mut insert = tx
-            .prepare("INSERT INTO namespace_ops(id,node,body,state,kind) VALUES(?1,?2,?3,?4,'remove')")
+            .prepare(
+                "INSERT INTO namespace_ops(id,node,body,state,kind) VALUES(?1,?2,?3,?4,'remove')",
+            )
             .unwrap();
         let mut unlink = tx
             .prepare("INSERT OR REPLACE INTO local_unlinks(node,confirmed) VALUES(?1,0)")
@@ -645,11 +647,8 @@ fn dispatch_incident_round(
         }
         "uncertain" => {
             assert!(
-                s.observe_namespace_unresolved(
-                    &selected.operation,
-                    Observation::CommitUnconfirmed
-                )
-                .unwrap()
+                s.observe_namespace_unresolved(&selected.operation, Observation::CommitUnconfirmed)
+                    .unwrap()
             );
         }
         state => panic!("unexpected selected state {state} in the frozen shape"),
@@ -669,17 +668,11 @@ fn dispatch_incident_round(
 fn frozen_incident_shape_dispatches_pending_tail_at_scale() {
     // --- construction: one remote snapshot transaction + one journal tx ---
     let construction_started = Instant::now();
-    let (d, mut s) = synthetic_remove_store(
-        INCIDENT_CONFLICTS + INCIDENT_UNCERTAIN + INCIDENT_PENDING,
-    );
+    let (d, mut s) =
+        synthetic_remove_store(INCIDENT_CONFLICTS + INCIDENT_UNCERTAIN + INCIDENT_PENDING);
     insert_removes_bulk(&d, 0, INCIDENT_CONFLICTS, "conflict", "c");
-    let uncertain = insert_removes_bulk(
-        &d,
-        INCIDENT_CONFLICTS,
-        INCIDENT_UNCERTAIN,
-        "uncertain",
-        "u",
-    );
+    let uncertain =
+        insert_removes_bulk(&d, INCIDENT_CONFLICTS, INCIDENT_UNCERTAIN, "uncertain", "u");
     let pending = insert_removes_bulk(
         &d,
         INCIDENT_CONFLICTS + INCIDENT_UNCERTAIN,
