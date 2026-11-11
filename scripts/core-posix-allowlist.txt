@@ -20,10 +20,6 @@
 crates/drive-core/src/drafts.rs:os::unix::fs::FileExt
 # ReadHandle::read_at is already cfg(unix)-gated; replaced by SecureIo.
 crates/drive-core/src/state.rs:use std::os::unix::fs::FileExt;
-# #60 storage bounds: build the CString for statvfs(2) from the profile path.
-# Filesystem-space accounting is a host capability, not a core business rule;
-# moves to the platform layer with SecureIo (Step 3) and is deleted then.
-crates/drive-core/src/state.rs:use std::os::unix::ffi::OsStrExt;
 # consume_startup_pause reads uid/mode and opens with O_NOFOLLOW|O_NONBLOCK;
 # moves to SecureIo::open_private_no_follow + PlatformSession owner check.
 crates/drive-core/src/task_control.rs:MetadataExt|OpenOptionsExt
@@ -36,10 +32,6 @@ crates/drive-core/src/preview.rs:use std::os::unix
 # --- Already cfg(unix)-gated blocks (Step 3 moves them behind SecureIo) ---
 
 crates/drive-core/src/state.rs:#\[cfg\(unix\)\]
-# #60 draft quarantine: fsync of the recoverable quarantine directory is the
-# only POSIX-only part of the orphan-GC move; it joins the SecureIo::fsync_dir
-# migration above instead of adding a platform dependency to core.
-crates/drive-core/src/drafts.rs:#\[cfg\(unix\)\]
 
 # --- Directory fsync: File::open(<dir>) fails on Windows (Step 3 SecureIo::fsync_dir) ---
 
@@ -48,9 +40,6 @@ crates/drive-core/src/state.rs:File::open\(.*sync_all
 crates/drive-core/src/task_control.rs:File::open\(.*sync_all
 # drafts.rs fsyncs its drafts directory here; moves to SecureIo::fsync_dir.
 crates/drive-core/src/drafts.rs:File::open\(self\.root\.join\("drafts"\)\)
-# #60 orphan quarantine: fsync the drafts-quarantine directory after moving a
-# recoverable body; same SecureIo::fsync_dir migration as the line above.
-crates/drive-core/src/drafts.rs:File::open\(&quarantine_dir\)
 # drafts.rs:299 fsyncs a draft file (regular file, portable), but the rule
 # cannot distinguish a directory open from a file open on one line. Keep the
 # narrow exception rather than weakening the directory-fsync rule.
@@ -60,17 +49,6 @@ crates/drive-core/src/drafts.rs:File::open\(self\.draft_path
 
 crates/drive-core/src/task_control.rs:PermissionsExt|OsStrExt|mkfifo
 crates/drive-core/src/task_control.rs:std::os::unix::fs::symlink
-
-# --- libc POSIX APIs other than errno (Step 3 SecureIo / platform layer) ---
-# #60 storage lifecycle bounds use statvfs(2) for three decisions: the bounded
-# default cache budget, the bounded drafts quota and the pre-VACUUM INTO
-# migration-backup headroom check. Disk-space/free-space queries are host
-# capabilities rather than core business rules, so they move to the platform
-# layer (SecureIo::filesystem_space / PlatformSession) with the rest of Step 3;
-# delete both entries with that migration. They are called once at store open
-# (sizes are memoized), so no hot path depends on the libc call.
-crates/drive-core/src/state.rs:MaybeUninit::<libc::statvfs>
-crates/drive-core/src/state.rs:libc::statvfs\(
 
 # --- libc errno -> io::Error construction (Step 4 semantic error variants) ---
 # Each file below constructs POSIX errno values that are currently classified
@@ -92,6 +70,20 @@ crates/drive-core/src/replacements.rs:libc::E
 crates/drive-core/src/state.rs:libc::E
 crates/drive-core/src/timestamps.rs:libc::E
 crates/drive-core/src/write_permissions.rs:libc::E
+
+# --- #60 disk-space probe (statvfs) for cache/draft defaults + backup headroom ----------
+# Sizing the bounded cache/drafts defaults and the pre-migration VACUUM headroom check
+# needs the host filesystem capacity. Kept in core (memoized at Store::open, falls back
+# to the 10 GiB cap / skips the check when unavailable) until #11 Step 1/3 provides a
+# portable DiskSpace probe; delete these entries when that migration lands.
+crates/drive-core/src/state.rs:os::unix::ffi::OsStrExt
+crates/drive-core/src/state.rs:MaybeUninit::<libc::statvfs>
+crates/drive-core/src/state.rs:libc::statvfs\(
+# --- #60 quarantine directory fsync (mirrors the drafts directory fsync above) -----------
+# Moving an orphan body into drafts-quarantine/ fsyncs both directories on unix; the
+# portable SecureIo::fsync_dir step from #11 Step 3 will delete this entry.
+crates/drive-core/src/drafts.rs:#\[cfg\(unix\)\]
+crates/drive-core/src/drafts.rs:File::open\(&quarantine_dir\)
 
 # --- Platform-only dependency (Step 1/3: libc stays only in drive-platform) ---
 
