@@ -184,6 +184,78 @@ impl ProjectionBase {
             len,
         }
     }
+
+    /// Test-only estimate of the heap bytes this snapshot owns. The #67 W3
+    /// resident tests compare it with the worker's estimate to prove the worker
+    /// keeps one shared copy of the projection instead of a second full clone.
+    #[cfg(test)]
+    fn resident_bytes_estimate(&self) -> usize {
+        rows_bytes_estimate(&self.rows) + children_bytes_estimate(&self.children)
+    }
+}
+
+/// Test-only: approximate heap bytes of `parent -> visible children` edges.
+#[cfg(test)]
+fn children_bytes_estimate(children: &HashMap<String, Children>) -> usize {
+    std::mem::size_of::<HashMap<String, Children>>()
+        + children.capacity() * (std::mem::size_of::<(String, Children)>() + 1)
+        + children
+            .iter()
+            .map(|(parent, list)| {
+                parent.capacity()
+                    + list.capacity() * (std::mem::size_of::<(String, bool)>() + 1)
+                    + list.iter().map(|(child, _)| child.capacity()).sum::<usize>()
+            })
+            .sum::<usize>()
+}
+
+/// Test-only: approximate heap bytes of the row map (keys, bucket table and the
+/// per-row `id`/`parent` strings; `StatusSeed` itself lives inline in the table).
+#[cfg(test)]
+fn rows_bytes_estimate(rows: &HashMap<String, StatusSeed>) -> usize {
+    std::mem::size_of::<HashMap<String, StatusSeed>>()
+        + rows.capacity() * (std::mem::size_of::<(String, StatusSeed)>() + 1)
+        + rows
+            .iter()
+            .map(|(key, seed)| {
+                key.capacity()
+                    + seed.id.capacity()
+                    + seed.parent.as_ref().map_or(0, String::capacity)
+            })
+            .sum::<usize>()
+}
+
+/// Test-only: approximate heap bytes of the sparse row delta.
+#[cfg(test)]
+fn row_delta_bytes_estimate(delta: &HashMap<String, Option<StatusSeed>>) -> usize {
+    std::mem::size_of::<HashMap<String, Option<StatusSeed>>>()
+        + delta.capacity() * (std::mem::size_of::<(String, Option<StatusSeed>)>() + 1)
+        + delta
+            .iter()
+            .map(|(id, seed)| {
+                id.capacity()
+                    + seed.as_ref().map_or(0, |seed| {
+                        seed.id.capacity() + seed.parent.as_ref().map_or(0, String::capacity)
+                    })
+            })
+            .sum::<usize>()
+}
+
+/// Test-only: approximate heap bytes of the sparse child-edge delta.
+#[cfg(test)]
+fn child_delta_bytes_estimate(delta: &HashMap<String, ChildDelta>) -> usize {
+    std::mem::size_of::<HashMap<String, ChildDelta>>()
+        + delta.capacity() * (std::mem::size_of::<(String, ChildDelta)>() + 1)
+        + delta
+            .iter()
+            .map(|(parent, child)| {
+                parent.capacity()
+                    + child.removed.capacity() * (std::mem::size_of::<String>() + 1)
+                    + child.removed.iter().map(String::capacity).sum::<usize>()
+                    + child.changed.capacity() * (std::mem::size_of::<(String, bool)>() + 1)
+                    + child.changed.keys().map(String::capacity).sum::<usize>()
+            })
+            .sum::<usize>()
 }
 
 /// Child-edge changes for one parent since the base snapshot.
@@ -298,6 +370,14 @@ impl StatusProjection {
     #[cfg(test)]
     pub(crate) fn base_shared_with(&self, other: &StatusProjection) -> bool {
         Arc::ptr_eq(&self.base, &other.base)
+    }
+
+    /// Test-only estimate of the heap bytes owned by this projection's immutable
+    /// base snapshot. Publications share one base, so this is the single-copy
+    /// reference the worker's resident estimate is compared against (#67 W3).
+    #[cfg(test)]
+    pub(crate) fn base_resident_bytes_estimate(&self) -> usize {
+        self.base.resident_bytes_estimate()
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -514,6 +594,11 @@ pub(crate) struct StatusCache {
     compactions: AtomicU64,
     publish_delta_entries: AtomicU64,
     base_shares: AtomicU64,
+    /// Test-only (#67 W3): heap bytes the worker reported for its projection
+    /// state right before the last publication. The resident regression tests
+    /// compare it with the shared base's single-copy estimate.
+    #[cfg(test)]
+    worker_resident_bytes: AtomicU64,
     config: CacheConfig,
     /// Test-only capture of the structured lifecycle lines the product writes to
     /// stderr; lets tests assert the same events without hijacking stderr.
@@ -583,6 +668,8 @@ impl StatusCache {
             compactions: AtomicU64::new(0),
             publish_delta_entries: AtomicU64::new(0),
             base_shares: AtomicU64::new(0),
+            #[cfg(test)]
+            worker_resident_bytes: AtomicU64::new(0),
             config,
             #[cfg(test)]
             health_events: Mutex::new(Vec::new()),
@@ -602,6 +689,21 @@ impl StatusCache {
     #[cfg(test)]
     pub(crate) fn publishes(&self) -> u64 {
         self.publishes.load(Ordering::Relaxed)
+    }
+
+    /// Test-only (#67 W3): the worker's last reported heap estimate for its
+    /// projection state (shared immutable base plus sparse deltas).
+    #[cfg(test)]
+    pub(crate) fn worker_resident_bytes(&self) -> u64 {
+        self.worker_resident_bytes.load(Ordering::Relaxed)
+    }
+
+    /// Test-only (#67 W3): records the worker's projection-state heap estimate
+    /// right before a publication.
+    #[cfg(test)]
+    fn record_worker_resident_bytes(&self, bytes: usize) {
+        self.worker_resident_bytes
+            .store(bytes as u64, Ordering::Relaxed);
     }
 
     pub(crate) fn snapshot(&self) -> Option<Arc<StatusProjection>> {
@@ -1060,6 +1162,19 @@ impl<'a> Worker<'a> {
 
     fn fault(&self, kind: FaultKind) -> bool {
         self.cache.fault(kind)
+    }
+
+    /// Test-only (#67 W3) estimate of the heap bytes owned by this worker's
+    /// projection state. Before W3-A this counts the full row and child maps
+    /// cloned next to the immutable base; the resident regression test requires
+    /// it to stay within one shared base copy (plus sparse deltas).
+    #[cfg(test)]
+    fn resident_bytes_estimate(&self) -> usize {
+        self.base.resident_bytes_estimate()
+            + rows_bytes_estimate(&self.rows)
+            + children_bytes_estimate(&self.children)
+            + row_delta_bytes_estimate(&self.row_delta)
+            + child_delta_bytes_estimate(&self.child_delta)
     }
 
     /// Initial snapshot plus startup journal replay up to `STARTUP_REPLAY_LIMIT`.
@@ -1568,6 +1683,9 @@ impl<'a> Worker<'a> {
         // The published projection shares the previous immutable base; only the
         // sparse delta is owned by this generation.
         self.cache.base_shares.fetch_add(1, Ordering::Relaxed);
+        #[cfg(test)]
+        self.cache
+            .record_worker_resident_bytes(self.resident_bytes_estimate());
         let projection = Arc::new(StatusProjection {
             generation,
             base: Arc::clone(&self.base),
