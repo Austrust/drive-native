@@ -1,7 +1,8 @@
 //! Local conflict decisions are atomic. Uncertain server commits remain gated.
-use crate::{Error, Node, NodeMetadata, Result, Status, Store, creations::CREATE_VERSION};
+use crate::{Error, Node, NodeMetadata, Result, Store, creations::CREATE_VERSION};
 use rusqlite::{OptionalExtension, params};
 use serde::Serialize;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SyncIssue {
@@ -39,6 +40,43 @@ pub struct KeptBoth {
     pub original: String,
     pub copy: Node,
     pub path: String,
+}
+
+/// Everything [`Store::issue_decision`] needs about one candidate identity.
+///
+/// [`Store::sync_issue`] fills these facts from per-identity lookups; the paged
+/// path fills a whole page from a fixed number of set-based statements so a
+/// 256-entry first page does not pay one query round trip per candidate (issue
+/// #67: 18–20 ms and 5.4–5.9 MB of page reads at 294k nodes).
+struct IssueFacts {
+    node: Node,
+    dirty: Option<String>,
+    blob: Option<String>,
+    base: Option<String>,
+    generation: i64,
+    deleted: bool,
+    draft: Option<(String, String, i64, i64, bool)>,
+    uncertain: bool,
+    conflict: bool,
+    reconcile_attempts: u32,
+    namespace: bool,
+    local_creation: bool,
+    bound_identity: bool,
+    parent_live: bool,
+    locally_unlinked: bool,
+    alias_remote: Option<String>,
+    unconfirmed_upload: bool,
+}
+
+/// Node-side columns loaded before the cross-table facts are merged.
+struct IssueNodeRow {
+    node: Node,
+    dirty: Option<String>,
+    blob: Option<String>,
+    base: Option<String>,
+    generation: i64,
+    deleted: bool,
+    conflict: bool,
 }
 
 /// Candidate identity source shared by [`Store::sync_issues`] and
@@ -155,19 +193,32 @@ impl Store {
         )?;
         Ok(local_only)
     }
+    /// One candidate identity from the issue service.
+    ///
+    /// Local metadata only; no file open or NAS request. Shares
+    /// [`Self::issue_decision`] with [`Self::sync_issues`] so the paged path
+    /// cannot drift from the row-at-a-time contract.
     pub fn sync_issue(&self, root: &str, id: &str) -> Result<Option<SyncIssue>> {
-        let node = self.issue_node(id)?;
         let path = self.issue_path(root, id)?;
-        let (dirty, blob, base, generation, deleted): (
+        let facts = self.issue_facts(id)?;
+        self.issue_decision(id, path, &facts)
+    }
+
+    /// Row-at-a-time facts for one candidate. [`Self::sync_issues`] loads the
+    /// same fields set-based through [`Self::issue_facts_batch`].
+    fn issue_facts(&self, id: &str) -> Result<IssueFacts> {
+        let node = self.issue_node(id)?;
+        let (dirty, blob, base, generation, deleted, conflict): (
             Option<String>,
             Option<String>,
             Option<String>,
             i64,
             bool,
+            bool,
         ) = self.db.query_row(
-            "SELECT dirty_blob,blob,base_version,dirty_generation,deleted FROM nodes WHERE id=?1",
+            "SELECT dirty_blob,blob,base_version,dirty_generation,deleted,conflict FROM nodes WHERE id=?1",
             [id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
         )?;
         let draft: Option<(String, String, i64, i64, bool)> = self
             .db
@@ -177,13 +228,14 @@ impl Store {
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
             )
             .optional()?;
+        let locally_unlinked = self.locally_unlinked(id)?;
+        // `Store::status` reports Conflict exactly when the nodes row is flagged
+        // or a dirty draft diverged from the remote version while surviving.
+        let draft_conflict = draft
+            .as_ref()
+            .is_some_and(|d| d.4 && !locally_unlinked && (d.1 != node.version || deleted));
+        let conflict = conflict || draft_conflict;
         let uncertain: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE node=?1 AND state IN ('inflight','uncertain','abandoned')) OR EXISTS(SELECT 1 FROM namespace_ops WHERE node=?1 AND state IN ('uncertain','cleanup_uncertain','inflight','cleanup_inflight'))",[id],|r|r.get(0))?;
-        let conflict = self.status(id)? == Status::Conflict;
-        if !uncertain && !conflict {
-            return Ok(None);
-        }
-        // The durable upload reconciliation budget is surfaced so the GUI can
-        // explain that automatic retries paused instead of implying a live wait.
         let reconcile_attempts: u32 = self
             .db
             .query_row(
@@ -192,7 +244,6 @@ impl Store {
                 |r| r.get::<_, i64>(0),
             )
             .map(|attempts| u32::try_from(attempts).unwrap_or(u32::MAX))?;
-        let reconcile_exhausted = reconcile_attempts >= crate::MAX_UPLOAD_RECONCILE_ATTEMPTS;
         let namespace = crate::namespace::blocks_upload(&self.db, id)?;
         let local_creation: bool = self.db.query_row(
             "SELECT EXISTS(SELECT 1 FROM local_creations WHERE node=?1)",
@@ -209,6 +260,390 @@ impl Store {
             .as_deref()
             .and_then(|p| self.node(p).ok())
             .is_some_and(|p| p.directory);
+        let alias_remote: Option<String> = self
+            .db
+            .query_row(
+                "SELECT remote FROM remote_aliases WHERE node=?1",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let unconfirmed_upload: bool = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM operations WHERE kind='upload' AND node=?1 AND state IN ('uncertain','abandoned'))",
+            [id],
+            |r| r.get(0),
+        )?;
+        Ok(IssueFacts {
+            node,
+            dirty,
+            blob,
+            base,
+            generation,
+            deleted,
+            draft,
+            uncertain,
+            conflict,
+            reconcile_attempts,
+            namespace,
+            local_creation,
+            bound_identity,
+            parent_live,
+            locally_unlinked,
+            alias_remote,
+            unconfirmed_upload,
+        })
+    }
+
+    /// Set-based [`IssueFacts`] load for one issue page, plus the rendered issue
+    /// path for each candidate. Uses a fixed number of statements (candidate
+    /// rows, one ancestor walk, and one aggregation per fact table) instead of
+    /// one query round trip per candidate, which is what made the 256-entry
+    /// first page cost 18–20 ms / 5.4–5.9 MB at 294k nodes (issue #67).
+    fn issue_facts_batch(
+        &self,
+        root: &str,
+        ids: &[String],
+    ) -> Result<HashMap<String, (IssueFacts, String)>> {
+        let mut batch = HashMap::new();
+        if ids.is_empty() {
+            return Ok(batch);
+        }
+        let list = vec!["?"; ids.len()].join(",");
+
+        // Node columns and the metadata that participates in the issue token.
+        let mut rows: HashMap<String, IssueNodeRow> = HashMap::new();
+        {
+            let sql = format!(
+                "SELECT n.id,n.parent,n.name,n.remote_version,n.directory,n.dirty_blob,n.blob,n.base_version,n.dirty_generation,n.deleted,n.conflict,m.size,m.mtime,m.mode
+                   FROM nodes n LEFT JOIN node_metadata m ON m.node=n.id
+                  WHERE n.id IN ({list})"
+            );
+            let mut q = self.db.prepare(&sql)?;
+            let mut query = q.query(rusqlite::params_from_iter(ids.iter()))?;
+            while let Some(r) = query.next()? {
+                let id: String = r.get(0)?;
+                let metadata = match r.get::<_, Option<i64>>(11)? {
+                    Some(_) => Some(NodeMetadata {
+                        size: crate::filesystem::read_unsigned(&r, 11)?,
+                        mtime: crate::filesystem::read_unsigned(&r, 12)?,
+                        mode: r.get(13)?,
+                    }),
+                    None => None,
+                };
+                rows.insert(
+                    id.clone(),
+                    IssueNodeRow {
+                        node: Node {
+                            id,
+                            parent: r.get(1)?,
+                            name: r.get(2)?,
+                            version: r.get(3)?,
+                            directory: r.get(4)?,
+                            metadata,
+                        },
+                        dirty: r.get(5)?,
+                        blob: r.get(6)?,
+                        base: r.get(7)?,
+                        generation: r.get(8)?,
+                        deleted: r.get(9)?,
+                        conflict: r.get(10)?,
+                    },
+                );
+            }
+        }
+
+        // Ancestor rows in one recursive walk. The candidate rows loaded above
+        // already cover their own level, so the walk starts from the distinct
+        // parents: seeding it with all candidates again would random-access the
+        // same scattered node pages a second time. `UNION` keeps cycles finite;
+        // the per-candidate path walk below still reproduces `issue_path`'s
+        // exact cycle/depth/outside-task error contract.
+        let mut parents: HashMap<String, (Option<String>, String, bool, bool)> = rows
+            .iter()
+            .map(|(id, row)| {
+                (
+                    id.clone(),
+                    (
+                        row.node.parent.clone(),
+                        row.node.name.clone(),
+                        row.node.directory,
+                        row.deleted,
+                    ),
+                )
+            })
+            .collect();
+        let seeds: Vec<String> = rows
+            .values()
+            .filter_map(|row| row.node.parent.clone())
+            .filter(|parent| !parents.contains_key(parent))
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        if !seeds.is_empty() {
+            let seed_list = vec!["?"; seeds.len()].join(",");
+            let sql = format!(
+                "WITH RECURSIVE anc(root,id,parent,name,directory,deleted) AS (
+                     SELECT n.id,n.id,n.parent,n.name,n.directory,n.deleted FROM nodes n WHERE n.id IN ({seed_list})
+                     UNION
+                     SELECT a.root,n.id,n.parent,n.name,n.directory,n.deleted
+                       FROM nodes n JOIN anc a ON n.id=a.parent
+                 )
+                 SELECT id,parent,name,directory,deleted FROM anc"
+            );
+            let mut q = self.db.prepare(&sql)?;
+            let mut query = q.query(rusqlite::params_from_iter(seeds.iter()))?;
+            while let Some(r) = query.next()? {
+                let id: String = r.get(0)?;
+                parents.insert(id, (r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?));
+            }
+        }
+
+        // `blocks_upload` walks the node ancestry; the overlay table still holds
+        // only in-flight namespace rows, so a full read is the cheapest exact
+        // membership test for the whole page.
+        let overlay: HashSet<String> = {
+            let mut q = self.db.prepare("SELECT node FROM namespace_overlay")?;
+            q.query_map([], |r| r.get::<_, String>(0))?
+                .collect::<std::result::Result<HashSet<_>, _>>()?
+        };
+        // A denied task makes a parent lookup go through the access-denied
+        // ancestor walk; fall back to the row-at-a-time check only for those
+        // stores instead of paying it on every page.
+        let denied: bool = self
+            .db
+            .query_row("SELECT EXISTS(SELECT 1 FROM access_denied)", [], |r| {
+                r.get(0)
+            })?;
+
+        let mut drafts: HashMap<String, (String, String, i64, i64, bool)> = HashMap::new();
+        {
+            let sql =
+                format!("SELECT node,token,base,generation,checkpoint,dirty FROM drafts WHERE node IN ({list})");
+            let mut q = self.db.prepare(&sql)?;
+            let mut query = q.query(rusqlite::params_from_iter(ids.iter()))?;
+            while let Some(r) = query.next()? {
+                drafts.insert(
+                    r.get(0)?,
+                    (r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?),
+                );
+            }
+        }
+        // (uncertain operation present, max upload reconcile attempts, has an
+        // unconfirmed upload operation)
+        let mut operations: HashMap<String, (bool, i64, bool)> = HashMap::new();
+        {
+            let sql = format!(
+                "SELECT node,
+                        MAX(CASE WHEN state IN ('inflight','uncertain','abandoned') THEN 1 ELSE 0 END),
+                        COALESCE(MAX(CASE WHEN kind='upload' AND state IN ('inflight','uncertain','abandoned') THEN reconcile_attempts END),0),
+                        MAX(CASE WHEN kind='upload' AND state IN ('uncertain','abandoned') THEN 1 ELSE 0 END)
+                   FROM operations WHERE node IN ({list}) GROUP BY node"
+            );
+            let mut q = self.db.prepare(&sql)?;
+            let mut query = q.query(rusqlite::params_from_iter(ids.iter()))?;
+            while let Some(r) = query.next()? {
+                operations.insert(
+                    r.get(0)?,
+                    (
+                        r.get::<_, i64>(1)? != 0,
+                        r.get(2)?,
+                        r.get::<_, i64>(3)? != 0,
+                    ),
+                );
+            }
+        }
+        let mut namespace_ops: HashMap<String, bool> = HashMap::new();
+        {
+            let sql = format!(
+                "SELECT node, MAX(CASE WHEN state IN ('uncertain','cleanup_uncertain','inflight','cleanup_inflight') THEN 1 ELSE 0 END)
+                   FROM namespace_ops WHERE node IN ({list}) GROUP BY node"
+            );
+            let mut q = self.db.prepare(&sql)?;
+            let mut query = q.query(rusqlite::params_from_iter(ids.iter()))?;
+            while let Some(r) = query.next()? {
+                namespace_ops.insert(r.get(0)?, r.get::<_, i64>(1)? != 0);
+            }
+        }
+
+        let mut local_creations: HashSet<String> = HashSet::new();
+        {
+            let sql = format!("SELECT node FROM local_creations WHERE node IN ({list})");
+            let mut q = self.db.prepare(&sql)?;
+            let mut found = q.query_map(rusqlite::params_from_iter(ids.iter()), |r| {
+                r.get::<_, String>(0)
+            })?;
+            local_creations.extend(
+                found
+                    .by_ref()
+                    .collect::<std::result::Result<Vec<_>, _>>()?,
+            );
+        }
+        let mut remote_aliases: HashMap<String, String> = HashMap::new();
+        {
+            let sql = format!("SELECT node,remote FROM remote_aliases WHERE node IN ({list})");
+            let mut q = self.db.prepare(&sql)?;
+            let mut query = q.query(rusqlite::params_from_iter(ids.iter()))?;
+            while let Some(r) = query.next()? {
+                remote_aliases.insert(r.get(0)?, r.get(1)?);
+            }
+        }
+        let mut local_unlinks: HashSet<String> = HashSet::new();
+        {
+            let sql = format!("SELECT node FROM local_unlinks WHERE node IN ({list})");
+            let mut q = self.db.prepare(&sql)?;
+            let mut found =
+                q.query_map(rusqlite::params_from_iter(ids.iter()), |r| r.get::<_, String>(0))?;
+            local_unlinks.extend(
+                found
+                    .by_ref()
+                    .collect::<std::result::Result<Vec<_>, _>>()?,
+            );
+        }
+
+        for id in ids {
+            let Some(row) = rows.remove(id) else {
+                // The candidate query and this load read the same table in the
+                // same transactionless snapshot; a miss is defensive only.
+                continue;
+            };
+            let IssueNodeRow {
+                node,
+                dirty,
+                blob,
+                base,
+                generation,
+                deleted,
+                conflict: node_conflict,
+            } = row;
+            let draft = drafts.remove(id);
+            let (op_uncertain, attempts, unconfirmed_upload) = operations
+                .get(id)
+                .copied()
+                .unwrap_or((false, 0, false));
+            let namespace_op_uncertain = namespace_ops.get(id).copied().unwrap_or(false);
+            let locally_unlinked = local_unlinks.contains(id);
+            let draft_conflict = draft
+                .as_ref()
+                .is_some_and(|d| d.4 && !locally_unlinked && (d.1 != node.version || deleted));
+            let conflict = node_conflict || draft_conflict;
+            let parent_live = node.parent.as_deref().is_some_and(|parent| {
+                parents
+                    .get(parent)
+                    .is_some_and(|(_, _, directory, parent_deleted)| {
+                        *directory
+                            && !*parent_deleted
+                            && (!denied
+                                || self
+                                    .node(parent)
+                                    .ok()
+                                    .is_some_and(|node| node.directory))
+                    })
+            });
+            // Same set `blocks_upload` tests: this node plus every ancestor
+            // reachable through parent links (which may include a virtual
+            // namespace-overlay parent, hence the raw parent walk).
+            let mut namespace = false;
+            let mut current = Some(id.clone());
+            let mut seen = HashSet::new();
+            while let Some(state) = current {
+                if !seen.insert(state.clone()) {
+                    break;
+                }
+                if overlay.contains(&state) {
+                    namespace = true;
+                    break;
+                }
+                current = parents.get(&state).and_then(|(parent, _, _, _)| parent.clone());
+            }
+            let path = if id.as_str() == root {
+                String::new()
+            } else {
+                let mut parts = Vec::new();
+                let mut current = id.clone();
+                let mut seen = HashSet::new();
+                let mut resolved = true;
+                while current.as_str() != root {
+                    if parts.len() >= 128 || !seen.insert(current.clone()) {
+                        resolved = false;
+                        break;
+                    }
+                    let Some((parent, name, _, _)) = parents.get(&current) else {
+                        resolved = false;
+                        break;
+                    };
+                    parts.push(name.clone());
+                    match parent {
+                        Some(parent) => current = parent.clone(),
+                        None => {
+                            resolved = false;
+                            break;
+                        }
+                    }
+                }
+                if resolved {
+                    parts.reverse();
+                    parts.join("/")
+                } else {
+                    // Preserve the exact row-at-a-time error contract rather
+                    // than inventing a page-level error for malformed data.
+                    self.issue_path(root, id)?
+                }
+            };
+            batch.insert(
+                id.clone(),
+                (
+                    IssueFacts {
+                        node,
+                        dirty,
+                        blob,
+                        base,
+                        generation,
+                        deleted,
+                        draft,
+                        uncertain: op_uncertain || namespace_op_uncertain,
+                        conflict,
+                        reconcile_attempts: u32::try_from(attempts).unwrap_or(u32::MAX),
+                        namespace,
+                        local_creation: local_creations.contains(id),
+                        bound_identity: remote_aliases.contains_key(id),
+                        parent_live,
+                        locally_unlinked,
+                        alias_remote: remote_aliases.get(id).cloned(),
+                        unconfirmed_upload,
+                    },
+                    path,
+                ),
+            );
+        }
+        Ok(batch)
+    }
+
+    /// Decide the user-facing issue for one candidate from preloaded facts.
+    fn issue_decision(&self, id: &str, path: String, facts: &IssueFacts) -> Result<Option<SyncIssue>> {
+        let node = &facts.node;
+        let dirty = &facts.dirty;
+        let blob = &facts.blob;
+        let base = &facts.base;
+        let generation = facts.generation;
+        let deleted = facts.deleted;
+        let draft = &facts.draft;
+        let uncertain = facts.uncertain;
+        let conflict = facts.conflict;
+        if !uncertain && !conflict {
+            return Ok(None);
+        }
+        // The durable upload reconciliation budget is surfaced so the GUI can
+        // explain that automatic retries paused instead of implying a live wait.
+        let reconcile_attempts = facts.reconcile_attempts;
+        let reconcile_exhausted = reconcile_attempts >= crate::MAX_UPLOAD_RECONCILE_ATTEMPTS;
+        let namespace = facts.namespace;
+        let local_creation = facts.local_creation;
+        let bound_identity = facts.bound_identity;
+        let parent_live = facts.parent_live;
+        let locally_unlinked = facts.locally_unlinked;
+        let alias_remote = &facts.alias_remote;
+        let unconfirmed_upload = facts.unconfirmed_upload;
+
         let busy = self
             .handles
             .lock()
@@ -234,22 +669,9 @@ impl Store {
             } else {
                 (0, String::new(), false)
             };
-        let alias_remote: Option<String> = self
-            .db
-            .query_row(
-                "SELECT remote FROM remote_aliases WHERE node=?1",
-                [id],
-                |r| r.get(0),
-            )
-            .optional()?;
         // Discarding is limited to an unconfirmed local creation: the local
         // bytes were never acknowledged by the server and no remote identity is
         // bound, so deleting them cannot leave a dangling server object.
-        let unconfirmed_upload: bool = self.db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM operations WHERE kind='upload' AND node=?1 AND state IN ('uncertain','abandoned'))",
-            [id],
-            |r| r.get(0),
-        )?;
         let can_abandon_upload = !node.directory
             && local_creation
             && !bound_identity
@@ -314,7 +736,7 @@ impl Store {
             "commit_uncertain"
         } else if directory_plan.is_some() {
             "directory_creation_conflict"
-        } else if namespace || (node.directory && !bound_identity) || self.locally_unlinked(id)? {
+        } else if namespace || (node.directory && !bound_identity) || locally_unlinked {
             "namespace_conflict"
         } else if !parent_live {
             "parent_unavailable"
@@ -409,10 +831,19 @@ impl Store {
                 .collect::<std::result::Result<Vec<_>, _>>()?
         };
         let next = (ids.len() > 256).then(|| ids[255].clone());
+        let page: Vec<String> = ids.into_iter().take(256).collect();
+        let mut facts = self.issue_facts_batch(root, &page)?;
         let mut entries = Vec::new();
-        for id in ids.into_iter().take(256) {
-            if let Some(issue) = self.sync_issue(root, &id)? {
-                entries.push(issue)
+        for id in page {
+            let Some((candidate, path)) = facts.remove(&id) else {
+                // Defensive: never drop a candidate the paged query returned.
+                if let Some(issue) = self.sync_issue(root, &id)? {
+                    entries.push(issue);
+                }
+                continue;
+            };
+            if let Some(issue) = self.issue_decision(&id, path, &candidate)? {
+                entries.push(issue);
             }
         }
         Ok(IssuePage { entries, next })

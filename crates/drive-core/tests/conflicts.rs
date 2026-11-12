@@ -781,3 +781,155 @@ fn abandon_conflicted_remove_is_idempotent_and_terminal() {
         1
     );
 }
+
+fn add_raw_node(db: &rusqlite::Connection, id: &str, parent: &str, name: &str, directory: bool) {
+    db.execute(
+        "INSERT INTO nodes(id,parent,name,remote_version,directory) VALUES(?1,?2,?3,'v1',?4)",
+        rusqlite::params![id, parent, name, directory],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO node_metadata(node,size,mtime,mode) VALUES(?1,3,1,420)",
+        [id],
+    )
+    .unwrap();
+}
+
+/// The issue service has two contracts for the same data: the paged
+/// `sync_issues` (batched to avoid the issue #67 N+1 cost) and the row-at-a-time
+/// `sync_issue`. They must report exactly the same identities and byte-identical
+/// entries (reason, derived flags, path and decision token).
+fn assert_paged_issues_match_point_lookups(d: &tempfile::TempDir, s: &Store, root: &str) {
+    let ids: Vec<String> = {
+        let db = rusqlite::Connection::open(d.path().join("state.sqlite")).unwrap();
+        let mut q = db.prepare("SELECT id FROM nodes ORDER BY id").unwrap();
+        q.query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap()
+    };
+    let mut pointed = Vec::new();
+    for id in &ids {
+        if let Some(issue) = s.sync_issue(root, id).unwrap() {
+            pointed.push(issue);
+        }
+    }
+    let mut paged = Vec::new();
+    let mut after = String::new();
+    loop {
+        let page = s.sync_issues(root, &after).unwrap();
+        paged.extend(page.entries);
+        match page.next {
+            Some(next) => after = next,
+            None => break,
+        }
+    }
+    assert_eq!(
+        paged.iter().map(|i| &i.id).collect::<Vec<_>>(),
+        pointed.iter().map(|i| &i.id).collect::<Vec<_>>(),
+        "paged identities drifted from the point lookups"
+    );
+    for (paged_issue, pointed_issue) in paged.iter().zip(pointed.iter()) {
+        assert_eq!(
+            serde_json::to_value(paged_issue).unwrap(),
+            serde_json::to_value(pointed_issue).unwrap(),
+            "issue {} drifted between the paged and point lookup paths",
+            paged_issue.id
+        );
+    }
+}
+
+/// Issue #67 batching guard: one page with the full spread of issue reasons,
+/// derived flags and hidden candidates must match the point lookups exactly.
+#[test]
+fn paged_issue_entries_match_point_lookups_across_reasons() {
+    let (d, mut s) = fixture();
+    conflict(&mut s); // a: content conflict with a dirty local body
+    {
+        let db = rusqlite::Connection::open(d.path().join("state.sqlite")).unwrap();
+        add_raw_node(&db, "b", "root", "b.doc", false);
+        add_raw_node(&db, "c", "root", "c.doc", false);
+        add_raw_node(&db, "e", "root", "e.doc", false);
+        add_raw_node(&db, "p", "root", "p.doc", false);
+        add_raw_node(&db, "g", "p", "g.doc", false);
+        add_raw_node(&db, "h", "root", "h", true);
+        add_raw_node(&db, "l", "root", "l.doc", false);
+        add_raw_node(&db, "n", "root", "n.doc", false);
+        // b: a dirty draft diverged from the remote version is a conflict source.
+        db.execute(
+            "INSERT INTO drafts(node,token,base,generation,checkpoint,dirty) VALUES('b','11111111-1111-4111-8111-111111111111','v0',1,0,1)",
+            [],
+        )
+        .unwrap();
+        // c: an uncertain upload is commit_uncertain with a finite retry budget.
+        db.execute(
+            "INSERT INTO operations(id,node,kind,base,generation,state,reconcile_attempts) VALUES('op-c','c','upload','v1',1,'uncertain',3)",
+            [],
+        )
+        .unwrap();
+        // e: a tombstoned file that still holds its local body.
+        db.execute(
+            "UPDATE nodes SET deleted=1,dirty_blob='deadbeef',conflict=1 WHERE id='e'",
+            [],
+        )
+        .unwrap();
+        // g: its parent is a file, so the issue path is not actionable.
+        db.execute("UPDATE nodes SET conflict=1 WHERE id='g'", [])
+            .unwrap();
+        // h: a bound directory without surviving descendants stays hidden.
+        db.execute("UPDATE nodes SET conflict=1 WHERE id='h'", [])
+            .unwrap();
+        db.execute(
+            "INSERT INTO remote_aliases(remote,node) VALUES('900','h')",
+            [],
+        )
+        .unwrap();
+        // l: a tombstone without local content has no local recovery.
+        db.execute("UPDATE nodes SET deleted=1,conflict=1 WHERE id='l'", [])
+            .unwrap();
+        // n: a namespace-overlay row blocks the upload path.
+        db.execute("UPDATE nodes SET conflict=1 WHERE id='n'", [])
+            .unwrap();
+        db.execute(
+            "INSERT INTO namespace_overlay(node,remote) VALUES('n','{\"parent\":\"root\",\"name\":\"n.doc\"}')",
+            [],
+        )
+        .unwrap();
+    }
+    let created = s.create_local_file("root", "i.doc", 0o644).unwrap();
+    s.save_local(&created.id, b"mine").unwrap();
+    let local_dir = s.create_local_directory("root", "m", 0o755).unwrap();
+    {
+        let db = rusqlite::Connection::open(d.path().join("state.sqlite")).unwrap();
+        db.execute("UPDATE nodes SET conflict=1 WHERE id=?1", [&created.id])
+            .unwrap();
+        db.execute("UPDATE nodes SET conflict=1 WHERE id=?1", [&local_dir.id])
+            .unwrap();
+    }
+    assert_paged_issues_match_point_lookups(&d, &s, "root");
+    // The fixture must exercise the interesting decisions; otherwise the
+    // equivalence above would only prove that two empty pages agree.
+    let page = s.sync_issues("root", "").unwrap();
+    let reasons: std::collections::HashMap<_, _> =
+        page.entries.iter().map(|i| (i.id.as_str(), i.reason)).collect();
+    assert_eq!(reasons.get("a"), Some(&"content_conflict"));
+    assert_eq!(reasons.get("b"), Some(&"content_conflict"));
+    assert_eq!(reasons.get("c"), Some(&"commit_uncertain"));
+    assert_eq!(reasons.get("e"), Some(&"remote_deleted"));
+    assert_eq!(reasons.get("g"), Some(&"parent_unavailable"));
+    assert_eq!(reasons.get("l"), Some(&"local_content_unavailable"));
+    assert_eq!(reasons.get("n"), Some(&"namespace_conflict"));
+    assert_eq!(
+        reasons.get(created.id.as_str()),
+        Some(&"creation_conflict"),
+        "a locally created file with saved content keeps the creation decision"
+    );
+    assert!(
+        reasons.contains_key(local_dir.id.as_str()),
+        "a local directory conflict must stay actionable"
+    );
+    assert!(
+        !reasons.contains_key("h"),
+        "bound directory without survivors must stay hidden"
+    );
+}

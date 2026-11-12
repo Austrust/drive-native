@@ -685,7 +685,7 @@ impl<'db> SnapshotMetadataWriter<'db> {
     }
 }
 
-fn read_unsigned(row: &rusqlite::Row<'_>, column: usize) -> rusqlite::Result<u64> {
+pub(crate) fn read_unsigned(row: &rusqlite::Row<'_>, column: usize) -> rusqlite::Result<u64> {
     let value: i64 = row.get(column)?;
     value
         .try_into()
