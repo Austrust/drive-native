@@ -153,7 +153,7 @@ pub(crate) fn install_barrier_versions(db: &rusqlite::Connection) -> Result<()> 
         "CREATE TEMP TABLE IF NOT EXISTS dn_barrier_version(ops INTEGER NOT NULL, paths INTEGER NOT NULL);
          INSERT INTO dn_barrier_version(ops,paths) SELECT 0,0 WHERE NOT EXISTS(SELECT 1 FROM dn_barrier_version);
          CREATE TEMP TRIGGER IF NOT EXISTS dn_barrier_ops_insert AFTER INSERT ON main.namespace_ops BEGIN UPDATE dn_barrier_version SET ops=ops+1; END;
-         CREATE TEMP TRIGGER IF NOT EXISTS dn_barrier_ops_update AFTER UPDATE ON main.namespace_ops BEGIN UPDATE dn_barrier_version SET ops=ops+1; END;
+         CREATE TEMP TRIGGER IF NOT EXISTS dn_barrier_ops_update AFTER UPDATE OF kind, state, node ON main.namespace_ops BEGIN UPDATE dn_barrier_version SET ops=ops+1; END;
          CREATE TEMP TRIGGER IF NOT EXISTS dn_barrier_ops_delete AFTER DELETE ON main.namespace_ops BEGIN UPDATE dn_barrier_version SET ops=ops+1; END;
          CREATE TEMP TRIGGER IF NOT EXISTS dn_barrier_paths_update AFTER UPDATE OF parent,name ON main.nodes WHEN OLD.parent IS NOT NEW.parent OR OLD.name IS NOT NEW.name BEGIN UPDATE dn_barrier_version SET paths=paths+1; END;
          CREATE TEMP TRIGGER IF NOT EXISTS dn_barrier_paths_delete AFTER DELETE ON main.nodes BEGIN UPDATE dn_barrier_version SET paths=paths+1; END;",
@@ -329,12 +329,25 @@ impl Store {
         path: &str,
     ) -> Result<Option<UploadRemoveBarrier>> {
         let started = std::time::Instant::now();
+        let rebuilds_before = self.barrier.rebuilds;
         self.barrier.refresh(&self.db)?;
         let blocked = self.barrier.barrier(&self.db, node, path)?;
         let cache = &mut self.barrier;
         cache.calls += 1;
         cache.last_rows = cache.rows.len();
         cache.last_us = started.elapsed().as_micros() as u64;
+        if cache.rebuilds != rebuilds_before {
+            // #28 residual: one structured line per index rebuild, consumed by
+            // the service journal (stderr, key=value); `remove_barrier_stats`
+            // and the test accessor expose the same counters in-process.
+            let line = format!(
+                "level=info event=remove_barrier_rebuild calls={} rebuilds={} rows={} last_us={}",
+                cache.calls, cache.rebuilds, cache.last_rows, cache.last_us
+            );
+            eprintln!("{line}");
+            #[cfg(test)]
+            cache.diagnostics.push(line);
+        }
         Ok(blocked)
     }
     /// Barrier bookkeeping for tests and latency diagnostics: (calls, rebuilds,
