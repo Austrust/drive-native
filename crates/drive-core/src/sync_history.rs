@@ -227,17 +227,218 @@ fn append_sql(key: &str, node: &str, action: &str, result: &str, error: &str,
     )
 }
 
-/// Record a discovered server event inside its application transaction. This
-/// is deliberately not attached to status journal invalidations (local changes
-/// also invalidate that journal and are not remote synchronization events).
-pub(crate) fn record_remote_event(db: &Connection, event: &crate::Event) -> Result<()> {
-    let node = match &event.change {
-        crate::Change::Upsert(node) => node.id.as_str(),
-        crate::Change::Delete { id } => id.as_str(),
-    };
-    let local: String = db.query_row(
-        "SELECT COALESCE((SELECT node FROM remote_aliases WHERE remote=?1),?1)", [node], |r| r.get(0))?;
-    record(db, &format!("remote:{}", event.id), &local, "remote_change", "ok", None)
+/// History rows collected while one inbox batch is applied, written by a single
+/// multi-value statement before that application transaction commits.
+///
+/// The *content* of every row is captured at the moment its event is applied:
+/// `path_at_event` and `name` follow the namespace as it stands after that
+/// event, exactly like the previous one-row-per-event helper. Only the INSERT,
+/// the retention reservation and the sequence assignment are deferred, so the
+/// durability rule "history rows commit with the namespace write and the cursor
+/// never moves past missing history" is unchanged.
+pub(crate) struct RemoteHistoryBatch {
+    rows: Vec<RemoteHistoryRow>,
+}
+
+struct RemoteHistoryRow {
+    node: String,
+    name: String,
+    path: String,
+    root: String,
+    operation_key: String,
+}
+
+/// Bound one multi-value statement to this many rows. Six bound values per row
+/// keeps a full statement far below SQLite's variable limit.
+const MAX_ROWS_PER_INSERT: usize = 500;
+
+impl RemoteHistoryBatch {
+    pub(crate) fn new() -> Self {
+        Self { rows: Vec::new() }
+    }
+
+    /// Collect the history row for one discovered server event. This is
+    /// deliberately not attached to status journal invalidations (local changes
+    /// also invalidate that journal and are not remote synchronization events).
+    pub(crate) fn push_remote_event(
+        &mut self,
+        db: &Connection,
+        event: &crate::Event,
+    ) -> Result<()> {
+        let node = match &event.change {
+            crate::Change::Upsert(node) => node.id.as_str(),
+            crate::Change::Delete { id } => id.as_str(),
+        };
+        let local: String = db.query_row(
+            "SELECT COALESCE((SELECT node FROM remote_aliases WHERE remote=?1),?1)",
+            [node],
+            |r| r.get(0),
+        )?;
+        let (name, path, root) = namespace_path_at_event(db, &local)?;
+        self.rows.push(RemoteHistoryRow {
+            node: local,
+            name,
+            path,
+            root,
+            operation_key: format!("remote:{}", event.id),
+        });
+        Ok(())
+    }
+
+    /// Write the collected rows. Must run inside the caller's transaction,
+    /// before it commits and before `committed_cursor` advances.
+    pub(crate) fn finish(self, db: &Connection) -> Result<()> {
+        if self.rows.is_empty() {
+            return Ok(());
+        }
+        // Two events cannot share `remote:{id}` (`seen` rejects a reused id with
+        // different content) but keep the multi-value statement safe if a caller
+        // ever does: the last row wins, like two sequential UPSERTs.
+        let mut rows = Vec::with_capacity(self.rows.len());
+        let mut index: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for row in self.rows {
+            if let Some(&at) = index.get(&row.operation_key) {
+                rows[at] = row;
+            } else {
+                index.insert(row.operation_key.clone(), rows.len());
+                rows.push(row);
+            }
+        }
+        // Steady-state retention is reserved once per batch instead of once per
+        // event. The AFTER INSERT trigger keeps the hard cap for every other
+        // writer (and remains the fallback for a batch larger than the cap).
+        reserve(db, rows.len())?;
+        // Read the sequence base *after* the event loop: namespace workflow
+        // triggers started by this batch's own resolutions advance it too.
+        let base: i64 = db.query_row(
+            "SELECT CAST(value AS INTEGER) FROM metadata WHERE key='sync_history_sequence'",
+            [],
+            |r| r.get(0),
+        )?;
+        let mount: Option<String> = db.query_row(
+            "SELECT COALESCE((SELECT node FROM fs_inodes WHERE ino=1),
+               (SELECT CASE WHEN json_valid(value) THEN json_extract(value,'$.file_id') END
+                  FROM metadata WHERE key='native_scope'))",
+            [],
+            |r| r.get(0),
+        )?;
+        let add = i64::try_from(rows.len()).unwrap_or(i64::MAX);
+        let mut next = base;
+        for chunk in rows.chunks(MAX_ROWS_PER_INSERT) {
+            let mut sql = String::from(
+                "INSERT INTO sync_history(seq,mount,node,name,path_at_event,action,result,
+                   attempts,completed_at,operation_key) VALUES ",
+            );
+            for at in 0..chunk.len() {
+                if at > 0 {
+                    sql.push(',');
+                }
+                sql.push_str("(?,?,?,?,?,'remote_change','ok',1,unixepoch(),?)");
+            }
+            sql.push_str(
+                " ON CONFLICT(operation_key) DO UPDATE SET seq=excluded.seq,
+                   result=excluded.result,error_kind=excluded.error_kind,
+                   error_summary=excluded.error_summary,completed_at=excluded.completed_at",
+            );
+            let mut values: Vec<rusqlite::types::Value> = Vec::with_capacity(chunk.len() * 6);
+            for row in chunk {
+                next = next
+                    .checked_add(1)
+                    .ok_or_else(|| Error::State("sync history sequence exhausted".into()))?;
+                values.push(next.into());
+                values.push(match mount.as_deref() {
+                    Some(mount) => mount.to_owned().into(),
+                    None => row.root.clone().into(),
+                });
+                values.push(row.node.clone().into());
+                values.push(row.name.clone().into());
+                values.push(row.path.clone().into());
+                values.push(row.operation_key.clone().into());
+            }
+            db.execute(&sql, rusqlite::params_from_iter(values))?;
+        }
+        db.execute(
+            "UPDATE metadata SET value=CAST(value AS INTEGER)+?1
+               WHERE key='sync_history_sequence'",
+            [add],
+        )?;
+        Ok(())
+    }
+}
+
+/// One-time per batch retention reservation. Expiring day-old rows and deleting
+/// the excess from the oldest end in single statements replaces the per-event
+/// trigger eviction; the trigger stays installed as the hard cap for all other
+/// writers.
+fn reserve(db: &Connection, add: usize) -> Result<()> {
+    db.execute(
+        "DELETE FROM sync_history
+          WHERE completed_at < unixepoch()-86400*(SELECT CAST(value AS INTEGER) FROM metadata WHERE key='sync_history_days')",
+        [],
+    )?;
+    let cap: i64 = db
+        .query_row(
+            "SELECT CAST(value AS INTEGER) FROM metadata WHERE key='sync_history_records'",
+            [],
+            |r| r.get(0),
+        )
+        .optional()?
+        .unwrap_or(i64::from(DEFAULT_RETENTION_RECORDS));
+    let rows: i64 = db
+        .query_row(
+            "SELECT CAST(value AS INTEGER) FROM metadata WHERE key='sync_history_rows'",
+            [],
+            |r| r.get(0),
+        )
+        .optional()?
+        .unwrap_or(0);
+    let excess = rows
+        .saturating_add(i64::try_from(add).unwrap_or(i64::MAX))
+        .saturating_sub(cap);
+    if excess > 0 {
+        db.execute(
+            "DELETE FROM sync_history WHERE seq IN
+               (SELECT seq FROM sync_history ORDER BY seq LIMIT ?1)",
+            [excess],
+        )?;
+    }
+    Ok(())
+}
+
+/// Name, mount-relative path and walked root of `node`, using the committed
+/// node rows as they stand at this instant. This is the same walk `record()`
+/// performs; it is kept separate so a batch captures `path_at_event` when the
+/// event applies instead of recomputing it at commit time.
+fn namespace_path_at_event(db: &Connection, node: &str) -> Result<(String, String, String)> {
+    let mut parts = Vec::new();
+    let mut cursor = Some(node.to_owned());
+    let mut seen = std::collections::HashSet::new();
+    let mut name = String::new();
+    let mut root = String::new();
+    while let Some(id) = cursor.take() {
+        if !seen.insert(id.clone()) {
+            return Err(Error::State("namespace path cycle".into()));
+        }
+        let row: Option<(Option<String>, String)> = db
+            .query_row("SELECT parent,name FROM nodes WHERE id=?1", [&id], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .optional()?;
+        let Some((parent, current_name)) = row else {
+            break;
+        };
+        if name.is_empty() {
+            name = current_name.clone();
+        }
+        if parent.is_some() {
+            parts.push(current_name);
+        } else {
+            root = id;
+        }
+        cursor = parent;
+    }
+    parts.reverse();
+    Ok((name, parts.join("/"), root))
 }
 
 /// Called by content publication *before* its transaction commits. This also

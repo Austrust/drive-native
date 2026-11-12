@@ -123,6 +123,28 @@ pub struct Batch {
     pub events: Vec<Event>,
 }
 
+/// Result of applying one bounded slice of an inbox receipt (issue #67 W2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ApplyChunk {
+    /// No inbox receipt is waiting.
+    Idle,
+    /// This slice committed, but the receipt still has unapplied events. The
+    /// inbox row and `committed_cursor` are unchanged; call again to continue.
+    Partial { applied: usize },
+    /// The receipt was fully applied: this transaction also deleted the inbox
+    /// row and advanced `committed_cursor`.
+    Done { applied: usize },
+}
+
+/// Non-durable cursor inside the receipt `apply_chunk` is applying. A restart
+/// replays the receipt from the start and `seen` skips the prefix whose events
+/// an earlier chunk already committed; nothing here is persisted.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ApplyProgress {
+    inbox_seq: i64,
+    next: usize,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Status {
     OnlineOnly,
@@ -196,6 +218,10 @@ pub struct Store {
     _writer_lock: Option<WriterLock>,
     // #28: incremental remove-barrier index; empty on read-only handles.
     pub(crate) barrier: crate::removals::RemoveBarrierCache,
+    /// Position inside the inbox receipt a chunked apply is in progress on.
+    /// In-memory only: recovery replays the receipt and `seen` is the durable
+    /// idempotency boundary.
+    pub(crate) apply_progress: Option<ApplyProgress>,
 }
 
 /// Counters that make the draft write path observable without tracing every
@@ -945,6 +971,7 @@ impl Store {
             default_draft_quota: crate::drafts::default_draft_quota_bytes(disk_total),
             permission_cache: Mutex::new(crate::write_permissions::PermissionCache::new()),
             barrier: Default::default(),
+            apply_progress: None,
         };
         // Bound bookkeeping written before schema 28 (superseded operations,
         // old terminal namespace history, applied inbox receipts, duplicate
@@ -1018,6 +1045,7 @@ impl Store {
             default_draft_quota: crate::drafts::default_draft_quota_bytes(disk_total),
             permission_cache: Mutex::new(crate::write_permissions::PermissionCache::new()),
             barrier: Default::default(),
+            apply_progress: None,
         })
     }
     /// Issue #60: additive migration-backup storage diagnostics. Read-only
@@ -1313,7 +1341,24 @@ impl Store {
         Ok(())
     }
 
+    /// Apply the whole oldest pending inbox receipt in one transaction.
+    ///
+    /// This is `apply_chunk(usize::MAX)`: the receipt, its events, the applied
+    /// event rows deletion and `committed_cursor` still commit atomically, so
+    /// every caller that wants the original transaction boundary keeps it.
     pub fn apply_next(&mut self) -> Result<bool> {
+        Ok(matches!(self.apply_chunk(usize::MAX)?, ApplyChunk::Done { .. }))
+    }
+
+    /// Apply at most `max_events` events of the oldest pending inbox receipt.
+    ///
+    /// A receipt larger than one chunk commits in several transactions. The
+    /// inbox row and `committed_cursor` only move in the transaction that
+    /// applies the receipt's last event, so the durable recovery contract is
+    /// unchanged: a crash between chunks replays the whole receipt and `seen`
+    /// makes the already-committed prefix idempotent. `history` rows commit with
+    /// the events that produced them in every chunk.
+    pub fn apply_chunk(&mut self, max_events: usize) -> Result<ApplyChunk> {
         if self.initialization_writeback_blocked()? {
             return Err(Error::State(
                 "initialization: candidate active; ordinary inbox blocked".into(),
@@ -1328,9 +1373,21 @@ impl Store {
             )
             .optional()?;
         let Some((seq, body)) = next else {
-            return Ok(false);
+            self.apply_progress = None;
+            return Ok(ApplyChunk::Idle);
         };
         let batch: Batch = serde_json::from_str(&body)?;
+        let start = match self.apply_progress {
+            Some(progress)
+                if progress.inbox_seq == seq && progress.next <= batch.events.len() =>
+            {
+                progress.next
+            }
+            _ => 0,
+        };
+        let end = start
+            .saturating_add(max_events.max(1))
+            .min(batch.events.len());
         let tx = self.db.transaction()?;
         let cursor: String = tx.query_row(
             "SELECT value FROM metadata WHERE key='committed_cursor'",
@@ -1340,7 +1397,9 @@ impl Store {
         if cursor != batch.from {
             return Err(Error::State("inbox cursor mismatch".into()));
         }
-        for event in &batch.events {
+        let mut history = sync_history::RemoteHistoryBatch::new();
+        let mut mark_inode_map = false;
+        for event in &batch.events[start..end] {
             let payload = serde_json::to_string(&event.change)?;
             let prior: Option<String> = tx
                 .query_row("SELECT body FROM seen WHERE id=?1", [&event.id], |r| {
@@ -1370,9 +1429,10 @@ impl Store {
                         conflict=CASE WHEN nodes.dirty_blob IS NOT NULL AND nodes.base_version!=excluded.remote_version AND NOT EXISTS(SELECT 1 FROM local_unlinks WHERE node=nodes.id) THEN 1 ELSE nodes.conflict END",
                         params![n.id,n.parent,n.name,n.version,n.directory])?;
                         crate::filesystem::write_metadata(&tx, n)?;
-                        // The next mount must backfill any node this event
-                        // created; the O(1) hint is only a hint.
-                        crate::filesystem::mark_inode_map_incomplete(&tx)?;
+                        // The next mount must backfill any node this chunk
+                        // created; the O(1) hint is only a hint and one write
+                        // per transaction is enough.
+                        mark_inode_map = true;
                     }
                     Change::Delete { id } => {
                         tx.execute("WITH RECURSIVE subtree(id) AS (SELECT ?1 UNION SELECT n.id FROM nodes n JOIN subtree s ON n.parent=s.id)
@@ -1384,19 +1444,42 @@ impl Store {
                 "INSERT INTO seen VALUES (?1,?2)",
                 params![event.id, payload],
             )?;
-            sync_history::record_remote_event(&tx, event)?;
+            history.push_remote_event(&tx, event)?;
         }
-        // An applied receipt is never read again: deleting it in the same
-        // transaction keeps the inbox bounded (the `inbox_pending` index only
-        // ever walks unapplied rows). Resent bodies cannot reappear here because
-        // the cursor contract rejects a regressed batch before insertion.
-        tx.execute("DELETE FROM inbox WHERE seq=?1", [seq])?;
-        tx.execute(
-            "UPDATE metadata SET value=?1 WHERE key='committed_cursor'",
-            [batch.to],
-        )?;
+        if mark_inode_map {
+            crate::filesystem::mark_inode_map_incomplete(&tx)?;
+        }
+        // Collected rows are written before this chunk commits, in the same
+        // transaction as the namespace writes they describe.
+        history.finish(&tx)?;
+        let done = end == batch.events.len();
+        if done {
+            // An applied receipt is never read again: deleting it in the same
+            // transaction keeps the inbox bounded (the `inbox_pending` index
+            // only ever walks unapplied rows). Resent bodies cannot reappear
+            // here because the cursor contract rejects a regressed batch before
+            // insertion.
+            tx.execute("DELETE FROM inbox WHERE seq=?1", [seq])?;
+            tx.execute(
+                "UPDATE metadata SET value=?1 WHERE key='committed_cursor'",
+                [batch.to],
+            )?;
+        }
         tx.commit()?;
-        Ok(true)
+        if done {
+            self.apply_progress = None;
+            Ok(ApplyChunk::Done {
+                applied: end - start,
+            })
+        } else {
+            self.apply_progress = Some(ApplyProgress {
+                inbox_seq: seq,
+                next: end,
+            });
+            Ok(ApplyChunk::Partial {
+                applied: end - start,
+            })
+        }
     }
     pub fn drain(&mut self) -> Result<()> {
         while self.apply_next()? {}
