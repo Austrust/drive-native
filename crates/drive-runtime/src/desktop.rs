@@ -425,6 +425,14 @@ mod counters {
         static RESOLVE_CALLS: Cell<usize> = Cell::new(0);
         static JSON_SERIALIZATIONS: Cell<usize> = Cell::new(0);
         static JSON_PARSES: Cell<usize> = Cell::new(0);
+        /// Issue #67 W1: completed full-projection tree loads/renders on this
+        /// thread. A warm batch must reuse the committed render, so this only
+        /// grows on a projection-generation miss (or the historical fallback).
+        static PROJECTION_TREE_LOADS: Cell<usize> = Cell::new(0);
+        /// Issue #67 W1: batches answered from the committed render cache.
+        static ENTRY_CACHE_HITS: Cell<usize> = Cell::new(0);
+        /// Issue #67 W1: full committed renders published to the cache.
+        static ENTRY_CACHE_BUILDS: Cell<usize> = Cell::new(0);
     }
     pub(super) fn bump(counter: &'static std::thread::LocalKey<Cell<usize>>) {
         counter.with(|value| value.set(value.get() + 1));
@@ -433,6 +441,31 @@ mod counters {
         RESOLVE_CALLS.with(|value| value.set(0));
         JSON_SERIALIZATIONS.with(|value| value.set(0));
         JSON_PARSES.with(|value| value.set(0));
+    }
+    pub(super) fn count_projection_tree_load() {
+        PROJECTION_TREE_LOADS.with(|value| value.set(value.get() + 1));
+    }
+    pub(super) fn reset_projection_tree_loads() {
+        PROJECTION_TREE_LOADS.with(|value| value.set(0));
+    }
+    pub(super) fn projection_tree_loads() -> usize {
+        PROJECTION_TREE_LOADS.with(Cell::get)
+    }
+    pub(super) fn count_entry_cache_hit() {
+        ENTRY_CACHE_HITS.with(|value| value.set(value.get() + 1));
+    }
+    pub(super) fn count_entry_cache_build() {
+        ENTRY_CACHE_BUILDS.with(|value| value.set(value.get() + 1));
+    }
+    pub(super) fn entry_cache_hits() -> usize {
+        ENTRY_CACHE_HITS.with(Cell::get)
+    }
+    pub(super) fn entry_cache_builds() -> usize {
+        ENTRY_CACHE_BUILDS.with(Cell::get)
+    }
+    pub(super) fn reset_entry_cache_counters() {
+        ENTRY_CACHE_HITS.with(|value| value.set(0));
+        ENTRY_CACHE_BUILDS.with(|value| value.set(0));
     }
     pub(super) fn resolve_calls() -> usize {
         RESOLVE_CALLS.with(Cell::get)
@@ -468,7 +501,10 @@ fn load_tree_with_projection<'p>(
     match status_tree::StatusTree::load_with_projection(store, projection, &roots) {
         Ok(tree) => {
             #[cfg(test)]
-            PROJECTION_TREE_LOADS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            {
+                PROJECTION_TREE_LOADS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                counters::count_projection_tree_load();
+            }
             Ok(Some(tree))
         }
         Err(_) => load_tree(store, resolved),
@@ -510,6 +546,242 @@ fn render_entries(
     }
     out
 }
+/// Issue #67 W1: one rendered entry, kept without the id string the map key
+/// already owns. `sync_error` is boxed so the common `None` stays small; the
+/// committed render is retained for every visible node.
+#[derive(Clone)]
+struct CachedEntry {
+    directory: bool,
+    status: &'static str,
+    pinned: bool,
+    offline_available: bool,
+    sync_error: Option<Box<drive_core::download_jobs::DownloadFailure>>,
+}
+/// Everything a warm batch render depends on: the committed projection
+/// generation, the committed Store state its seeds/details were read from, and
+/// the active-download set (which changes file and folder status labels).
+#[derive(Clone, PartialEq, Eq)]
+struct EntriesCacheKey {
+    generation: u64,
+    commit: drive_core::shared_store::CommitState,
+    active: HashSet<String>,
+}
+/// One committed-projection render (issue #67 W1).
+///
+/// `entries` is `None` when this generation cannot be rendered (a stale
+/// identity inside the projection, or a node whose detail could not be read).
+/// Every batch on that key then keeps the historical projection-or-scoped path
+/// instead of retrying the O(#nodes) render on every request.
+pub(crate) struct CachedProjectionEntries {
+    key: EntriesCacheKey,
+    entries: Option<HashMap<String, CachedEntry>>,
+}
+fn cached_from_entry(entry: EntryState) -> CachedEntry {
+    CachedEntry {
+        directory: entry.directory,
+        status: entry.status,
+        pinned: entry.pinned,
+        offline_available: entry.offline_available,
+        sync_error: entry.sync_error.map(Box::new),
+    }
+}
+fn render_cached_entry(id: &str, entry: &CachedEntry) -> EntryState {
+    EntryState {
+        id: id.to_owned(),
+        directory: entry.directory,
+        status: entry.status,
+        pinned: entry.pinned,
+        offline_available: entry.offline_available,
+        sync_error: entry.sync_error.as_deref().cloned(),
+    }
+}
+/// Render a batch from a committed entry map. `None` means the map cannot
+/// describe the batch (a resolved node is absent because the projection cannot
+/// see it yet, or its detail read failed), so the caller keeps the historical
+/// path instead of caching an error into the response.
+fn render_cached_batch(
+    entries: &HashMap<String, CachedEntry>,
+    resolved: &[(String, io::Result<Node>)],
+) -> Option<Vec<PathState>> {
+    let mut out = Vec::with_capacity(resolved.len());
+    for (path, node) in resolved {
+        match node {
+            Ok(node) => {
+                let entry = entries.get(&node.id)?;
+                // The seed's directory flag is part of the projection; a fresh
+                // resolve that disagrees means the projection moved under us.
+                if entry.directory != node.directory {
+                    return None;
+                }
+                out.push(PathState {
+                    path: path.clone(),
+                    entry: Some(render_cached_entry(&node.id, entry)),
+                    error: None,
+                });
+            }
+            Err(_) => out.push(PathState {
+                path: path.clone(),
+                entry: None,
+                error: Some("path_or_local_state_unavailable"),
+            }),
+        }
+    }
+    Some(out)
+}
+/// Whether the committed projection can describe every resolvable root of the
+/// batch, including its ancestor chain. This is the same acceptance rule
+/// [`status_tree::StatusTree::load_with_projection`] applies before falling back
+/// to the scoped read, checked *before* paying for a full render.
+fn projection_covers(
+    projection: &StatusProjection,
+    resolved: &[(String, io::Result<Node>)],
+) -> bool {
+    for (_, node) in resolved {
+        let Ok(node) = node else { continue };
+        let mut cursor = Some(node.id.as_str());
+        let mut hops = 0usize;
+        while let Some(id) = cursor {
+            hops += 1;
+            if hops > 128 {
+                return false;
+            }
+            let Some(seed) = projection.seed(id) else {
+                return false;
+            };
+            cursor = seed.parent.as_deref();
+        }
+    }
+    true
+}
+/// A built render plus whether the aggregation completed. An incomplete render
+/// keeps its finished subtrees (they are valid) and the caller never reports the
+/// missing ones as errors.
+struct BuiltProjectionRender {
+    entries: HashMap<String, CachedEntry>,
+    complete: bool,
+}
+/// Build every entry of the committed projection (issue #67 W1). The render is
+/// exactly the aggregation the historical path would run for a namespace-root
+/// batch: `roots = [scope root]` gives the walk the whole projection, so one
+/// pass fills the entry map for every node. `None` means the projection cannot
+/// describe the tree; the caller keeps the scoped fallback.
+fn build_projection_entries(
+    store: &Store,
+    projection: &StatusProjection,
+    root_id: &str,
+    active: &HashSet<String>,
+) -> Option<BuiltProjectionRender> {
+    let tree =
+        status_tree::StatusTree::load_with_projection(store, projection, &[root_id.to_owned()])
+            .ok()?;
+    #[cfg(test)]
+    {
+        PROJECTION_TREE_LOADS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        counters::count_projection_tree_load();
+    }
+    let mut tree = Some(tree);
+    let mut memo = HashMap::new();
+    // A failed aggregation is reported to the caller, but every completed
+    // subtree still stays in `memo` and is reusable.
+    let complete = entry(
+        Some(store),
+        root_id,
+        true,
+        active,
+        &mut memo,
+        &mut HashSet::new(),
+        &mut tree,
+        0,
+    )
+    .is_ok();
+    Some(BuiltProjectionRender {
+        entries: memo
+            .into_iter()
+            .map(|(id, entry)| (id, cached_from_entry(entry)))
+            .collect(),
+        complete,
+    })
+}
+/// Answer a warm batch from the committed render cache (issue #67 W1).
+///
+/// The cache is only an accelerator: every miss, projection inconsistency,
+/// state movement or unrepresentable path returns `None` so the caller runs the
+/// historical projection-or-scoped path unchanged. A hit renders only the
+/// requested rows, which is O(#paths) instead of O(#nodes).
+fn cached_projection_entries(
+    store: &Store,
+    service: &Service,
+    projection: &StatusProjection,
+    resolved: &[(String, io::Result<Node>)],
+    active: &HashSet<String>,
+) -> Option<Vec<PathState>> {
+    if !service.desktop_entries_cache_enabled() {
+        return None;
+    }
+    // File-only batches never build a tree on the historical path; keep it.
+    if tree_roots(resolved).is_none() {
+        return None;
+    }
+    let key = EntriesCacheKey {
+        generation: projection.generation(),
+        commit: service.bridge.store.change_state(),
+        active: active.clone(),
+    };
+    // Single flight: a miss holds this mutex across the one full render, so
+    // concurrent warm batches wait for it instead of repeating the O(#nodes)
+    // walk. A key match is terminal for the cache (hit, or the historical path
+    // when this generation cannot be rendered).
+    let mut cache = service.desktop_entries_cache();
+    if cache.as_ref().is_some_and(|cache| cache.key == key) {
+        let hit = cache
+            .as_ref()
+            .and_then(|cache| cache.entries.as_ref())
+            .and_then(|entries| render_cached_batch(entries, resolved));
+        if hit.is_some() {
+            #[cfg(test)]
+            counters::count_entry_cache_hit();
+        }
+        return hit;
+    }
+    // A projection that cannot describe a root is what the historical path
+    // detects and repairs with its scoped fallback; do not pay for a render
+    // first.
+    if !projection_covers(projection, resolved) {
+        return None;
+    }
+    let built = build_projection_entries(store, projection, &service.profile.scope.file_id, active);
+    // Only publish when nothing committed and no newer projection appeared
+    // while the render was built: a mixed-generation render is never cached.
+    let publishable = service.bridge.store.change_state() == key.commit
+        && service
+            .status_projection()
+            .is_some_and(|current| current.generation() == key.generation);
+    let built = match built {
+        Some(built) => built,
+        None => {
+            if publishable {
+                *cache = Some(CachedProjectionEntries { key, entries: None });
+            }
+            return None;
+        }
+    };
+    if built.complete && publishable {
+        #[cfg(test)]
+        counters::count_entry_cache_build();
+    }
+    let rendered = render_cached_batch(&built.entries, resolved);
+    if publishable {
+        *cache = Some(CachedProjectionEntries {
+            key,
+            entries: built.complete.then_some(built.entries),
+        });
+        return rendered;
+    }
+    // A commit landed while the render was built: serve this batch from it (the
+    // same committed projection the historical path would have used) but never
+    // publish it.
+    rendered
+}
 /// Covered entries for a batch whose paths are already resolved: the same
 /// projection-or-scoped choice as [`states_off_lock`], without resolving again.
 fn entries_off_lock(
@@ -521,6 +793,13 @@ fn entries_off_lock(
     // A ready projection answers folder aggregation without another scoped SQL
     // read; unready (None) keeps the authoritative scoped read.
     let projection = service.status_projection();
+    if let Some(projection) = projection.as_deref() {
+        if let Some(entries) =
+            cached_projection_entries(store, service, projection, &resolved, active)
+        {
+            return Ok(entries);
+        }
+    }
     let mut tree = match projection.as_deref() {
         Some(projection) => load_tree_with_projection(store, projection, &resolved)?,
         None => load_tree(store, &resolved)?,
@@ -2712,6 +2991,259 @@ mod readpath_tests {
             service.bridge.store.local_revision()
         );
         assert!(service.bridge.store.local_revision() > before_revision);
+    }
+
+    /// Issue #67 W1: every warm `GetStates` batch on a ready projection used to
+    /// build the whole `wanted` subtree, batch-load every detailed seed and
+    /// re-aggregate the entire tree. The render is a pure function of the
+    /// committed projection generation, so repeated warm batches must reuse one
+    /// render: no second full-tree load while the committed state is unchanged.
+    #[test]
+    fn warm_projection_batches_reuse_one_render() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(dir.path()).unwrap();
+        let mut nodes = vec![node("root", None, true)];
+        let folders = 32usize;
+        for folder in 0..folders {
+            let folder_id = format!("d{folder:03}");
+            nodes.push(node(&folder_id, Some("root"), true));
+            for file in 0..80 {
+                nodes.push(node(
+                    &format!("f{folder:03}-{file:03}"),
+                    Some(&folder_id),
+                    false,
+                ));
+            }
+        }
+        store
+            .install_remote_snapshot(&nodes, "1", "server")
+            .unwrap();
+        store.ensure_fs_root("root").unwrap();
+        let service =
+            Service::new(profile(), store, PathBuf::from("/nonexistent-worker")).unwrap();
+        let tasks = service.clone().start();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while service.status_projection().is_none() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "status projection did not become ready within 10s"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let root_paths = vec![".".to_string()];
+        let page_paths: Vec<String> = (0..folders).map(|f| format!("d{f:03}")).collect();
+        let root_first = states(&service, root_paths.clone()).unwrap();
+        let page_first = states(&service, page_paths.clone()).unwrap();
+        super::counters::reset_projection_tree_loads();
+        super::counters::reset_entry_cache_counters();
+        let root_second = states(&service, root_paths).unwrap();
+        let page_second = states(&service, page_paths).unwrap();
+        let rewalked = super::counters::projection_tree_loads();
+        let builds = super::counters::entry_cache_builds();
+        let hits = super::counters::entry_cache_hits();
+        service.shutdown();
+        tasks.join();
+        assert_eq!(root_first, root_second, "warm root render changed");
+        assert_eq!(page_first, page_second, "warm root-page render changed");
+        assert_eq!(
+            builds, 0,
+            "warm GetStates rebuilt the committed render {builds} time(s)"
+        );
+        assert_eq!(
+            hits, 2,
+            "both warm batches must be answered by the committed render, got {hits} hit(s)"
+        );
+        assert_eq!(
+            rewalked, 0,
+            "warm GetStates re-walked the committed projection {rewalked} time(s); \
+             every warm batch must reuse the one committed render"
+        );
+    }
+
+    /// Issue #67 W1: the committed render is a pure accelerator. Every batch it
+    /// answers must stay field-for-field identical to the historical projection
+    /// render, across committed changes that move the projection generation
+    /// (pin, download publication, namespace edit, dirty draft).
+    #[test]
+    fn cached_projection_render_matches_uncached_render() {
+        use drive_core::{DownloadTicket, sha256};
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(dir.path()).unwrap();
+        let mut nodes = vec![
+            node("root", None, true),
+            node("folder", Some("root"), true),
+            node("sub", Some("folder"), true),
+            node("one", Some("sub"), false),
+            node("two", Some("folder"), false),
+            node("other", Some("root"), true),
+            node("file", Some("other"), false),
+        ];
+        store
+            .install_remote_snapshot(&nodes, "1", "server")
+            .unwrap();
+        store.ensure_fs_root("root").unwrap();
+        let body = b"abc";
+        store
+            .publish_download(
+                &DownloadTicket {
+                    id: "one".into(),
+                    version: "v1".into(),
+                },
+                body,
+                &sha256(body),
+            )
+            .unwrap();
+        store.pin("folder", true).unwrap();
+        let draft = store.begin_draft("two", "v1", None).unwrap();
+        store.draft_write(&draft, 0, b"pending", false).unwrap();
+        let service =
+            Service::new(profile(), store, PathBuf::from("/nonexistent-worker")).unwrap();
+        let tasks = service.clone().start();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while service.status_projection().is_none() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "status projection did not become ready within 10s"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let batches = vec![
+            vec![".".to_string()],
+            vec!["folder".to_string(), "sub".to_string()],
+            vec![
+                "folder".to_string(),
+                "sub".to_string(),
+                "one".to_string(),
+                "two".to_string(),
+                "file".to_string(),
+                "missing".to_string(),
+            ],
+            vec!["other".to_string()],
+        ];
+        let generation = |service: &Arc<Service>| {
+            service
+                .status_projection()
+                .map(|projection| projection.generation())
+                .unwrap_or(0)
+        };
+        let wait_generation = |after: u64| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while generation(&service) <= after {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "status projection did not advance past generation {after}"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            // A paged journal replay can publish more than once for one append;
+            // let the worker settle before comparing renders.
+            loop {
+                let stable = generation(&service);
+                std::thread::sleep(std::time::Duration::from_millis(400));
+                if generation(&service) == stable {
+                    break;
+                }
+            }
+        };
+        let mut compare = |label: &str| {
+            for _ in 0..3 {
+                // Two warm calls per batch: the first may rebuild after a
+                // committed change, the second must be a committed-render hit.
+                let before_generation = generation(&service);
+                let before_commit = service.bridge.store.change_state();
+                let mut renders = Vec::with_capacity(batches.len());
+                super::counters::reset_entry_cache_counters();
+                for paths in &batches {
+                    let first = states(&service, paths.clone()).unwrap();
+                    let second = states(&service, paths.clone()).unwrap();
+                    renders.push((first, second));
+                }
+                let builds = super::counters::entry_cache_builds();
+                let hits = super::counters::entry_cache_hits();
+                service.set_desktop_entries_cache_enabled(false);
+                let uncached: Vec<String> = batches
+                    .iter()
+                    .map(|paths| states(&service, paths.clone()).unwrap())
+                    .collect();
+                service.set_desktop_entries_cache_enabled(true);
+                if generation(&service) != before_generation
+                    || service.bridge.store.change_state() != before_commit
+                {
+                    // A background publish/commit raced this round; rerun on
+                    // the settled generation instead of comparing mixed views.
+                    continue;
+                }
+                for (index, ((first, second), legacy)) in
+                    renders.iter().zip(uncached.iter()).enumerate()
+                {
+                    assert_eq!(
+                        first, legacy,
+                        "{label}: batch {index} rendered from the committed cache differs \
+                         from the historical render"
+                    );
+                    assert_eq!(
+                        second, legacy,
+                        "{label}: batch {index} warm hit differs from the historical render"
+                    );
+                }
+                assert_eq!(
+                    builds, 1,
+                    "{label}: one committed render must serve every batch of the generation"
+                );
+                assert_eq!(
+                    hits,
+                    2 * batches.len() - 1,
+                    "{label}: every warm batch must hit the committed render"
+                );
+                return;
+            }
+            panic!("{label}: the committed projection kept moving during the comparison");
+        };
+        compare("initial");
+        let before = generation(&service);
+        {
+            let mut store = service.bridge.store.lock().unwrap();
+            store.pin("sub", true).unwrap();
+        }
+        wait_generation(before);
+        compare("after pin");
+        let before = generation(&service);
+        {
+            let mut store = service.bridge.store.lock().unwrap();
+            store
+                .publish_download(
+                    &DownloadTicket {
+                        id: "file".into(),
+                        version: "v1".into(),
+                    },
+                    body,
+                    &sha256(body),
+                )
+                .unwrap();
+        }
+        wait_generation(before);
+        compare("after download publication");
+        let before = generation(&service);
+        nodes.push(node("three", Some("root"), true));
+        nodes.push(node("inner", Some("three"), false));
+        {
+            let mut store = service.bridge.store.lock().unwrap();
+            store
+                .install_remote_snapshot(&nodes, "2", "server")
+                .unwrap();
+        }
+        wait_generation(before);
+        compare("after namespace edit");
+        let before = generation(&service);
+        {
+            let mut store = service.bridge.store.lock().unwrap();
+            let draft = store.begin_draft("inner", "v1", None).unwrap();
+            store.draft_write(&draft, 0, b"pending", false).unwrap();
+        }
+        wait_generation(before);
+        compare("after dirty draft");
+        service.shutdown();
+        tasks.join();
     }
 }
 
