@@ -933,7 +933,7 @@ fn local_creation_and_removal_flow_into_the_projection() {
 /// while the directory's aggregate status is silently wrong.
 #[test]
 fn hidden_to_visible_subtree_invalidations_are_recognized() {
-    use super::{build_children, subtree_needs_refresh};
+    use super::{ProjectionBase, ProjectionView, build_children, subtree_needs_refresh};
     use drive_core::status_changes::{ChangeScope, StatusChange};
     use std::collections::HashMap;
 
@@ -977,6 +977,18 @@ fn hidden_to_visible_subtree_invalidations_are_recognized() {
     rows.insert("d".into(), seed("d", Some("root"), true));
     rows.insert("f".into(), seed("f", Some("d"), false));
     let children = build_children(&rows);
+    let base = ProjectionBase {
+        rows,
+        children,
+        len: 3,
+    };
+    let row_delta = HashMap::new();
+    let child_delta = HashMap::new();
+    let view = ProjectionView {
+        base: &base,
+        rows: &row_delta,
+        children: &child_delta,
+    };
 
     // (a) overlay edit that points hidden `p` back at the visible parent `d`.
     let overlay_reveal = change(
@@ -987,14 +999,14 @@ fn hidden_to_visible_subtree_invalidations_are_recognized() {
         Some("d"),
     );
     assert!(
-        subtree_needs_refresh(&rows, &children, &overlay_reveal),
+        subtree_needs_refresh(&view, &overlay_reveal),
         "an overlay edit that reveals a hidden directory must refresh its subtree"
     );
 
     // (b) move of the hidden directory out of the denied subtree.
     let move_reveal = change("nodes", Some("p"), Some("p"), Some("D"), Some("d"));
     assert!(
-        subtree_needs_refresh(&rows, &children, &move_reveal),
+        subtree_needs_refresh(&view, &move_reveal),
         "moving a hidden directory into visibility must refresh its subtree"
     );
 
@@ -1008,13 +1020,12 @@ fn hidden_to_visible_subtree_invalidations_are_recognized() {
         Some("root"),
         Some("root"),
     );
-    assert!(!subtree_needs_refresh(&rows, &children, &acl_hide));
+    assert!(!subtree_needs_refresh(&view, &acl_hide));
 
     // Controls: row-local writes must not widen into a subtree query.
     let visible_file_move = change("nodes", Some("f"), Some("f"), Some("d"), Some("root"));
     assert!(!subtree_needs_refresh(
-        &rows,
-        &children,
+        &view,
         &visible_file_move
     ));
     let visible_file_overlay = change(
@@ -1025,18 +1036,17 @@ fn hidden_to_visible_subtree_invalidations_are_recognized() {
         Some("d"),
     );
     assert!(!subtree_needs_refresh(
-        &rows,
-        &children,
+        &view,
         &visible_file_overlay
     ));
     let rename = change("nodes", Some("d"), Some("d"), Some("root"), Some("root"));
-    assert!(!subtree_needs_refresh(&rows, &children, &rename));
+    assert!(!subtree_needs_refresh(&view, &rename));
     let insert = change("nodes", None, Some("new"), Some("d"), Some("d"));
-    assert!(!subtree_needs_refresh(&rows, &children, &insert));
+    assert!(!subtree_needs_refresh(&view, &insert));
 
     // A visible directory still widens on a move.
     let visible_dir_move = change("nodes", Some("d"), Some("d"), Some("root"), Some("top"));
-    assert!(subtree_needs_refresh(&rows, &children, &visible_dir_move));
+    assert!(subtree_needs_refresh(&view, &visible_dir_move));
 }
 
 /// Regression for queue review R1: the subtree walk's "remove rows that the
