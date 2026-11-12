@@ -1962,15 +1962,34 @@ fn cache_settings_with(service: &Service, read_only: Option<&Store>) -> io::Resu
     // be reported as reclaimable while the trimmer protects them. Only project
     // off-lock when nothing is open so protected/reclaimable stays identical to
     // the serialized projection.
-    let usage = read_only
-        .filter(|_| service.bridge.store.open_handle_count() == 0)
-        .and_then(|store| {
-            let active = service.bridge.active_downloads().into_iter().collect();
-            store.cache_usage(unix_now(), &active).ok()
-        });
-    let usage = match usage {
+    //
+    // Issue #67 W4b: the expensive half only changes when the committed Store
+    // generation changes (or the handle/active-download inputs do), so a poll
+    // inside one generation reuses the previous accounting. Policy edits are
+    // invalidated explicitly by `Service::cache_policy_changed`.
+    let open_handles = service.bridge.store.open_handle_count();
+    let mut active: Vec<String> = service.bridge.active_downloads().into_iter().collect();
+    active.sort();
+    let commit_key = service.bridge.store.change_state();
+    let cached = service.cached_cache_usage(commit_key, &active, open_handles);
+    let usage = match cached {
         Some(usage) => usage,
-        None => service.bridge.cache_usage()?,
+        None => {
+            let active_set: HashSet<String> = active.iter().cloned().collect();
+            let computed = read_only
+                .filter(|_| open_handles == 0)
+                .and_then(|store| store.cache_usage(unix_now(), &active_set).ok());
+            let usage = match computed {
+                Some(usage) => usage,
+                None => service.bridge.cache_usage()?,
+            };
+            // Only a snapshot that saw no open handle can be reused without the
+            // writer's handle table; a fallback under open handles is not keyed.
+            if open_handles == 0 && service.bridge.store.change_state() == commit_key {
+                service.remember_cache_usage(commit_key, active.clone(), open_handles, usage.clone());
+            }
+            usage
+        }
     };
     let state = service.control.lock().unwrap().state;
     Ok(serde_json::json!({"schema":1,"task_id":service.profile.task_id,"usage":usage,"connection":state,"error":*service.bridge.cache_error.lock().unwrap(),"recent_download_seconds":drive_core::cache_policy::RECENT_DOWNLOAD_SECONDS,"release_job":release_job_summary(service)}).to_string())
@@ -2369,6 +2388,106 @@ mod readpath_tests {
         assert_eq!(
             off_lock["recent_download_seconds"],
             drive_core::cache_policy::RECENT_DOWNLOAD_SECONDS
+        );
+    }
+
+    fn cache_usage_of(service: &Service) -> serde_json::Value {
+        serde_json::from_str(&cache_settings(service).unwrap()).unwrap()
+    }
+
+    /// The usage memo must not hide a policy edit: the limit lives in `metadata`
+    /// outside the committed status generation, so it is invalidated explicitly.
+    #[test]
+    fn cache_settings_usage_refreshes_after_a_limit_change() {
+        let (_dir, service) = fixture();
+        let first = cache_usage_of(&service);
+        assert_eq!(first["schema"], 1);
+        let limit = 64u64 * 1024 * 1024;
+        let body = serde_json::json!({
+            "schema": 1,
+            "task_id": service.profile.task_id,
+            "limit_bytes": limit,
+        })
+        .to_string();
+        let applied: serde_json::Value =
+            serde_json::from_str(&set_cache_settings(&service, &body).unwrap()).unwrap();
+        assert_eq!(applied["usage"]["limit_bytes"], limit);
+        // Later polls must observe the new policy inside the same generation.
+        assert_eq!(
+            cache_usage_of(&service)["usage"]["limit_bytes"],
+            limit,
+            "a policy edit must invalidate the cached usage"
+        );
+    }
+
+    /// A committed publication changes the cached content, so the next poll must
+    /// recompute instead of serving the pre-publication snapshot.
+    #[test]
+    fn cache_settings_usage_refreshes_after_a_committed_publication() {
+        let (_dir, service) = fixture();
+        assert_eq!(cache_usage_of(&service)["usage"]["content_bytes"], 0);
+        let bytes = b"cached body";
+        {
+            let mut store = service.bridge.store.lock().unwrap();
+            store
+                .publish_download(
+                    &drive_core::DownloadTicket {
+                        id: "one".into(),
+                        version: "v1".into(),
+                    },
+                    bytes,
+                    &drive_core::sha256(bytes),
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            cache_usage_of(&service)["usage"]["content_bytes"],
+            bytes.len() as u64,
+            "a committed publication must invalidate the cached usage"
+        );
+    }
+
+    /// Cost probe (not part of the default suite): once a committed generation is
+    /// warm, a `GetCacheSettings` poll must reuse the usage accounting instead of
+    /// re-running the committed-row scan behind it.
+    #[test]
+    #[ignore = "cost probe: run with --ignored --nocapture"]
+    fn cache_settings_poll_reuses_the_committed_generation_scan() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(dir.path()).unwrap();
+        let mut nodes = vec![
+            node("root", None, true),
+            node("folder", Some("root"), true),
+            node("one", Some("folder"), false),
+        ];
+        for i in 0..50_000 {
+            nodes.push(node(&format!("bulk-{i:05}"), Some("folder"), false));
+        }
+        store.install_remote_snapshot(&nodes, "1", "server").unwrap();
+        store.ensure_fs_root("root").unwrap();
+        let service =
+            Service::new(profile(), store, PathBuf::from("/nonexistent-worker")).unwrap();
+        // Measure on one private read-only handle so the sample isolates the
+        // usage accounting, not the per-call handle open.
+        let read_only = read_only(&service).expect("read-only handle");
+        let mut samples = Vec::new();
+        for _ in 0..4 {
+            let started = Instant::now();
+            let _ = cache_settings_with(&service, Some(&read_only)).unwrap();
+            samples.push(started.elapsed().as_secs_f64() * 1000.0);
+        }
+        println!(
+            "CACHE_SETTINGS_PROBE sample_ms={:?}",
+            samples
+                .iter()
+                .map(|ms| (ms * 1000.0).round() / 1000.0)
+                .collect::<Vec<_>>()
+        );
+        let first = samples[0];
+        let warm = samples[1..].iter().cloned().fold(f64::INFINITY, f64::min);
+        assert!(
+            warm * 3.0 < first,
+            "the committed-row scan must be reused inside one generation: {samples:?}"
         );
     }
 

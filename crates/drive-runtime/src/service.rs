@@ -278,6 +278,29 @@ pub(crate) struct ReleaseState {
     /// independent of the state lock while it reclaims files.
     pub(crate) cancel: Option<Arc<AtomicBool>>,
 }
+/// One reusable `GetCacheSettings` usage snapshot.
+///
+/// `cache_usage` scans committed rows (`shared_blobs` still has to walk the
+/// dirty-blob side of `nodes`) and the file trees. The DB half only changes when
+/// the committed Store generation changes, so a poll inside one generation
+/// reuses the previous accounting instead of repeating the scan. Conditions that
+/// make the snapshot invalid are part of the key: the open-handle count (a
+/// protected/reclaimable split input) and the active-download set. Policy edits
+/// live in `metadata` outside the generation, so [`Service::cache_policy_changed`]
+/// clears the memo explicitly.
+pub(crate) struct CacheUsageMemoEntry {
+    pub(crate) key: drive_core::shared_store::CommitState,
+    pub(crate) active: Vec<String>,
+    pub(crate) open_handles: usize,
+    pub(crate) at: std::time::Instant,
+    pub(crate) usage: drive_core::cache_policy::CacheUsage,
+}
+/// Usage snapshots stay valid this long inside one committed generation. The
+/// bound covers the file-tree and wall-clock inputs (recent-download protection,
+/// draft orphan age) that are not part of the Store generation.
+pub(crate) const CACHE_USAGE_MEMO_TTL: std::time::Duration =
+    std::time::Duration::from_millis(1500);
+
 pub struct Service {
     pub profile: Profile,
     pub bridge: Arc<Bridge>,
@@ -293,6 +316,9 @@ pub struct Service {
     /// Warm render cache switch (`DN_DESKTOP_ENTRIES_CACHE=0` disables it for
     /// A/B diagnosis; the cache-on/off equivalence tests use the same seam).
     desktop_entries_enabled: AtomicBool,
+    /// Issue #67 W4b: the last `GetCacheSettings` usage accounting, reused for
+    /// polls inside one committed Store generation (see [`CacheUsageMemoEntry`]).
+    cache_usage_memo: Mutex<Option<CacheUsageMemoEntry>>,
     pub control: Mutex<Control>,
     changed: Condvar,
     pub stop: AtomicBool,
@@ -418,6 +444,7 @@ impl Service {
             status_cache: std::sync::OnceLock::new(),
             overview_cache: Mutex::new(None),
             desktop_entries: Mutex::new(None),
+            cache_usage_memo: Mutex::new(None),
             desktop_entries_enabled: AtomicBool::new(
                 !std::env::var("DN_DESKTOP_ENTRIES_CACHE").is_ok_and(|value| value == "0"),
             ),
@@ -630,6 +657,53 @@ impl Service {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(derived);
     }
+    /// Issue #67 W4b: reusable `GetCacheSettings` usage accounting for one
+    /// committed generation. Returns `None` when the memo is absent, was taken
+    /// under a different generation/active set/handle count, or is older than
+    /// [`CACHE_USAGE_MEMO_TTL`].
+    pub(crate) fn cached_cache_usage(
+        &self,
+        key: drive_core::shared_store::CommitState,
+        active: &[String],
+        open_handles: usize,
+    ) -> Option<drive_core::cache_policy::CacheUsage> {
+        let memo = self
+            .cache_usage_memo
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let entry = memo.as_ref()?;
+        (entry.key == key
+            && entry.active == active
+            && entry.open_handles == open_handles
+            && entry.at.elapsed() < CACHE_USAGE_MEMO_TTL)
+            .then(|| entry.usage.clone())
+    }
+    /// Publish a usage snapshot for later polls in the same generation.
+    pub(crate) fn remember_cache_usage(
+        &self,
+        key: drive_core::shared_store::CommitState,
+        active: Vec<String>,
+        open_handles: usize,
+        usage: drive_core::cache_policy::CacheUsage,
+    ) {
+        *self
+            .cache_usage_memo
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(CacheUsageMemoEntry {
+            key,
+            active,
+            open_handles,
+            at: std::time::Instant::now(),
+            usage,
+        });
+    }
+    /// Drop the usage memo (policy edits change usage outside the generation).
+    fn clear_cache_usage_memo(&self) {
+        *self
+            .cache_usage_memo
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    }
     /// Issue #67 W1: the warm committed-projection render cache. Only the
     /// off-lock desktop projection path reads or writes it.
     pub(crate) fn desktop_entries_cache(
@@ -650,6 +724,9 @@ impl Service {
         self.desktop_entries_enabled.store(enabled, Ordering::Release);
     }
     pub fn cache_policy_changed(&self) {
+        // The limit lives in `metadata`, outside the status journal, so a policy
+        // edit does not move the committed generation: invalidate explicitly.
+        self.clear_cache_usage_memo();
         self.cache_policy_dirty.store(true, Ordering::Release);
         self.control.lock().unwrap().revision += 1;
         self.changed.notify_all();
