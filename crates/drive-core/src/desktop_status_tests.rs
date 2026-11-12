@@ -1,5 +1,5 @@
 //! Scoped desktop seed equivalence and read-volume evidence.
-use super::{SEED_COLUMNS, SEED_FILTERS, StatusSeed, scoped_seed_sql};
+use super::{SEED_COLUMNS, SEED_FILTERS, SeedScope, StatusSeed, scoped_seed_sql};
 use crate::{Node, Store};
 use std::collections::{HashMap, HashSet};
 
@@ -183,6 +183,75 @@ fn scoped_seed_rows_match_the_full_projection_of_tree_and_ancestors() {
         assert_eq!(tuples(&scoped), tuples(&expected), "roots {roots:?}");
     }
     assert!(s.desktop_status_seeds_for(&[]).unwrap().is_empty());
+}
+
+/// The GUI root page asks for every visible child of the namespace root in one
+/// batch. Scoped, that is one recursive subtree walk per child (the #67 755 ms
+/// shape); the batch must take the single linear full read instead.
+#[test]
+fn root_page_batch_covering_every_visible_child_uses_the_full_read() {
+    let (_dir, s) = small_fixture();
+    let full = s.desktop_status_seeds().unwrap();
+    let mut children: Vec<String> = full
+        .iter()
+        .filter(|seed| seed.parent.as_deref() == Some("root"))
+        .map(|seed| seed.id.clone())
+        .collect();
+    children.sort();
+    assert_eq!(
+        children,
+        vec!["a".to_owned(), "b".to_owned(), "c".to_owned(), "ov".to_owned(), "pinned".to_owned()],
+        "fixture root page lists every visible child"
+    );
+    // The row set is the whole visible namespace either way, so the read can be
+    // chosen for cost without changing a single field.
+    assert_eq!(
+        tuples(&s.desktop_status_seeds_for(&children).unwrap()),
+        tuples(&full),
+        "the root page batch must return exactly the full projection rows"
+    );
+    assert_eq!(
+        s.seed_scope(&children).unwrap(),
+        SeedScope::Full,
+        "the root page batch must use the linear full-namespace read"
+    );
+}
+
+#[test]
+fn partial_and_namespace_root_batches_keep_their_documented_scope() {
+    let (_dir, s) = small_fixture();
+    // A namespace root always covers everything.
+    assert_eq!(s.seed_scope(&["root".to_owned()]).unwrap(), SeedScope::Full);
+    // A partial child batch is still scoped, and the encoding round-trips.
+    match s
+        .seed_scope(&["a".to_owned(), "b".to_owned()])
+        .unwrap()
+    {
+        SeedScope::Scoped(encoded) => {
+            let roots: Vec<String> = serde_json::from_str(&encoded).unwrap();
+            assert_eq!(roots, vec!["a".to_owned(), "b".to_owned()]);
+        }
+        SeedScope::Full => panic!("a partial child batch must stay scoped"),
+    }
+    // Duplicate ids cannot name a covering batch.
+    assert!(matches!(
+        s.seed_scope(&["a".to_owned(), "a".to_owned()]).unwrap(),
+        SeedScope::Scoped(_)
+    ));
+    // A batch naming all visible children plus the root is a namespace-root
+    // batch (the root check wins before the coverage check).
+    assert_eq!(
+        s.seed_scope(&[
+            "root".to_owned(),
+            "a".to_owned(),
+            "b".to_owned(),
+            "c".to_owned(),
+            "ov".to_owned(),
+            "pinned".to_owned()
+        ])
+        .unwrap(),
+        SeedScope::Full
+    );
 }
 
 #[test]
