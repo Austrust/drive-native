@@ -67,6 +67,10 @@ pub(crate) struct PermissionCache {
     decisions: HashMap<(String, String, Action), Decision>,
     pub(crate) hits: u64,
     pub(crate) misses: u64,
+    /// Successful batched ACL page projections (#26).
+    pub(crate) batched_pages: u64,
+    /// Entries covered by those batched projections.
+    pub(crate) batched_entries: u64,
 }
 impl PermissionCache {
     pub(crate) fn new() -> Self {
@@ -75,6 +79,8 @@ impl PermissionCache {
             decisions: HashMap::new(),
             hits: 0,
             misses: 0,
+            batched_pages: 0,
+            batched_entries: 0,
         }
     }
     fn roll(&mut self, epoch: u64) {
@@ -120,11 +126,40 @@ impl PermissionCache {
         self.decisions
             .insert((root.to_owned(), node.to_owned(), action), decision);
     }
+    /// Count one successful batched ACL page projection and the entries it
+    /// covered (#26). Only a wholly batched page calls this, so the per-entry
+    /// fallback never inflates the counters.
+    pub(crate) fn record_batch(&mut self, entries: u64) {
+        self.batched_pages += 1;
+        self.batched_entries += entries;
+    }
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PermissionCacheStats {
     pub hits: u64,
     pub misses: u64,
+}
+/// Process-local ACL diagnostics consumed by `drive-fs` (#26). Additive
+/// counters only: no JSON/D-Bus field and no behaviour depends on them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AclMetrics {
+    pub cache_hits: u64,
+    pub cache_misses: u64,
+    pub batched_pages: u64,
+    pub batched_entries: u64,
+}
+/// Snapshot the writer-local permission memo and the batched READDIRPLUS
+/// projection counters (#26). Read-only handles never populate the memo, so
+/// their cache counters stay zero; the batch counters are per `Store`.
+pub fn acl_metrics(store: &Store) -> AclMetrics {
+    let cache = store.permission_cache_stats();
+    let (batched_pages, batched_entries) = store.permission_cache_batch_stats();
+    AclMetrics {
+        cache_hits: cache.hits,
+        cache_misses: cache.misses,
+        batched_pages,
+        batched_entries,
+    }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -489,6 +524,9 @@ pub fn project_read_page(
         }
         flags[index] = true;
     }
+    // One wholly batched page: count the projection and the entries it
+    // covered (#26). The per-entry fallback in `drive-fs` never reaches here.
+    store.permission_cache_batch(records.len() as u64);
     Ok(flags)
 }
 
@@ -1419,6 +1457,55 @@ mod tests {
                 .unwrap(),
             0
         );
+    }
+
+    /// #26 acceptance: the ACL page metrics are consumable from product code,
+    /// not only as `DRIVE_NATIVE_FS_DIAGNOSTICS=1` stages. A batched page must
+    /// advance `batched_pages`/`batched_entries`; the writer-local memo must
+    /// report its miss and hit in `cache_misses`/`cache_hits`.
+    #[test]
+    fn acl_metrics_track_batched_projection_and_permission_cache() {
+        let record = |id: &str, ino: u64, directory: bool| crate::filesystem::PosixRecord {
+            id: id.into(),
+            ino,
+            directory,
+            size: if directory { 0 } else { 3 },
+            mtime: 1,
+            atime: 0,
+            atime_nsec: 0,
+            mode: if directory { 0o755 } else { 0o644 },
+            unlinked: false,
+            blocks: 0,
+            cacheable: true,
+        };
+        let (_d, s) = fixture();
+        let mut records = vec![record("A", 2, true), record("f", 3, false)];
+        let before = acl_metrics(&s);
+        let allowed = project_read_page(&s, "root", &mut records).unwrap();
+        assert_eq!(allowed, vec![true, true]);
+        let after = acl_metrics(&s);
+        assert_eq!(
+            after.batched_pages,
+            before.batched_pages + 1,
+            "one batched ACL page must be counted"
+        );
+        assert_eq!(
+            after.batched_entries,
+            before.batched_entries + 2,
+            "both projected entries must be counted"
+        );
+        assert!(
+            after.cache_misses > before.cache_misses,
+            "the parent traversal decision must fill the permission memo"
+        );
+        let mut again = vec![record("A", 2, true), record("f", 3, false)];
+        project_read_page(&s, "root", &mut again).unwrap();
+        let second = acl_metrics(&s);
+        assert!(
+            second.cache_hits > after.cache_hits,
+            "an unchanged store generation must reuse the memoized traversal decision"
+        );
+        assert_eq!(second.batched_entries, before.batched_entries + 4);
     }
 
 }

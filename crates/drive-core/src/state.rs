@@ -810,6 +810,23 @@ impl Store {
             misses: cache.misses,
         }
     }
+    /// Count one wholly batched ACL READDIRPLUS page projection (#26). Kept on
+    /// the same writer-local structure as the memo so the diagnostics accessor
+    /// reads one lock; the values are diagnostic only.
+    pub(crate) fn permission_cache_batch(&self, entries: u64) {
+        self.permission_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .record_batch(entries);
+    }
+    /// Cumulative `(batched_pages, batched_entries)` for #26 diagnostics.
+    pub(crate) fn permission_cache_batch_stats(&self) -> (u64, u64) {
+        let cache = self
+            .permission_cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        (cache.batched_pages, cache.batched_entries)
+    }
     /// The state directory, including `state.sqlite` and `blobs`.
     pub fn root(&self) -> &Path {
         &self.root

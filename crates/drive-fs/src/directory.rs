@@ -910,7 +910,10 @@ fn send_acl_plus(store:&drive_core::SharedStore,notify:&NotifyHub,view:&View,off
                 allowed
             }
         };
-        if batched {diagnostics::add_count(diagnostics::Stage::ReaddirPlusBatchedPages,1);}
+        if batched {
+            diagnostics::add_count(diagnostics::Stage::ReaddirPlusBatchedPages,1);
+            diagnostics::add_count(diagnostics::Stage::ReaddirPlusBatchedEntries,records.len() as u64);
+        }
         let mut full=false;
         for position in 0..slots.len() {
             let (ino,name,kind)=&chunk[position];
@@ -937,6 +940,7 @@ fn send_acl_plus(store:&drive_core::SharedStore,notify:&NotifyHub,view:&View,off
     let cache_after=guard.permission_cache_stats();
     diagnostics::add_count(diagnostics::Stage::PermissionCacheHits,cache_after.hits.saturating_sub(cache_before.hits));
     diagnostics::add_count(diagnostics::Stage::PermissionCacheMisses,cache_after.misses.saturating_sub(cache_before.misses));
+    diagnostics::acl_summary(&guard);
     reply.ok();drop(guard);
 }
 fn send_index_page(block: &DirBlock, offset: usize, exclusion: Option<&drive_core::exclude::ExclusionIndex>, mut reply: ReplyDirectory) {
