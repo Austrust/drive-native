@@ -190,14 +190,33 @@ fn pull_applies_a_large_catch_up_batch_through_chunked_apply() {
     server.join().unwrap();
     let store = bridge.store.lock().unwrap();
     assert_eq!(store.cursor().unwrap(), "2");
-    assert!(store.record("batch-0").is_ok());
-    assert!(store.record("batch-999").is_ok());
-    let history = store
-        .sync_history(&drive_core::sync_history::HistoryQuery::default())
-        .unwrap();
-    assert_eq!(history.records.len(), 1000);
+    // Events carry server ids; the namespace stores the mapped local identity.
+    let first = store.local_identity("batch-0").unwrap();
+    assert!(store.node(&first).is_ok());
+    let last = store.local_identity("batch-999").unwrap();
+    assert!(store.node(&last).is_ok());
+    // The page API caps a page at 500; walk the cursor to count the batch.
+    let mut total = 0usize;
+    let mut cursor: Option<String> = None;
+    let mut newest_first = true;
+    loop {
+        let page = store
+            .sync_history(&drive_core::sync_history::HistoryQuery {
+                limit: Some(500),
+                cursor: cursor.clone(),
+                ..Default::default()
+            })
+            .unwrap();
+        newest_first &= page.records.windows(2).all(|pair| pair[0].seq > pair[1].seq);
+        total += page.records.len();
+        cursor = page.next_cursor.clone();
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert_eq!(total, 1000);
     assert!(
-        history.records.windows(2).all(|pair| pair[0].seq > pair[1].seq),
+        newest_first,
         "history must be ordered newest-first without duplicates"
     );
 }
