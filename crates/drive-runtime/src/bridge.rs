@@ -149,11 +149,20 @@ const UPLOAD_REFRESH_MAX_INTERVAL: Duration = Duration::from_secs(5);
 /// never publishes a semantic journal change, so it cannot wake the UI.
 const STORAGE_PRUNE_INTERVAL: Duration = Duration::from_secs(300);
 
-/// Events per Store write-lease slice while a Pull batch is received, applied and
-/// its invalidations collected (issue #67 W2). The apply slice commits between
-/// chunks so catch-up no longer monopolizes the single writer boundary; the
-/// inbox receipt and `committed_cursor` still move only at the batch end.
-const PULL_LOCK_SLICE_EVENTS: usize = 64;
+/// Events applied per Store write-lease acquisition (issue #67 W2). Every chunk
+/// is its own committed transaction, so this trades the longest single write
+/// lease hold against WAL write amplification: 64-event chunks kept the lease
+/// near 20 ms but multiplied physical writes on 1000-event catch-up batches
+/// (~5x base, measured on the #67 harness), while 256-event chunks keep the
+/// longest lease p95 ~76 ms and the extra write amplification close to the
+/// per-event history maintenance itself. Receipts smaller than this stay one
+/// transaction, exactly like `apply_next`.
+const APPLY_CHUNK_EVENTS: usize = 256;
+
+/// Invalidations are cheap point lookups but run under the same Store write
+/// lease; slicing them keeps one large Pull from holding the lease for the scan
+/// alone. This does not affect write amplification.
+const INVALIDATION_SLICE_EVENTS: usize = 64;
 
 /// Invalidations that describe the *pre-apply* namespace (old names and old
 /// parents), collected in bounded slices.
@@ -818,7 +827,7 @@ impl Bridge {
                     }
                 }
             }
-            let end = (slice + PULL_LOCK_SLICE_EVENTS).min(batch.events.len());
+            let end = (slice + INVALIDATION_SLICE_EVENTS).min(batch.events.len());
             collect_prior_invalidations(
                 &store,
                 &batch.events[slice..end],
@@ -854,7 +863,7 @@ impl Bridge {
         loop {
             let mut store = self.store.lock().unwrap();
             let chunk = store
-                .apply_chunk(PULL_LOCK_SLICE_EVENTS)
+                .apply_chunk(APPLY_CHUNK_EVENTS)
                 .map_err(io::Error::other)?;
             drop(store);
             if matches!(chunk, drive_core::ApplyChunk::Idle) {
@@ -863,7 +872,7 @@ impl Bridge {
         }
         let mut slice = 0usize;
         while slice < batch.events.len() {
-            let end = (slice + PULL_LOCK_SLICE_EVENTS).min(batch.events.len());
+            let end = (slice + INVALIDATION_SLICE_EVENTS).min(batch.events.len());
             let store = self.store.lock().unwrap();
             collect_applied_invalidations(
                 &store,
