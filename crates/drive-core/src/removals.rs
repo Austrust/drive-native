@@ -126,6 +126,10 @@ pub(crate) struct RemoveBarrierCache {
     rebuilds: u64,
     last_rows: usize,
     last_us: u64,
+    /// Structured `key=value` rebuild lines. Production writes them to stderr
+    /// (journald); tests capture the same lines in-process through the accessor.
+    #[cfg(test)]
+    diagnostics: Vec<String>,
 }
 struct CachedRemove {
     seq: i64,
@@ -342,6 +346,12 @@ impl Store {
             self.barrier.last_us,
             self.barrier.last_rows,
         )
+    }
+    /// Structured rebuild diagnostics captured in-process for tests. Production
+    /// emits the same lines to stderr (systemd journal) instead of buffering them.
+    #[cfg(test)]
+    pub(crate) fn remove_barrier_diagnostics(&self) -> Vec<String> {
+        self.barrier.diagnostics.clone()
     }
 }
 fn os(code: i32) -> Error {
