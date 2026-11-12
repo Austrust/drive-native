@@ -859,10 +859,23 @@ impl Store {
             q.query_map([], |r| r.get::<_, String>(0))?
                 .collect::<std::result::Result<Vec<_>, _>>()?
         };
+        // Same batched facts as the paged read (issue #67 W4b): the per-candidate
+        // probe cost ~22 ms / 6.2 MB at 294k nodes because GetOverview asks for
+        // this count once per committed generation.
         let mut count = 0_u64;
-        for id in ids {
-            if self.sync_issue(root, &id)?.is_some() {
-                count += 1;
+        for page in ids.chunks(256) {
+            let page = page.to_vec();
+            let mut facts = self.issue_facts_batch(root, &page)?;
+            for id in page {
+                let Some((candidate, path)) = facts.remove(&id) else {
+                    if self.sync_issue(root, &id)?.is_some() {
+                        count += 1;
+                    }
+                    continue;
+                };
+                if self.issue_decision(&id, path, &candidate)?.is_some() {
+                    count += 1;
+                }
             }
         }
         Ok(count)

@@ -829,6 +829,11 @@ fn assert_paged_issues_match_point_lookups(d: &tempfile::TempDir, s: &Store, roo
         pointed.iter().map(|i| &i.id).collect::<Vec<_>>(),
         "paged identities drifted from the point lookups"
     );
+    assert_eq!(
+        s.sync_issue_count(root).unwrap(),
+        u64::try_from(pointed.len()).unwrap(),
+        "the issue count must equal the point-lookup issue set"
+    );
     for (paged_issue, pointed_issue) in paged.iter().zip(pointed.iter()) {
         assert_eq!(
             serde_json::to_value(paged_issue).unwrap(),

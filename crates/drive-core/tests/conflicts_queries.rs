@@ -495,6 +495,23 @@ fn issue_query_cost_on_a_294k_node_database() {
         warm.entries.len()
     );
 
+    // GetOverview asks for the issue count once per committed generation; the
+    // batched count must not repeat the per-candidate probe.
+    let before = rchar();
+    let start = std::time::Instant::now();
+    let count = store.sync_issue_count("root").unwrap();
+    let elapsed = start.elapsed();
+    let after = rchar();
+    println!(
+        "sync_issue_count 294k nodes: count={} elapsed={:?} rchar_delta={:?}",
+        count,
+        elapsed,
+        after
+            .zip(before)
+            .map(|(after, before)| after.saturating_sub(before))
+    );
+    assert!(count >= first_page.entries.len() as u64);
+
     let before = rchar();
     let start = std::time::Instant::now();
     let candidates = page(&db, &new_candidates(), "");
