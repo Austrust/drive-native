@@ -179,6 +179,12 @@ G3 在 SharedStore 发布已知拒绝后暂停 NSI 回复，走权威逐操作�
 
 明确的原生 Read 拒绝不设置自动下载重试截止（`retry_at=null`）。已知 Read 或祖先 Traverse 拒绝同样约束后台补全、重试唤醒及 Bridge 的缓存/新请求入口，返回 EACCES；仅重试传输不覆盖权限证据。重连、profile 通知或用户重新核对按既有 revision 规则恢复 unknown，再允许尝试；权限变更期间的迟到拒绝仍只影响当次调用，不建立旧拒绝门禁。该补充不改变 IPC21、entry TTL=0 或 attr 默认1000ms。
 
+## 状态投影缓存诊断（#25，本地诊断、非 IPC 契约）
+
+`StatusCache` 在 `ready`／`degraded`／`degraded_retry`／`recovered`／`lock_budget_exceeded` 五个生命周期转换处向 stderr 写一行结构化 `key=value` 诊断（`level`、`event`、`reason`、`attempts`、`next_retry_in_ms`，以及锁持有 p99/预算违规、发布/重建、ACL/压缩等计数器），由 daemon 的 systemd/journald 收集；`StatusCache::health_snapshot()` 暴露同一份健康快照，供 crate 内测试与未来诊断接口读取。
+
+该通道不新增或修改任何 `GetOverview`／`GetIssues`／D-Bus 字段，不升 `schema`／`version.ipc`，也不改变错误码；诊断行只含状态与计数，不含路径、账号或凭据。降级期间最后一份已发布快照继续服务读者，重试成功后自动恢复，无需重启。
+
 ## 验收与证据
 
 G4 独立代理按 PLAN §4 / PLAN-7 §9 运行并保留原始输出，作者不自评通过。G5 三套树100k/319679/327750，.9/本地/候选同窗口首扫重扫各3轮，记录负载、每目录成本、请求数、真值与 hydration。目标未达记录差距和可测分解，不能伪造耗时归因。真实 ACL/NAS 是外部验收，标注未实测。最后报告与导航只引用实际证据。
