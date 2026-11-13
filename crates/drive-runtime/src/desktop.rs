@@ -4726,6 +4726,45 @@ mod readpath_tests {
         let authoritative = states(&service, root.clone()).unwrap();
         service.set_desktop_entries_cache_enabled(true);
         let oracle_equal = authoritative == incremental_root;
+        // Same-tree A/B for the per-request work: the cache-disabled path is the
+        // historical "authoritative render per request" behaviour (one scoped
+        // read plus one whole-subtree aggregation per call). Measured on this
+        // exact tree so warm numbers above have a directly comparable baseline.
+        service.set_desktop_entries_cache_enabled(false);
+        let authoritative_calls = 3usize;
+        let mut authoritative_ns = Vec::with_capacity(authoritative_calls);
+        for _ in 0..authoritative_calls {
+            let call = std::time::Instant::now();
+            let _ = states(&service, root.clone()).unwrap();
+            authoritative_ns.push(call.elapsed().as_nanos() as u64);
+        }
+        authoritative_ns.sort_unstable();
+        let authoritative_threads = 16usize;
+        let authoritative_per_thread = 6usize;
+        let barrier = Arc::new(std::sync::Barrier::new(authoritative_threads));
+        let mut authoritative_handles = Vec::with_capacity(authoritative_threads);
+        for _ in 0..authoritative_threads {
+            let service = service.clone();
+            let root = root.clone();
+            let barrier = barrier.clone();
+            authoritative_handles.push(std::thread::spawn(move || {
+                barrier.wait();
+                let mut latencies = Vec::with_capacity(authoritative_per_thread);
+                for _ in 0..authoritative_per_thread {
+                    let call = std::time::Instant::now();
+                    let body = states(&service, root.clone()).unwrap();
+                    latencies.push(call.elapsed().as_nanos() as u64);
+                    assert!(body.contains("\"entries\""));
+                }
+                latencies
+            }));
+        }
+        let mut authoritative_concurrent = Vec::new();
+        for handle in authoritative_handles {
+            authoritative_concurrent.extend(handle.join().unwrap());
+        }
+        authoritative_concurrent.sort_unstable();
+        service.set_desktop_entries_cache_enabled(true);
         // Concurrency: same committed generation, root batch only.
         let mut concurrency_lines = Vec::new();
         for threads in [1usize, 16, 48] {
@@ -4776,10 +4815,18 @@ mod readpath_tests {
              incremental_refreshes={incremental_refreshes} \
              incremental_nodes={incremental_nodes} incremental_builds={incremental_builds} \
              incremental_tree_walks={incremental_walks} oracle_equal={oracle_equal} \
+             authoritative_root_p50_us={:.1} authoritative_root_p95_us={:.1} \
+             authoritative_16x{}_p50_us={:.1} p95_us={:.1} p99_us={:.1} \
              setup_hwm_kb={setup_hwm} hwm_kb={} rss_kb={}",
             percentile(&same_generation_ns, 0.50) as f64 / 1000.0,
             percentile(&same_generation_ns, 0.95) as f64 / 1000.0,
             percentile(&same_generation_ns, 0.99) as f64 / 1000.0,
+            percentile(&authoritative_ns, 0.50) as f64 / 1000.0,
+            percentile(&authoritative_ns, 0.95) as f64 / 1000.0,
+            authoritative_per_thread,
+            percentile(&authoritative_concurrent, 0.50) as f64 / 1000.0,
+            percentile(&authoritative_concurrent, 0.95) as f64 / 1000.0,
+            percentile(&authoritative_concurrent, 0.99) as f64 / 1000.0,
             proc_status("VmHWM:"),
             proc_status("VmRSS:"),
         );
