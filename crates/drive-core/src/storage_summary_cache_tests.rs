@@ -260,6 +260,31 @@ fn storage_generation_is_shared_with_read_only_overview_handles() {
     );
 }
 
+/// GetOverview intentionally serves storage from a pooled read-only handle; the
+/// warm path there must skip the filesystem work exactly like the writer path.
+#[test]
+fn read_only_overview_hot_path_does_not_rescan() {
+    let (_dir, store) = fixture(25);
+    let shared = crate::SharedStore::new(store);
+    let reader = shared.read_only().unwrap();
+    let now = 5_500_000u64;
+    let first = reader.storage_summary_at(now).unwrap();
+    assert_eq!(first.drafts_bytes, 25 * 9);
+
+    let before = reader.storage_summary_stats();
+    for _ in 0..50 {
+        let _ = reader.storage_summary_at(now).unwrap();
+    }
+    let delta = delta(before, reader.storage_summary_stats());
+    assert_eq!(delta.hits, 50);
+    assert_eq!(delta.refreshes, 0);
+    assert_eq!(
+        delta.directory_enumerations, 0,
+        "#89 read-only overview hide path must not enumerate drafts: {delta:?}"
+    );
+    assert_eq!(delta.file_stats, 0, "#89 read-only hot path must not stat: {delta:?}");
+}
+
 /// AC: a failed scan must be explainable, never reported as zero statistics.
 #[test]
 fn failed_scan_returns_stale_error_instead_of_zero() {

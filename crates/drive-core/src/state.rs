@@ -841,19 +841,24 @@ impl StorageSummaryShared {
 }
 
 #[cfg(test)]
-static STORAGE_SUMMARY_CACHE_BYPASS: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+thread_local! {
+    /// Force the uncached (pre-fix) scan on every read in this thread so the
+    /// issue #89 red evidence (`notes/test-logs/r5/storage/red-89.log`) can be
+    /// reproduced from this tree. Thread-local on purpose: the test suite runs
+    /// in parallel and a process-wide switch would contaminate other tests'
+    /// syscall counters.
+    static STORAGE_SUMMARY_CACHE_BYPASS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
 
-/// Force the uncached (pre-fix) scan on every read so the issue #89 red evidence
-/// (`notes/test-logs/r5/storage/red-89.log`) can be reproduced from this tree.
+/// Force the uncached (pre-fix) scan on every read (test helper, red replay).
 #[cfg(test)]
 pub(crate) fn set_storage_summary_cache_bypass_for_red(enabled: bool) {
-    STORAGE_SUMMARY_CACHE_BYPASS.store(enabled, Ordering::Release);
+    STORAGE_SUMMARY_CACHE_BYPASS.with(|flag| flag.set(enabled));
 }
 
 #[cfg(test)]
 fn storage_summary_cache_bypass() -> bool {
-    STORAGE_SUMMARY_CACHE_BYPASS.load(Ordering::Acquire)
+    STORAGE_SUMMARY_CACHE_BYPASS.with(std::cell::Cell::get)
 }
 
 /// One published derived summary and the two keys that make it valid: the
