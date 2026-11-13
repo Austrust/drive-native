@@ -303,3 +303,298 @@ fn barrier_cache_tracks_bulk_commits_with_a_large_backlog() {
         .unwrap()
         .is_none());
 }
+/// Field-shaped backlog for the end-to-end regression: the overwhelming majority
+/// of intents are still `pending`, with the small `uncertain` and `conflict`
+/// minority seen in the `.2` incident (3,114 pending / 55 uncertain / 4 conflict,
+/// scaled here to 10k total). Seeding writes the same serialized [`RemoveJob`]
+/// body and journal columns as `unlink_local`, but in one transaction: a public
+/// API seed would be 10k synchronous=FULL commits (an I/O benchmark), and the
+/// mixed shape is unreachable through the mutation gates while an `uncertain`
+/// head blocks later pending intents (that is #57's dispatch defect, not #28).
+fn mixed_backlog_fixture(
+    pending: usize,
+    uncertain: usize,
+    conflict: usize,
+) -> (tempfile::TempDir, Store) {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path()).unwrap();
+    store
+        .db
+        .execute(
+            "INSERT INTO nodes(id,parent,name,remote_version,directory) VALUES('root',NULL,'root','v1',1)",
+            [],
+        )
+        .unwrap();
+    store
+        .db
+        .execute(
+            "INSERT INTO nodes(id,parent,name,remote_version,directory) VALUES('uploads','root','uploads','v1',1)",
+            [],
+        )
+        .unwrap();
+    let tx = store.db.unchecked_transaction().unwrap();
+    let mut index = 0usize;
+    for (state, count) in [
+        ("pending", pending),
+        ("uncertain", uncertain),
+        ("conflict", conflict),
+    ] {
+        for _ in 0..count {
+            let id = format!("n{index:05}");
+            let name = format!("removed-{index:05}");
+            let operation = format!("op{index:05}");
+            let job = RemoveJob {
+                operation: operation.clone(),
+                node: Node {
+                    id: id.clone(),
+                    parent: Some("root".to_owned()),
+                    name: name.clone(),
+                    version: "v1".to_owned(),
+                    directory: false,
+                    metadata: None,
+                },
+                path: name.clone(),
+                cursor: String::new(),
+            };
+            tx.execute(
+                "INSERT INTO nodes(id,parent,name,remote_version,directory,deleted) VALUES(?1,'root',?2,'v1',0,1)",
+                rusqlite::params![id, name],
+            )
+            .unwrap();
+            tx.execute(
+                "INSERT INTO namespace_ops(id,node,body,state,kind) VALUES(?1,?2,?3,?4,'remove')",
+                rusqlite::params![
+                    operation,
+                    id,
+                    serde_json::to_string(&job).unwrap(),
+                    state
+                ],
+            )
+            .unwrap();
+            index += 1;
+        }
+    }
+    tx.commit().unwrap();
+    (dir, store)
+}
+
+/// Pending uploads for locally created files under an unrelated directory, built
+/// through the production creation path (`create_local_file` + `creation_saved`).
+fn prepare_uploads(store: &mut Store, count: usize) -> Vec<String> {
+    let mut nodes = Vec::new();
+    for index in 0..count {
+        let node = store
+            .create_local_file("uploads", &format!("up-{index:02}.doc"), 0o644)
+            .unwrap();
+        store.creation_saved(&node.id).unwrap();
+        nodes.push(node.id);
+    }
+    nodes
+        .iter()
+        .map(|node| {
+            store
+                .db
+                .query_row(
+                    "SELECT id FROM operations WHERE kind='upload' AND node=?1 AND state='pending'",
+                    [node.as_str()],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        })
+        .collect()
+}
+
+/// RED for the #28 residual: the barrier's TEMP version trigger fired on every
+/// `namespace_ops` UPDATE, including durable commit-diagnosis/attempt bookkeeping
+/// that cannot change the indexed membership or paths. One bookkeeping write per
+/// queued intent force-rebuilt the whole 10k-row index.
+#[test]
+fn barrier_version_ignores_nonsemantic_intent_updates() {
+    let (_dir, mut store) = fixture(10_000);
+    assert!(target_barrier(&mut store).is_none());
+    let (calls, rebuilds, _last_us, rows) = store.remove_barrier_stats();
+    assert_eq!((calls, rebuilds, rows), (1, 1, 10_000));
+
+    // Exactly the columns commit_diagnostics::record/clear_tx rewrite while a
+    // remove intent waits for its next attempt.
+    store
+        .db
+        .execute(
+            "UPDATE namespace_ops SET attempts=attempts+1, outcome='unknown_retryable',
+                    outcome_category='interrupted', last_error='reconcile attempt',
+                    next_retry_at=0, updated_at=unixepoch() WHERE kind='remove'",
+            [],
+        )
+        .unwrap();
+    assert!(target_barrier(&mut store).is_none());
+    let (calls_after, rebuilds_after, _last_us, rows_after) = store.remove_barrier_stats();
+    assert_eq!(calls_after, calls + 1);
+    assert_eq!(
+        rebuilds_after, rebuilds,
+        "non-semantic namespace_ops updates must not rebuild the barrier index"
+    );
+    assert_eq!(rows_after, 10_000);
+
+    // A semantic change must still invalidate the index.
+    store
+        .db
+        .execute(
+            "UPDATE namespace_ops SET state='committed' WHERE id='op05000'",
+            [],
+        )
+        .unwrap();
+    assert!(target_barrier(&mut store).is_none());
+    assert_eq!(
+        store.remove_barrier_stats().1,
+        rebuilds_after + 1,
+        "state changes must still rebuild"
+    );
+    assert_eq!(store.remove_barrier_stats().3, 9_999);
+
+    // Body rewrites are the other non-semantic production update (`rebase_jobs`
+    // rewrites a queued intent's captured version after an ancestor confirms).
+    store
+        .db
+        .execute("UPDATE namespace_ops SET body=body WHERE id='op04000'", [])
+        .unwrap();
+    assert!(target_barrier(&mut store).is_none());
+    assert_eq!(
+        store.remove_barrier_stats().1,
+        rebuilds_after + 1,
+        "body rewrites must not rebuild the barrier index"
+    );
+}
+
+/// RED for the #28 residual: an upload must stay bounded while a 10k field-shaped
+/// remove backlog drains and each reconcile attempt rewrites durable bookkeeping.
+/// The old trigger rebuilt all 10k indexed rows on every attempt (>40ms); the
+/// fixed trigger ignores those writes and the upload pays only the per-target
+/// lookup.
+#[test]
+fn upload_start_stays_bounded_with_a_large_mixed_remove_backlog() {
+    let (_backlog_dir, mut backlog) = mixed_backlog_fixture(8_900, 1_000, 100);
+    let (_control_dir, mut control) = mixed_backlog_fixture(0, 0, 0);
+    let backlog_uploads = prepare_uploads(&mut backlog, 8);
+    let control_uploads = prepare_uploads(&mut control, 8);
+
+    // The first upload after the backlog exists pays the one-time index build;
+    // it is the same cost the pre-#28 implementation paid on every upload.
+    assert!(backlog.mark_upload_started(&backlog_uploads[0]).is_ok());
+    assert!(control.mark_upload_started(&control_uploads[0]).is_ok());
+    assert_eq!(backlog.remove_barrier_stats().3, 10_000);
+
+    let mut backlog_samples = Vec::new();
+    let mut control_samples = Vec::new();
+    for index in 1..8 {
+        // One durable attempt/diagnosis rewrite between uploads, the shape of
+        // commit_diagnostics::record for the draining remove tail.
+        backlog
+            .db
+            .execute(
+                "UPDATE namespace_ops SET attempts=attempts+1, outcome='unknown_retryable',
+                        outcome_category='interrupted', last_error='reconcile attempt',
+                        next_retry_at=0, updated_at=unixepoch() WHERE id=?1",
+                [format!("op{index:05}")],
+            )
+            .unwrap();
+        let started = Instant::now();
+        backlog.mark_upload_started(&backlog_uploads[index]).unwrap();
+        backlog_samples.push(started.elapsed());
+        let started = Instant::now();
+        control.mark_upload_started(&control_uploads[index]).unwrap();
+        control_samples.push(started.elapsed());
+    }
+    let backlog_median = median(backlog_samples);
+    let control_median = median(control_samples);
+    let (calls, rebuilds, last_us, rows) = backlog.remove_barrier_stats();
+    eprintln!(
+        "#28 E2E backlog_median={:.3}ms control_median={:.3}ms ratio={:.1} calls={calls} rebuilds={rebuilds} last_us={last_us} rows={rows}",
+        backlog_median.as_secs_f64() * 1e3,
+        control_median.as_secs_f64() * 1e3,
+        backlog_median.as_secs_f64() / control_median.as_secs_f64().max(1e-9)
+    );
+    assert_eq!((calls, rows), (8, 10_000));
+    assert_eq!(
+        rebuilds, 1,
+        "reconcile bookkeeping must not rebuild the barrier index"
+    );
+    // The primary bound is relative to the empty-store control: `cargo test
+    // --workspace` runs test binaries in parallel under shared machine load, so
+    // an absolute millisecond threshold is not a stable product signal (the same
+    // call measured ~4ms isolated and ~20ms under the full-suite load). The RED
+    // lever stays the O(R) rebuild ratio (RED: 6.7) plus `rebuilds == 1` above;
+    // the absolute bound below only catches pathological regressions.
+    let ratio = backlog_median.as_secs_f64() / control_median.as_secs_f64().max(1e-9);
+    assert!(
+        ratio <= 5.0,
+        "backlog upload start must stay within 5x of the empty store: {ratio:.1}"
+    );
+    assert!(
+        backlog_median < Duration::from_millis(200),
+        "upload start with a 10k backlog is pathologically slow: {backlog_median:?}"
+    );
+    assert!(last_us > 0);
+
+    // Unrelated paths are not blocked, while a remove that owns the upload path
+    // still is.
+    let blocked_node = backlog.create_local_file("uploads", "blocked.doc", 0o644).unwrap();
+    backlog.creation_saved(&blocked_node.id).unwrap();
+    let blocked_upload: String = backlog
+        .db
+        .query_row(
+            "SELECT id FROM operations WHERE kind='upload' AND node=?1 AND state='pending'",
+            [blocked_node.id.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let job = RemoveJob {
+        operation: "op-blocked".to_owned(),
+        node: blocked_node.clone(),
+        path: "uploads/blocked.doc".to_owned(),
+        cursor: String::new(),
+    };
+    backlog
+        .db
+        .execute(
+            "INSERT INTO namespace_ops(id,node,body,state,kind) VALUES('op-blocked',?1,?2,'pending','remove')",
+            rusqlite::params![blocked_node.id, serde_json::to_string(&job).unwrap()],
+        )
+        .unwrap();
+    let error = backlog.mark_upload_started(&blocked_upload).unwrap_err();
+    assert!(
+        error.to_string().contains("pending remove"),
+        "upload under its own queued remove must stay blocked: {error}"
+    );
+}
+
+/// RED for the #28 residual: production had no observable barrier diagnostics.
+/// Each rebuild now emits one structured `key=value` line to stderr for the
+/// journal, and the crate-internal accessor exposes the same lines to tests.
+#[test]
+fn barrier_rebuild_emits_diagnostic_line_and_stats() {
+    let (_dir, mut store) = fixture(1_000);
+    assert!(store.remove_barrier_diagnostics().is_empty());
+    assert!(target_barrier(&mut store).is_none());
+    let (calls, rebuilds, last_us, rows) = store.remove_barrier_stats();
+    assert_eq!((calls, rebuilds, rows), (1, 1, 1_000));
+    assert!(last_us > 0);
+    let lines = store.remove_barrier_diagnostics();
+    assert_eq!(lines.len(), 1, "one diagnostic line per rebuild: {lines:?}");
+    let line = &lines[0];
+    for expected in [
+        "level=info",
+        "event=remove_barrier_rebuild",
+        "calls=1",
+        "rebuilds=1",
+        "rows=1000",
+        "last_us=",
+    ] {
+        assert!(
+            line.contains(expected),
+            "missing {expected:?} in diagnostic line {line:?}"
+        );
+    }
+    // A cache hit must not emit another line.
+    assert!(target_barrier(&mut store).is_none());
+    assert_eq!(store.remove_barrier_diagnostics().len(), 1);
+}
