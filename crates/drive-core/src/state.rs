@@ -1955,6 +1955,47 @@ impl Store {
     pub fn restore_excluded_nodes(&mut self) -> Result<u64> {
         self.restore_unexcluded_nodes(|_, _| false)
     }
+    /// Issue #56B: drop the sync intents of `local_only` nodes while keeping the
+    /// node rows, inode mappings, dirty drafts and cached bodies usable locally.
+    ///
+    /// This is the `local_only` counterpart of [`Self::purge_excluded_nodes`]:
+    /// it never hides a node and never garbage-collects content because the
+    /// local view must stay usable (`git`, build caches, ...). Only queued work
+    /// that could reach the server is removed: upload operations, transfers,
+    /// pending namespace operations, local creation/unlink intents and overlays.
+    pub fn quiesce_local_only_nodes(&mut self, ids: &[String]) -> Result<u64> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let tx = self.db.transaction()?;
+        let mut quiesced = 0u64;
+        for id in ids {
+            // The explicit id list may contain a node that a local unlink/rename
+            // just turned into a tombstone (`deleted=1`). Keeping the row is the
+            // point of local_only, but its pending sync intent must still go, or
+            // the scheduler could dispatch a remote remove/rename (#56B F1).
+            let exists: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM nodes WHERE id=?1)",
+                [id],
+                |r| r.get(0),
+            )?;
+            if !exists {
+                continue;
+            }
+            tx.execute("DELETE FROM operations WHERE node=?1", [id])?;
+            tx.execute("DELETE FROM transfers WHERE node=?1", [id])?;
+            tx.execute(
+                "DELETE FROM namespace_ops WHERE node=?1 AND state NOT IN ('committed','superseded')",
+                [id],
+            )?;
+            tx.execute("DELETE FROM local_creations WHERE node=?1", [id])?;
+            tx.execute("DELETE FROM local_unlinks WHERE node=?1", [id])?;
+            tx.execute("DELETE FROM namespace_overlay WHERE node=?1", [id])?;
+            quiesced += 1;
+        }
+        tx.commit()?;
+        Ok(quiesced)
+    }
 
     /// Persist scheduler intent before starting network I/O. Duplicate tickets coalesce.
     pub fn queue_download(&mut self, ticket: &DownloadTicket) -> Result<String> {

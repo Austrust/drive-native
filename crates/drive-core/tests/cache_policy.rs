@@ -443,4 +443,27 @@ fn migration_backups_rotate_and_leverage_a_space_precheck() {
     );
     let usage = serde_json::to_value(store.cache_usage(now(), &HashSet::new()).unwrap()).unwrap();
     assert!(usage["backup_bytes"].as_u64().unwrap() > 0);
+/// Issue #56B: automatic trimming must never evict a `local_only` body; the
+/// same candidate is still released once it is no longer protected.
+#[test]
+fn protected_candidates_survive_automatic_trim() {
+    let (_dir, mut s) = setup();
+    for id in ["a", "b", "c", "d"] {
+        s.note_cache_use(id).unwrap();
+    }
+    s.set_cache_limit(1).unwrap();
+    let protected: HashSet<String> = ["a".to_string()].into_iter().collect();
+    let trimmed = s
+        .trim_cache_protected(now() + 120, &HashSet::new(), &protected)
+        .unwrap();
+    assert!(
+        trimmed.released.iter().all(|id| id != "a"),
+        "protected local-only body was trimmed: {:?}",
+        trimmed.released
+    );
+    assert!(
+        !trimmed.released.is_empty(),
+        "the limit still forces unprotected candidates out"
+    );
+
 }

@@ -253,6 +253,7 @@ fn overview_reports_the_failure_source_and_stays_schema_compatible() {
             local_policy: None,
             writable_source: None,
             exclude_patterns: Vec::new(),
+            exclude_mode: drive_core::exclude::ExcludeMode::default(),
         },
         store,
         std::path::PathBuf::from("/nonexistent-worker"),

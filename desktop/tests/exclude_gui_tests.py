@@ -188,6 +188,19 @@ class ExcludeGuiTests(unittest.TestCase):
         self.assertEqual(saved, ["a"])
         self.assertEqual(read_profile()["exclude_patterns"], ["a"])
 
+    def test_saving_patterns_never_drops_the_exclude_mode_field(self):
+        # Issue #56B: the mode is additive profile state. The rule editor only
+        # replaces exclude_patterns, so a local_only/hidden choice survives a
+        # pattern-only save (the UI selector itself is a documented follow-up).
+        self.write_profile([r"\.iso$"])
+        prof = read_profile()
+        prof["exclude_mode"] = "local_only"
+        profile_path().write_text(json.dumps(prof), encoding="utf-8")
+        config.update_exclude_patterns([r"\.iso$", r"\.tmp$"], expected_task="task-exclude")
+        saved = read_profile()
+        self.assertEqual(saved["exclude_mode"], "local_only")
+        self.assertEqual(saved["exclude_patterns"], [r"\.iso$", r"\.tmp$"])
+
     def test_editor_is_keyboard_reachable_and_accessible(self):
         self.write_profile([r"\.iso$"])
         dialog = self.dialog()

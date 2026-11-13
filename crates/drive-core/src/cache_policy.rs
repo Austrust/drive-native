@@ -479,6 +479,18 @@ impl Store {
         Ok(queued)
     }
     pub fn trim_cache(&mut self, now: u64, active: &HashSet<String>) -> Result<CacheTrim> {
+        self.trim_cache_protected(now, active, &HashSet::new())
+    }
+    /// Issue #56B: trim like [`Self::trim_cache`] but never evict `protected`
+    /// bodies. `local_only` matches keep their cached content usable locally;
+    /// automatic eviction skips them, an explicit user release is still honored
+    /// by [`Self::release`].
+    pub fn trim_cache_protected(
+        &mut self,
+        now: u64,
+        active: &HashSet<String>,
+        protected: &HashSet<String>,
+    ) -> Result<CacheTrim> {
         let limit = self.cache_limit()?;
         if limit == 0 {
             return Ok(CacheTrim {
@@ -497,6 +509,9 @@ impl Store {
             for (id, size) in self.cache_candidates(now, active)?.into_iter().take(256) {
                 if bytes <= limit {
                     break;
+                }
+                if protected.contains(&id) {
+                    continue;
                 }
                 self.release(&id)?;
                 released.push(id);

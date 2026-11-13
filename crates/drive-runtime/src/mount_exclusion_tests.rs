@@ -137,6 +137,7 @@ fn preview_profile(mount: PathBuf) -> Profile {
         local_policy: None,
         writable_source: None,
         exclude_patterns: vec![r"(^|/)node_modules/".into()],
+        exclude_mode: drive_core::exclude::ExcludeMode::default(),
     }
 }
 

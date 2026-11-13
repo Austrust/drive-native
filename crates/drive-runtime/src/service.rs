@@ -42,6 +42,13 @@ pub struct Profile {
     /// relative to `scope.path`. Absent in old profiles and therefore empty.
     #[serde(default)]
     pub exclude_patterns: Vec<String>,
+    /// Issue #56B: what a matching exclusion pattern means for the local view.
+    /// Absent in profiles written before the field existed; those default to
+    /// `local_only` (visible locally, never synced). `hidden` keeps the issue
+    /// #50 behaviour. An unknown value is rejected by serde with the raw value
+    /// in the error so the settings UI can show it.
+    #[serde(default)]
+    pub exclude_mode: drive_core::exclude::ExcludeMode,
 }
 impl Profile {
     pub fn effective_local_policy(&self) -> drive_core::write_permissions::LocalPolicy {
@@ -76,8 +83,11 @@ impl Profile {
         if text.len() > 65536 {
             return Err(io::Error::other("profile exceeds size limit"));
         }
-        let profile: Self =
-            serde_json::from_str(&text).map_err(|_| io::Error::other("invalid profile format"))?;
+        let profile: Self = serde_json::from_str(&text).map_err(|error| {
+            // Keep the serde detail: an unknown `exclude_mode` value must reach
+            // the settings UI with the raw value it contains (#56B).
+            io::Error::other(format!("invalid profile format: {error}"))
+        })?;
         profile.validate()?;
         Ok(profile)
     }
@@ -388,8 +398,11 @@ impl Service {
         // Issue #50: compile the exclusion rules once and share the state with
         // both the initialization owner (import pruning) and the mount (read
         // path filtering). Empty rules never build or consult an index.
-        let exclusion = Arc::new(drive_core::exclude::ExclusionState::new(
+        // Issue #56B: the profile-selected mode decides whether a match is
+        // hidden (#50) or kept local-only (visible, never synced; the default).
+        let exclusion = Arc::new(drive_core::exclude::ExclusionState::with_mode(
             profile.exclude_rules()?,
+            profile.exclude_mode,
         ));
         bridge.set_exclusion_state(exclusion);
         Ok(Arc::new(Self {
@@ -971,11 +984,26 @@ impl Service {
         // Issue #56: restore unmatched rows even when some rules remain active.
         self.bridge.restore_excluded_from_store()?;
         if exclusion.is_active() {
-            self.bridge.purge_excluded_from_store()?;
-            // The purge changed the committed namespace; rebuild before the
-            // mount and the inode backfill observe it.
-            let store = self.bridge.store.lock().unwrap();
-            refresh_exclusion_before_mount(&exclusion, &store, root, true)?;
+            if exclusion.hides() {
+                self.bridge.purge_excluded_from_store()?;
+                // The purge changed the committed namespace; rebuild before the
+                // mount and the inode backfill observe it.
+                let store = self.bridge.store.lock().unwrap();
+                refresh_exclusion_before_mount(&exclusion, &store, root, true)?;
+            } else {
+                // Issue #56B local_only: a previous hidden-mode mount may have
+                // purged rows the current rules still match; restore them all so
+                // the local view stays usable, then drop only their sync work.
+                {
+                    let mut store = self.bridge.store.lock().unwrap();
+                    store.restore_excluded_nodes().map_err(io::Error::other)?;
+                }
+                {
+                    let store = self.bridge.store.lock().unwrap();
+                    refresh_exclusion_before_mount(&exclusion, &store, root, true)?;
+                }
+                self.bridge.quiesce_local_only_from_store(root)?;
+            }
         }
         Ok(())
     }

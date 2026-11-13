@@ -3,7 +3,7 @@
 //! operation. The mounted tests need `/dev/fuse` and an ordinary Linux user, so
 //! they are `#[ignore]`d and run explicitly like the other kernel regressions.
 use super::*;
-use drive_core::exclude::{ExcludeRules, ExclusionState};
+use drive_core::exclude::{ExcludeMode, ExcludeRules, ExclusionState};
 use drive_core::NodeMetadata;
 use std::io::Write;
 use std::sync::Arc;
@@ -42,6 +42,14 @@ fn open_fs(
     nodes: &[Node],
     patterns: &[&str],
 ) -> (tempfile::TempDir, Arc<drive_core::SharedStore>, CacheFilesystem) {
+    open_fs_mode(nodes, patterns, ExcludeMode::Hidden)
+}
+
+fn open_fs_mode(
+    nodes: &[Node],
+    patterns: &[&str],
+    mode: ExcludeMode,
+) -> (tempfile::TempDir, Arc<drive_core::SharedStore>, CacheFilesystem) {
     let temp = tempfile::tempdir().unwrap();
     let mut store = Store::open(temp.path().join("state")).unwrap();
     store
@@ -50,8 +58,9 @@ fn open_fs(
     store.ensure_fs_root(ROOT).unwrap();
     store.ensure_filesystem_inodes(ROOT).unwrap();
     let store = Arc::new(drive_core::SharedStore::new(store));
-    let state = Arc::new(ExclusionState::new(
+    let state = Arc::new(ExclusionState::with_mode(
         ExcludeRules::compile(patterns).expect("valid test rules"),
+        mode,
     ));
     if !patterns.is_empty() {
         let guard = store.lock().unwrap();
@@ -96,6 +105,61 @@ fn assert_enoent<T>(result: std::io::Result<T>, what: &str) {
         Some(libc::ENOENT),
         "{what} must answer ENOENT, got {error:?}"
     );
+}
+
+#[test]
+fn local_only_mode_allows_write_guards_and_marks_quiesce_targets() {
+    let (_temp, store, fs) = open_fs_mode(
+        &snapshot(),
+        &[r"^Pinned$", r"\.iso$"],
+        ExcludeMode::LocalOnly,
+    );
+    let (pinned_dir, root_ino) = {
+        let guard = store.lock().unwrap();
+        (
+            guard.lookup(ROOT, "Pinned").unwrap().ino,
+            guard.record(ROOT).unwrap().ino,
+        )
+    };
+    assert!(!fs.inode_excluded(pinned_dir));
+    assert!(!fs.entry_excluded(root_ino, "Pinned"));
+    assert!(!fs.child_excluded(root_ino, "blocked.iso", false));
+    assert!(!fs.child_excluded(root_ino, "Pinned", true));
+    // The write side still resolves the same paths for the local-only quiesce.
+    assert!(fs.local_only_inode(pinned_dir));
+    assert!(fs.local_only_child(root_ino, "blocked.iso", false));
+    assert!(!fs.local_only_child(root_ino, "A.txt", false));
+}
+
+/// Issue #56B: writes under a `local_only` rule succeed, stay readable and
+/// queue no upload/namespace operation.
+#[test]
+#[ignore = "requires ordinary Linux user and /dev/fuse"]
+fn local_only_write_paths_stay_local_without_operations() {
+    let (temp, store, fs) = open_fs_mode(&snapshot(), &[r"^Pinned$"], ExcludeMode::LocalOnly);
+    let (mount, session) = mount_at(&temp, fs);
+    std::fs::write(mount.join("Pinned/new.txt"), b"local").unwrap();
+    assert_eq!(
+        std::fs::read(mount.join("Pinned/new.txt")).unwrap(),
+        b"local"
+    );
+    let (id, pending) = {
+        let s = store.lock().unwrap();
+        (
+            s.lookup("300", "new.txt").expect("local node").node.id,
+            s.upload_operations("pending").unwrap(),
+        )
+    };
+    assert!(!id.is_empty());
+    assert!(
+        pending.is_empty(),
+        "local_only write must not queue an upload: {pending:?}"
+    );
+    assert_eq!(
+        store.lock().unwrap().pending_namespace_operations().unwrap(),
+        0
+    );
+    drop(session);
 }
 
 #[test]
@@ -164,4 +228,62 @@ fn empty_rules_keep_the_unfiltered_write_baseline() {
     let guard = store.lock().unwrap();
     assert!(guard.lookup(ROOT, "ok.txt").is_ok());
     assert!(guard.lookup(ROOT, "okdir").is_ok());
+}
+
+/// Issue #56B F1: deleting a remote-bound `local_only` file must not leave a
+/// pending `remove` namespace operation (that operation would let the scheduler
+/// delete the file on the server).
+#[test]
+#[ignore = "requires ordinary Linux user and /dev/fuse"]
+fn local_only_unlink_of_a_bound_file_queues_no_remove() {
+    let (temp, store, fs) = open_fs_mode(&snapshot(), &[r"^A\.txt$"], ExcludeMode::LocalOnly);
+    let (mount, session) = mount_at(&temp, fs);
+    std::fs::remove_file(mount.join("A.txt")).unwrap();
+    assert!(!mount.join("A.txt").exists(), "local view is deleted");
+    let (remove, pending) = {
+        let s = store.lock().unwrap();
+        (
+            s.next_remove().unwrap().is_some(),
+            s.pending_namespace_operations().unwrap(),
+        )
+    };
+    assert!(!remove, "local_only unlink must not queue a remote remove");
+    assert_eq!(pending, 0);
+    drop(session);
+}
+
+/// Issue #56B F1: rmdir/rename that touch a `local_only` path stay local and
+/// leave no namespace operation behind, including a replaced bound target.
+#[test]
+#[ignore = "requires ordinary Linux user and /dev/fuse"]
+fn local_only_rmdir_and_rename_queue_no_namespace_operations() {
+    let nodes = vec![
+        node(ROOT, None, "Lab", true),
+        node("400", Some(ROOT), "cache", true),
+        node("401", Some(ROOT), "A.txt", false),
+        node("402", Some(ROOT), "install.iso", false),
+    ];
+    let (temp, store, fs) = open_fs_mode(
+        &nodes,
+        &[r"^cache$", r"^A\.txt$"],
+        ExcludeMode::LocalOnly,
+    );
+    let (mount, session) = mount_at(&temp, fs);
+    std::fs::remove_dir(mount.join("cache")).unwrap();
+    std::fs::rename(mount.join("install.iso"), mount.join("A.txt")).unwrap();
+    assert!(mount.join("A.txt").exists());
+    assert!(!mount.join("cache").exists());
+    {
+        let s = store.lock().unwrap();
+        assert!(
+            s.next_remove().unwrap().is_none(),
+            "no dispatchable remove may survive"
+        );
+        assert!(
+            s.next_rename().unwrap().is_none(),
+            "no dispatchable rename may survive"
+        );
+        assert_eq!(s.pending_namespace_operations().unwrap(), 0);
+    }
+    drop(session);
 }

@@ -229,17 +229,184 @@ impl CacheFilesystem {
     }
 
     /// Snapshot of the exclusion index for a read-path reply, or `None` when
-    /// rules are inactive. Matching runs after the Store lock is released.
+    /// rules are inactive or the profile selected the `local_only` mode
+    /// (#56B): local-only matches stay visible to every read path, so those
+    /// replies must not be filtered. Matching runs after the Store lock is
+    /// released.
     pub(crate) fn exclusion_index(
         &self,
     ) -> Option<Arc<drive_core::exclude::ExclusionIndex>> {
         self.exclusion.as_ref().and_then(|state| {
-            if state.is_active() {
+            if state.is_active() && state.hides() {
                 Some(state.current())
             } else {
                 None
             }
         })
+    }
+
+    /// The exclusion index of a `local_only` task, or `None` for hidden/empty
+    /// rules (#56B). Write paths use it to decide whether an allowed local
+    /// operation must be quiesced instead of refused.
+    fn local_only_index(&self) -> Option<Arc<drive_core::exclude::ExclusionIndex>> {
+        self.exclusion.as_ref().and_then(|state| {
+            if state.is_active() && !state.hides() {
+                Some(state.current())
+            } else {
+                None
+            }
+        })
+    }
+
+    /// True when `ino` belongs to a matched subtree in `local_only` mode.
+    pub(crate) fn local_only_inode(&self, ino: u64) -> bool {
+        self.local_only_index()
+            .is_some_and(|index| index.inode_excluded(ino))
+    }
+
+    /// True when the directory entry `(parent, name)` matches a `local_only`
+    /// rule. Unlike [`Self::entry_excluded`] this does not hide the entry.
+    pub(crate) fn local_only_entry(&self, parent: u64, name: &str) -> bool {
+        self.local_only_index()
+            .is_some_and(|index| index.entry_excluded(parent, name))
+    }
+
+    /// Issue #56B F2: local-only content is served only from local state. When
+    /// `missing` is true (no cached body, no draft) the mount must answer ENOENT
+    /// instead of hydrating the body from the server.
+    pub(crate) fn local_only_content_unavailable(&self, ino: u64, missing: bool) -> bool {
+        missing && self.local_only_inode(ino)
+    }
+
+    /// True when a not-yet-created entry below `parent` matches a `local_only`
+    /// rule (#56B); the operation is allowed but its sync intents are dropped.
+    pub(crate) fn local_only_child(&self, parent: u64, name: &str, is_dir: bool) -> bool {
+        let Some(state) = self.exclusion.as_ref() else {
+            return false;
+        };
+        if !state.is_active() || state.hides() {
+            return false;
+        }
+        let index = state.current();
+        state.child_matches(&index, parent, name, is_dir) || index.inode_excluded(parent)
+    }
+
+    /// Issue #56B: remove a `local_only` entry from the local view without
+    /// queueing a remove operation and without hydrating a missing body.
+    fn local_only_remove(&mut self, parent: u64, name: &str, directory: bool, reply: ReplyEmpty) {
+        let store = self.store.clone();
+        let notify = self.notify.clone();
+        let hydrator = self.hydrator.clone();
+        let exclusion = self.exclusion.clone();
+        let name = name.to_owned();
+        let parent_ino = parent;
+        self.queue.submit(Box::new(move || {
+            let result = (|| -> drive_core::Result<()> {
+                let mut s = store.lock().unwrap();
+                let parent_id = preview::authoritative(&s, parent_ino, libc::EROFS)?.node.id;
+                let id = s.lookup(&parent_id, &name)?.node.id;
+                permissions::remove(&s, &parent_id, &id, directory)?;
+                // Mark before the tombstone exists so the scheduler guard covers
+                // the in-flight window; quiesce then removes the remove intent.
+                if let Some(state) = &exclusion {
+                    state.mark_local_only_node(&id);
+                }
+                let ino = s.record(&id)?.ino;
+                s.unlink_local(&parent_id, &name, &id, directory)?;
+                s.quiesce_local_only_nodes(std::slice::from_ref(&id))?;
+                drop(s);
+                notify.invalidate_entry(parent_ino, &name);
+                notify.invalidate_inode(parent_ino);
+                notify.invalidate_inode(ino);
+                Ok(())
+            })();
+            match result {
+                Ok(()) => {
+                    if let Some(h) = hydrator {
+                        h.local_saved();
+                    }
+                    reply.ok()
+                }
+                Err(e) => reply.error(errno(&e)),
+            }
+        }));
+    }
+
+    /// Issue #56B: rename a `local_only` path locally. The remote side is not
+    /// touched (no rename/replace operation, no hydration of the target).
+    fn local_only_rename(
+        &mut self,
+        parent: u64,
+        name: &OsStr,
+        newparent: u64,
+        newname: &OsStr,
+        flags: u32,
+        reply: ReplyEmpty,
+    ) {
+        let (Some(name), Some(newname)) = (
+            name.to_str().map(str::to_owned),
+            newname.to_str().map(str::to_owned),
+        ) else {
+            reply.error(libc::EINVAL);
+            return;
+        };
+        let store = self.store.clone();
+        let notify = self.notify.clone();
+        let hydrator = self.hydrator.clone();
+        let exclusion = self.exclusion.clone();
+        let (parent_ino, newparent_ino) = (parent, newparent);
+        self.queue.submit(Box::new(move || {
+            let result = (|| -> drive_core::Result<()> {
+                let mut s = store.lock().unwrap();
+                let p = preview::authoritative(&s, parent_ino, libc::EROFS)?.node.id;
+                let np = preview::authoritative(&s, newparent_ino, libc::EROFS)?.node.id;
+                let source = s.lookup(&p, &name)?.node.id;
+                let target = s
+                    .lookup(&np, &newname)
+                    .ok()
+                    .map(|target| target.node)
+                    .filter(|target| target.id != source);
+                permissions::rename(
+                    &s,
+                    &p,
+                    &source,
+                    &np,
+                    target.as_ref().map(|target| target.id.as_str()),
+                )?;
+                // Cover the rename/tombstone window before the journal rows exist.
+                if let Some(state) = &exclusion {
+                    state.mark_local_only_node(&source);
+                    if let Some(target) = &target {
+                        state.mark_local_only_node(&target.id);
+                    }
+                }
+                s.rename_local_replacing(
+                    &p,
+                    &name,
+                    &np,
+                    &newname,
+                    flags & (libc::RENAME_NOREPLACE as u32) != 0,
+                )?;
+                let mut ids = vec![source];
+                if let Some(target) = target {
+                    ids.push(target.id);
+                }
+                s.quiesce_local_only_nodes(&ids)?;
+                drop(s);
+                if let Some(h) = hydrator {
+                    h.local_saved();
+                }
+                notify.invalidate_entry(parent_ino, &name);
+                notify.invalidate_entry(newparent_ino, &newname);
+                notify.invalidate_inode(parent_ino);
+                notify.invalidate_inode(newparent_ino);
+                Ok(())
+            })();
+            match result {
+                Ok(()) => reply.ok(),
+                Err(e) => reply.error(errno(&e)),
+            }
+        }));
     }
 
     /// True when `ino` belongs to an excluded subtree and must answer ENOENT.
@@ -263,7 +430,7 @@ impl CacheFilesystem {
         let Some(state) = self.exclusion.as_ref() else {
             return false;
         };
-        if !state.is_active() {
+        if !state.is_active() || !state.hides() {
             return false;
         }
         let index = state.current();
@@ -500,6 +667,10 @@ impl Filesystem for CacheFilesystem {
             reply.error(libc::ENOENT);
             return;
         }
+        // Issue #56B: a `local_only` match still creates the directory, but the
+        // resulting sync intents are dropped immediately.
+        let local_only = self.local_only_child(parent, &name, true);
+        let exclusion = self.exclusion.clone();
         let store = self.store.clone();
         let hydrator = self.hydrator.clone();
         let notify = self.notify.clone();
@@ -511,7 +682,17 @@ impl Filesystem for CacheFilesystem {
                 let p = preview::authoritative(&s, parent, libc::EROFS)?;
                 permissions::node(&s, &p.node.id, permissions::Action::CreateDir)?;
                 let node = s.create_local_directory(&p.node.id, &name, mode & !umask)?;
-                s.record(&node.id)
+                if local_only {
+                    s.quiesce_local_only_nodes(std::slice::from_ref(&node.id))?;
+                }
+                let record = s.record(&node.id)?;
+                drop(s);
+                if local_only {
+                    if let Some(state) = &exclusion {
+                        state.mark_local_only_node(&node.id);
+                    }
+                }
+                Ok(record)
             })();
             match result {
                 Ok(record) => {
@@ -570,6 +751,14 @@ impl Filesystem for CacheFilesystem {
             reply.error(libc::ENOENT);
             return;
         }
+        // Issue #56B: a local-only match is removable locally; only the sync
+        // intents are quiesced.
+        if let Some(name) = name.to_str() {
+            if self.local_only_entry(parent, name) || self.local_only_inode(parent) {
+                self.local_only_remove(parent, name, false, reply);
+                return;
+            }
+        }
         namespace::remove(self, parent, name, false, reply)
     }
     fn rmdir(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEmpty) {
@@ -579,6 +768,12 @@ impl Filesystem for CacheFilesystem {
             drive_core::exclude::trace_hit("rmdir");
             reply.error(libc::ENOENT);
             return;
+        }
+        if let Some(name) = name.to_str() {
+            if self.local_only_entry(parent, name) || self.local_only_inode(parent) {
+                self.local_only_remove(parent, name, true, reply);
+                return;
+            }
         }
         namespace::remove(self, parent, name, true, reply)
     }
@@ -606,6 +801,19 @@ impl Filesystem for CacheFilesystem {
         if source_excluded || target_excluded {
             drive_core::exclude::trace_hit("rename");
             reply.error(libc::ENOENT);
+            return;
+        }
+        // Issue #56B: renames that touch a local-only path stay local; replacing
+        // an existing local-only target is a local edit, never a remote delete.
+        let local_only = name
+            .to_str()
+            .is_some_and(|name| self.local_only_entry(parent, name) || self.local_only_inode(parent))
+            || newname.to_str().is_some_and(|name| {
+                self.local_only_child(newparent, name, true)
+                    || self.local_only_child(newparent, name, false)
+            });
+        if local_only {
+            self.local_only_rename(parent, name, newparent, newname, flags, reply);
             return;
         }
         namespace::rename(self, parent, name, newparent, newname, flags, reply)
@@ -964,7 +1172,9 @@ impl Filesystem for CacheFilesystem {
             reply.error(libc::ENOENT);
             return;
         }
-        writable::open(self, ino, flags, reply, deadline)
+        // Issue #56B F2: an uncached local-only body must not hydrate.
+        let local_only = self.local_only_inode(ino);
+        writable::open(self, ino, flags, reply, deadline, local_only)
     }
     fn write(
         &mut self,
@@ -1054,6 +1264,9 @@ impl Filesystem for CacheFilesystem {
         let deadline = request::RequestDeadline::new(request::Op::Read);
         let reply = self.reads.register(req.unique(), reply);
         let cancel = reply.cancellation();
+        // Issue #56B F2: local-only content is served only when it is already
+        // local; the missing branch below answers ENOENT instead of hydrating.
+        let local_only = self.local_only_inode(ino);
         let handles = self.handles.clone();
         let network_queue = self.network_queue.clone();
         let hydrator = self.hydrator.clone();
@@ -1085,6 +1298,11 @@ impl Filesystem for CacheFilesystem {
             };
             if let Some(content) = cached {
                 reply_read(&store,ino,content, offset, size, reply);
+                return;
+            }
+            if local_only {
+                // #56B F2: never start a server download for a local-only path.
+                reply.error(libc::ENOENT);
                 return;
             }
             let Some(hydrator) = hydrator else {

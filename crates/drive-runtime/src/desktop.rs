@@ -51,7 +51,9 @@ fn other() -> io::Error {
 /// `None` keeps every projection on its unfiltered fast path.
 fn exclusion_rules(service: &Service) -> Option<drive_core::exclude::ExcludeRules> {
     let state = service.bridge.exclusion_state();
-    if state.is_active() {
+    if state.is_active() && state.hides() {
+        // #56B: local_only matches stay listed (GetDirectory/GetStates); only
+        // the explicit hidden mode filters desktop projections.
         Some(state.rules().clone())
     } else {
         None
@@ -1959,6 +1961,7 @@ mod readpath_tests {
             local_policy: None,
             writable_source: None,
             exclude_patterns: Vec::new(),
+            exclude_mode: drive_core::exclude::ExcludeMode::default(),
         }
     }
     fn fixture() -> (tempfile::TempDir, Arc<Service>) {
@@ -2259,6 +2262,14 @@ mod readpath_tests {
         patterns: &[&str],
         nodes: &[Node],
     ) -> (tempfile::TempDir, Arc<Service>) {
+        service_with_excludes_mode(patterns, nodes, drive_core::exclude::ExcludeMode::Hidden)
+    }
+
+    fn service_with_excludes_mode(
+        patterns: &[&str],
+        nodes: &[Node],
+        mode: drive_core::exclude::ExcludeMode,
+    ) -> (tempfile::TempDir, Arc<Service>) {
         let dir = tempfile::tempdir().unwrap();
         let mut store = Store::open(dir.path()).unwrap();
         store.install_remote_snapshot(nodes, "1", "server").unwrap();
@@ -2268,6 +2279,7 @@ mod readpath_tests {
             .iter()
             .map(|pattern| (*pattern).to_owned())
             .collect();
+        profile.exclude_mode = mode;
         (
             dir,
             Service::new(profile, store, PathBuf::from("/nonexistent-worker")).unwrap(),
@@ -2305,6 +2317,44 @@ mod readpath_tests {
             );
         }
         assert!(directory(&service, "notes", 0).is_ok());
+    }
+
+    /// Issue #56B: the default `local_only` mode keeps matched paths listed by
+    /// GetDirectory/GetStates instead of answering ENOENT.
+    #[test]
+    fn local_only_matches_stay_visible_in_desktop_projections() {
+        let nodes = [
+            node("root", None, true),
+            node("folder", Some("root"), true),
+            node("one", Some("folder"), false),
+            node("notes", Some("root"), true),
+            node("install.iso", Some("root"), false),
+        ];
+        let (_dir, service) = service_with_excludes_mode(
+            &["^folder$", r"\.iso$"],
+            &nodes,
+            drive_core::exclude::ExcludeMode::LocalOnly,
+        );
+        let page: serde_json::Value =
+            serde_json::from_str(&directory(&service, "", 0).expect("root page")).unwrap();
+        let paths: Vec<&str> = page["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["path"].as_str().unwrap())
+            .collect();
+        assert_eq!(paths, ["folder", "install.iso", "notes"]);
+        assert_eq!(page["total"], 3);
+        assert!(directory(&service, "folder", 0).is_ok());
+        let value: serde_json::Value = serde_json::from_str(
+            &states(&service, vec!["folder".to_owned(), "install.iso".to_owned()]).unwrap(),
+        )
+        .unwrap();
+        let entries = value["entries"].as_array().unwrap();
+        assert_eq!(entries[0]["path"], "folder");
+        assert!(entries[0]["error"].is_null(), "{entries:?}");
+        assert_eq!(entries[1]["path"], "install.iso");
+        assert!(entries[1]["error"].is_null(), "{entries:?}");
     }
 
     /// Issue #50: GetStates treats excluded paths like missing ones.
@@ -2688,6 +2738,7 @@ mod release_job_tests {
             mount: PathBuf::from(MOUNT),
             writable: false,
             exclude_patterns: Vec::new(),
+            exclude_mode: drive_core::exclude::ExcludeMode::default(),
             local_policy: None,
             writable_source: None,
         }

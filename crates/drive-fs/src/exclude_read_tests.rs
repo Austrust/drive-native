@@ -4,7 +4,7 @@
 //! The mounted tests need `/dev/fuse` and an ordinary Linux user, so they are
 //! `#[ignore]`d like the other kernel regressions and are run explicitly.
 use super::*;
-use drive_core::exclude::{ExcludeRules, ExclusionState};
+use drive_core::exclude::{ExcludeMode, ExcludeRules, ExclusionState};
 use drive_core::NodeMetadata;
 use std::sync::Arc;
 
@@ -39,14 +39,32 @@ fn snapshot() -> Vec<Node> {
 }
 
 fn state(patterns: &[&str]) -> Arc<ExclusionState> {
-    Arc::new(ExclusionState::new(
+    state_mode(patterns, ExcludeMode::Hidden)
+}
+
+fn state_mode(patterns: &[&str], mode: ExcludeMode) -> Arc<ExclusionState> {
+    Arc::new(ExclusionState::with_mode(
         ExcludeRules::compile(patterns).expect("valid test rules"),
+        mode,
     ))
 }
 
 fn open_fs(
     nodes: &[Node],
     patterns: &[&str],
+) -> (
+    tempfile::TempDir,
+    Arc<drive_core::SharedStore>,
+    Arc<ExclusionState>,
+    CacheFilesystem,
+) {
+    open_fs_mode(nodes, patterns, ExcludeMode::Hidden)
+}
+
+fn open_fs_mode(
+    nodes: &[Node],
+    patterns: &[&str],
+    mode: ExcludeMode,
 ) -> (
     tempfile::TempDir,
     Arc<drive_core::SharedStore>,
@@ -61,7 +79,7 @@ fn open_fs(
     store.ensure_fs_root(ROOT).unwrap();
     store.ensure_filesystem_inodes(ROOT).unwrap();
     let store = Arc::new(drive_core::SharedStore::new(store));
-    let state = state(patterns);
+    let state = state_mode(patterns, mode);
     if !patterns.is_empty() {
         let guard = store.lock().unwrap();
         state.refresh(&guard, ROOT).unwrap();
@@ -146,6 +164,49 @@ fn empty_rules_keep_the_unfiltered_fast_path() {
     assert!(!fs.entry_excluded(1, "node_modules"));
 }
 
+/// Issue #56B: `local_only` (the profile default) keeps matched paths visible
+/// to every read path; only the hidden mode feeds the exclusion helpers.
+#[test]
+fn local_only_mode_keeps_matched_paths_visible_to_read_paths() {
+    let (_temp, store, state, fs) = open_fs_mode(
+        &snapshot(),
+        &[r"(^|/)node_modules/"],
+        ExcludeMode::LocalOnly,
+    );
+    let (hidden_dir, root_ino) = {
+        let guard = store.lock().unwrap();
+        (
+            guard.lookup(ROOT, "node_modules").unwrap().ino,
+            guard.record(ROOT).unwrap().ino,
+        )
+    };
+    assert!(!state.hides());
+    assert!(fs.exclusion_index().is_none(), "no read-path filtering");
+    assert!(!fs.inode_excluded(hidden_dir));
+    assert!(!fs.entry_excluded(root_ino, "node_modules"));
+    assert!(!fs.child_excluded(root_ino, "node_modules", true));
+    // The same index still identifies local-only targets for the write side.
+    assert!(fs.local_only_inode(hidden_dir));
+    assert!(fs.local_only_child(root_ino, "node_modules", true));
+    assert!(!fs.local_only_child(root_ino, "fresh-name", true));
+}
+
+/// Issue #56B: a `local_only` mount lists and serves matched paths.
+#[test]
+#[ignore = "requires an ordinary Linux user and /dev/fuse; run explicitly"]
+fn local_only_mount_keeps_matched_paths_visible() {
+    let (temp, _store, _state, fs) =
+        open_fs_mode(&snapshot(), &[r"(^|/)node_modules/"], ExcludeMode::LocalOnly);
+    let (mount, session) = mount_at(&temp, fs);
+    assert_eq!(
+        names(&mount),
+        ["A.txt", "Pinned", "install.iso", "node_modules"]
+    );
+    assert!(std::fs::metadata(mount.join("node_modules")).is_ok());
+    assert!(std::fs::metadata(mount.join("node_modules/left-pad/index.js")).is_ok());
+    drop(session);
+}
+
 #[test]
 #[ignore = "requires an ordinary Linux user and /dev/fuse; run explicitly"]
 fn excluded_paths_answer_enoent_and_stay_out_of_readdir() {
@@ -205,5 +266,56 @@ fn mount_then_initialization_snapshot_refresh_keeps_excluded_paths_hidden() {
     assert_eq!(names(&mount), ["A.txt", "Pinned"]);
     assert_missing(&mount.join("install.iso"));
     assert_missing(&mount.join("node_modules/left-pad/index.js"));
+    drop(session);
+}
+
+/// Issue #56B F2: local-only content is served only from local state. A bound
+/// node whose body was reclaimed (or never downloaded) must answer ENOENT
+/// instead of starting a hydration; hidden mode keeps the old path.
+#[test]
+fn local_only_uncached_content_is_not_served() {
+    let (_temp, store, _state, fs) =
+        open_fs_mode(&snapshot(), &[r"^A\.txt$"], ExcludeMode::LocalOnly);
+    let (ino, cached) = {
+        let s = store.lock().unwrap();
+        (
+            s.lookup(ROOT, "A.txt").unwrap().ino,
+            s.open_cached("101").is_ok(),
+        )
+    };
+    assert!(!cached, "synthetic snapshot deliberately has no body");
+    assert!(
+        fs.local_only_content_unavailable(ino, !cached),
+        "local-only missing content must be refused before hydration"
+    );
+    let (_temp2, store2, _state2, fs2) = open_fs(&snapshot(), &[r"^A\.txt$"]);
+    let ino2 = store2.lock().unwrap().lookup(ROOT, "A.txt").unwrap().ino;
+    assert!(
+        !fs2.local_only_content_unavailable(ino2, true),
+        "hidden mode keeps its existing hydration path"
+    );
+}
+
+/// Issue #56B F2 (kernel): reading an uncached local-only file returns ENOENT
+/// and never calls the hydrator.
+#[test]
+#[ignore = "requires an ordinary Linux user and /dev/fuse; run explicitly"]
+fn local_only_uncached_read_answers_enoent_without_hydration() {
+    struct NoHydrate;
+    impl Hydrator for NoHydrate {
+        fn hydrate(
+            &self,
+            _node: &Node,
+        ) -> std::result::Result<Arc<drive_core::ReadHandle>, i32> {
+            panic!("local-only content must not hydrate");
+        }
+    }
+    let (temp, _store, _state, fs) =
+        open_fs_mode(&snapshot(), &[r"^A\.txt$"], ExcludeMode::LocalOnly);
+    let fs = fs.with_hydrator(Arc::new(NoHydrate));
+    let (mount, session) = mount_at(&temp, fs);
+    assert!(std::fs::metadata(mount.join("A.txt")).is_ok());
+    let error = std::fs::read(mount.join("A.txt")).unwrap_err();
+    assert_eq!(error.raw_os_error(), Some(libc::ENOENT));
     drop(session);
 }

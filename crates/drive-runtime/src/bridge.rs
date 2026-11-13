@@ -312,8 +312,18 @@ impl Bridge {
         let active = flights.keys().map(|(id, _)| id.clone()).collect();
         let (result, inodes) = {
             let mut store = self.store.lock().unwrap();
+            // Issue #56B: local-only matches keep their cached bodies; automatic
+            // trimming must not turn a visible local file back into "online only".
+            let protected = {
+                let state = self.exclusion_state();
+                if state.is_active() {
+                    state.current().excluded_node_ids().into_iter().collect()
+                } else {
+                    std::collections::HashSet::new()
+                }
+            };
             let result = store
-                .trim_cache(unix_seconds(), &active)
+                .trim_cache_protected(unix_seconds(), &active, &protected)
                 .map_err(io::Error::other)?;
             let inodes = result
                 .released
@@ -455,7 +465,9 @@ impl Bridge {
         if !state.is_active() {
             return false;
         }
-        state.current().node_excluded(node_id)
+        // #56B: `local_only` nodes are quiesced at the write path; the marked
+        // set closes the window until the next index rebuild adds them.
+        state.is_local_only_node(node_id) || state.current().node_excluded(node_id)
     }
     /// Rebuild the exclusion index after the committed namespace changed.
     ///
@@ -531,6 +543,29 @@ impl Bridge {
             > 0
         {
             drive_core::exclude::trace_hit("mount-restore");
+        }
+        Ok(())
+    }
+    /// Issue #56B: drop queued sync work for `local_only` matches at mount time
+    /// while keeping the nodes, inodes, drafts and cached bodies usable. Rebuilds
+    /// the index against the committed namespace first so a rule change is
+    /// reflected without waiting for the next namespace swap.
+    pub(crate) fn quiesce_local_only_from_store(&self, root: &str) -> io::Result<()> {
+        let state = self.exclusion_state();
+        if !state.is_active() || state.hides() {
+            return Ok(());
+        }
+        let _mutation = self.recovery_gate.write().unwrap();
+        let mut store = self.store.lock().unwrap();
+        state.refresh(&store, root).map_err(io::Error::other)?;
+        let ids = state.current().excluded_node_ids();
+        let quiesced = store
+            .quiesce_local_only_nodes(&ids)
+            .map_err(io::Error::other)?;
+        if quiesced > 0 {
+            drive_core::exclude::trace_hit(&format!(
+                "local-only quiesce ({quiesced} nodes)"
+            ));
         }
         Ok(())
     }
@@ -895,16 +930,27 @@ impl Bridge {
                             Ok(index) => {
                                 let ids = index.excluded_node_ids();
                                 if !ids.is_empty() {
-                                    match store.purge_excluded_nodes(&ids) {
+                                    // #56B: hidden mode purges; local_only drops
+                                    // sync intents but keeps the local view.
+                                    let outcome = if self.exclusion_state().hides() {
+                                        store.purge_excluded_nodes(&ids).map(|purged| {
+                                            if purged > 0 {
+                                                let _ = store.collect_garbage();
+                                            }
+                                            purged
+                                        })
+                                    } else {
+                                        store.quiesce_local_only_nodes(&ids)
+                                    };
+                                    match outcome {
                                         Ok(purged) if purged > 0 => {
-                                            let _ = store.collect_garbage();
                                             drive_core::exclude::trace_hit(&format!(
-                                                "recovery snapshot purge ({purged} nodes)"
+                                                "recovery snapshot cleanup ({purged} nodes)"
                                             ));
                                         }
                                         Ok(_) => {}
                                         Err(error) => eprintln!(
-                                            "drive-native exclude: recovery purge failed: {error}"
+                                            "drive-native exclude: recovery cleanup failed: {error}"
                                         ),
                                     }
                                 }

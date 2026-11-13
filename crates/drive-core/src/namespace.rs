@@ -244,6 +244,43 @@ impl Store {
         normalized_version(&self.db, id, version)
     }
 
+    /// Issue #56B: a `local_only` rename that may replace an existing local
+    /// target. `rename_local` refuses a replace (`EOPNOTSUPP`) because remote
+    /// replace owns that semantics; for local-only paths the target is retired
+    /// locally first (tombstone + all sync intents removed, see F1) and then the
+    /// ordinary local rename runs. The remote side is never touched.
+    pub fn rename_local_replacing(
+        &mut self,
+        parent: &str,
+        name: &str,
+        new_parent: &str,
+        new_name: &str,
+        no_replace: bool,
+    ) -> Result<()> {
+        let source = self.lookup(parent, name)?.node;
+        if let Ok(target) = self.lookup(new_parent, new_name) {
+            if target.node.id != source.id {
+                if no_replace {
+                    return Err(os(libc::EEXIST));
+                }
+                if target.node.directory != source.directory {
+                    return Err(os(if source.directory {
+                        libc::ENOTDIR
+                    } else {
+                        libc::EISDIR
+                    }));
+                }
+                self.unlink_local(new_parent, new_name, &target.node.id, target.node.directory)?;
+                // F1: the local tombstone must not keep a dispatchable remove.
+                self.quiesce_local_only_nodes(std::slice::from_ref(&target.node.id))?;
+            }
+        }
+        self.rename_local(parent, name, new_parent, new_name, no_replace)?;
+        // The local rename queues a rename intent; local_only never dispatches it.
+        self.quiesce_local_only_nodes(std::slice::from_ref(&source.id))?;
+        Ok(())
+    }
+
     pub fn rename_local(
         &mut self,
         parent: &str,

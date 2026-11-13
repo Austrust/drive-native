@@ -36,6 +36,7 @@ fn profile() -> Profile {
         mount: PathBuf::from("/tmp/drive-native-test-mount"),
         writable: false, local_policy: None, writable_source: None,
         exclude_patterns: Vec::new(),
+        exclude_mode: drive_core::exclude::ExcludeMode::default(),
     }
 }
 fn fixture() -> (tempfile::TempDir, std::sync::Arc<Service>) {
@@ -1536,6 +1537,46 @@ fn profile_reads_valid_exclude_patterns_and_matches_relative_paths() {
     assert!(rules.matches("Sub/C.txt", false));
     assert!(rules.matches("install.iso", false));
     assert!(!rules.matches("A.txt", false));
+}
+
+/// Issue #56B: exclusion mode defaults to `local_only` (visible locally, never
+/// synced); legacy `hidden` is explicit and unknown values are rejected with
+/// the raw value so the settings UI can report it.
+#[test]
+fn profile_exclude_mode_defaults_to_local_only_and_rejects_unknown_values() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_profile(&dir, |value| {
+        value.as_object_mut().unwrap().remove("exclude_mode");
+    });
+    let profile = Profile::read(&path).unwrap();
+    assert_eq!(
+        profile.exclude_mode,
+        drive_core::exclude::ExcludeMode::LocalOnly
+    );
+
+    let path = write_profile(&dir, |value| {
+        value
+            .as_object_mut()
+            .unwrap()
+            .insert("exclude_mode".into(), serde_json::json!("hidden"));
+    });
+    let profile = Profile::read(&path).unwrap();
+    assert_eq!(
+        profile.exclude_mode,
+        drive_core::exclude::ExcludeMode::Hidden
+    );
+
+    let path = write_profile(&dir, |value| {
+        value
+            .as_object_mut()
+            .unwrap()
+            .insert("exclude_mode".into(), serde_json::json!("bogus"));
+    });
+    let error = Profile::read(&path)
+        .err()
+        .expect("unknown exclude mode must be rejected")
+        .to_string();
+    assert!(error.contains("bogus"), "{error}");
 }
 
 /// issue #54: a bound directory tombstoned by the server while local-only
