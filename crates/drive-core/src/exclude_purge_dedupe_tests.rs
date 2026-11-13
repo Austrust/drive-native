@@ -9,6 +9,7 @@
 //! stays fast and it runs explicitly on the remote builder.
 use crate::state::{
     ExcludedPurgedMerge, excluded_purge_profile, reset_excluded_purge_profile,
+    set_legacy_excluded_purge_merge_for_red,
 };
 use crate::Store;
 use rusqlite::params;
@@ -235,4 +236,62 @@ fn purge_scale_curve_and_concurrent_metadata_latency() {
             profile.probes
         );
     }
+}
+
+/// Reproducible red, same tree: the former `Vec::contains` merge is kept behind
+/// a test-only switch and must perform exactly K(K-1)/2 membership comparisons
+/// for K unique ids; the prepared merge in the same tree performs O(K).
+#[test]
+fn legacy_vec_contains_merge_reproduces_the_quadratic_red_count() {
+    const K: usize = 1_000;
+    let new_ids = ids("r", K);
+    set_legacy_excluded_purge_merge_for_red(true);
+    reset_excluded_purge_profile();
+    let merged = ExcludedPurgedMerge::prepare(None).absorb(new_ids.clone());
+    let legacy_probes = excluded_purge_profile().probes;
+    set_legacy_excluded_purge_merge_for_red(false);
+    assert_eq!(merged.len(), K);
+    assert_eq!(
+        legacy_probes,
+        u64::try_from(K * (K - 1) / 2).unwrap(),
+        "red-87.log: K(K-1)/2 comparisons for K unique ids"
+    );
+
+    let (merged, probes) = measured_merge(Vec::new(), new_ids);
+    assert_eq!(merged.len(), K);
+    assert!(
+        probes <= 4 * u64::try_from(K).unwrap() + 64,
+        "the prepared merge in the same tree is linear: {probes} probes"
+    );
+}
+
+/// The same replay through the real `purge_excluded_nodes` path: this is the
+/// exact 19900-probe sample recorded in `red-87.log` for 200 ids.
+#[test]
+fn legacy_merge_through_the_purge_path_reproduces_red_87() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open(dir.path()).unwrap();
+    let wanted = ids("legacy", 200);
+    insert_nodes(&store, &wanted);
+    set_legacy_excluded_purge_merge_for_red(true);
+    reset_excluded_purge_profile();
+    let purged = store.purge_excluded_nodes(&wanted).unwrap();
+    let legacy_probes = excluded_purge_profile().probes;
+    set_legacy_excluded_purge_merge_for_red(false);
+    assert_eq!(purged, 200);
+    assert_eq!(
+        legacy_probes,
+        u64::try_from(200 * 199 / 2).unwrap(),
+        "red-87.log: 19900 probes through the real purge path"
+    );
+
+    reset_excluded_purge_profile();
+    let second = ids("fixed", 200);
+    insert_nodes(&store, &second);
+    assert_eq!(store.purge_excluded_nodes(&second).unwrap(), 200);
+    let fixed_probes = excluded_purge_profile().probes;
+    assert!(
+        fixed_probes <= 4 * 200 + 64,
+        "fixed merge stays linear: {fixed_probes} probes"
+    );
 }

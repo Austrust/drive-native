@@ -900,6 +900,19 @@ pub(crate) struct ExcludedPurgeProfile {
 
 #[cfg(test)]
 thread_local! {
+    /// Force the former `Vec::contains` merge in a unit test. This exists only
+    /// so the red evidence (`notes/test-logs/r5/storage/red-87.log`) can be
+    /// reproduced from this branch through the real purge path.
+    static LEGACY_EXCLUDED_PURGE_MERGE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+pub(crate) fn set_legacy_excluded_purge_merge_for_red(enabled: bool) {
+    LEGACY_EXCLUDED_PURGE_MERGE.with(|flag| flag.set(enabled));
+}
+
+#[cfg(test)]
+thread_local! {
     static EXCLUDED_PURGE_PROFILE: std::cell::Cell<ExcludedPurgeProfile> =
         const { std::cell::Cell::new(ExcludedPurgeProfile {
             probes: 0,
@@ -961,6 +974,22 @@ impl ExcludedPurgedMerge {
     pub(crate) fn absorb(mut self, persisted: Vec<String>) -> Vec<String> {
         let mut merged = std::mem::take(&mut self.previous);
         for id in persisted {
+            #[cfg(test)]
+            if LEGACY_EXCLUDED_PURGE_MERGE.with(std::cell::Cell::get) {
+                // Red replay: the exact former `Vec::contains` loop.
+                let mut duplicate = false;
+                for existing in &merged {
+                    record_excluded_purge(|profile| profile.probes += 1);
+                    if existing == &id {
+                        duplicate = true;
+                        break;
+                    }
+                }
+                if !duplicate {
+                    merged.push(id);
+                }
+                continue;
+            }
             #[cfg(test)]
             record_excluded_purge(|profile| profile.probes += 1);
             if self.seen.insert(id.clone()) {
