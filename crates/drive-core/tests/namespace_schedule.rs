@@ -877,7 +877,9 @@ fn pending_suffix_beyond_the_scan_window_is_eventually_attempted() {
         let suffix: std::collections::HashSet<String> =
             pending.iter().map(|(operation, _)| operation.clone()).collect();
         let mut attempted = std::collections::HashSet::new();
-        for _round in 0..WINDOW_ROUND_BUDGET {
+        let mut first_attempt_round = None;
+        let started = std::time::Instant::now();
+        for round in 0..WINDOW_ROUND_BUDGET {
             let Some(selected) = s.next_namespace_operation().unwrap() else {
                 // A selector that only sees the blocked prefix returns `None`;
                 // an executable-pending fix must keep returning candidates.
@@ -887,6 +889,7 @@ fn pending_suffix_beyond_the_scan_window_is_eventually_attempted() {
                 s.mark_remove_started(&selected.operation).unwrap();
                 journal_commit(&d, &selected.operation);
                 attempted.insert(selected.operation);
+                first_attempt_round.get_or_insert(round);
             } else if selected.state == "uncertain" {
                 // Model the read-only reconcile that cannot prove the outcome.
                 assert!(s
@@ -897,6 +900,17 @@ fn pending_suffix_beyond_the_scan_window_is_eventually_attempted() {
                     .unwrap());
             }
         }
+        let scan = s.queue_health().unwrap().schedule.expect("schedule snapshot");
+        println!(
+            "#57A prefix={prefix} first_suffix_attempt_round={:?} attempts={} rounds_elapsed_ms={} scan_cursor={} scan_cycles={} truncated={} truncation_reason={:?}",
+            first_attempt_round,
+            attempted.len(),
+            started.elapsed().as_millis(),
+            scan.scan_cursor,
+            scan.scan_cycles,
+            scan.truncated,
+            scan.truncation_reason,
+        );
         assert!(
             !attempted.is_empty(),
             "prefix={prefix}: the 100-row independent pending suffix never got an attempt in \
@@ -1002,6 +1016,14 @@ fn continuous_pending_serves_a_due_reconcile_within_the_aging_budget() {
         health.reconcile_max_wait_ms >= 10_000,
         "reconcile_max_wait_ms={}",
         health.reconcile_max_wait_ms
+    );
+    println!(
+        "#57C reconcile_aged max_wait_ms={} due_age_ms={:?} attempts={} overrides={} pending_before_aged={pending_before}",
+        health.reconcile_max_wait_ms,
+        health.reconcile_due_age_ms,
+        health.reconcile_attempts,
+        health.reconcile_aged_overrides,
+        pending_before = 5,
     );
     let schedule = health.schedule.expect("schedule snapshot");
     assert_eq!(schedule.executable_unscheduled, 1);
