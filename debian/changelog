@@ -1,3 +1,59 @@
+drive-native (0.1.0~dev20261113.1) unstable; urgency=medium
+
+  * Merge the #6/#9/#23/#25–#28/#56/#57–#61 issue batch and the #67
+    performance batch:
+    - #57 (P0): pending-first namespace dispatch with durable attempt
+      counters and starvation diagnostics; uncertain reconciles can no
+      longer monopolize the single commit lane and freeze the pending tail.
+    - #58: catch-up gets a total wall-clock budget plus a business-progress
+      watchdog, so keep-alives cannot renew a stalled catch-up forever.
+    - #59: configurable FUSE queue tuning, per-opcode request deadlines and
+      bounded metadata waits keep a slow worker from stalling other
+      requests; the claim/memory model is documented in FUSE_READ_ISOLATION.
+    - #60: cache limit defaults become bounded (min(10 GiB, 10% disk); an
+      explicit 0 still opts out), orphan drafts are quarantined and
+      reclaimed, and migration backups rotate (newest two / 30 days).
+    - #61: a persisted sync_paused_v1 intent from a previous lifetime is
+      auto-resumed at startup and the pause origin is reported as paused_by.
+    - #9 TB3: the remaining silent reconcile paths now write explicit
+      diagnostics; scheduler observation keeps the concrete last error;
+      unexpected journal states fail loudly; 12 runtime/core tests pin it.
+    - #23: directory projections single-flight per directory instead of per
+      mount, so concurrent opendir on different directories no longer
+      serializes; per-directory view invalidation is designed separately.
+    - #25–#28: status-cache degradation/recovery is observable on the
+      product diagnostic channel; ACL permission-cache and READDIRPLUS
+      batch counters are exported; invalidation overflow/recovery emits
+      health events; the remove-barrier version trigger is narrowed to
+      semantic columns and a 10k-backlog upload regression is pinned.
+    - #56: exclude rules default to "local keep, do not sync" (local_only):
+      matched paths stay visible/readable/writable locally but never upload,
+      download, or delete remotely; the previous hide-everything behavior
+      remains available via "exclude_mode": "hidden"; restoring a rule no
+      longer requires clearing all rules; local remove/rename quiesces the
+      sync intents without any remote mutation.
+    - #6: conflicted native removes gain an additive keep-remote recovery
+      (GetIssues can_abandon_remove + D-Bus AbandonRemoveConflict) that
+      restores the local tombstone and never sends a delete/modify RPC.
+    - #67 performance: warm GetStates reuses one committed projection
+      render; remote-event history writes are batched and applied in
+      256-event chunks; the status projection stays resident once; GetIssues
+      first-page facts and root-page cache accounting are batched; desktop
+      polls reuse a bounded pool of read-only connections; overlapping cold
+      GetStates batches coalesce instead of each re-reading the store.
+  * schema stays 29 and IPC stays 21; this batch adds no migration.
+    Behavior changes: the exclude mode default (#56), TB3 diagnostics,
+    bounded cache defaults and resumed-startup pause semantics. FSD and
+    worker must still be updated as a pair. The local_only default can be
+    reverted per profile with "exclude_mode": "hidden".
+  * Verified on workstation202611 with a clean rebuild of the merged tree:
+    workspace all-features 1439 passed / 0 failed / 85 ignored; the POSIX gate reports 0 violations and the kernel FUSE matrix (mounted/permissions/directory views/readdirplus/namespace index) is 20/20; lab kernel suites and the GUI
+    module matrix were run by the packaging tests. See
+    docs/RELEASE_20261113_1.md for details; release assets carry the exact
+    commit and package hashes.
+
+ -- Drive Native contributors <noreply@example.invalid>  Fri, 13 Nov 2026 17:40:00 +0800
+
 drive-native (0.1.0~dev20261109.2) unstable; urgency=medium
 
   * Merge the #2/#6/#8/#9/#10/#11/#14/#18/#19/#50/#53 batch:

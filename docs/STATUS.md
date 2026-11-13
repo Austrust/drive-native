@@ -2,7 +2,7 @@
 
 唯一实时验收状态见 [DELIVERY_GATES.md](../DELIVERY_GATES.md)。开发版的修复、性能、安装与剩余范围见 [交付说明](RELEASE_20261103_9.md)。历史实验按各自报告保留；本页不再复制阶段快照。
 
-当前发布：`0.1.0~dev20261109.2`（`main` @ `73ab2b3`，schema v29、IPC21）；发布说明见 [RELEASE_NOTES_2](RELEASE_20261109_2.md) 与 [RELEASE_NOTES.md](RELEASE_NOTES.md)，可复制的验收命令见 [ACCEPTANCE_COMMANDS.md](ACCEPTANCE_COMMANDS.md)。
+当前发布：`0.1.0~dev20261113.1`（schema v29、IPC21，本版无迁移）；发布说明见 [RELEASE_20261113_1.md](RELEASE_20261113_1.md) 与 [RELEASE_NOTES.md](RELEASE_NOTES.md)，可复制的验收命令见 [ACCEPTANCE_COMMANDS.md](ACCEPTANCE_COMMANDS.md)。
 
 只读路径排除与预览挂载：[按任务正则排除（#50 P1–P3，含 B2 preview 修复）](EXCLUDE_PATTERNS.md)；跨平台移植（#11 stage0）：[Windows / CFAPI 移植路线与 core POSIX 门禁](WINDOWS_PORT.md)（`bash scripts/check-core-posix.sh`，当前为骨架阶段）。
 

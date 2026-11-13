@@ -1089,8 +1089,19 @@ fn first_install_commit_publishes_one_generation_invalidation_and_recovers() {
     assert_eq!(bridge.notification_overflows(), 0);
     // The mount suspends cacheable publication for one old-lease quiet window
     // and resumes by itself: the first install never needs a restart.
+    // Suspension starts on the publication thread after the invalidation is
+    // consumed, so waiting on the ttl alone races the degrade transition:
+    // require the recovery to have been accounted before asserting it.
     assert!(
-        wait_for(Duration::from_secs(5), || !hub.ttl().is_zero()),
+        wait_for(Duration::from_secs(5), || {
+            // Polling `ttl()` is what drives `try_recover`; sample it first so
+            // the degraded window can elapse, then require the accounted
+            // recovery (the earlier wait could observe a still-nonzero TTL
+            // before the degrade transition had even run).
+            let ttl = hub.ttl();
+            let stats = hub.stats();
+            stats.recoveries >= 1 && !stats.degraded && !ttl.is_zero()
+        }),
         "mount never resumed cacheable publication after the first-install storm"
     );
     let stats = hub.stats();

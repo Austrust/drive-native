@@ -1,3 +1,15 @@
+# 0.1.0~dev20261113.1：P0/P1 缺陷收尾、open issues 验证与 #67 性能批
+
+本版已发布为 `dev20261113.1`。合入上一批 draft PR #62–#66（#57–#61 修复）与后续两轮收尾：#23（按目录 single-flight）、#25–#28（可观测性与 barrier 成本）、#56（排除规则默认 local_only + restore 修复）、#6（remove 冲突 keep-remote 恢复）、#9 TB3（静默 reconcile 收口），以及 #67 性能批（PR #73–#78、#83）。schema **29**／IPC **21** 不变，本版无迁移；升级仍需 FSD/worker 成对更新。
+
+- **#56 默认行为变化**：`exclude_mode` 缺省为 `local_only`（命中路径本地可见可读写、不同步、不产生远端删除）；显式 `"exclude_mode": "hidden"` 保持 #50 的完全隐藏语义；部分撤回规则即可恢复对应路径。
+- **#6**：冲突原生删除新增 additive `AbandonRemoveConflict(id, token)` 与 `can_abandon_remove`，只在本地恢复、零远端 RPC。
+- **#9 TB3**：replace 准备失败可见化、诊断保真、不可能状态显式失败，12 个新测试钉死。
+- **#23/#25–#28**：opendir 按目录 single-flight；status_cache/ACL/invalidation 诊断可观测；remove barrier 触发器收窄且 10k 积压上传 ratio 1.0（重建 8→1）。
+- **#67 性能批**：warm GetStates 投影复用、事件历史批量+256 分块、投影常驻、GetIssues/根页批量化、只读连接池、cold 批合并。数字与未覆盖项以 issue #67 为准。
+
+验证：workstation202611 干净重建全量 `cargo test --workspace --all-features --locked` **1439 通过 / 0 失败 / 85 忽略**；POSIX 门禁 0 violation；GUI 与内核 FUSE 套件随打包/发布验证执行。详见 [RELEASE_20261113_1.md](RELEASE_20261113_1.md) 与发布资产 `VALIDATION.json`。真实 NAS／Mint 桌面／真实 dpkg 安装升级仍未验收，本包不是 rc1。
+
 # 0.1.0~dev20261109.2：上传终态处理、缓存释放与 schema v29
 
 本版已发布为 `dev20261109.2`。本批把 #14 未确认上传预算耗尽后的 `abandoned` 终态与「放弃本地文件」入口、#19 缓存释放后台作业与 GC 回收、#18 FUSE 硬链接拒绝语义、#53 后台提交推进后的托盘/导航计数刷新、#8 初始化期间桌面读响应性验收、#6 已绑定目录 stale conflict 标志自愈、#9 TB1 的 schema v29 诊断列与迁移回填、#2 2a 托盘不可用时的 freedesktop 系统通知回退、#50 的按任务正则排除（P1/P2 初始化剪枝、P3 读路径隐藏、B2 preview 挂载修复与 P4 写路径/调度防御与本地清理）、#11 stage0 的 core POSIX 门禁与 Windows 移植骨架、#11 step1 的文件身份契约、#6/issue #54 的已绑定目录恢复入口、#9 TB2 的提交诊断消费面、#10 的自动恢复分类、#14 残留 pending 上传补漏、#8 门禁稳健性合入 `main`（PR #55，合并提交 `73ab2b3`；代码树即发布源）。schema29、IPC21：FSD 与 worker 必须成对更新，旧程序不能读取新 schema；升级前会自动 `VACUUM INTO` `state-before-v29-*.sqlite` 备份。

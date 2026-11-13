@@ -957,120 +957,110 @@ impl Service {
     {
         let mut waited = false;
         let joined_at = Instant::now();
+        let mut leader = false;
         {
             let mut gate = self
                 .cold_states
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             loop {
-                let outcome = {
-                    let Some(entry) = gate.as_mut() else { break };
-                    if entry.key != key {
-                        break;
-                    }
-                    match &entry.outcome {
-                        Some(outcome) => Some(rebuild_cold_states_outcome(outcome)),
-                        None => {
-                            if !waited {
-                                waited = true;
-                                entry.followers += 1;
-                            }
-                            None
+                // Publish the in-flight key before releasing the lock, so a
+                // caller that finds "no gate" can only become the single leader.
+                // The earlier two-phase check (wait loop, then publish attempt)
+                // let two simultaneous first callers both run the authoritative
+                // read when the publication race was lost.
+                if gate.is_none() {
+                    *gate = Some(ColdStatesEntry {
+                        key: key.clone(),
+                        outcome: None,
+                        followers: 0,
+                    });
+                    leader = true;
+                    break;
+                }
+                if gate.as_ref().is_some_and(|entry| entry.key != key) {
+                    // A different batch owns the gate: never wait for it.
+                    break;
+                }
+                let ready = {
+                    let entry = gate.as_mut().unwrap();
+                    if let Some(outcome) = &entry.outcome {
+                        Some(rebuild_cold_states_outcome(outcome))
+                    } else {
+                        if !waited {
+                            waited = true;
+                            entry.followers += 1;
                         }
+                        None
                     }
                 };
-                match outcome {
-                    Some(result) => {
-                        if waited {
-                            if let Some(entry) = gate.as_mut() {
-                                entry.followers -= 1;
-                                if entry.followers == 0 {
-                                    *gate = None;
-                                }
-                            }
-                            self.cold_states_changed.notify_all();
+                if let Some(result) = ready {
+                    if waited {
+                        let entry = gate.as_mut().unwrap();
+                        entry.followers = entry.followers.saturating_sub(1);
+                        if entry.followers == 0 {
+                            *gate = None;
                         }
-                        #[cfg(test)]
-                        self.cold_states_joins.fetch_add(1, Ordering::Relaxed);
-                        return result;
+                        self.cold_states_changed.notify_all();
                     }
-                    None => {
-                        let (next, timeout) = self
-                            .cold_states_changed
-                            .wait_timeout(gate, COLD_STATES_JOIN_SLICE)
-                            .unwrap_or_else(std::sync::PoisonError::into_inner);
-                        gate = next;
-                        // Re-check the gate after every slice: a timeout is not
-                        // a reason to start a competing O(#nodes) read (that
-                        // thundering herd starves the read lane). Only a leader
-                        // wedged past the hard deadline lets this caller fall
-                        // back to its own read.
-                        if timeout.timed_out() && joined_at.elapsed() >= COLD_STATES_JOIN_DEADLINE
-                        {
-                            if waited {
-                                waited = false;
-                                if let Some(entry) = gate.as_mut() {
-                                    entry.followers = entry.followers.saturating_sub(1);
-                                    if entry.followers == 0 && entry.outcome.is_some() {
-                                        *gate = None;
-                                    }
-                                }
-                                self.cold_states_changed.notify_all();
+                    #[cfg(test)]
+                    self.cold_states_joins.fetch_add(1, Ordering::Relaxed);
+                    return result;
+                }
+                let (next, timeout) = self
+                    .cold_states_changed
+                    .wait_timeout(gate, COLD_STATES_JOIN_SLICE)
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                gate = next;
+                // Re-check the gate after every slice: a timeout is not a
+                // reason to start a competing O(#nodes) read. Only a leader
+                // wedged past the hard deadline lets this caller fall back.
+                if timeout.timed_out() && joined_at.elapsed() >= COLD_STATES_JOIN_DEADLINE {
+                    if waited {
+                        waited = false;
+                        if let Some(entry) = gate.as_mut() {
+                            entry.followers = entry.followers.saturating_sub(1);
+                            if entry.followers == 0 && entry.outcome.is_some() {
+                                *gate = None;
                             }
-                            #[cfg(test)]
-                            self.cold_states_abandoned.fetch_add(1, Ordering::Relaxed);
-                            break;
                         }
+                        self.cold_states_changed.notify_all();
                     }
+                    #[cfg(test)]
+                    self.cold_states_abandoned.fetch_add(1, Ordering::Relaxed);
+                    break;
                 }
             }
         }
-        // Publish only when no unrelated batch owns the gate; otherwise run the
-        // authoritative read without coalescing so unrelated requests never wait.
-        let publish = {
-            let mut gate = self
-                .cold_states
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if gate.is_none() {
-                *gate = Some(ColdStatesEntry {
-                    key: key.clone(),
-                    outcome: None,
-                    followers: 0,
-                });
-                true
-            } else {
-                false
+        if leader {
+            #[cfg(test)]
+            self.cold_states_test_delay();
+            #[cfg(test)]
+            if self.take_cold_states_test_failure() {
+                let failure = Err(std::io::Error::other("injected cold-states failure"));
+                ColdStatesLeader {
+                    service: self,
+                    key,
+                    published: false,
+                }
+                .finish(&failure);
+                return failure;
             }
-        };
-        if !publish {
+            let result = work();
             #[cfg(test)]
             self.count_cold_states_computation();
-            return work();
-        }
-        #[cfg(test)]
-        self.cold_states_test_delay();
-        #[cfg(test)]
-        if self.take_cold_states_test_failure() {
-            let failure = Err(std::io::Error::other("injected cold-states failure"));
             ColdStatesLeader {
                 service: self,
                 key,
                 published: false,
             }
-            .finish(&failure);
-            return failure;
+            .finish(&result);
+            result
+        } else {
+            #[cfg(test)]
+            self.count_cold_states_computation();
+            work()
         }
-        let result = work();
-        #[cfg(test)]
-        self.count_cold_states_computation();
-        ColdStatesLeader {
-            service: self,
-            key,
-            published: false,
-        }
-        .finish(&result);
-        result
     }
     /// Latest committed desktop status projection, if the cache is ready.
     ///
