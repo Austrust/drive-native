@@ -145,6 +145,10 @@ const CACHE_CANDIDATES_SQL: &str = concat!(
     "AND n.blob NOT IN (SELECT blob FROM shared_blobs) ",
     "ORDER BY COALESCE(a.seq,0),n.id",
 );
+
+/// #90-A: the blob keep-set as one set query. Shared by the full legacy
+/// `collect_garbage` pass and the bounded re-verification windows.
+const BLOB_KEEP_SET_SQL: &str = "SELECT blob FROM nodes WHERE blob IS NOT NULL AND (deleted=0 OR conflict=1) UNION SELECT dirty_blob FROM nodes WHERE dirty_blob IS NOT NULL UNION SELECT blob FROM operations WHERE blob IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict','abandoned') UNION SELECT json_extract(body,'$.blob') FROM namespace_ops WHERE kind='replace' AND state NOT IN ('committed','superseded')";
 #[derive(Clone, Debug, Serialize)]
 pub struct CacheUsage {
     pub limit_bytes: u64,
@@ -173,12 +177,163 @@ pub struct CacheUsage {
     pub backup_reclaimable_bytes: u64,
     pub backup_protected_bytes: u64,
 }
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct CacheTrim {
     pub revision: u64,
     pub usage: CacheUsage,
     pub released: Vec<String>,
     pub reclaimed_bytes: u64,
+    /// Issue #90-A additive metrics (never a behaviour input).
+    pub maintenance: CacheMaintenanceStats,
+}
+/// Issue #90-B: clean-draft rows deleted per transaction.
+///
+/// The pre-#90 loop issued one `DELETE` per row, so with WAL and
+/// `synchronous=FULL` every clean closed draft paid its own commit while the
+/// caller held the Store/flights locks. A batch transaction amortizes the WAL
+/// sync without relaxing durability. Exposed so the runtime maintenance loop and
+/// its red/green measurement use the same budget as the core deletion pass.
+pub const GC_CLEAN_DRAFT_BATCH_SIZE: usize = 128;
+
+/// One bounded clean-draft pruning pass. `commits` counts the transactions this
+/// pass performed; deliberately metered separately from the other GC writes so
+/// #90-B's write amplification is observable on its own.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct CleanDraftPrune {
+    pub rows: u64,
+    pub commits: u64,
+    pub file_bytes: u64,
+}
+
+/// One bounded unreferenced-draft-file sweep.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct DraftFilePrune {
+    pub files: u64,
+    pub bytes: u64,
+    /// `false` when the pass stopped at its file budget and the directory still
+    /// needs another pass.
+    pub exhausted: bool,
+}
+
+/// Issue #90-A: blob candidates re-verified (and deleted when still
+/// unreferenced) per locked GC window. The Store/flights locks are released
+/// between windows so metadata and content work can advance.
+pub const GC_BLOB_BATCH_SIZE: usize = 128;
+/// Issue #90-A: bounded number of locked windows one maintenance call performs
+/// before returning; the cursor resumes on the next call.
+pub const GC_MAX_WINDOWS_PER_CALL: usize = 16;
+/// Issue #90-A: soft wall-clock budget for one maintenance call; guards the
+/// window cap against a slow filesystem.
+pub const GC_ROUND_TIME_BUDGET: std::time::Duration = std::time::Duration::from_millis(250);
+/// Issue #90-A: re-scan floor after a pressure round reclaimed nothing. Policy,
+/// limit and revision changes bypass it.
+pub const GC_NO_PROGRESS_BACKOFF: std::time::Duration = std::time::Duration::from_secs(90);
+
+/// One UUID-named blob body discovered without holding the Store lock.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BlobEntry {
+    pub name: String,
+    pub bytes: u64,
+}
+
+/// A lock-free snapshot of the blob directory: candidate identities/sizes and
+/// the logical total. #90-A reuses it for the GC candidate pass and the usage
+/// accounting instead of walking `blobs/` three times under the lock.
+#[derive(Clone, Debug, Default)]
+pub struct BlobInventory {
+    pub entries: Vec<BlobEntry>,
+    pub total_bytes: u64,
+    pub sizes: HashMap<String, u64>,
+}
+
+/// Outcome of one bounded, re-verified reclaim window.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct GcReclaim {
+    pub examined: u64,
+    pub removed: u64,
+    pub removed_bytes: u64,
+}
+
+/// Walk `root/blobs` without any Store/flights lock (#90-A). The directory
+/// traversal is the expensive part and must never run inside the share-visible
+/// critical section. Only UUID-named regular files are returned; a body that
+/// vanishes mid-walk is skipped because every deletion is re-verified under the
+/// lock once more.
+pub fn scan_blob_inventory(root: &std::path::Path) -> Result<BlobInventory> {
+    let mut inventory = BlobInventory::default();
+    let dir = root.join("blobs");
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(inventory),
+        Err(e) => return Err(e.into()),
+    };
+    for entry in entries {
+        let entry = entry?;
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        if uuid::Uuid::parse_str(&name).is_err() {
+            continue;
+        }
+        // A vanished/replaced body is not an error here: the locked window
+        // re-checks identity before touching it.
+        let Ok(metadata) = std::fs::symlink_metadata(dir.join(&name)) else {
+            continue;
+        };
+        if !metadata.is_file() {
+            continue;
+        }
+        let bytes = metadata.len();
+        inventory.total_bytes = inventory.total_bytes.saturating_add(bytes);
+        inventory.sizes.insert(name.clone(), bytes);
+        inventory.entries.push(BlobEntry { name, bytes });
+    }
+    Ok(inventory)
+}
+
+/// Inputs already collected by one maintenance round (#90-A). `None` means
+/// "measure it here"; reused inputs avoid repeating the `blobs/` and `drafts/`
+/// walks the legacy trim performed two to three times inside one lock hold.
+#[derive(Default)]
+pub struct CacheUsageInputs<'a> {
+    pub blobs_bytes: Option<u64>,
+    pub blob_sizes: Option<&'a HashMap<String, u64>>,
+    pub drafts: Option<&'a crate::drafts::DraftUsage>,
+    pub backups: Option<&'a crate::state::MigrationBackupInventory>,
+}
+
+/// Instrumentation returned with every trim (#90-A). Deliberately additive: the
+/// values are what the red/green tests and the heavy measurement read to prove
+/// that one lock hold no longer spans a full directory walk.
+#[derive(Clone, Copy, Debug, Default, Serialize, PartialEq, Eq)]
+pub struct CacheMaintenanceStats {
+    /// Returned from the no-progress backoff without scanning.
+    pub deferred: bool,
+    /// The previous call stopped mid-round and this call continued it.
+    pub resumed: bool,
+    /// Maintenance rounds advanced (a resumed round counts once).
+    pub rounds: u32,
+    pub store_lock_windows: u32,
+    pub flights_lock_windows: u32,
+    pub max_store_lock_wait_ns: u64,
+    pub max_store_lock_hold_ns: u64,
+    pub total_store_lock_hold_ns: u64,
+    pub blobs_discovered: u64,
+    pub blob_bytes_discovered: u64,
+    pub blobs_examined: u64,
+    pub blobs_removed: u64,
+    pub max_blobs_per_window: u64,
+    pub removed_bytes: u64,
+    pub clean_draft_rows: u64,
+    pub clean_draft_commits: u64,
+    pub draft_files_removed: u64,
+    pub released: u64,
+    /// Inode invalidations queued for released cache bodies (legacy
+    /// `maintain_cache` queued one per released id after dropping the locks).
+    pub released_inode_invalidations: u64,
+    /// The usage snapshot used a fresh locked scan instead of the lock-free
+    /// inventory because the Store revision moved during the round.
+    pub calibrated: bool,
 }
 impl Store {
     pub fn downloads_paused(&self) -> Result<bool> {
@@ -247,6 +402,17 @@ impl Store {
         self.db.execute("INSERT INTO metadata(key,value) VALUES('cache_limit_bytes',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[bytes.to_string()])?;
         Ok(())
     }
+
+    /// Test-support seam for the cache-maintenance regression harness:
+    /// drop the 60 s recent-publication grace on one node so the eviction path
+    /// can select that body immediately. The grace window is deliberately not
+    /// configurable in production and this has no production caller.
+    #[doc(hidden)]
+    pub fn expire_cache_publication_for_test(&mut self, id: &str) -> Result<()> {
+        self.db
+            .execute("DELETE FROM cache_published WHERE node=?1", [id])?;
+        Ok(())
+    }
     /// Actual file opens only; icon/status and directory queries must not call it.
     ///
     /// This is deliberately memory-only. A cached read-only open is the hottest
@@ -307,6 +473,18 @@ impl Store {
         Ok(self.db.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE node=?1 AND state IN ('pending','inflight','uncertain','conflict','abandoned')) OR EXISTS(SELECT 1 FROM local_creations WHERE node=?1)",[id],|r|r.get(0))?)
     }
     fn cache_candidates(&self, now: u64, active: &HashSet<String>) -> Result<Vec<(String, u64)>> {
+        self.cache_candidates_with(now, active, None)
+    }
+    /// #90-A: reuse the blob sizes discovered by the lock-free inventory instead
+    /// of statting every candidate again. The on-disk identity check is still
+    /// performed so a vanished/changed candidate fails exactly like the legacy
+    /// pipeline.
+    fn cache_candidates_with(
+        &self,
+        now: u64,
+        active: &HashSet<String>,
+        blob_sizes: Option<&HashMap<String, u64>>,
+    ) -> Result<Vec<(String, u64)>> {
         // Visibility for a budget decision, not a durable notification: fold the
         // deferred open recency in before ordering candidates by `cache_access`.
         self.flush_cache_recency()?;
@@ -344,7 +522,10 @@ impl Store {
             if !metadata.is_file() {
                 return Err(Error::State("invalid cache content file".into()));
             }
-            result.push((id, metadata.len()));
+            let size = blob_sizes
+                .and_then(|sizes| sizes.get(&blob).copied())
+                .unwrap_or(metadata.len());
+            result.push((id, size));
         }
         Ok(result)
     }
@@ -411,18 +592,150 @@ impl Store {
             .checked_add(self.draft_usage(unix_now())?.total_bytes)
             .ok_or_else(|| Error::State("content size overflow".into()))
     }
+    /// #90-A: the DB-only half of the retired-row cleanup, isolated so the
+    /// runtime can run it in its own short window instead of inside a filesystem
+    /// scan. Returns the number of rows whose stale body pointer was dropped.
+    pub fn gc_retire_retired_pointers(&mut self) -> Result<u64> {
+        Ok(self.db.execute(
+            "UPDATE nodes SET blob=NULL,local_version=NULL WHERE deleted=1 AND conflict=0 AND dirty_blob IS NULL AND blob IS NOT NULL",
+            [],
+        )? as u64)
+    }
+    /// Every body the current committed state still needs: nodes, dirty blobs,
+    /// unresolved operations (incl. #14 `abandoned`), pending namespace
+    /// replacements, and open handles. Shared by the full legacy GC pass and the
+    /// bounded re-verification windows of #90-A.
+    pub(crate) fn blob_keep_set(&self) -> Result<HashSet<String>> {
+        let mut keep: HashSet<String> = {
+            let mut q = self.db.prepare(BLOB_KEEP_SET_SQL)?;
+            q.query_map([], |r| r.get::<_, String>(0))?
+                .collect::<std::result::Result<_, _>>()?
+        };
+        keep.extend(self.handles.lock().unwrap().keys().cloned());
+        Ok(keep)
+    }
+    /// Re-verify a batch of candidates discovered outside the lock, then unlink
+    /// the ones that are still unreferenced (#90-A).
+    ///
+    /// The caller holds the Store lock *and* the flights snapshot for this
+    /// window, so `keep` is a current reference set, not a stale snapshot: a
+    /// candidate that gained a node/operation/namespace-replace reference, an
+    /// open handle, or an active download flight after discovery is preserved.
+    /// Candidate identity is re-checked on disk (`symlink_metadata`, regular
+    /// file, unchanged size); a changed/vanished identity is left for the next
+    /// round instead of being deleted blindly.
+    pub fn gc_reclaim_blobs(
+        &mut self,
+        candidates: &[BlobEntry],
+        active: &HashSet<String>,
+    ) -> Result<GcReclaim> {
+        let keep = self.blob_keep_set()?;
+        let mut out = GcReclaim::default();
+        // Active download flights: re-read their nodes' current bodies in this
+        // same window instead of trusting the flight-start snapshot.
+        let mut active_keep = HashSet::new();
+        for id in active {
+            let row: Option<(Option<String>, Option<String>)> = self
+                .db
+                .query_row("SELECT blob,dirty_blob FROM nodes WHERE id=?1", [id], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })
+                .optional()?;
+            if let Some((blob, dirty)) = row {
+                if let Some(blob) = blob {
+                    active_keep.insert(blob);
+                }
+                if let Some(blob) = dirty {
+                    active_keep.insert(blob);
+                }
+            }
+        }
+        for candidate in candidates {
+            out.examined += 1;
+            if keep.contains(&candidate.name)
+                || active_keep.contains(&candidate.name)
+                || uuid::Uuid::parse_str(&candidate.name).is_err()
+            {
+                continue;
+            }
+            let path = self.root.join("blobs").join(&candidate.name);
+            let metadata = match std::fs::symlink_metadata(&path) {
+                Ok(metadata) => metadata,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => return Err(e.into()),
+            };
+            if !metadata.is_file() || metadata.len() != candidate.bytes {
+                // The identity changed since discovery: do not delete, rediscover.
+                continue;
+            }
+            std::fs::remove_file(&path)?;
+            out.removed += 1;
+            out.removed_bytes = out.removed_bytes.saturating_add(metadata.len());
+        }
+        Ok(out)
+    }
+    /// Release reclaimable candidates until the projected content fits the
+    /// limit, at most `max` metadata changes (#90-A reuses this from the
+    /// incremental trim so the release policy is unchanged).
+    pub fn release_over_limit(
+        &mut self,
+        now: u64,
+        active: &HashSet<String>,
+        protected: &HashSet<String>,
+        bytes_now: u64,
+        max: usize,
+    ) -> Result<(Vec<String>, u64)> {
+        let limit = self.cache_limit()?;
+        let mut bytes = bytes_now;
+        let mut released = Vec::new();
+        if limit == 0 || bytes <= limit {
+            return Ok((released, bytes));
+        }
+        for (id, size) in self.cache_candidates(now, active)?.into_iter().take(max) {
+            if bytes <= limit {
+                break;
+            }
+            if protected.contains(&id) {
+                continue;
+            }
+            self.release(&id)?;
+            released.push(id);
+            bytes = bytes.saturating_sub(size);
+        }
+        Ok((released, bytes))
+    }
     pub fn cache_usage(&self, now: u64, active: &HashSet<String>) -> Result<CacheUsage> {
+        self.cache_usage_with(now, active, CacheUsageInputs::default())
+    }
+    /// #90-A: accounting from inputs a maintenance round already collected
+    /// (lock-free blob inventory, one draft-usage pass, one backup inventory)
+    /// instead of repeating every directory walk inside the lock hold.
+    pub fn cache_usage_with(
+        &self,
+        now: u64,
+        active: &HashSet<String>,
+        inputs: CacheUsageInputs<'_>,
+    ) -> Result<CacheUsage> {
         let limit_bytes = self.cache_limit()?;
         let limit_source = self.cache_limit_source()?;
         let recommended_limit_bytes = self.recommended_cache_limit();
-        let blobs_bytes = self.blobs_bytes()?;
-        let drafts = self.draft_usage(now)?;
-        let backups = self.backup_inventory()?;
+        let blobs_bytes = match inputs.blobs_bytes {
+            Some(bytes) => bytes,
+            None => self.blobs_bytes()?,
+        };
+        let drafts = match inputs.drafts {
+            Some(usage) => usage.clone(),
+            None => self.draft_usage(now)?,
+        };
+        let backups = match inputs.backups {
+            Some(inventory) => inventory.clone(),
+            None => self.backup_inventory()?,
+        };
         let content_bytes = blobs_bytes
             .checked_add(drafts.total_bytes)
             .ok_or_else(|| Error::State("content size overflow".into()))?;
         let reclaimable_bytes = self
-            .cache_candidates(now, active)?
+            .cache_candidates_with(now, active, inputs.blob_sizes)?
             .iter()
             .map(|(_, size)| *size)
             .sum::<u64>()
@@ -498,25 +811,18 @@ impl Store {
                 usage: self.cache_usage(now, active)?,
                 released: Vec::new(),
                 reclaimed_bytes: 0,
+                maintenance: CacheMaintenanceStats::default(),
             });
         }
         let mut reclaimed = self.collect_garbage()?;
-        let mut bytes = self.content_bytes()?;
+        let bytes = self.content_bytes()?;
         let mut released = Vec::new();
         if bytes > limit {
             // Bound metadata changes per pass; physical GC runs once, not once
             // per file. Shared/orphan references may require another pass.
-            for (id, size) in self.cache_candidates(now, active)?.into_iter().take(256) {
-                if bytes <= limit {
-                    break;
-                }
-                if protected.contains(&id) {
-                    continue;
-                }
-                self.release(&id)?;
-                released.push(id);
-                bytes = bytes.saturating_sub(size);
-            }
+            let (candidates, _projected) =
+                self.release_over_limit(now, active, protected, bytes, 256)?;
+            released = candidates;
             reclaimed += self.collect_garbage()?;
         }
         Ok(CacheTrim {
@@ -524,6 +830,7 @@ impl Store {
             usage: self.cache_usage(now, active)?,
             released,
             reclaimed_bytes: reclaimed,
+            maintenance: CacheMaintenanceStats::default(),
         })
     }
 }
@@ -540,3 +847,7 @@ impl Drop for Store {
 #[cfg(test)]
 #[path = "cache_policy_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "gc_batch_tests.rs"]
+mod gc_batch_tests;
