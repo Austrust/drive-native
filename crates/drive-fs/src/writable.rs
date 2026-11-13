@@ -85,7 +85,13 @@ fn draft(
     }
     Ok(d)
 }
-pub(super) fn open(fs: &mut CacheFilesystem, ino: u64, flags: i32, reply: ReplyOpen) {
+pub(super) fn open(
+    fs: &mut CacheFilesystem,
+    ino: u64,
+    flags: i32,
+    reply: ReplyOpen,
+    deadline: request::RequestDeadline,
+) {
     let writable = flags & libc::O_ACCMODE != libc::O_RDONLY;
     if (writable || flags & libc::O_TRUNC != 0) && !fs.writable {
         reply.error(libc::EROFS);
@@ -100,6 +106,7 @@ pub(super) fn open(fs: &mut CacheFilesystem, ino: u64, flags: i32, reply: ReplyO
     let updates = fs.handle_updates.clone();
     let hydrator = fs.hydrator.clone();
     fs.queue.submit(Box::new(move || {
+        let _deadline = deadline;
         let result = {
             let s = store.lock().unwrap();
             (|| { permissions::inode(&s,ino,if writable {permissions::Action::WriteContent}else{permissions::Action::Read})?;
@@ -177,6 +184,7 @@ pub(super) fn write(
     offset: i64,
     bytes: &[u8],
     reply: ReplyWrite,
+    deadline: request::RequestDeadline,
 ) {
     if !fs.writable {
         reply.error(libc::EROFS);
@@ -212,6 +220,7 @@ pub(super) fn write(
         // Issue #24: make write-path queueing and store-lock footprint visible.
         let queued = diagnostics::span(diagnostics::Stage::WriteQueue);
         let job: Job = Box::new(move || {
+            let _deadline = deadline;
             drop(queued);
             let result =
                 draft(&store, &handles, &updates, &hydrator, &id, body, false, permissions::Action::WriteContent).and_then(|d| {
@@ -287,7 +296,14 @@ impl Drop for ReleaseCleanup {
     }
 }
 
-pub(super) fn sync(fs: &mut CacheFilesystem, ino: u64, fh: u64, release: bool, reply: ReplyEmpty) {
+pub(super) fn sync(
+    fs: &mut CacheFilesystem,
+    ino: u64,
+    fh: u64,
+    release: bool,
+    reply: ReplyEmpty,
+    deadline: request::RequestDeadline,
+) {
     let route = sync_route(&mut fs.handles.lock().unwrap(), ino, fh, release);
     match route {
         SyncRoute::Immutable(None) => {
@@ -298,6 +314,7 @@ pub(super) fn sync(fs: &mut CacheFilesystem, ino: u64, fh: u64, release: bool, r
         }
         SyncRoute::Immutable(Some(handle)) => {
             fs.read_queue.submit(Box::new(move || {
+                let _deadline = deadline;
                 drop(handle);
                 reply.ok();
             }));
@@ -321,6 +338,7 @@ pub(super) fn sync(fs: &mut CacheFilesystem, ino: u64, fh: u64, release: bool, r
         fh,
     });
     fs.queue.submit(Box::new(move || {
+        let _deadline = deadline;
         let snapshot = {
             let h = handles.lock().unwrap();
             match h.entries.get(&fh) {
@@ -389,6 +407,7 @@ pub(super) fn setattr(
     _bkuptime: Option<SystemTime>,
     flags: Option<u32>,
     reply: ReplyAttr,
+    deadline: request::RequestDeadline,
 ) {
     if !fs.writable {
         reply.error(libc::EROFS);
@@ -409,7 +428,7 @@ pub(super) fn setattr(
         if mode.is_some() || size.is_some() {
             reply.error(libc::EOPNOTSUPP);
         } else {
-            timestamp_setattr::set_times(fs, ino, fh, atime, mtime, reply);
+            timestamp_setattr::set_times(fs, ino, fh, atime, mtime, reply, deadline);
         }
         return;
     }
@@ -419,6 +438,7 @@ pub(super) fn setattr(
         let notify = fs.notify.clone();
         let (uid, gid) = (fs.uid, fs.gid);
         fs.queue.submit(Box::new(move || {
+            let _deadline = deadline;
             if let Some(fh) = fh {
                 if !handles
                     .lock()
@@ -484,6 +504,7 @@ pub(super) fn setattr(
         };
         let missing = matches!(body, OpenContent::Missing(_)) && size != 0;
         let job: Job = Box::new(move || {
+            let _deadline = deadline;
             let result = draft(&store, &handles, &updates, &hydrator, &id, body, size == 0, permissions::Action::WriteContent)
                 .and_then(|d| {
                     {
@@ -534,6 +555,7 @@ pub(super) fn create(
     umask: u32,
     flags: i32,
     reply: fuser::ReplyCreate,
+    deadline: request::RequestDeadline,
 ) {
     if !fs.writable {
         reply.error(libc::EROFS);
@@ -549,6 +571,7 @@ pub(super) fn create(
     let (uid, gid) = (fs.uid, fs.gid);
     let updates = fs.handle_updates.clone();
     fs.queue.submit(Box::new(move || {
+        let _deadline = deadline;
         let _update = updates.lock().unwrap();
         {
             let h = handles.lock().unwrap();
