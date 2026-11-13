@@ -75,6 +75,40 @@ enum Invalidation {
     /// message replaces a per-node invalidation list that cannot fit the queue.
     All,
 }
+
+/// Non-blocking health of the runtime -> mount notification path (issue #27
+/// residual). Deliberately not an IPC/D-Bus/JSON contract yet; the daemon health
+/// surface and `crates/drive-runtime` consumers can use it without a schema
+/// change. `notification_overflows()` remains the compatibility accessor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NotificationHealth {
+    /// Committed invalidations rejected by the bounded queue (dropped).
+    pub overflows: u64,
+    /// Snapshot commits published as one whole-namespace generation message.
+    pub generation_invalidations: u64,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Test seam standing in for the daemon's stderr consumer (journald).
+    static CAPTURED_EVENTS: std::cell::RefCell<Vec<String>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Emit one structured `key=value` lifecycle line. The daemon writes it to
+/// stderr, which systemd forwards to the journal; unit tests capture the same
+/// line on the emitting thread instead of parsing process stderr.
+fn emit_event(line: String) {
+    #[cfg(test)]
+    CAPTURED_EVENTS.with(|events| events.borrow_mut().push(line.clone()));
+    eprintln!("{line}");
+}
+
+#[cfg(test)]
+pub(crate) fn drain_captured_events() -> Vec<String> {
+    CAPTURED_EVENTS.with(|events| std::mem::take(&mut *events.borrow_mut()))
+}
+
 #[derive(Default)]
 struct Demand {
     readers: Vec<drive_fs::ReadCancellation>,
@@ -133,6 +167,10 @@ pub struct Bridge {
     /// Non-zero means the mount suspended cacheable publication for one quiet
     /// lease window and then resumed; it never needs a restart (#27).
     notification_overflows: AtomicU64,
+    /// Snapshot commits published as one whole-namespace generation message
+    /// (per-node message sets above `SNAPSHOT_GENERATION_THRESHOLD`). Exposed
+    /// through [`Bridge::notification_health`].
+    generation_invalidations: AtomicU64,
     /// Bumped whenever the automatic recovery journal changes (#10); the
     /// desktop status sample includes it so recovery progress refreshes the
     /// overview without a control-plane revision.
@@ -335,6 +373,7 @@ impl Bridge {
             notify_hub,
             notifications,
             notification_overflows: AtomicU64::new(0),
+            generation_invalidations: AtomicU64::new(0),
             recovery_revision: AtomicU64::new(0),
             downloads: AtomicUsize::new(0),
             download_failures_seen: AtomicUsize::new(0),
@@ -359,13 +398,32 @@ impl Bridge {
     /// silently lose a committed mutation before it reaches the mount's hub.
     fn enqueue_invalidation(&self, invalidation: Invalidation) {
         if !enqueue_invalidation(&self.notifications, &self.notify_hub, invalidation) {
-            self.notification_overflows.fetch_add(1, Ordering::Relaxed);
+            let overflows = self
+                .notification_overflows
+                .fetch_add(1, Ordering::Relaxed)
+                .saturating_add(1);
+            // Sample an overflow storm: log the first drop and then each power
+            // of two, so journald gets bounded lines instead of one per drop.
+            if overflows == 1 || overflows.is_power_of_two() {
+                emit_event(format!(
+                    "drive-native-bridge: event=notification_overflow overflows={} dropped={}",
+                    overflows, overflows,
+                ));
+            }
         }
     }
     /// Committed invalidations dropped by the bounded notification queue.
     /// Observable for root diagnostics; the mount recovers without a restart.
     pub fn notification_overflows(&self) -> u64 {
         self.notification_overflows.load(Ordering::Relaxed)
+    }
+    /// One non-blocking health snapshot of the notification path (#27 residual).
+    /// Pure counter loads: safe from a diagnostic/status path and from tests.
+    pub fn notification_health(&self) -> NotificationHealth {
+        NotificationHealth {
+            overflows: self.notification_overflows.load(Ordering::Relaxed),
+            generation_invalidations: self.generation_invalidations.load(Ordering::Relaxed),
+        }
     }
     /// Install the profile's exclusion rules. Must be called before
     /// initialization enumerates the namespace (see `Service::new`, #50).
@@ -489,6 +547,16 @@ impl Bridge {
             .map(|(inode, parent, _)| usize::from(inode.is_some()) + usize::from(parent.is_some()))
             .sum::<usize>();
         if messages > Self::SNAPSHOT_GENERATION_THRESHOLD {
+            let generation_invalidations = self
+                .generation_invalidations
+                .fetch_add(1, Ordering::Relaxed)
+                .saturating_add(1);
+            emit_event(format!(
+                "drive-native-bridge: event=generation_invalidation generation_invalidations={} per_node_messages={} entries={}",
+                generation_invalidations,
+                messages,
+                invalidations.len(),
+            ));
             self.enqueue_invalidation(Invalidation::All);
             return;
         }

@@ -22,7 +22,7 @@ mod namespace;
 mod namespace_index_glue;
 mod preview;
 pub mod publication;
-pub use publication::{NotifyHub, ENTRY_TTL};
+pub use publication::{NotifyHealth, NotifyHub, NotifyStats, ENTRY_TTL};
 pub use namespace_index_glue::enabled as namespace_index_enabled;
 mod read_requests;
 pub mod request;

@@ -62,6 +62,14 @@ pub enum DegradeReason {
     DeliveryFailure = 3,
 }
 impl DegradeReason {
+    /// Stable label for the structured `event=publication_degraded` line.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::QueueOverflow => "queue_overflow",
+            Self::WholeCache => "whole_cache",
+            Self::DeliveryFailure => "delivery_failure",
+        }
+    }
     fn encode(self) -> u8 {
         self as u8
     }
@@ -104,6 +112,9 @@ struct Shared {
     degraded_reason: AtomicU8,
     /// Latest degradation event, in monotonic milliseconds since `start`.
     degraded_since_ms: AtomicU64,
+    /// Duration of the last completed degraded quiet window, in milliseconds
+    /// (0 before the first recovery). Part of the #27 health accessor.
+    last_degraded_ms: AtomicU64,
     /// Completion of the latest cacheable reply, in monotonic milliseconds.
     last_reply_ms: AtomicU64,
     /// Replies holding a permit; degradation resumes only at zero.
@@ -144,6 +155,21 @@ pub struct NotifyStats {
     pub reason: Option<DegradeReason>,
 }
 
+/// Consolidated publication-gate health (issue #27 residual): the existing
+/// counters plus the state a health surface needs, in one non-blocking call.
+/// Deliberately not an IPC/D-Bus/JSON contract yet; `stats()` stays the
+/// compatibility accessor for existing callers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NotifyHealth {
+    pub stats: NotifyStats,
+    /// Unix-ms TTL configured for attribute leases (0 disables caching).
+    pub ttl_ms: u64,
+    /// Milliseconds since the current degradation started; `None` when healthy.
+    pub degraded_for_ms: Option<u64>,
+    /// Duration of the last completed degraded window; 0 if never degraded.
+    pub last_degraded_ms: u64,
+}
+
 #[derive(Clone)]
 pub struct NotifyHub {
     shared: Arc<Shared>,
@@ -167,6 +193,27 @@ fn elapsed_ms(shared: &Shared) -> u64 {
     u64::try_from(shared.start.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Test seam standing in for the daemon's stderr consumer (journald).
+    static CAPTURED_EVENTS: std::cell::RefCell<Vec<String>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Emit one structured `key=value` lifecycle line. The daemon writes it to
+/// stderr, which systemd forwards to the journal; unit tests capture the same
+/// line on the emitting thread instead of parsing process stderr.
+fn emit_event(line: String) {
+    #[cfg(test)]
+    CAPTURED_EVENTS.with(|events| events.borrow_mut().push(line.clone()));
+    eprintln!("{line}");
+}
+
+#[cfg(test)]
+pub(crate) fn drain_captured_events() -> Vec<String> {
+    CAPTURED_EVENTS.with(|events| std::mem::take(&mut *events.borrow_mut()))
+}
+
 /// The moment the previous lease window is provably over: the later of the
 /// degradation event and the last completed cacheable reply, plus the TTL that
 /// reply could have carried, plus a short grace.
@@ -185,16 +232,35 @@ fn quiet_deadline_ms(shared: &Shared, ttl_ms: u64) -> u64 {
 fn begin_degraded(shared: &Shared, reason: DegradeReason) {
     let _guard = shared.recovery.lock().unwrap();
     shared.caching.store(false, Ordering::Release);
-    if !shared.degraded.swap(true, Ordering::AcqRel) {
+    let transition = !shared.degraded.swap(true, Ordering::AcqRel);
+    if transition {
         shared.failures.fetch_add(1, Ordering::Relaxed);
         crate::diagnostics::count(crate::diagnostics::Stage::TtlDegraded);
     }
+    let previous_reason = DegradeReason::decode(shared.degraded_reason.load(Ordering::Acquire));
     shared
         .degraded_reason
         .store(reason.encode(), Ordering::Release);
+    let degraded_since_ms = elapsed_ms(shared);
     shared
         .degraded_since_ms
-        .store(elapsed_ms(shared), Ordering::Release);
+        .store(degraded_since_ms, Ordering::Release);
+    // One line per transition or reason change, never per repeated event: a
+    // degradation storm (every dropped invalidation extends the window) must
+    // not flood journald. The recovery line carries the final counters.
+    if transition || previous_reason != Some(reason) {
+        emit_event(format!(
+            "drive-native-fs: event=publication_degraded reason={} transition={} overflows={} failures={} invalidations={} delivered={} replies_in_flight={} degraded_since_ms={}",
+            reason.as_str(),
+            transition,
+            shared.overflows.load(Ordering::Relaxed),
+            shared.failures.load(Ordering::Relaxed),
+            shared.invalidations.load(Ordering::Relaxed),
+            shared.delivered.load(Ordering::Relaxed),
+            shared.in_flight.load(Ordering::Acquire),
+            degraded_since_ms,
+        ));
+    }
 }
 
 /// Resume publication once the previous lease window is fully quiet.
@@ -222,6 +288,20 @@ fn try_recover(shared: &Shared) -> bool {
         crate::diagnostics::count(crate::diagnostics::Stage::TtlRecovered);
         let caching = shared.active.load(Ordering::Acquire) && ttl_ms > 0;
         shared.caching.store(caching, Ordering::Release);
+        let degraded_ms = elapsed_ms(shared)
+            .saturating_sub(shared.degraded_since_ms.load(Ordering::Acquire));
+        shared.last_degraded_ms.store(degraded_ms, Ordering::Release);
+        emit_event(format!(
+            "drive-native-fs: event=publication_recovered degraded_ms={} recoveries={} overflows={} failures={} invalidations={} delivered={} ttl_ms={} caching={}",
+            degraded_ms,
+            shared.recoveries.load(Ordering::Relaxed),
+            shared.overflows.load(Ordering::Relaxed),
+            shared.failures.load(Ordering::Relaxed),
+            shared.invalidations.load(Ordering::Relaxed),
+            shared.delivered.load(Ordering::Relaxed),
+            ttl_ms,
+            caching,
+        ));
     }
     true
 }
@@ -231,7 +311,18 @@ fn try_recover(shared: &Shared) -> bool {
 fn note_whole_cache(shared: &Shared) {
     shared.invalidations.fetch_add(1, Ordering::Relaxed);
     crate::diagnostics::count(crate::diagnostics::Stage::TtlInvalidations);
-    shared.touched.lock().unwrap().clear();
+    let touched_directories = {
+        let mut touched = shared.touched.lock().unwrap();
+        let count = touched.len();
+        touched.clear();
+        count
+    };
+    emit_event(format!(
+        "drive-native-fs: event=generation_invalidation invalidations={} delivered={} touched_directories={}",
+        shared.invalidations.load(Ordering::Relaxed),
+        shared.delivered.load(Ordering::Relaxed),
+        touched_directories,
+    ));
     begin_degraded(shared, DegradeReason::WholeCache);
 }
 
@@ -283,6 +374,7 @@ impl NotifyHub {
             degraded: AtomicBool::new(false),
             degraded_reason: AtomicU8::new(0),
             degraded_since_ms: AtomicU64::new(0),
+            last_degraded_ms: AtomicU64::new(0),
             last_reply_ms: AtomicU64::new(0),
             in_flight: AtomicUsize::new(0),
             ttl_ms: AtomicU64::new(ttl_ms),
@@ -539,6 +631,21 @@ impl NotifyHub {
             reason: DegradeReason::decode(self.shared.degraded_reason.load(Ordering::Acquire)),
         }
     }
+    /// One non-blocking health snapshot for the publication gate (#27
+    /// observability). Pure observation: never waits for the recovery lock, so
+    /// a daemon health probe cannot stall replies; transitions emit their own
+    /// structured stderr lines (`event=publication_degraded|recovered`).
+    pub fn health(&self) -> NotifyHealth {
+        let degraded = self.shared.degraded.load(Ordering::Acquire);
+        let degraded_since_ms = self.shared.degraded_since_ms.load(Ordering::Acquire);
+        NotifyHealth {
+            stats: self.stats(),
+            ttl_ms: self.shared.ttl_ms.load(Ordering::Relaxed),
+            degraded_for_ms: degraded
+                .then(|| elapsed_ms(&self.shared).saturating_sub(degraded_since_ms)),
+            last_degraded_ms: self.shared.last_degraded_ms.load(Ordering::Acquire),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -655,4 +762,52 @@ mod tests {
         assert_eq!(stats.overflows, 0);
         assert_eq!(stats.recoveries, 1);
     }
+    #[test]
+    fn overflow_health_reports_degradation_window_and_recovery() {
+        let hub = NotifyHub::with_ttl_ms(20);
+        hub.activate_ttl_for_tests(20);
+        assert!(hub.health().degraded_for_ms.is_none());
+        hub.invalidate_delivery_failed();
+        let health = hub.health();
+        assert!(health.stats.degraded);
+        assert_eq!(health.stats.reason, Some(DegradeReason::QueueOverflow));
+        assert_eq!(health.stats.overflows, 1);
+        assert!(health.degraded_for_ms.is_some());
+        assert_eq!(health.last_degraded_ms, 0);
+        assert_eq!(health.ttl_ms, 20);
+        assert!(
+            wait_until(Duration::from_secs(2), || !hub.ttl().is_zero()),
+            "degraded publication never auto-recovered"
+        );
+        let health = hub.health();
+        assert!(!health.stats.degraded);
+        assert!(health.degraded_for_ms.is_none());
+        assert_eq!(health.stats.recoveries, 1);
+        assert_eq!(health.stats.overflows, 1);
+        // The quiet window covers at least the old-lease TTL plus the grace.
+        assert!(
+            health.last_degraded_ms >= 100,
+            "recovered after only {}ms",
+            health.last_degraded_ms
+        );
+    }
+
+    #[test]
+    fn publication_transitions_emit_structured_stderr_events() {
+        let _ = super::drain_captured_events();
+        let hub = NotifyHub::with_ttl_ms(20);
+        hub.activate_ttl_for_tests(20);
+        hub.invalidate_delivery_failed();
+        hub.invalidate_all();
+        assert!(wait_until(Duration::from_secs(2), || !hub.ttl().is_zero()));
+        let events = super::drain_captured_events();
+        let joined = events.join("\n");
+        assert!(joined.contains("event=publication_degraded"), "{joined}");
+        assert!(joined.contains("reason=queue_overflow"), "{joined}");
+        assert!(joined.contains("overflows=1"), "{joined}");
+        assert!(joined.contains("event=generation_invalidation"), "{joined}");
+        assert!(joined.contains("event=publication_recovered"), "{joined}");
+        assert!(joined.contains("degraded_ms="), "{joined}");
+    }
+
 }
