@@ -301,6 +301,129 @@ pub(crate) struct CacheUsageMemoEntry {
 pub(crate) const CACHE_USAGE_MEMO_TTL: std::time::Duration =
     std::time::Duration::from_millis(1500);
 
+/// Issue #67 R1: bounded idle pool of private read-only SQLite connections.
+///
+/// Every desktop poll used to open a fresh read-only connection. On a 294k
+/// store that open dominated 16-way `GetStates` concurrency (each open read the
+/// WAL/schema pages and contended with the others) even though the warm
+/// projection render is O(#paths). A [`ReadOnlyHandle`] borrows one connection
+/// and returns it on drop, so sequential polls pay the open once and a
+/// concurrent burst only fills the idle capacity.
+const READ_ONLY_POOL_CAPACITY: usize = 8;
+
+pub(crate) struct ReadOnlyPool {
+    shared: Arc<drive_core::SharedStore>,
+    idle: Mutex<Vec<Store>>,
+    #[cfg(test)]
+    opens: AtomicUsize,
+    #[cfg(test)]
+    open_ns: AtomicU64,
+}
+impl ReadOnlyPool {
+    fn new(shared: Arc<drive_core::SharedStore>) -> Self {
+        Self {
+            shared,
+            idle: Mutex::new(Vec::new()),
+            #[cfg(test)]
+            opens: AtomicUsize::new(0),
+            #[cfg(test)]
+            open_ns: AtomicU64::new(0),
+        }
+    }
+    /// Borrow a reusable read-only handle, or open one when the pool is empty.
+    /// Connections opened against a replaced Store root are discarded instead
+    /// of serving the old database. `None` keeps the serialized fallback.
+    fn handle(self: &Arc<Self>) -> Option<ReadOnlyHandle> {
+        let root = self.shared.root();
+        loop {
+            let store = self
+                .idle
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .pop();
+            let Some(store) = store else { break };
+            if store.root() == root.as_path() {
+                return Some(ReadOnlyHandle {
+                    pool: self.clone(),
+                    store: Some(store),
+                });
+            }
+            // The Store behind this pool was replaced: never serve the old root.
+            drop(store);
+        }
+        #[cfg(test)]
+        let started = Instant::now();
+        let store = self.shared.read_only().ok()?;
+        #[cfg(test)]
+        self.record_open(elapsed_ns(started));
+        Some(ReadOnlyHandle {
+            pool: self.clone(),
+            store: Some(store),
+        })
+    }
+    fn release(&self, store: Store) {
+        let mut idle = self
+            .idle
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if idle.len() < READ_ONLY_POOL_CAPACITY {
+            idle.push(store);
+        }
+    }
+    #[cfg(test)]
+    fn record_open(&self, ns: u64) {
+        self.opens.fetch_add(1, Ordering::Relaxed);
+        self.open_ns.fetch_add(ns, Ordering::Relaxed);
+    }
+    #[cfg(test)]
+    fn open_stats(&self) -> (usize, u64) {
+        (
+            self.opens.load(Ordering::Relaxed),
+            self.open_ns.load(Ordering::Relaxed),
+        )
+    }
+    #[cfg(test)]
+    fn reset_open_stats(&self) {
+        self.opens.store(0, Ordering::Relaxed);
+        self.open_ns.store(0, Ordering::Relaxed);
+    }
+}
+/// One borrowed private read-only [`Store`]. It derefs to the underlying Store,
+/// so callers use it exactly like the historical per-request handle, and
+/// returns the connection to the idle pool on drop.
+pub(crate) struct ReadOnlyHandle {
+    pool: Arc<ReadOnlyPool>,
+    store: Option<Store>,
+}
+impl ReadOnlyHandle {
+    pub(crate) fn as_deref(&self) -> Option<&Store> {
+        self.store.as_ref()
+    }
+}
+impl std::ops::Deref for ReadOnlyHandle {
+    type Target = Store;
+    fn deref(&self) -> &Store {
+        self.store.as_ref().expect("live read-only handle")
+    }
+}
+impl std::ops::DerefMut for ReadOnlyHandle {
+    fn deref_mut(&mut self) -> &mut Store {
+        self.store.as_mut().expect("live read-only handle")
+    }
+}
+impl Drop for ReadOnlyHandle {
+    fn drop(&mut self) {
+        if let Some(store) = self.store.take() {
+            self.pool.release(store);
+        }
+    }
+}
+/// Nanosecond resolution for the test-only read-path breakdown.
+#[cfg(test)]
+fn elapsed_ns(started: Instant) -> u64 {
+    u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX)
+}
+
 pub struct Service {
     pub profile: Profile,
     pub bridge: Arc<Bridge>,
@@ -334,6 +457,8 @@ pub struct Service {
     /// Test-only observation of how many trim passes ran.
     #[cfg(test)]
     cache_trim_runs: AtomicUsize,
+    /// Issue #67 R1: bounded idle pool of private read-only connections.
+    read_only_pool: Arc<ReadOnlyPool>,
     pub mounted: AtomicBool,
     /// Issue #61: structured startup pause decision, exposed additively in
     /// `GetOverview.startup_pause`. `None` for a store that could not be read.
@@ -438,6 +563,7 @@ impl Service {
             profile.exclude_mode,
         ));
         bridge.set_exclusion_state(exclusion);
+        let read_only_pool = Arc::new(ReadOnlyPool::new(bridge.store.clone()));
         Ok(Arc::new(Self {
             profile,
             bridge,
@@ -479,6 +605,7 @@ impl Service {
             cache_policy_dirty: AtomicBool::new(false),
             #[cfg(test)]
             cache_trim_runs: AtomicUsize::new(0),
+            read_only_pool,
             mounted: AtomicBool::new(false),
             shutdown_diagnostics: crate::shutdown::Diagnostics::default(),
             worker_image,
@@ -630,6 +757,19 @@ impl Service {
             cache: std::thread::spawn(move || c.cache_loop()),
             status: status_task,
         }
+    }
+    /// Issue #67 R1: borrow one private read-only connection. The handle returns
+    /// it to the idle pool on drop; the call takes no global lock.
+    pub(crate) fn read_only_handle(&self) -> Option<ReadOnlyHandle> {
+        self.read_only_pool.handle()
+    }
+    #[cfg(test)]
+    pub(crate) fn read_only_open_stats(&self) -> (usize, u64) {
+        self.read_only_pool.open_stats()
+    }
+    #[cfg(test)]
+    pub(crate) fn reset_read_only_open_stats(&self) {
+        self.read_only_pool.reset_open_stats();
     }
     /// Latest committed desktop status projection, if the cache is ready.
     ///
