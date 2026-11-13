@@ -386,10 +386,32 @@ impl Bridge {
             .map_err(io::Error::other)
     }
     pub fn maintain_cache(&self) -> io::Result<drive_core::cache_policy::CacheTrim> {
+        use drive_core::cache_policy::{CacheMaintenanceStats, scan_blob_inventory};
+        let mut stats = CacheMaintenanceStats::default();
+        stats.rounds = 1;
+        // RED measurement (#90-A): the legacy trim below runs the whole
+        // `collect_garbage` + `content_bytes` + optional second GC + `cache_usage`
+        // sequence under one uninterrupted flights+Store lock hold. Record the
+        // directory volume that one hold covers; the bounded path must split it
+        // into re-verified windows and release the locks between them.
+        if let Ok(inventory) = scan_blob_inventory(&self.store.root()) {
+            stats.blobs_discovered = inventory.entries.len() as u64;
+            stats.blob_bytes_discovered = inventory.total_bytes;
+            stats.blobs_examined = inventory.entries.len() as u64;
+            stats.max_blobs_per_window = inventory.entries.len() as u64;
+        }
         let flights = self.flights.lock().unwrap();
+        stats.flights_lock_windows = 1;
         let active = flights.keys().map(|(id, _)| id.clone()).collect();
-        let (result, inodes) = {
-            let mut store = self.store.lock().unwrap();
+        let store_wait = std::time::Instant::now();
+        let (mut result, inodes) = {
+            let mut store = self
+                .store
+                .lock()
+                .map_err(|_| io::Error::other("store lock poisoned"))?;
+            stats.store_lock_windows = 1;
+            stats.max_store_lock_wait_ns = store_wait.elapsed().as_nanos() as u64;
+            let hold = std::time::Instant::now();
             // Issue #56B: local-only matches keep their cached bodies; automatic
             // trimming must not turn a visible local file back into "online only".
             let protected = {
@@ -408,9 +430,14 @@ impl Bridge {
                 .iter()
                 .filter_map(|id| store.record(id).ok().map(|r| r.ino))
                 .collect::<Vec<_>>();
+            stats.max_store_lock_hold_ns = hold.elapsed().as_nanos() as u64;
+            stats.total_store_lock_hold_ns = stats.max_store_lock_hold_ns;
+            stats.removed_bytes = result.reclaimed_bytes;
+            stats.released = result.released.len() as u64;
             (result, inodes)
         };
         drop(flights);
+        result.maintenance = stats;
         for ino in inodes {
             self.enqueue_invalidation(Invalidation::Inode(ino));
         }

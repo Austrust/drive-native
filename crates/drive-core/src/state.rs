@@ -1719,21 +1719,12 @@ impl Store {
         // Retired rows may still point at the body they used to cache. A shared
         // pointer means the live row keeps the file below, so dropping the stale
         // pointer is safe; conflicted recovery rows keep theirs readable.
-        self.db.execute(
-            "UPDATE nodes SET blob=NULL,local_version=NULL WHERE deleted=1 AND conflict=0 AND dirty_blob IS NULL AND blob IS NOT NULL",
-            [],
-        )?;
+        self.gc_retire_retired_pointers()?;
         // `abandoned` is #14's terminal upload state, but it is only terminal for
         // automatic reconcile: an explicit retry re-arms it as `uncertain`, so its
-        // body still has to survive garbage collection.
-        // Scope the statement so the draft quarantine pass below can take
-        // `&mut self` after the blob keep-set is materialized.
-        let mut keep = {
-            let mut q=self.db.prepare("SELECT blob FROM nodes WHERE blob IS NOT NULL AND (deleted=0 OR conflict=1) UNION SELECT dirty_blob FROM nodes WHERE dirty_blob IS NOT NULL UNION SELECT blob FROM operations WHERE blob IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict','abandoned') UNION SELECT json_extract(body,'$.blob') FROM namespace_ops WHERE kind='replace' AND state NOT IN ('committed','superseded')")?;
-            q.query_map([], |r| r.get::<_, String>(0))?
-                .collect::<std::result::Result<std::collections::HashSet<_>, _>>()?
-        };
-        keep.extend(self.handles.lock().unwrap().keys().cloned());
+        // body still has to survive garbage collection. The set is materialized
+        // before the draft passes so they can take `&mut self` afterwards.
+        let keep = self.blob_keep_set()?;
         let parent = self.root.join("blobs");
         let mut removed = 0;
         for entry in fs::read_dir(&parent)? {
@@ -1829,7 +1820,7 @@ impl Store {
     /// caller's `&mut self` already excludes a state change during the pass; the
     /// `dirty=0` predicate is nevertheless re-checked inside each batch
     /// transaction so a stale row snapshot can never delete a dirty draft.
-    pub(crate) fn prune_clean_drafts(
+    pub fn prune_clean_drafts(
         &mut self,
         max_rows: usize,
     ) -> Result<crate::cache_policy::CleanDraftPrune> {
@@ -1878,7 +1869,7 @@ impl Store {
     /// Delete at most `max_files` draft bodies that have no `drafts` row and no
     /// open handle. Used for files whose row was removed by an earlier pass or
     /// by a crash between the row commit and the unlink.
-    pub(crate) fn prune_unreferenced_draft_files(
+    pub fn prune_unreferenced_draft_files(
         &mut self,
         max_files: usize,
     ) -> Result<crate::cache_policy::DraftFilePrune> {

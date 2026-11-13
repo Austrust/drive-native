@@ -261,3 +261,214 @@ fn failed_clean_draft_batch_rolls_back_and_retry_finishes() {
     assert_eq!(resumed.rows, 300 - 128);
     assert_eq!(resumed.commits, 172usize.div_ceil(GC_CLEAN_DRAFT_BATCH_SIZE) as u64);
 }
+
+/// #90-A: the lock-free scan may only *discover* candidates. Every deletion is
+/// re-verified against the current reference set under the Store lock, so a
+/// reference created between discovery and the delete window always wins.
+#[test]
+fn gc_reclaim_reverifies_references_after_lock_free_discovery() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open(dir.path()).unwrap();
+    store
+        .install_remote_snapshot(
+            &[node("root", None, true), node("live", Some("root"), false)],
+            "1",
+            "server",
+        )
+        .unwrap();
+    store.ensure_fs_root("root").unwrap();
+    store
+        .publish_download(
+            &DownloadTicket {
+                id: "live".into(),
+                version: "1".into(),
+            },
+            b"live-body",
+            &sha256(b"live-body"),
+        )
+        .unwrap();
+    let blob: String = store
+        .db
+        .query_row("SELECT blob FROM nodes WHERE id='live'", [], |r| r.get(0))
+        .unwrap();
+    let path = dir.path().join("blobs").join(&blob);
+
+    // 1. Discovery snapshot happens while the body is referenced.
+    let inventory = crate::cache_policy::scan_blob_inventory(dir.path()).unwrap();
+    assert!(inventory.entries.iter().any(|entry| entry.name == blob));
+
+    // 2. The reference disappears after discovery.
+    store
+        .db
+        .execute(
+            "UPDATE nodes SET blob=NULL,local_version=NULL WHERE id='live'",
+            [],
+        )
+        .unwrap();
+    // 3. ...but a new reference is created before the locked window. The stale
+    //    candidate snapshot must not delete it.
+    store
+        .db
+        .execute("UPDATE nodes SET blob=?1 WHERE id='live'", [&blob])
+        .unwrap();
+    let reclaim = store
+        .gc_reclaim_blobs(&inventory.entries, &HashSet::new())
+        .unwrap();
+    assert_eq!(reclaim.removed, 0, "a re-created reference must survive");
+    assert!(path.exists());
+
+    // 4. An open cached handle also protects the body after its DB pointer goes
+    //    away (the unlinked-old-handle case).
+    let handle = store.open_cached("live").unwrap();
+    store
+        .db
+        .execute("UPDATE nodes SET blob=NULL,local_version=NULL WHERE id='live'", [])
+        .unwrap();
+    let reclaim = store
+        .gc_reclaim_blobs(&inventory.entries, &HashSet::new())
+        .unwrap();
+    assert_eq!(reclaim.removed, 0, "an open handle must survive");
+    assert!(path.exists());
+    drop(handle);
+
+    // 5. With every protection gone the same candidate is reclaimed, and the
+    //    logical bytes are reported.
+    let reclaim = store
+        .gc_reclaim_blobs(&inventory.entries, &HashSet::new())
+        .unwrap();
+    assert_eq!(reclaim.removed, 1);
+    assert_eq!(reclaim.removed_bytes, b"live-body".len() as u64);
+    assert!(!path.exists());
+}
+
+#[test]
+fn gc_reclaim_keeps_operations_abandoned_and_namespace_replace_refs() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open(dir.path()).unwrap();
+    store
+        .install_remote_snapshot(
+            &[node("root", None, true), node("live", Some("root"), false)],
+            "1",
+            "server",
+        )
+        .unwrap();
+    store.ensure_fs_root("root").unwrap();
+    store
+        .publish_download(
+            &DownloadTicket {
+                id: "live".into(),
+                version: "1".into(),
+            },
+            b"shared-body",
+            &sha256(b"shared-body"),
+        )
+        .unwrap();
+    let blob: String = store
+        .db
+        .query_row("SELECT blob FROM nodes WHERE id='live'", [], |r| r.get(0))
+        .unwrap();
+    let inventory = crate::cache_policy::scan_blob_inventory(dir.path()).unwrap();
+    store
+        .db
+        .execute(
+            "UPDATE nodes SET blob=NULL,local_version=NULL WHERE id='live'",
+            [],
+        )
+        .unwrap();
+
+    // Pending upload operation protects the body, abandoned keeps protecting it
+    // (#14: an explicit retry can re-arm the same content).
+    store
+        .db
+        .execute(
+            "INSERT INTO operations(id,node,kind,base,blob,generation,state) \
+             VALUES('op','live','upload','1',?1,1,'pending')",
+            [&blob],
+        )
+        .unwrap();
+    assert_eq!(
+        store
+            .gc_reclaim_blobs(&inventory.entries, &HashSet::new())
+            .unwrap()
+            .removed,
+        0
+    );
+    store
+        .db
+        .execute("UPDATE operations SET state='abandoned' WHERE id='op'", [])
+        .unwrap();
+    assert_eq!(
+        store
+            .gc_reclaim_blobs(&inventory.entries, &HashSet::new())
+            .unwrap()
+            .removed,
+        0,
+        "abandoned recovery data must survive GC"
+    );
+    store.db.execute("DELETE FROM operations WHERE id='op'", []).unwrap();
+
+    // A pending namespace replacement protects the blob until it commits.
+    store
+        .db
+        .execute(
+            "INSERT INTO namespace_ops(id,node,body,state,kind) \
+             VALUES('ns','root',?1,'pending','replace')",
+            [serde_json::json!({ "blob": blob }).to_string()],
+        )
+        .unwrap();
+    assert_eq!(
+        store
+            .gc_reclaim_blobs(&inventory.entries, &HashSet::new())
+            .unwrap()
+            .removed,
+        0
+    );
+    store
+        .db
+        .execute("UPDATE namespace_ops SET state='committed' WHERE id='ns'", [])
+        .unwrap();
+    assert_eq!(
+        store
+            .gc_reclaim_blobs(&inventory.entries, &HashSet::new())
+            .unwrap()
+            .removed,
+        1,
+        "the committed replacement no longer references the body"
+    );
+}
+
+#[test]
+fn gc_reclaim_verifies_candidate_identity_on_disk() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open(dir.path()).unwrap();
+    let name = uuid::Uuid::new_v4().to_string();
+    std::fs::write(dir.path().join("blobs").join(&name), b"abcdef").unwrap();
+    // A size mismatch means the body changed since discovery: keep, rediscover.
+    let stale = crate::cache_policy::BlobEntry {
+        name: name.clone(),
+        bytes: 3,
+    };
+    let reclaim = store.gc_reclaim_blobs(&[stale], &HashSet::new()).unwrap();
+    assert_eq!(reclaim.removed, 0);
+    assert!(dir.path().join("blobs").join(&name).exists());
+    // The current identity (UUID + regular file + same size) is reclaimed.
+    let inventory = crate::cache_policy::scan_blob_inventory(dir.path()).unwrap();
+    let reclaim = store.gc_reclaim_blobs(&inventory.entries, &HashSet::new()).unwrap();
+    assert_eq!(reclaim.removed, 1);
+    assert!(!dir.path().join("blobs").join(&name).exists());
+}
+
+#[test]
+fn scan_blob_inventory_skips_non_blob_entries() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path()).unwrap();
+    std::fs::write(dir.path().join("blobs").join("not-a-uuid"), b"x").unwrap();
+    let real = uuid::Uuid::new_v4().to_string();
+    std::fs::write(dir.path().join("blobs").join(&real), b"1234").unwrap();
+    let inventory = crate::cache_policy::scan_blob_inventory(dir.path()).unwrap();
+    assert_eq!(inventory.entries.len(), 1);
+    assert_eq!(inventory.entries[0].name, real);
+    assert_eq!(inventory.entries[0].bytes, 4);
+    assert_eq!(inventory.total_bytes, 4);
+    drop(store);
+}
