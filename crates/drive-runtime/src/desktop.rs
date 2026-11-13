@@ -1488,10 +1488,10 @@ fn remember_overview_diagnostics(key: DiagnosticsCacheKey, snapshot: OverviewDia
 
 /// Issue #88: one commit-diagnostics read for GetOverview.
 ///
-/// Until drive-core exposes `commit_diagnostics::snapshot` this shim runs the
-/// historical three queries and reports `data_version: None`, so the snapshot
-/// cache is keyed on the committed Store state and writer epoch (the same
-/// invalidation window GetOverview had before).
+/// Reads `drive_core::commit_diagnostics::snapshot()`: one consistent read of
+/// the two counters and the record list, plus the read-only connection's
+/// `PRAGMA data_version` and the `consistent` flag, so the overview cache can
+/// key on (committed Store state, data_version) and never publish a torn read.
 fn overview_diagnostics(store: &Store) -> io::Result<OverviewDiagnostics> {
     #[cfg(test)]
     counters::count_diagnostics_read();
