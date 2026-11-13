@@ -146,17 +146,79 @@ pub(crate) fn clear_tx(tx: &Connection, table: &str, operation: &str) -> Result<
     Ok(())
 }
 
+/// The diagnostics list ordering contract (oldest retry first, conflicts first).
+///
+/// The old statement sorted the whole `commit_diagnostics` view (successful
+/// `confirmed` history included) on every overview. The bounded form below
+/// reads each outcome class per journal as an index-ordered range, keeps only
+/// its top `?1` rows, and merges them: with the total order
+/// `(class, next_retry_at, scope, operation)` this is exactly the global top-k,
+/// so the returned rows and their order are identical.
+pub(crate) fn diagnostics_list_sql() -> &'static str {
+    static SQL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    SQL.get_or_init(|| {
+        let mut sql = String::from(
+            "WITH candidates(priority,scope,operation,node,kind,state,outcome,outcome_category,\
+             last_error,attempts,next_retry_at,updated_at) AS (",
+        );
+        // (class priority, per-journal equality predicate). `confirmed` and
+        // `unknown_fatal` share the last priority: the historical ordering puts
+        // every other outcome in one class.
+        for (priority, predicate) in [
+            (0u8, "outcome='conflict'"),
+            (1, "outcome='unknown_retryable'"),
+            (2, "outcome='confirmed'"),
+            (2, "outcome='unknown_fatal'"),
+        ] {
+            for table in ["operations", "namespace_ops", "transfers"] {
+                let (scope, kind, attempts, updated) = match table {
+                    "operations" => ("operation", "kind", "reconcile_attempts", "updated_at"),
+                    "namespace_ops" => ("namespace", "kind", "attempts", "updated_at"),
+                    _ => ("transfer", "direction", "0", "0"),
+                };
+                if !sql.ends_with("AS (") {
+                    sql.push_str(" UNION ALL ");
+                }
+                sql.push_str(&format!(
+                    "SELECT * FROM (SELECT {priority},'{scope}',id,node,{kind},state,outcome,\
+                     outcome_category,last_error,{attempts},next_retry_at,{updated}                      FROM {table} WHERE {predicate} ORDER BY next_retry_at,id LIMIT ?1)"
+                ));
+            }
+        }
+        sql.push_str(
+            ") SELECT scope,operation,node,kind,state,outcome,outcome_category,\
+             last_error,attempts,next_retry_at,updated_at FROM candidates \
+             ORDER BY priority,next_retry_at,scope,operation LIMIT ?1",
+        );
+        sql
+    })
+}
+
+/// Both overview diagnostics counts from one statement (issue #88): the two
+/// numbers are part of the same read, so a writer commit cannot be observed by
+/// one count and not the other. Each count is an index range over the rows of
+/// one outcome class per journal, so the retained `confirmed` history is never
+/// scanned (the old form aggregated over the whole view).
+pub(crate) const DIAGNOSTICS_COUNTS_SQL: &str =
+    "SELECT
+       (SELECT COUNT(*) FROM operations WHERE outcome='unknown_retryable')
+     + (SELECT COUNT(*) FROM namespace_ops WHERE outcome='unknown_retryable')
+     + (SELECT COUNT(*) FROM transfers WHERE outcome='unknown_retryable'),
+       (SELECT COUNT(*) FROM operations WHERE outcome='conflict')
+     + (SELECT COUNT(*) FROM namespace_ops WHERE outcome='conflict')
+     + (SELECT COUNT(*) FROM transfers WHERE outcome='conflict')
+     + (SELECT COUNT(*) FROM operations WHERE outcome='unknown_fatal' AND state<>'abandoned')
+     + (SELECT COUNT(*) FROM namespace_ops WHERE outcome='unknown_fatal' AND state<>'abandoned')
+     + (SELECT COUNT(*) FROM transfers WHERE outcome='unknown_fatal' AND state<>'abandoned')";
+
 /// All durable diagnostics, oldest retry first.
 pub fn list(store: &Store, limit: usize) -> Result<Vec<CommitDiagnosticRecord>> {
+    list_on(&store.db, limit)
+}
+
+fn list_on(conn: &Connection, limit: usize) -> Result<Vec<CommitDiagnosticRecord>> {
     let limit = i64::try_from(limit.clamp(1, 500)).unwrap_or(500);
-    let mut statement = store.db.prepare_cached(
-        "SELECT scope, operation, node, kind, state, outcome, outcome_category,
-                last_error, attempts, next_retry_at, updated_at
-           FROM commit_diagnostics
-          ORDER BY CASE outcome WHEN 'conflict' THEN 0 WHEN 'unknown_retryable' THEN 1 ELSE 2 END,
-                   next_retry_at, scope, operation
-          LIMIT ?1",
-    )?;
+    let mut statement = conn.prepare_cached(diagnostics_list_sql())?;
     let rows = statement.query_map([limit], |row| {
         Ok((
             row.get::<_, String>(0)?,
@@ -206,6 +268,80 @@ pub fn list(store: &Store, limit: usize) -> Result<Vec<CommitDiagnosticRecord>> 
         });
     }
     Ok(diagnostics)
+}
+
+/// One consistent read of everything the overview needs from the commit
+/// diagnostics (issue #88).
+///
+/// The two counts and the diagnosis list come from the same read transaction,
+/// so a commit cannot be half-observed. `data_version` is the connection's
+/// `PRAGMA data_version` captured after the reads; `consistent` is false when
+/// another connection committed while the read was running (the values are
+/// still usable, but the caller must not cache them under that key).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiagnosticsSnapshot {
+    /// Rows with `outcome='unknown_retryable'` (the existing `open_unknown`).
+    pub unknown_retryable: i64,
+    /// Rows that need a user decision: conflicts plus non-abandoned
+    /// `unknown_fatal` rows (the existing `needs_attention` number; the
+    /// terminal `abandoned` state is explained, not waiting for a decision).
+    pub unknown_fatal: i64,
+    /// The diagnosis list (`list(store, 20)` semantics).
+    pub records: Vec<CommitDiagnosticRecord>,
+    /// `PRAGMA data_version` observed after the read transaction; valid as a
+    /// cache key only on the same connection.
+    pub data_version: i64,
+    /// True when the source connection did not commit between the start and end
+    /// of the read, so `data_version` describes exactly this result.
+    pub consistent: bool,
+}
+
+impl DiagnosticsSnapshot {
+    /// Count of live unknowns that still have an automatic retry scheduled.
+    pub fn open_unknown(&self) -> i64 {
+        self.unknown_retryable
+    }
+    /// Count of rows that need a user decision (conflicts + armed fatals).
+    pub fn needs_attention(&self) -> i64 {
+        self.unknown_fatal
+    }
+}
+
+/// Number of attempts to obtain a read that was not torn by a crossing commit.
+const DIAGNOSTICS_SNAPSHOT_ATTEMPTS: usize = 2;
+
+/// Read the overview diagnostics through one consistent read transaction.
+///
+/// Safe on a read-only writer-adjacent handle: it only starts a deferred read
+/// transaction, never writes, and `PRAGMA data_version` is a read-only pragma.
+pub fn snapshot(store: &Store) -> Result<DiagnosticsSnapshot> {
+    let mut last: Option<DiagnosticsSnapshot> = None;
+    for _ in 0..DIAGNOSTICS_SNAPSHOT_ATTEMPTS {
+        let before = store.data_version()?;
+        let (unknown_retryable, unknown_fatal, records) = {
+            let transaction = store.db.unchecked_transaction()?;
+            let (unknown_retryable, unknown_fatal): (i64, i64) =
+                transaction.query_row(DIAGNOSTICS_COUNTS_SQL, [], |row| {
+                    Ok((row.get(0)?, row.get(1)?))
+                })?;
+            let records = list_on(&transaction, 20)?;
+            transaction.commit()?;
+            (unknown_retryable, unknown_fatal, records)
+        };
+        let after = store.data_version()?;
+        let snapshot = DiagnosticsSnapshot {
+            unknown_retryable,
+            unknown_fatal,
+            records,
+            data_version: after,
+            consistent: before == after,
+        };
+        if snapshot.consistent {
+            return Ok(snapshot);
+        }
+        last = Some(snapshot);
+    }
+    Ok(last.expect("snapshot loop always produces a result"))
 }
 
 /// Count of live unknowns that still have an automatic retry scheduled.
@@ -269,3 +405,7 @@ pub(crate) fn backfill_startup(db: &Connection) -> Result<()> {
     )?;
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "commit_diagnostics_scale_tests.rs"]
+mod scale_tests;

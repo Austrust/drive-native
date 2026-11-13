@@ -82,6 +82,9 @@ pub struct SharedStore {
     // read-only connection, and its scheduler observations describe the writer's
     // domain rather than that throwaway connection.
     namespace_runtime: Arc<Mutex<crate::namespace_schedule::NamespaceRuntime>>,
+    // Issue #89: the writer's storage-summary generation is shared with pooled
+    // read-only overview handles so a draft mutation invalidates their cache.
+    storage_summary: Arc<crate::state::StorageSummaryShared>,
     // Lock-free mirror of `Store::local_revision()` (`total_changes`), published
     // whenever a writer guard finishes, so off-lock projections keep the field's
     // historical meaning instead of reading 0 from their own connection.
@@ -142,6 +145,7 @@ impl SharedStore {
         // the same handle map to answer cache protection without a Store lock.
         let handles = store.handles.clone();
         let namespace_runtime = store.namespace_runtime.clone();
+        let storage_summary = store.storage_summary.shared().clone();
         let permission_denials = crate::write_permissions::has_denials(&store).unwrap_or(true);
         let boundary = boundary(&store).ok();
         // A projection may only be trusted when both the semantic journal and
@@ -173,6 +177,7 @@ impl SharedStore {
             root: Mutex::new(root),
             handles,
             namespace_runtime,
+            storage_summary,
             local_revision: AtomicU64::new(total_changes),
         }
     }
@@ -189,7 +194,11 @@ impl SharedStore {
     /// only committed WAL, takes no `writer.lock` and cannot write.
     pub fn read_only(&self) -> crate::Result<Store> {
         let root = self.root();
-        Store::open_read_only_observing(&root, self.namespace_runtime.clone())
+        Store::open_read_only_observing(
+            &root,
+            self.namespace_runtime.clone(),
+            self.storage_summary.clone(),
+        )
     }
     /// Lock-free mirror of [`Store::local_revision`] (SQLite `total_changes`).
     /// Updated when a writer guard publishes its boundary, so desktop overview

@@ -260,6 +260,8 @@ impl Store {
         if self.draft_created_for_tombstone(id)? {
             self.draft_stats.unreferenced_draft_begins += 1;
         }
+        // Issue #89: a new working copy changes the derived storage summary.
+        self.bump_storage_generation();
         Ok(self.retain_draft(id, token, base.into(), file))
     }
     /// Resolve the working file for an edit and durably mark the edit epoch.
@@ -296,6 +298,9 @@ impl Store {
             }
             self.draft_stats.metadata_commits += 1;
         }
+        // Issue #89: the first edit of a dirty epoch changes the draft body, so
+        // the derived storage summary is stale from here on.
+        self.bump_storage_generation();
         Ok(OpenOptions::new()
             .read(true)
             .write(true)
@@ -311,10 +316,12 @@ impl Store {
         let f = self.editing_file(draft)?;
         let offset = if append { f.metadata()?.len() } else { offset };
         self.draft_stats.writes += 1;
+        self.bump_storage_generation();
         Ok(f.write_at(data, offset)?)
     }
     pub fn draft_truncate(&mut self, draft: &DraftHandle, size: u64) -> Result<()> {
         self.editing_file(draft)?.set_len(size)?;
+        self.bump_storage_generation();
         Ok(())
     }
     /// Existing handles retain the same working inode; the generation prevents
@@ -326,6 +333,7 @@ impl Store {
         file.set_modified(
             std::time::UNIX_EPOCH + std::time::Duration::from_secs(u64::from(seconds)),
         )?;
+        self.bump_storage_generation();
         Ok(())
     }
     fn checkpoint_needed(&self, draft: &DraftHandle) -> Result<bool> {
@@ -362,6 +370,9 @@ impl Store {
                 params![draft.node, draft.token, generation],
             )?;
             self.draft_stats.metadata_commits += 1;
+            // Issue #89: the checkpoint flag moved, which can change the
+            // orphan-reclaimability class of the working copy.
+            self.bump_storage_generation();
             return Ok(None);
         }
         let mut f = File::open(self.draft_path(&draft.token)?)?;
@@ -376,6 +387,8 @@ impl Store {
         // transaction, so it still costs one durable metadata commit.
         self.draft_stats.metadata_commits += 1;
         self.draft_stats.checkpoints += 1;
+        // Issue #89: the draft is now checkpointed (dirty epoch closed).
+        self.bump_storage_generation();
         Ok(Some(op))
     }
     /// Local durability barrier. A failed snapshot leaves the durable draft intact
@@ -435,21 +448,28 @@ impl Store {
             "INSERT INTO metadata(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
             params![DRAFT_QUOTA_KEY, bytes.to_string()],
         )?;
+        // Issue #89: the quota is part of the summary block.
+        self.bump_storage_generation();
         Ok(())
     }
     fn draft_dir_entries(&self, dir: &str) -> Result<Vec<(String, u64, u64)>> {
         let mut files = Vec::new();
+        // Issue #89: one enumeration per call is the cost the overview cache
+        // must avoid on the hot path; count it for the red/green evidence.
+        self.storage_summary.shared().record_scan_work(0);
         let entries = match std::fs::read_dir(self.root.join(dir)) {
             Ok(entries) => entries,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(files),
             Err(error) => return Err(error.into()),
         };
+        let mut file_stats = 0u64;
         for entry in entries {
             let entry = entry?;
             let name = entry.file_name().to_string_lossy().into_owned();
             if uuid::Uuid::parse_str(&name).is_err() || !entry.file_type()?.is_file() {
                 continue;
             }
+            file_stats += 1;
             let metadata = entry.metadata()?;
             let modified = metadata
                 .modified()
@@ -459,6 +479,7 @@ impl Store {
                 .unwrap_or(0);
             files.push((name, metadata.len(), modified));
         }
+        self.storage_summary.shared().record_file_stats(file_stats);
         Ok(files)
     }
     fn draft_rows(&self) -> Result<std::collections::HashMap<String, DraftRowInfo>> {
@@ -565,8 +586,10 @@ impl Store {
         } else {
             usage.total_bytes.saturating_sub(usage.quota_bytes)
         };
+        self.storage_summary.shared().record_scan_work(0);
         for record in self.quarantine_records()? {
             let path = self.root.join(DRAFT_QUARANTINE_DIR).join(&record.token);
+            self.storage_summary.shared().record_file_stats(1);
             if let Ok(metadata) = std::fs::metadata(&path) {
                 if metadata.is_file() {
                     usage.quarantine_bytes = usage.quarantine_bytes.saturating_add(metadata.len());
@@ -619,6 +642,8 @@ impl Store {
         }
         if !result.quarantined.is_empty() {
             self.set_quarantine_records(&records)?;
+            // Issue #89: draft bytes moved between drafts/ and quarantine/.
+            self.bump_storage_generation();
             #[cfg(unix)]
             {
                 File::open(self.root.join("drafts"))?.sync_all()?;
@@ -652,6 +677,10 @@ impl Store {
             restored += 1;
         }
         self.set_quarantine_records(&remaining)?;
+        if restored > 0 {
+            // Issue #89: quarantined bodies are back in the drafts directory.
+            self.bump_storage_generation();
+        }
         Ok(restored)
     }
     /// Creation-time detection (#60): a working copy created for a node that is
