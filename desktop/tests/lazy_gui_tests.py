@@ -252,6 +252,8 @@ class ListingPaginationTests(unittest.TestCase):
         self.assertTrue(self.window.more.isHidden())
         self.assertEqual(self.window.directory_queries, 10)
         self.assertEqual(self.entries_served, 2560)
+        self.assertEqual(self.renders, 10,
+                         'one render per completed screen: %d' % self.renders)
         self.assertFalse(self.window._directory_loading)
         self.assertFalse(self.window.loading)
 
