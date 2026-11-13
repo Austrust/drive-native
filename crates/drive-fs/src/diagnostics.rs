@@ -301,3 +301,47 @@ pub fn snapshot() -> Vec<Sample> {
         })
         .collect()
 }
+/// Issue #26 residual accounting snapshot (see `readdir_plus_materialization`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ReaddirPlusMaterialization {
+    pub replies: u64,
+    pub materialized_total: u64,
+    pub materialized_max_per_reply: u64,
+    pub batches: u64,
+    pub batch_slots_total: u64,
+    pub batch_slots_max: u64,
+}
+static ACL_REPLIES: AtomicU64 = AtomicU64::new(0);
+static ACL_MATERIALIZED_TOTAL: AtomicU64 = AtomicU64::new(0);
+static ACL_MATERIALIZED_MAX: AtomicU64 = AtomicU64::new(0);
+static ACL_BATCHES: AtomicU64 = AtomicU64::new(0);
+static ACL_BATCH_SLOTS_TOTAL: AtomicU64 = AtomicU64::new(0);
+static ACL_BATCH_SLOTS_MAX: AtomicU64 = AtomicU64::new(0);
+/// Issue #26 residual: READDIRPLUS ACL materialization accounting.
+///
+/// `materialized` counts the directory entries a reply turned into ACL slots
+/// *before* paging (pre-fix) or per bounded batch (fixed). `batch_slots_max` is
+/// the largest per-page slot batch. Always-on atomics: the ACL path is already
+/// the expensive branch and a few relaxed adds are negligible, while the
+/// counters make the red -> green mechanism testable without an environment
+/// switch.
+pub fn readdir_plus_materialization() -> ReaddirPlusMaterialization {
+    ReaddirPlusMaterialization {
+        replies: ACL_REPLIES.load(Ordering::Relaxed),
+        materialized_total: ACL_MATERIALIZED_TOTAL.load(Ordering::Relaxed),
+        materialized_max_per_reply: ACL_MATERIALIZED_MAX.load(Ordering::Relaxed),
+        batches: ACL_BATCHES.load(Ordering::Relaxed),
+        batch_slots_total: ACL_BATCH_SLOTS_TOTAL.load(Ordering::Relaxed),
+        batch_slots_max: ACL_BATCH_SLOTS_MAX.load(Ordering::Relaxed),
+    }
+}
+pub(crate) fn record_acl_materialized_reply(items: u64) {
+    ACL_REPLIES.fetch_add(1, Ordering::Relaxed);
+    ACL_MATERIALIZED_TOTAL.fetch_add(items, Ordering::Relaxed);
+    ACL_MATERIALIZED_MAX.fetch_max(items, Ordering::Relaxed);
+}
+pub(crate) fn record_acl_batch(slots: u64) {
+    ACL_BATCHES.fetch_add(1, Ordering::Relaxed);
+    ACL_BATCH_SLOTS_TOTAL.fetch_add(slots, Ordering::Relaxed);
+    ACL_BATCH_SLOTS_MAX.fetch_max(slots, Ordering::Relaxed);
+}
