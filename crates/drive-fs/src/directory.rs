@@ -297,6 +297,8 @@ impl Views {
                 break;
             }
             let budget = MAX_BYTES.saturating_sub(self.charged.load(Ordering::Acquire));
+            #[cfg(test)]
+            test_hooks::before_projection(ino);
             let projection = diagnostics::span(diagnostics::Stage::DirectoryProjection);
             let built = Self::build_readonly(store, ino, budget);
             drop(projection);
@@ -1034,6 +1036,127 @@ pub(super) fn release(fs: &mut CacheFilesystem, ino: u64, fh: u64, reply: ReplyE
 #[cfg(test)]
 #[path = "directory_view_stamp_tests.rs"]
 mod stamp_tests;
+
+/// Deterministic seam for the #23 per-directory single-flight tests: pause one
+/// directory's read-only projection while another directory (or a second handle
+/// of the same directory) is opened. Test-only; never compiled into the daemon.
+#[cfg(test)]
+pub(super) mod test_hooks {
+    use std::{
+        collections::HashMap,
+        sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock},
+        time::{Duration, Instant},
+    };
+
+    struct Hook {
+        /// Directories whose next projection blocks before it starts building.
+        pauses: HashMap<u64, Arc<Pause>>,
+        /// Projections that entered the build phase, per directory.
+        starts: HashMap<u64, usize>,
+    }
+
+    fn hook() -> &'static Mutex<Hook> {
+        static HOOK: OnceLock<Mutex<Hook>> = OnceLock::new();
+        HOOK.get_or_init(|| {
+            Mutex::new(Hook {
+                pauses: HashMap::new(),
+                starts: HashMap::new(),
+            })
+        })
+    }
+
+    /// Tests using the process-global seam must hold this for their duration.
+    pub(super) fn serial() -> MutexGuard<'static, ()> {
+        static SERIAL: Mutex<()> = Mutex::new(());
+        SERIAL.lock().unwrap_or_else(|poison| poison.into_inner())
+    }
+
+    pub(super) struct Pause {
+        _ino: u64,
+        reached: Mutex<bool>,
+        release: Mutex<bool>,
+        reached_cv: Condvar,
+        release_cv: Condvar,
+    }
+    impl Pause {
+        fn new(ino: u64) -> Self {
+            Self {
+                _ino: ino,
+                reached: Mutex::new(false),
+                release: Mutex::new(false),
+                reached_cv: Condvar::new(),
+                release_cv: Condvar::new(),
+            }
+        }
+        /// Wait until the paused projection reached the build boundary.
+        pub(super) fn wait_reached(&self, timeout: Duration) -> bool {
+            let deadline = Instant::now() + timeout;
+            let mut reached = self.reached.lock().unwrap_or_else(|poison| poison.into_inner());
+            while !*reached {
+                let left = deadline.saturating_duration_since(Instant::now());
+                if left.is_zero() {
+                    return false;
+                }
+                let (guard, _) = self
+                    .reached_cv
+                    .wait_timeout(reached, left)
+                    .unwrap_or_else(|poison| poison.into_inner());
+                reached = guard;
+            }
+            true
+        }
+        pub(super) fn release(&self) {
+            *self.release.lock().unwrap_or_else(|poison| poison.into_inner()) = true;
+            self.release_cv.notify_all();
+        }
+    }
+
+    /// Clear every pause/counter. Call while holding [`serial`].
+    pub(super) fn reset() {
+        let mut hook = hook().lock().unwrap_or_else(|poison| poison.into_inner());
+        hook.pauses.clear();
+        hook.starts.clear();
+    }
+
+    /// Block the next projection of `ino` at the build boundary.
+    pub(super) fn pause(ino: u64) -> Arc<Pause> {
+        let pause = Arc::new(Pause::new(ino));
+        hook().lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .pauses
+            .insert(ino, pause.clone());
+        pause
+    }
+
+    pub(super) fn starts(ino: u64) -> usize {
+        hook()
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .starts
+            .get(&ino)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    /// Called by `Views::open` immediately before one read-only projection.
+    pub(super) fn before_projection(ino: u64) {
+        let pause = {
+            let mut hook = hook().lock().unwrap_or_else(|poison| poison.into_inner());
+            *hook.starts.entry(ino).or_insert(0) += 1;
+            hook.pauses.get(&ino).cloned()
+        };
+        let Some(pause) = pause else { return; };
+        *pause.reached.lock().unwrap_or_else(|poison| poison.into_inner()) = true;
+        pause.reached_cv.notify_all();
+        let mut release = pause.release.lock().unwrap_or_else(|poison| poison.into_inner());
+        while !*release {
+            release = pause
+                .release_cv
+                .wait(release)
+                .unwrap_or_else(|poison| poison.into_inner());
+        }
+    }
+}
 
 #[cfg(test)]
 #[path = "directory_bench_tests.rs"]
