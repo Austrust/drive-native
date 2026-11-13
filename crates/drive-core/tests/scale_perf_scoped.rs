@@ -504,6 +504,46 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
+    // The GUI root page: every visible child of the namespace root in one batch
+    // (the #67 "147 top-level directories" shape, at this fixture's width). The
+    // scoped walk degenerates to one subtree walk per child; the batch expands
+    // to the whole namespace, so it must use the linear full read.
+    let mut all_root_children: Vec<String> =
+        (0..TOP_DIRS).map(|i| node_id(TOP_START + i)).collect();
+    all_root_children.push(node_id(PINNED_ROOT));
+    let (scoped_all, all_samples) = bench(
+        "desktop_status_seeds_for",
+        "batch_all_root_children",
+        runs,
+        || {
+            store
+                .desktop_status_seeds_for(&all_root_children)
+                .expect("seeds_for all root children")
+        },
+    );
+    println!(
+        "SCALE_SCOPED_ROWS query=desktop_status_seeds_for scenario=batch_all_root_children rows={} expected={}",
+        scoped_all.len(),
+        full.len()
+    );
+    assert_eq!(
+        scoped_all.len(),
+        full.len(),
+        "the all-children root page batch must cover the whole visible namespace"
+    );
+    let got_all: HashSet<&str> = scoped_all.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(
+        got_all, full_ids,
+        "the all-children root page batch must equal the full projection"
+    );
+    assert!(
+        rchar_median(&all_samples) <= rchar_median(&full_samples) * 3 / 2,
+        "the all-children batch must use the linear full read, rchar {} vs full {}",
+        rchar_median(&all_samples),
+        rchar_median(&full_samples)
+    );
+
+
     // Projection equivalence: every scoped row must carry exactly the flags the
     // full read reports for the same id (inherited pin/overlay/detail rules).
     for row in scoped_root
@@ -511,6 +551,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .chain(scoped_top.iter())
         .chain(scoped_sub.iter())
         .chain(scoped_batch.iter())
+        .chain(scoped_all.iter())
     {
         let want = projection
             .get(&row.id)

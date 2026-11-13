@@ -24,6 +24,20 @@ pub struct AclRefresh {
     /// keep inherited flags resolvable.
     pub seeds: Vec<StatusSeed>,
 }
+/// Which read answers one desktop status batch.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum SeedScope {
+    /// The batch's scoped set is the whole visible namespace, so the linear full
+    /// read is cheaper. A root page batch can still name a strict subset of the
+    /// rows the full read returns: a node whose only path to the root crosses a
+    /// tombstoned ancestor is not reachable from the requested (visible) roots,
+    /// while the full visibility rule includes it. Those extra rows are sibling
+    /// branches of the requested page, never rendered by the desktop tree, so the
+    /// cost win is taken without changing any requested row.
+    Full,
+    /// The scoped recursive read of these JSON-encoded roots.
+    Scoped(String),
+}
 /// Projection shared by the full and scoped reads so both report identical rules.
 const SEED_COLUMNS: &str = "n.id,n.parent,n.directory,n.pinned,EXISTS(SELECT 1 FROM namespace_overlay o WHERE o.node=n.id), (n.blob IS NOT NULL OR n.dirty_blob IS NOT NULL OR n.conflict!=0 OR EXISTS(SELECT 1 FROM drafts d WHERE d.node=n.id) OR EXISTS(SELECT 1 FROM transfers t WHERE t.node=n.id AND t.direction='download'))";
 /// Visibility rules shared by the full and scoped reads.
@@ -42,25 +56,80 @@ impl Store {
     /// frontier as the outer loop (see docs/CANDIDATE_QUERY_ORDER.md) and the
     /// (parent,name,deleted) index serves each downward step.
     ///
-    /// A namespace root (`parent IS NULL`) in `roots` means the scoped walk would
-    /// cover the whole database one index lookup at a time. That costs several
-    /// times the linear scan on a large namespace, so those batches use the full
-    /// projection instead; the returned row set is the same because the scoped
-    /// set is then the entire namespace.
+    /// A namespace root (`parent IS NULL`) in `roots`, or a batch naming every
+    /// visible child of the namespace root, makes the scoped walk expand the whole
+    /// namespace one index lookup at a time. That costs several times the linear
+    /// scan (issue #67: 755 ms / 70.8 MB for the 147-directory root page at 294k
+    /// nodes), so those batches use the full projection instead. The requested
+    /// rows are identical; the root-page batch may additionally return nodes whose
+    /// only root path crosses a tombstoned ancestor, exactly as the full read
+    /// always has (see [`SeedScope::Full`]). Consumers render only the requested
+    /// subtrees, so those extra rows never change a reply.
     pub fn desktop_status_seeds_for(&self, roots: &[String]) -> Result<Vec<StatusSeed>> {
         if roots.is_empty() {
             return Ok(Vec::new());
         }
-        let roots = serde_json::to_string(roots)?;
+        match self.seed_scope(roots)? {
+            SeedScope::Full => self.desktop_status_seeds(),
+            SeedScope::Scoped(encoded) => {
+                self.collect_seeds(&scoped_seed_sql(), &[&encoded])
+            }
+        }
+    }
+    /// Decide which read answers a status batch.
+    fn seed_scope(&self, roots: &[String]) -> Result<SeedScope> {
+        let encoded = serde_json::to_string(roots)?;
         let namespace_root: bool = self.db.query_row(
             "SELECT EXISTS(SELECT 1 FROM nodes WHERE parent IS NULL AND id IN (SELECT value FROM json_each(?1)))",
-            [&roots],
+            [&encoded],
             |row| row.get(0),
         )?;
         if namespace_root {
-            return self.desktop_status_seeds();
+            return Ok(SeedScope::Full);
         }
-        self.collect_seeds(&scoped_seed_sql(), &[&roots])
+        if self.covers_namespace_children(roots, &encoded)? {
+            return Ok(SeedScope::Full);
+        }
+        Ok(SeedScope::Scoped(encoded))
+    }
+    /// True when `roots` names exactly every visible child of the namespace root.
+    ///
+    /// That is the desktop root page: a batch of all top-level directories (and
+    /// files) requested by the GUI at once. The scoped read would then expand the
+    /// entire namespace through one recursive subtree walk per child, which is
+    /// several times the linear scan (issue #67: 755 ms / 70.8 MB for 147
+    /// directories at 294k nodes). `up` additionally contributes the root row, so
+    /// the scoped row set equals the full projection and only the cost improves.
+    ///
+    /// Any ambiguity (duplicate ids, missing/extra children, a namespace with more
+    /// than one root) keeps the historical scoped read; a false negative only
+    /// misses the optimization, never a row.
+    fn covers_namespace_children(&self, roots: &[String], encoded: &str) -> Result<bool> {
+        let unique: HashSet<&str> = roots.iter().map(String::as_str).collect();
+        if unique.len() != roots.len() {
+            return Ok(false);
+        }
+        let namespaces: Vec<String> = {
+            let mut q = self
+                .db
+                .prepare("SELECT id FROM nodes WHERE parent IS NULL AND deleted=0")?;
+            q.query_map([], |row| row.get::<_, String>(0))?
+                .collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        if namespaces.len() != 1 {
+            return Ok(false);
+        }
+        let sql = format!(
+            "SELECT (SELECT count(*) FROM nodes n WHERE n.parent=?1 AND {SEED_FILTERS}), \
+                    (SELECT count(*) FROM nodes n WHERE n.parent=?1 \
+                       AND n.id IN (SELECT value FROM json_each(?2)) AND {SEED_FILTERS})"
+        );
+        let (children, named_children): (i64, i64) = self.db.query_row(
+            &sql,
+            params![&namespaces[0], encoded],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        Ok(children == named_children && usize::try_from(children).ok() == Some(roots.len()))
     }
     /// One seed row for `id`, or `None` when the node is missing, deleted,
     /// access-denied or shadowed by a local creation at the same name.
