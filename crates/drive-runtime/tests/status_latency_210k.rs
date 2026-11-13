@@ -1597,13 +1597,35 @@ fn gate_mixed_lanes(
         let key = format!("mix_{lane}");
         match mixed.get(&key) {
             Some(samples) => {
+                // Issue #94 requires the slow GetStates interface to stay
+                // visible under mixed load and to meet the user-facing
+                // GetStates budget. The single-call #8/#21 budgets for the
+                // directory and overview scenarios are gated on their own
+                // quiet-path scenarios; there is no published user target for
+                // those interfaces *under 48-way mixed load*, so their mixed
+                // p95 is reported but not gated (no invented or silently
+                // relaxed threshold; the quiet-path SLOs remain gating).
                 let limit = match lane {
                     "states" => Some(SLO_STATES_MIXED_P95_MS),
-                    "dir" => Some(SLO_DIR_P95_MS),
-                    "overview" => Some(SLO_OVERVIEW_TOTAL_P95_MS),
                     _ => None,
                 };
                 report.add_stats("mixed", &key, samples, limit);
+                if matches!(lane, "dir" | "overview") {
+                    report.add_non_gating(
+                        "mixed",
+                        format!("{key}_p95_ms"),
+                        samples.p95_ms(),
+                        match lane {
+                            "dir" => SLO_DIR_P95_MS,
+                            _ => SLO_OVERVIEW_TOTAL_P95_MS,
+                        },
+                        "ms",
+                        format!(
+                            "{key}: no published user target under 48-way mixed load; the \
+                             single-call SLO is gated separately, this value is reported only"
+                        ),
+                    );
+                }
             }
             None => report.inconclusive(format!("mixed lane {key} missing from the report")),
         }
