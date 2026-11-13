@@ -1846,16 +1846,30 @@ impl Store {
             .collect();
         clean.truncate(max_rows);
         let mut out = crate::cache_policy::CleanDraftPrune::default();
-        // RED baseline (#90-B): one autocommit per deleted row, exactly like the
-        // pre-#90 loop this method replaces.
-        for token in clean {
-            let deleted = self
-                .db
-                .execute("DELETE FROM drafts WHERE token=?1 AND dirty=0", [&token])?;
-            if deleted == 1 {
-                out.rows += 1;
-                out.commits += 1;
-                out.file_bytes = out.file_bytes.saturating_add(self.remove_draft_file(&token)?);
+        for chunk in clean.chunks(crate::cache_policy::GC_CLEAN_DRAFT_BATCH_SIZE) {
+            // One explicit transaction for the whole batch: the commit is the
+            // batch's atomic boundary and the only WAL sync the batch pays.
+            let tx = self.db.transaction()?;
+            let mut deleted_tokens: Vec<&String> = Vec::with_capacity(chunk.len());
+            {
+                let mut delete =
+                    tx.prepare_cached("DELETE FROM drafts WHERE token=?1 AND dirty=0")?;
+                for token in chunk {
+                    // Re-check dirty=0 in the write statement itself so a stale
+                    // row snapshot can never delete a dirty draft.
+                    if delete.execute([token])? == 1 {
+                        deleted_tokens.push(token);
+                    }
+                }
+            }
+            tx.commit()?;
+            out.commits += 1;
+            out.rows += deleted_tokens.len() as u64;
+            // Files are unlinked only after the row transaction committed: a
+            // crash can leave a recoverable orphan body, never a row whose body
+            // was already deleted.
+            for token in deleted_tokens {
+                out.file_bytes = out.file_bytes.saturating_add(self.remove_draft_file(token)?);
             }
         }
         Ok(out)

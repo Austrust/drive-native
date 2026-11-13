@@ -229,16 +229,19 @@ fn failed_clean_draft_batch_rolls_back_and_retry_finishes() {
         "the batch error must propagate instead of being swallowed: {failed}"
     );
     // The first batch committed, the failed batch rolled back as a unit.
-    assert_eq!(remaining_draft_rows(&store).len(), 300 - 128);
-    for token in &ordered[..128] {
-        assert!(!dir.path().join("drafts").join(token).exists());
-    }
-    for token in &ordered[128..] {
+    // 300 clean rows + 1 dirty row: exactly the first 128-row batch committed.
+    let remaining = remaining_draft_rows(&store);
+    assert_eq!(remaining.len(), 301 - 128);
+    for token in &remaining {
         assert!(
             dir.path().join("drafts").join(token).exists(),
             "the rolled-back batch must keep every body"
         );
     }
+    let draft_bodies = std::fs::read_dir(dir.path().join("drafts"))
+        .unwrap()
+        .count();
+    assert_eq!(draft_bodies, remaining.len());
     // The dirty draft is still protected.
     assert_eq!(
         store
