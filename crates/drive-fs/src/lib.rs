@@ -361,23 +361,35 @@ impl CacheFilesystem {
                 let p = preview::authoritative(&s, parent_ino, libc::EROFS)?.node.id;
                 let np = preview::authoritative(&s, newparent_ino, libc::EROFS)?.node.id;
                 let source = s.lookup(&p, &name)?.node.id;
-                permissions::rename(&s, &p, &source, &np, None)?;
                 let target = s
                     .lookup(&np, &newname)
                     .ok()
-                    .map(|target| target.node.id)
-                    .filter(|target| target != &source);
+                    .map(|target| target.node)
+                    .filter(|target| target.id != source);
+                permissions::rename(
+                    &s,
+                    &p,
+                    &source,
+                    &np,
+                    target.as_ref().map(|target| target.id.as_str()),
+                )?;
                 // Cover the rename/tombstone window before the journal rows exist.
                 if let Some(state) = &exclusion {
                     state.mark_local_only_node(&source);
                     if let Some(target) = &target {
-                        state.mark_local_only_node(target);
+                        state.mark_local_only_node(&target.id);
                     }
                 }
-                s.rename_local(&p, &name, &np, &newname, flags & (libc::RENAME_NOREPLACE as u32) != 0)?;
+                s.rename_local_replacing(
+                    &p,
+                    &name,
+                    &np,
+                    &newname,
+                    flags & (libc::RENAME_NOREPLACE as u32) != 0,
+                )?;
                 let mut ids = vec![source];
                 if let Some(target) = target {
-                    ids.push(target);
+                    ids.push(target.id);
                 }
                 s.quiesce_local_only_nodes(&ids)?;
                 drop(s);

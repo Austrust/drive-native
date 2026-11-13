@@ -30,6 +30,7 @@ fn fixture() -> (tempfile::TempDir, Store) {
             &[
                 node("root", None, "Lab", true),
                 node("A", Some("root"), "A.txt", false),
+                node("B", Some("root"), "B.txt", false),
                 node("nm", Some("root"), "node_modules", true),
                 node("nmc", Some("nm"), "pkg", true),
             ],
@@ -124,4 +125,31 @@ fn quiescing_a_local_only_tombstone_drops_the_remove_intent() {
         .query_row("SELECT deleted FROM nodes WHERE id='A'", [], |r| r.get(0))
         .unwrap();
     assert!(deleted, "the node stays a local tombstone");
+}
+
+/// Issue #56B kernel-rename follow-up: a `local_only` rename may replace an
+/// existing local target. The target is retired locally (tombstone, no sync
+/// intent) and the source takes its name; `Store::rename_local` alone refuses
+/// the replace because remote replace owns that path outside local_only.
+#[test]
+fn local_only_rename_replacement_retires_the_target_without_sync() {
+    let (_dir, mut store) = fixture();
+    store
+        .rename_local_replacing("root", "A.txt", "root", "B.txt", false)
+        .unwrap();
+    assert_eq!(store.lookup("root", "B.txt").unwrap().node.id, "A");
+    let deleted: bool = store
+        .db
+        .query_row("SELECT deleted FROM nodes WHERE id='B'", [], |r| r.get(0))
+        .unwrap();
+    assert!(deleted, "the replaced target stays a local tombstone");
+    assert!(
+        store.next_rename().unwrap().is_none(),
+        "no rename intent may reach the scheduler"
+    );
+    assert!(
+        store.next_remove().unwrap().is_none(),
+        "no remove intent may reach the scheduler"
+    );
+    assert_eq!(store.pending_namespace_operations().unwrap(), 0);
 }
