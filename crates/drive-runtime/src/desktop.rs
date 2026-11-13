@@ -1776,10 +1776,32 @@ pub fn cancel_release(service: &Service, job_id: &str) -> io::Result<String> {
     Ok(value.to_string())
 }
 
+/// Issue #93: opaque `listing_cookie` for authoritative directory pages.
+///
+/// The value is the committed namespace semantic version: the writer boundary
+/// publishes a `CommitState` derived from the namespace watermark (the status
+/// journal cursor plus the attribute-only counter), so any commit that can
+/// change directory membership, order or visibility — insert/delete, rename,
+/// move, visibility/ACL overlays, pins, drafts, local precedence — moves it.
+/// Non-namespace writes (settings, LRU/recency, receipts, TEMP maintenance) do
+/// not, so an idle listing keeps a stable cookie.
+///
+/// Reading it is one lock-free atomic load, not a new SQLite query or scan.
+/// Callers must capture it under the same Store guard that reads the page so
+/// the page and its cookie cannot straddle a commit.
+fn listing_cookie(service: &Service) -> String {
+    let commit = service.bridge.store.projection_state();
+    format!(
+        "ns1:{:016x}:{}",
+        commit.revision,
+        u8::from(!commit.verified)
+    )
+}
+
 /// Read-only browser pages from local metadata, including before network unlock.
 pub fn directory(service: &Service, path: &str, offset: u32) -> io::Result<String> {
     let rules = exclusion_rules(service);
-    let (children, total) = {
+    let (children, total, listing_cookie) = {
         let store = service.bridge.store.lock().unwrap();
         if preview::active(&store, &service.profile.scope.file_id)? {
             return preview::directory(
@@ -1822,7 +1844,11 @@ pub fn directory(service: &Service, path: &str, offset: u32) -> io::Result<Strin
                 )
             });
         }
-        (children, total)
+        // Issue #93: capture the committed namespace version under the same
+        // guard that produced the page, so the page snapshot and its cookie are
+        // always from one committed state.
+        let cookie = listing_cookie(service);
+        (children, total, cookie)
     };
     // The page snapshot already carries every child id, so only the requested
     // directory path is resolved; the status batch reuses these nodes instead of
@@ -1844,6 +1870,10 @@ pub fn directory(service: &Service, path: &str, offset: u32) -> io::Result<Strin
         "total": total,
         "offset": offset,
         "path": path,
+        // Issue #93: additive opaque version token for client-side pagination;
+        // older clients ignore it and newer clients conservatively re-read when
+        // it is missing or changes.
+        "listing_cookie": listing_cookie,
     })
     .to_string())
 }
@@ -2734,6 +2764,115 @@ mod readpath_tests {
         assert_eq!(page["offset"], 0);
         assert_eq!(page["total"], 1);
         assert_eq!(page["entries"], expected["entries"]);
+    }
+
+    fn directory_json(service: &Service, path: &str, offset: u32) -> serde_json::Value {
+        serde_json::from_str(&directory(service, path, offset).expect("directory page"))
+            .expect("directory json")
+    }
+
+    /// Issue #93: every GetDirectory page carries an opaque `listing_cookie`
+    /// taken from the committed namespace version, so a client can append the
+    /// next page while the listing is unchanged. The field is additive: the
+    /// existing page fields keep their shape.
+    #[test]
+    fn directory_reports_a_stable_listing_cookie_for_an_unchanged_namespace() {
+        let (_dir, service) = fixture();
+        let first = directory_json(&service, "folder", 0);
+        let cookie = first["listing_cookie"]
+            .as_str()
+            .expect("GetDirectory must report listing_cookie")
+            .to_owned();
+        assert!(!cookie.is_empty(), "listing_cookie must be opaque but nonempty");
+        // Retrying the same page of an unchanged namespace reports the same
+        // cookie; otherwise a client could never append.
+        for _ in 0..4 {
+            let again = directory_json(&service, "folder", 0);
+            assert_eq!(again["listing_cookie"], cookie.as_str());
+            assert_eq!(again["entries"], first["entries"]);
+            assert_eq!(again["total"], first["total"]);
+        }
+        // The cookie is a namespace version, not a Store write counter: an
+        // unrelated settings commit must not invalidate a directory listing.
+        service
+            .bridge
+            .store
+            .lock()
+            .unwrap()
+            .set_cache_limit(64 * 1024 * 1024)
+            .unwrap();
+        let after_settings = directory_json(&service, "folder", 0);
+        assert_eq!(after_settings["listing_cookie"], cookie.as_str());
+        // Pages of one committed listing share the cookie, including a page
+        // past the end (offset > total keeps the historical empty page).
+        let past_the_end = directory_json(&service, "folder", 99);
+        assert_eq!(past_the_end["total"], 1);
+        assert_eq!(past_the_end["offset"], 99);
+        assert!(past_the_end["entries"].as_array().unwrap().is_empty());
+        assert_eq!(past_the_end["listing_cookie"], cookie.as_str());
+    }
+
+    /// Issue #93: any committed namespace change invalidates the cookie. Pins
+    /// live on `nodes`, so this is a committed namespace write whose page
+    /// membership is unchanged; the conservative contract still changes it.
+    #[test]
+    fn directory_listing_cookie_changes_with_the_committed_namespace_version() {
+        let (_dir, service) = fixture();
+        let first = directory_json(&service, "folder", 0);
+        let cookie = first["listing_cookie"]
+            .as_str()
+            .expect("listing_cookie")
+            .to_owned();
+        service.bridge.store.lock().unwrap().pin("one", true).unwrap();
+        let pinned = directory_json(&service, "folder", 0);
+        assert_ne!(pinned["listing_cookie"].as_str(), Some(cookie.as_str()));
+        assert_eq!(pinned["total"], 1);
+        assert_eq!(pinned["entries"][0]["path"], "folder/one");
+        // Cookies never repeat: a second commit moves the version again.
+        service
+            .bridge
+            .store
+            .lock()
+            .unwrap()
+            .pin("one", false)
+            .unwrap();
+        let unpinned = directory_json(&service, "folder", 0);
+        assert_ne!(
+            unpinned["listing_cookie"].as_str(),
+            pinned["listing_cookie"].as_str()
+        );
+        assert_ne!(unpinned["listing_cookie"].as_str(), Some(cookie.as_str()));
+    }
+
+    /// Issue #93 acceptance: insertion/rename/visibility changes must change the
+    /// cookie. A locally created child changes the page's membership and total.
+    #[test]
+    fn directory_listing_cookie_tracks_membership_changes() {
+        let (_dir, service) = fixture();
+        let before = directory_json(&service, "folder", 0);
+        let cookie = before["listing_cookie"]
+            .as_str()
+            .expect("listing_cookie")
+            .to_owned();
+        assert_eq!(before["total"], 1);
+        let created = service
+            .bridge
+            .store
+            .lock()
+            .unwrap()
+            .create_local_file("folder", "two", 0o644)
+            .expect("local creation");
+        assert_eq!(created.parent.as_deref(), Some("folder"));
+        let grown = directory_json(&service, "folder", 0);
+        assert_eq!(grown["total"], 2);
+        assert_ne!(grown["listing_cookie"].as_str(), Some(cookie.as_str()));
+        let paths: Vec<&str> = grown["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["path"].as_str().unwrap())
+            .collect();
+        assert_eq!(paths, ["folder/one", "folder/two"]);
     }
 
     fn service_with_excludes(

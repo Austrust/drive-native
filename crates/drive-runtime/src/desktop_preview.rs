@@ -149,9 +149,13 @@ pub(super) fn directory(
                     row(child_path, record)
                 })
                 .collect();
+            // Issue #93: preview pages key the additive `listing_cookie` on the
+            // preview generation instead of the authoritative namespace version.
+            let generation = page.stamp.fingerprint();
+            let cookie = format!("pv1:{generation}");
             Ok(
                 serde_json::json!({"schema":1,"preview_only":true,"directory_state":"received",
-                "preview_generation":page.stamp.fingerprint(),"entries":entries,
+                "preview_generation":generation,"listing_cookie":cookie,"entries":entries,
                 "total":page.total,"offset":offset,"path":path})
                 .to_string(),
             )
@@ -163,8 +167,13 @@ pub(super) fn directory(
                 _ => return Err(error),
             };
             // null means unknown, never a successfully enumerated empty list.
+            // Issue #93: the additive field is present on unready pages too, so
+            // clients can distinguish "new backend, no listing yet" from an old
+            // backend that omitted the field; a pending/denied page never
+            // carries entries to append anyway.
             Ok(
                 serde_json::json!({"schema":1,"preview_only":true,"directory_state":state,
+                "listing_cookie":format!("pv1:{state}"),
                 "entries":[],"total":null,"offset":offset,"path":path})
                 .to_string(),
             )
@@ -317,5 +326,53 @@ rules_digest: String::new(),
         assert_ne!(first["preview_generation"], newer["preview_generation"]);
         assert!(store.node("100").is_err());
         assert_eq!(store.cursor().unwrap(), "");
+    }
+
+    /// Issue #93: preview pages expose the same additive `listing_cookie`
+    /// contract as authoritative pages, but keyed by the preview generation.
+    /// A multi-page preview traversal may therefore append, while a replaced
+    /// direct listing invalidates it. Unready pages still carry the field so a
+    /// client can tell a new backend from an older one that omits it.
+    #[test]
+    fn preview_pages_report_a_listing_cookie_that_tracks_the_generation() {
+        let (_temp, mut store, run) = setup();
+        let mount = Path::new("/tmp/preview-desktop");
+        let files = (0..300)
+            .map(|i| {
+                node(
+                    &(1000 + i).to_string(),
+                    Some("100"),
+                    &format!("file-{i:03}"),
+                    false,
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut nodes = files.clone();
+        nodes.push(node("200", Some("100"), "Dir", true));
+        list(&mut store, &run, nodes.clone());
+        let first = data(directory(&store, "100", mount, "", 0, None));
+        let second = data(directory(&store, "100", mount, "", 256, None));
+        let cookie = first["listing_cookie"]
+            .as_str()
+            .expect("preview directory must report listing_cookie")
+            .to_owned();
+        assert!(!cookie.is_empty());
+        assert_eq!(second["listing_cookie"], cookie.as_str());
+        assert_eq!(second["preview_generation"], first["preview_generation"]);
+        // A directory that has not been listed yet is a pending page: the
+        // field is present even though the entries are withheld.
+        let pending = data(directory(&store, "100", mount, "Dir", 0, None));
+        assert_eq!(pending["directory_state"], "pending");
+        assert!(pending["listing_cookie"].is_string());
+        assert!(!pending["listing_cookie"].as_str().unwrap().is_empty());
+        // Replacing the direct listing changes the preview generation, so the
+        // cookie of the same page must move with it.
+        list(&mut store, &run, nodes);
+        let newer = data(directory(&store, "100", mount, "", 256, None));
+        assert_ne!(newer["listing_cookie"].as_str(), Some(cookie.as_str()));
+        assert_ne!(
+            newer["listing_cookie"].as_str(),
+            pending["listing_cookie"].as_str()
+        );
     }
 }
