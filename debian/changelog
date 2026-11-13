@@ -1,3 +1,61 @@
+drive-native (0.1.0~dev20261113.2) unstable; urgency=medium
+
+  * Performance round 5: fix the 13 remaining hotspots from the 2026-11-13
+    audit (new issues #87-#94 plus supplements to #26/#23/#30/#59/#57),
+    merging draft PRs #95-#101:
+    - #87/#91: excluded-purge merge becomes O(K+P) (HashSet membership,
+      preparation before the write transaction, raw-snapshot recheck) and the
+      operations_node_active / operations_blob_active partial indexes cover all
+      five protected states (#91); legacy databases are repaired on open via
+      sqlite_master reconciliation (same schema version, no migration).
+    - #88/#89: GetOverview serves commit diagnostics from one consistent
+      snapshot (two counts from one statement, provably equivalent per-journal
+      top-k, outcome partial indexes) and a generation+TTL cached storage
+      summary (additive collected_at/stale/error). The desktop caches both
+      behind (CommitState, PRAGMA data_version) and never publishes a torn read.
+    - #90: cache maintenance runs in bounded, resumable, re-verified windows
+      with flights/Store locks released between windows; clean-draft rows are
+      deleted in bounded transactions (ceil(C/128) commits, FULL preserved);
+      released inodes keep the Invalidation::Inode contract; eviction only
+      happens on a completed round.
+    - #92/#93: GUI transfer polling is per-slot with a minimum interval and one
+      coalesced follow-up (no cross-mount feedback); "load more" appends via an
+      additive GetDirectory listing_cookie instead of re-reading the prefix
+      (55 -> 10 requests for ten screens).
+    - #23/#26: hot-index opendir reads a precomputed DirBlock byte estimate
+      instead of rescanning entry names, and ACL READDIRPLUS materializes only
+      the current <=128-entry page instead of the whole directory.
+    - #30: the committed desktop render refreshes incrementally along the
+      publication invalidation set (ancestor chain), with single-flight and the
+      authoritative fallback retained.
+    - #57: the namespace scan is paged with a resumable, dependency-safe cursor,
+      so a >256-row prefix cannot starve the pending tail; reconcile attempts
+      get a bounded execution budget with explicit Timeout diagnostics (no
+      replay, unknown result kept uncertain) and an aging fairness budget.
+    - #59: read requests get a single-claim deadline watchdog (late results
+      discarded, exactly one reply), expired queued work is skipped, runtime
+      hydration admission is bounded, and additive fuse.request_deadline
+      metrics report fired/late/skipped/in-flight counters.
+    - #94: the performance gate is mode-explicit (cold/warm/degraded/mixed),
+      reports per-interface p50/p95/p99/max/errors/timeouts, gates classic
+      timeouts independently of the mixed aggregate, and emits a
+      machine-readable VERDICT with a non-zero exit on any gating failure.
+  * schema stays 29 and IPC stays 21; this batch adds no migration. JSON/DB
+    changes are additive only (GetDirectory listing_cookie, fuse.request_deadline,
+    storage-summary freshness, namespace scheduling diagnostics). FSD and worker
+    must still be updated as a pair.
+  * Verified on workstation202611 with the merged tree and a clean rebuild:
+    workspace all-features 1508 passed / 0 failed / 99 ignored; POSIX gate
+    0 violations (120 allowlisted); kernel FUSE matrix 16/16; GUI module matrix
+    27/27; candidate package dh_auto_test 1508/0/99. Paired quiet-window A/B
+    (baseline 7d664e0): 210k warm projection p95 244.5 -> 195.9 ms, mixed
+    throughput +65%, cold/mixed/degraded gates all PASS with zero timeouts.
+    See docs/RELEASE_20261113_2.md; release assets carry the exact commit and
+    package hashes. Real NAS/Mint desktop and real dpkg install/upgrade remain
+    unverified; this is a development build, not rc1.
+
+ -- Drive Native contributors <noreply@example.invalid>  Fri, 13 Nov 2026 23:45:00 +0800
+
 drive-native (0.1.0~dev20261113.1) unstable; urgency=medium
 
   * Merge the #6/#9/#23/#25–#28/#56/#57–#61 issue batch and the #67

@@ -1,3 +1,9 @@
+# 0.1.0~dev20261113.2：13 项性能热点收尾（#87–#94 与 #23/#26/#30/#57/#59 补充）
+
+本版已发布为 `dev20261113.2`。合入 draft PR #95–#101，覆盖 2026-11-13 性能复核的全部 13 项：排除清理 O(K²) 去重（#87）、abandoned 五态 partial index（#91）、GetOverview 诊断/存储统计缓存（#88/#89）、GC 分批窗口与 clean draft 批事务（#90）、GUI 传输轮询与追加分页（#92/#93）、ACL READDIRPLUS 分页物化（#26）、热索引 opendir O(1) 估算（#23）、warm 投影增量聚合（#30）、命名空间分页扫描与 reconcile 预算/公平（#57）、FUSE 单次 reply deadline（#59）、性能门禁模式化与机读 verdict（#94）。schema **29**／IPC **21** 不变，无迁移，JSON 仅 additive；FSD/worker/GUI 成对更新。
+
+验证：workstation202611 合并树干净重建全量 `cargo test --workspace --all-features --locked` **1508 通过 / 0 失败 / 99 忽略**；POSIX 门禁 0 violation；内核 FUSE 16/16；GUI 27/27；静默窗口配对 A/B：warm 投影 p95 **244.5→195.9 ms（−19.9%）**、mixed 吞吐 **+65%**、cold/mixed/degraded 门禁全 PASS。详见 [RELEASE_20261113_2.md](RELEASE_20261113_2.md) 与发布资产 `VALIDATION.json`。真实 NAS／Mint 桌面／真实 dpkg 安装升级仍未验收，本包不是 rc1。
+
 # 0.1.0~dev20261113.1：P0/P1 缺陷收尾、open issues 验证与 #67 性能批
 
 本版已发布为 `dev20261113.1`。合入上一批 draft PR #62–#66（#57–#61 修复）与后续两轮收尾：#23（按目录 single-flight）、#25–#28（可观测性与 barrier 成本）、#56（排除规则默认 local_only + restore 修复）、#6（remove 冲突 keep-remote 恢复）、#9 TB3（静默 reconcile 收口），以及 #67 性能批（PR #73–#78、#83）。schema **29**／IPC **21** 不变，本版无迁移；升级仍需 FSD/worker 成对更新。
