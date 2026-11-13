@@ -192,3 +192,132 @@ fn cancelled_waiter_detaches_promptly_while_original_reader_keeps_downloading() 
 
 #[path = "cancel_backoff_tests.rs"]
 mod backoff;
+
+// ---- #59: bounded worker admission and expiry-aware cancellation -----------
+
+/// A hydration whose reply deadline already passed (drive-fs watchdog claimed
+/// the one reply) must not start an expensive worker RPC at all.
+#[test]
+fn expired_read_token_skips_expensive_hydration_without_an_rpc() {
+    let (_dir, bridge, file, mut peer) = fixture(false);
+    peer.set_read_timeout(Some(Duration::from_millis(250))).unwrap();
+    let started = Instant::now() - Duration::from_secs(1);
+    let token = drive_fs::ReadCancellation::with_budget(started, Duration::from_millis(10));
+    assert!(token.is_expired());
+    let result = bridge.ensure_cancellable(&file, Some(&token));
+    assert_eq!(result, Err(libc::EIO));
+    assert!(
+        transport::receive::<Envelope<Command>>(&mut peer).is_err(),
+        "no worker RPC may be started for a reply that is already gone"
+    );
+    let metrics = bridge.hydrate_metrics();
+    assert_eq!(metrics.expired_skips, 1);
+    assert_eq!(metrics.admitted, 0);
+    assert_eq!(metrics.inflight, 0);
+    assert_eq!(metrics.waiting, 0);
+    assert_eq!(bridge.downloads.load(Ordering::Relaxed), 0);
+}
+
+fn many_files(bridge: &Arc<Bridge>, count: usize) -> Vec<Node> {
+    let mut nodes = vec![Node {
+        id: "root".into(),
+        parent: None,
+        name: "root".into(),
+        version: "v1".into(),
+        directory: true,
+        metadata: None,
+    }];
+    for index in 0..count {
+        nodes.push(Node {
+            id: format!("file-{index}"),
+            parent: Some("root".into()),
+            name: format!("f{index}.doc"),
+            version: "v1".into(),
+            directory: false,
+            metadata: None,
+        });
+    }
+    bridge
+        .store
+        .lock()
+        .unwrap()
+        .install_remote_snapshot(&nodes, "1", "server")
+        .unwrap();
+    nodes.split_off(1)
+}
+
+/// With more cache misses than admission slots, in-flight worker RPCs stay
+/// bounded; expired waiters abandon without starting work and every counter
+/// drains back to zero (no orphan work after the reply deadline).
+#[test]
+fn bounded_hydration_admission_never_exceeds_the_bound_and_drains() {
+    let (_dir, bridge, _file, mut peer) = fixture(false);
+    let files = many_files(&bridge, 6);
+    bridge.set_hydration_concurrency(2);
+    let (stats_tx, stats_rx) = mpsc::channel();
+    let peer_thread = std::thread::spawn(move || {
+        let mut downloads = 0usize;
+        let mut active = 0isize;
+        let mut peak = 0isize;
+        while let Ok((envelope, _)) = transport::receive::<Envelope<Command>>(&mut peer) {
+            match envelope.body {
+                Command::Download { .. } => {
+                    downloads += 1;
+                    active += 1;
+                    peak = peak.max(active);
+                }
+                Command::Cancel { .. } => active = (active - 1).max(0),
+                _ => {}
+            }
+        }
+        stats_tx.send((downloads, peak)).unwrap();
+    });
+    let handles: Vec<_> = files
+        .iter()
+        .map(|file| {
+            let bridge = bridge.clone();
+            let file = file.clone();
+            std::thread::spawn(move || {
+                let token = drive_fs::ReadCancellation::with_budget(
+                    Instant::now(),
+                    Duration::from_millis(250),
+                );
+                bridge.ensure_cancellable(&file, Some(&token))
+            })
+        })
+        .collect();
+    let started = Instant::now();
+    for handle in handles {
+        assert!(
+            handle.join().unwrap().is_err(),
+            "an expired read must not report success"
+        );
+    }
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "abandoned reads must return within the budget + bounded scheduler slack"
+    );
+    let metrics = bridge.hydrate_metrics();
+    assert!(
+        metrics.admitted <= 2 && metrics.peak <= 2,
+        "bound=2 but admitted={} peak={}",
+        metrics.admitted,
+        metrics.peak
+    );
+    assert_eq!(metrics.inflight, 0, "no orphan hydration work after abandonment");
+    assert_eq!(metrics.waiting, 0, "admission queue must drain");
+    assert!(
+        metrics.abandoned_waiting >= 1,
+        "waiting requests must abandon on their own deadline, metrics={metrics:?}"
+    );
+    assert_eq!(
+        bridge.downloads.load(Ordering::Relaxed) as u64,
+        metrics.admitted,
+        "one accounted download per admitted worker RPC"
+    );
+    bridge.connection().close();
+    let (downloads, peak) = stats_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(downloads <= 2, "worker saw {downloads} hydration RPCs with bound 2");
+    assert!(peak <= 2, "worker concurrency peak {peak} exceeded the bound");
+    peer_thread.join().unwrap();
+}
