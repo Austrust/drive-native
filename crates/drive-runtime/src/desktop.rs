@@ -2875,6 +2875,46 @@ mod readpath_tests {
         assert_eq!(paths, ["folder/one", "folder/two"]);
     }
 
+    /// Issue #93: the cookie must follow visibility/permission changes, not just
+    /// membership edits. Both cases below are committed journal sources:
+    /// `access_denied` (subtree scope, ACL revoke) and `drafts` (dirty/draft
+    /// visibility). The writer boundary republishes the namespace watermark
+    /// (`SharedStore::projection_state`) whenever either table changes.
+    #[test]
+    fn directory_listing_cookie_tracks_visibility_and_permission_changes() {
+        let (_dir, service) = fixture();
+        let first = directory_json(&service, "", 0);
+        let cookie = first["listing_cookie"]
+            .as_str()
+            .expect("listing_cookie")
+            .to_owned();
+        // ACL revoke: the access-denied set is a subtree-scope namespace source.
+        service
+            .bridge
+            .store
+            .lock()
+            .unwrap()
+            .set_access_denied(&["folder".to_string()])
+            .expect("access denial commit");
+        let denied = directory_json(&service, "", 0);
+        assert_ne!(denied["listing_cookie"].as_str(), Some(cookie.as_str()));
+        // Draft visibility: a dirty draft is a namespace journal source even
+        // though the directory membership does not change.
+        service
+            .bridge
+            .store
+            .lock()
+            .unwrap()
+            .save_local("one", b"draft")
+            .expect("draft commit");
+        let drafted = directory_json(&service, "", 0);
+        assert_ne!(
+            drafted["listing_cookie"].as_str(),
+            denied["listing_cookie"].as_str()
+        );
+        assert_ne!(drafted["listing_cookie"].as_str(), Some(cookie.as_str()));
+    }
+
     fn service_with_excludes(
         patterns: &[&str],
         nodes: &[Node],
