@@ -258,6 +258,24 @@ static REQUESTS: [OpAggregate; OP_COUNT] = [const { OpAggregate::new() }; OP_COU
 static LOCK_WAITS: Aggregate = Aggregate::new();
 static LOCK_WAIT_TIMEOUTS: AtomicU64 = AtomicU64::new(0);
 static REQUEST_TIMEOUTS: AtomicU64 = AtomicU64::new(0);
+/// Issue #59: single-claim reply deadlines (drive-fs side).
+static DEADLINE_FIRED: AtomicU64 = AtomicU64::new(0);
+static LATE_RESULTS_DISCARDED: AtomicU64 = AtomicU64::new(0);
+static EXPIRED_TASK_SKIPS: AtomicU64 = AtomicU64::new(0);
+static CANCELLED_REQUESTS: AtomicU64 = AtomicU64::new(0);
+static WATCHDOG_UNAVAILABLE: AtomicU64 = AtomicU64::new(0);
+/// Hydrations that are still running (they cannot be preempted by userspace);
+/// bounded by the data-plane worker pool. A peak above that bound is a leak.
+static HYDRATIONS_INFLIGHT: AtomicU64 = AtomicU64::new(0);
+static HYDRATIONS_PEAK: AtomicU64 = AtomicU64::new(0);
+static READ_QUEUE_WAIT: Aggregate = Aggregate::new();
+static READ_STORE_WAIT: Aggregate = Aggregate::new();
+static READ_WORKER_WAIT: Aggregate = Aggregate::new();
+static READ_REPLY_TIME: Aggregate = Aggregate::new();
+/// One `fuse.reply_deadline` line at most per second; the counter keeps the
+/// exact total so a sustained deadline storm cannot flood journald.
+static DEADLINE_LOG_LAST_MS: AtomicU64 = AtomicU64::new(0);
+static DEADLINE_LOG_SUPPRESSED: AtomicU64 = AtomicU64::new(0);
 static RETRYABLE_REPLIES: AtomicU64 = AtomicU64::new(0);
 static DEGRADED_EVENTS: AtomicU64 = AtomicU64::new(0);
 static TUNING: AtomicU64 = AtomicU64::new(0);
@@ -381,6 +399,84 @@ pub fn record_lock_wait(elapsed: Duration) {
     LOCK_WAITS.record(elapsed.as_micros() as u64);
 }
 
+fn uptime_ms() -> u64 {
+    static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    START
+        .get_or_init(Instant::now)
+        .elapsed()
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64
+}
+/// Count one reply answered by its deadline watchdog. The kernel already has a
+/// defined error; the log line is rate limited per second and by opcode, the
+/// counter is exact.
+pub(crate) fn record_deadline_fired() {
+    DEADLINE_FIRED.fetch_add(1, Ordering::Relaxed);
+    let now = uptime_ms();
+    let last = DEADLINE_LOG_LAST_MS.load(Ordering::Relaxed);
+    if now.saturating_sub(last) < 1_000 {
+        DEADLINE_LOG_SUPPRESSED.fetch_add(1, Ordering::Relaxed);
+        return;
+    }
+    if DEADLINE_LOG_LAST_MS
+        .compare_exchange(last, now, Ordering::AcqRel, Ordering::Relaxed)
+        .is_err()
+    {
+        DEADLINE_LOG_SUPPRESSED.fetch_add(1, Ordering::Relaxed);
+        return;
+    }
+    let suppressed = DEADLINE_LOG_SUPPRESSED.swap(0, Ordering::Relaxed);
+    eprintln!(
+        "drive-native fuse.reply_deadline op=read errno={} suppressed={suppressed}",
+        libc::EIO
+    );
+}
+/// Count one worker result that arrived after the deadline watchdog had already
+/// answered. It was dropped, never sent as a second reply.
+pub(crate) fn record_late_result() {
+    LATE_RESULTS_DISCARDED.fetch_add(1, Ordering::Relaxed);
+}
+/// Count one queued task skipped because its request was already expired or
+/// cancelled: the expensive work is not started at all.
+pub(crate) fn record_expired_skip() {
+    EXPIRED_TASK_SKIPS.fetch_add(1, Ordering::Relaxed);
+}
+/// Count one request answered with the cancellation error (EINTR).
+pub(crate) fn record_cancelled() {
+    CANCELLED_REQUESTS.fetch_add(1, Ordering::Relaxed);
+}
+pub(crate) fn record_watchdog_unavailable() {
+    WATCHDOG_UNAVAILABLE.fetch_add(1, Ordering::Relaxed);
+}
+/// Gauge a non-preemptible hydration that is currently running.
+pub(crate) fn hydration_started() {
+    let now = HYDRATIONS_INFLIGHT.fetch_add(1, Ordering::AcqRel) + 1;
+    HYDRATIONS_PEAK.fetch_max(now, Ordering::AcqRel);
+}
+pub(crate) fn hydration_finished() {
+    HYDRATIONS_INFLIGHT.fetch_sub(1, Ordering::AcqRel);
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ReadStage {
+    /// Dispatcher admission to the read queue.
+    Queue,
+    /// Bounded Store wait inside the read worker.
+    StoreWait,
+    /// The non-preemptible hydration call itself.
+    WorkerWait,
+    /// Projection/publication of the final bytes.
+    Reply,
+}
+pub(crate) fn record_read_stage(stage: ReadStage, elapsed: Duration) {
+    let aggregate = match stage {
+        ReadStage::Queue => &READ_QUEUE_WAIT,
+        ReadStage::StoreWait => &READ_STORE_WAIT,
+        ReadStage::WorkerWait => &READ_WORKER_WAIT,
+        ReadStage::Reply => &READ_REPLY_TIME,
+    };
+    aggregate.record(elapsed.as_micros().min(u128::from(u64::MAX)) as u64);
+}
+
 /// RAII deadline for one FUSE handler invocation.
 ///
 /// The guard is created on the dispatcher thread and moved into the job that
@@ -405,6 +501,15 @@ impl RequestDeadline {
     }
     pub fn elapsed(&self) -> Duration {
         self.started.elapsed()
+    }
+    /// Dispatcher timestamp of the request; shared with the completion-claim
+    /// token so the deadline covers queueing, Store waits and the worker call.
+    pub fn started(&self) -> Instant {
+        self.started
+    }
+    /// Opcode budget this deadline enforces.
+    pub fn budget(&self) -> Duration {
+        self.budget
     }
     /// True once the opcode budget is exhausted. Callers use this only at
     /// controllable blocking points (a ready result is still returned; forcing
@@ -452,6 +557,25 @@ pub struct OpLatency {
     pub timeouts: u64,
     pub retryable: u64,
 }
+/// Issue #59 drive-fs side: single-claim reply deadlines, late-result
+/// discards, expired-task skips and the separated read-stage latencies.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DeadlineMetrics {
+    pub fired: u64,
+    pub late_results_discarded: u64,
+    pub expired_task_skips: u64,
+    pub cancelled: u64,
+    pub watchdog_unavailable: u64,
+    /// Non-preemptible hydrations currently running; bounded by the data-plane
+    /// worker pool, not a queue depth.
+    pub hydrations_inflight: u64,
+    pub hydrations_peak: u64,
+    pub queue_wait: HistogramSummary,
+    pub store_wait: HistogramSummary,
+    pub worker_wait: HistogramSummary,
+    pub reply: HistogramSummary,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FuseMetrics {
     pub configured_tuning: FuseTuning,
@@ -463,6 +587,7 @@ pub struct FuseMetrics {
     pub lock_wait: HistogramSummary,
     pub lock_wait_timeouts: u64,
     pub degraded_events: u64,
+    pub deadline: DeadlineMetrics,
 }
 pub fn snapshot() -> FuseMetrics {
     let budgets = budgets();
@@ -489,6 +614,19 @@ pub fn snapshot() -> FuseMetrics {
         lock_wait: LOCK_WAITS.summary(),
         lock_wait_timeouts: LOCK_WAIT_TIMEOUTS.load(Ordering::Relaxed),
         degraded_events: DEGRADED_EVENTS.load(Ordering::Relaxed),
+        deadline: DeadlineMetrics {
+            fired: DEADLINE_FIRED.load(Ordering::Relaxed),
+            late_results_discarded: LATE_RESULTS_DISCARDED.load(Ordering::Relaxed),
+            expired_task_skips: EXPIRED_TASK_SKIPS.load(Ordering::Relaxed),
+            cancelled: CANCELLED_REQUESTS.load(Ordering::Relaxed),
+            watchdog_unavailable: WATCHDOG_UNAVAILABLE.load(Ordering::Relaxed),
+            hydrations_inflight: HYDRATIONS_INFLIGHT.load(Ordering::Relaxed),
+            hydrations_peak: HYDRATIONS_PEAK.load(Ordering::Relaxed),
+            queue_wait: READ_QUEUE_WAIT.summary(),
+            store_wait: READ_STORE_WAIT.summary(),
+            worker_wait: READ_WORKER_WAIT.summary(),
+            reply: READ_REPLY_TIME.summary(),
+        },
     }
 }
 
@@ -549,6 +687,23 @@ impl FuseMetrics {
             "lock_wait_timeouts": self.lock_wait_timeouts,
             "degraded_events": self.degraded_events,
             "deadline_capability": "detect-and-report+bounded-store-wait",
+            // Additive issue #59 fields: a real completion-race deadline on the
+            // read data plane plus its separated stage latencies.
+            "request_deadline": {
+                "capability": "single-claim-reply-deadline+expiry-skip",
+                "fired": self.deadline.fired,
+                "late_results_discarded": self.deadline.late_results_discarded,
+                "expired_task_skips": self.deadline.expired_task_skips,
+                "cancelled": self.deadline.cancelled,
+                "watchdog_unavailable": self.deadline.watchdog_unavailable,
+                "hydrations_inflight": self.deadline.hydrations_inflight,
+                "hydrations_peak": self.deadline.hydrations_peak,
+                "hydrations_bound": 4,
+                "queue_wait": histogram(self.deadline.queue_wait),
+                "store_wait": histogram(self.deadline.store_wait),
+                "worker_wait": histogram(self.deadline.worker_wait),
+                "reply": histogram(self.deadline.reply),
+            },
         })
     }
 }
