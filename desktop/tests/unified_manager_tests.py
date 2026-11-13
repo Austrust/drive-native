@@ -1104,7 +1104,8 @@ class ManagerTransferPollingTests(unittest.TestCase):
                                  'slot %r issued overlapping requests' % slot)
         # Evidence counters, reported in notes/r5/desktop-gui.md.
         self.assertEqual(self.window.transfer_requests, len(requests))
-        self.assertGreaterEqual(self.window.transfer_updates, 2)
+        self.assertEqual(self.window.transfer_updates, 4,
+                         'one GUI update per applied reply, not per request burst')
 
     def test_replies_shorter_than_tick_do_not_rearm_each_other(self):
         for bus in self.sim_buses.values():
