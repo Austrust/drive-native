@@ -175,6 +175,8 @@ G4 错误码校正：只有普通文件 WriteContent 与 Setattr 同时 denied �
 
 诊断名称固定：`IndexHits`、`IndexMisses`、`IndexFallback`、`IndexDegraded`、`IndexBuildUs`、`IndexBytes`、`PermissionDenied`、`SpaceForbidden`，另暴露 index_partial。诊断不得包含名称/路径/凭据。
 
+#26 的 ACL 权限判定与 READDIRPLUS 批量投影诊断追加固定名称：`ReaddirPlusBatchedPages`（走批量权限投影的 ACL READDIRPLUS 页数）、`ReaddirPlusBatchedEntries`（批量投影覆盖的条目数）、`PermissionCacheHits`/`PermissionCacheMisses`（writer-local 有效权限判定 memo 的命中/未命中）。crate 访问器 `write_permissions::acl_metrics(&Store)` 汇总为 `AclMetrics { cache_hits, cache_misses, batched_pages, batched_entries }`；`DRIVE_NATIVE_FS_DIAGNOSTICS=1` 时 `directory.rs::send_acl_plus` 在每次 ACL READDIRPLUS 回复末尾用 stderr 输出结构化 `drive-native acl: cache_hits=… cache_misses=… batched_pages=… batched_entries=…` 一行（journald 消费），开关关闭时不输出。这些计数是进程内聚合，不进入 JSON/D-Bus 契约，也不改变 IPC、schema 或错误码。
+
 G3 在 SharedStore 发布已知拒绝后暂停 NSI 回复，走权威逐操作检查。无拒绝时保留内存路径。正文/目录续读使用独立的 `permission_clear_lease()` 持至有界回复；首个拒绝的发布等待此前回复完成，但普通元数据事务不阻塞已缓存正文读取。持此租约不得阻塞获取 Store（目录续读仅 try_lock）；已知拒绝的回复在 Store 内重验后发布。所有权限检查同时覆盖本地祖先和未确认 namespace_overlay 的远端祖先，不继承其写动作。
 
 明确的原生 Read 拒绝不设置自动下载重试截止（`retry_at=null`）。已知 Read 或祖先 Traverse 拒绝同样约束后台补全、重试唤醒及 Bridge 的缓存/新请求入口，返回 EACCES；仅重试传输不覆盖权限证据。重连、profile 通知或用户重新核对按既有 revision 规则恢复 unknown，再允许尝试；权限变更期间的迟到拒绝仍只影响当次调用，不建立旧拒绝门禁。该补充不改变 IPC21、entry TTL=0 或 attr 默认1000ms。

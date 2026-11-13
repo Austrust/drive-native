@@ -68,6 +68,8 @@ pub enum Stage {
     ReaddirPlusProjection,
     /// One READDIRPLUS ACL page whose permission projection ran batched (#26).
     ReaddirPlusBatchedPages,
+    /// Entries covered by one batched ACL permission projection (#26).
+    ReaddirPlusBatchedEntries,
     /// Effective decisions served by the writer-local memo (#26).
     PermissionCacheHits,
     /// Effective decisions computed and memoized by the writer-local memo (#26).
@@ -98,7 +100,7 @@ pub enum Stage {
     /// Wall time of one checkpoint: dirty-draft barrier, snapshot and commit.
     CheckpointTotal,
 }
-const STAGES: [Stage; 59] = [
+const STAGES: [Stage; 60] = [
     Stage::LookupQueue,
     Stage::LookupStoreWait,
     Stage::LookupProjection,
@@ -142,7 +144,8 @@ const STAGES: [Stage; 59] = [
     Stage::ReaddirRequests, Stage::ReaddirPlusRequests, Stage::IndexReadUs,
     Stage::WriteQueue, Stage::WriteStoreWait, Stage::WriteHold,
     Stage::CheckpointTotal,
-    Stage::ReaddirPlusBatchedPages, Stage::PermissionCacheHits,
+    Stage::ReaddirPlusBatchedPages, Stage::ReaddirPlusBatchedEntries,
+    Stage::PermissionCacheHits,
     Stage::PermissionCacheMisses,
 ];
 struct Aggregate {
@@ -161,7 +164,7 @@ impl Aggregate {
         }
     }
 }
-static TOTALS: [Aggregate; 59] = [const { Aggregate::new() }; 59];
+static TOTALS: [Aggregate; 60] = [const { Aggregate::new() }; 60];
 static ENABLED: OnceLock<bool> = OnceLock::new();
 pub(crate) fn enabled() -> bool {
     *ENABLED
@@ -190,6 +193,20 @@ pub(crate) fn add_count(stage: Stage, count: u64) {
     TOTALS[stage as usize]
         .count
         .fetch_add(count, Ordering::Relaxed);
+}
+/// Consume the #26 ACL counters behind the diagnostics switch: one stable
+/// `key=value` stderr line per ACL READDIRPLUS reply (journald-friendly, no
+/// names, paths or inode ids). `drive-core` owns the counters; `drive-fs` owns
+/// the switch, so the accessor is read here instead of growing every call site.
+pub(crate) fn acl_summary(store: &drive_core::Store) {
+    if !enabled() {
+        return;
+    }
+    let metrics = drive_core::write_permissions::acl_metrics(store);
+    eprintln!(
+        "drive-native acl: cache_hits={} cache_misses={} batched_pages={} batched_entries={}",
+        metrics.cache_hits, metrics.cache_misses, metrics.batched_pages, metrics.batched_entries
+    );
 }
 pub(crate) fn value(stage: Stage, value: u64) {
     if enabled() { record(stage, value); }
