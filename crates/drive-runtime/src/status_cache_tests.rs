@@ -1547,6 +1547,9 @@ fn lock_budget_overruns_are_reported_on_the_product_health_channel() {
     let health = cache.health_snapshot();
     assert!(health.lock_budget_violations >= 1);
     assert!(health.lock_holds >= 1);
+    stop_and_join(&service, task);
+}
+
 // ---------------------------------------------------------------------------
 // #67 W3: the projection is resident once (immutable base + sparse deltas).
 // ---------------------------------------------------------------------------
