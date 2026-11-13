@@ -9,7 +9,19 @@ use std::{
 };
 
 const LIMIT: usize = 256;
+/// #57-A: bounded continuation page. The fixed front window is always rescanned
+/// from the journal head so pending-first priority never waits for the cursor;
+/// the continuation page walks the rest of the journal across rounds so a
+/// permanently blocked prefix cannot hide an independent suffix.
+const CONTINUATION_LIMIT: usize = 256;
 const BODY_BUDGET: usize = 4 * 1024 * 1024;
+/// #57-A: upper bound on the cross-round dependency prefix kept in memory. The
+/// cache is dropped with an explicit `scan_prefix_budget` diagnostic instead of
+/// growing without bound; a dropped cache only costs one extra full pass.
+const SCAN_CACHE_LIMIT: usize = 8192;
+/// #57-C: declared maximum time an independent pending stream may defer a due
+/// read-only reconcile before the aging quota gives it the serial lane once.
+const RECONCILE_AGING_BUDGET: Duration = Duration::from_secs(10);
 /// #57: consecutive dispatch rounds without a pending attempt that raise the
 /// structured `namespace.pending_starved` diagnostic.
 const PENDING_STARVED_ROUNDS: u32 = 3;
@@ -37,11 +49,118 @@ struct DispatchRuntime {
     pending_starved_events: u64,
     last_pending_attempt: Option<Instant>,
 }
+/// #57-A: why a bounded scan window stopped before exhausting the journal.
+/// Only `Window` (and the resumable body budget) can make progress next round;
+/// the other reasons name a row that cannot be crossed safely and is reported
+/// as an unresolved barrier for the operator instead of being skipped.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ScanStop {
+    Window,
+    BodyBudget,
+    OversizedBody,
+    InvalidBody,
+    UnresolvedState,
+    PrefixBudget,
+}
+impl ScanStop {
+    fn reason(self) -> &'static str {
+        match self {
+            Self::Window => "window_limit",
+            Self::BodyBudget => "body_budget",
+            Self::OversizedBody => "oversized_body",
+            Self::InvalidBody => "invalid_body",
+            Self::UnresolvedState => "unresolved_state",
+            Self::PrefixBudget => "scan_prefix_budget",
+        }
+    }
+}
+/// One earlier unfinished intent's dependency footprint, cached for the
+/// continuation pages. `digest` invalidates the footprint if a body rewrite
+/// changes it (replace provenance/rebase paths do this in place).
+#[derive(Clone)]
+struct ScanIntent {
+    seq: i64,
+    operation: String,
+    state: String,
+    digest: String,
+    footprint: Footprint,
+}
+/// Compacted union of every earlier intent before the continuation cursor.
+///
+/// Checking a candidate against the union is equivalent to pairwise overlap
+/// against each earlier intent: the overlap relation is exactly
+/// `candidate.writes ∩ (earlier.writes ∪ earlier.reads)` plus
+/// `candidate.reads ∩ earlier.writes` plus path prefix intersection. Nothing is
+/// skipped, so the dispatch ordering guarantees of the one-shot scan are kept.
+#[derive(Default)]
+struct Barrier {
+    writes: HashSet<String>,
+    reads: HashSet<String>,
+    paths: Vec<String>,
+}
+impl Barrier {
+    fn rebuild(intents: &[ScanIntent]) -> Self {
+        let mut barrier = Self::default();
+        for intent in intents {
+            barrier.add(&intent.footprint);
+        }
+        barrier
+    }
+    fn add(&mut self, footprint: &Footprint) {
+        self.writes.extend(footprint.writes.iter().cloned());
+        self.reads.extend(footprint.reads.iter().cloned());
+        self.paths.extend(footprint.paths.iter().cloned());
+    }
+    fn overlaps(&self, footprint: &Footprint) -> bool {
+        footprint
+            .writes
+            .iter()
+            .any(|id| self.writes.contains(id) || self.reads.contains(id))
+            || footprint
+                .reads
+                .iter()
+                .any(|id| self.writes.contains(id))
+            || self.paths.iter().any(|prior| {
+                footprint
+                    .paths
+                    .iter()
+                    .any(|path| paths_overlap(prior, path))
+            })
+    }
+}
+fn paths_overlap(a: &str, b: &str) -> bool {
+    a == b
+        || a.strip_prefix(b).is_some_and(|rest| rest.starts_with('/'))
+        || b.strip_prefix(a).is_some_and(|rest| rest.starts_with('/'))
+}
+/// #57-A: resumable continuation progress. `intents` holds every nonterminal
+/// intent with `seq < cursor`, so a later page can prove a candidate independent
+/// of all of them without ever skipping an earlier intent.
+#[derive(Default)]
+struct ScanProgress {
+    cursor: i64,
+    intents: Vec<ScanIntent>,
+}
+/// #57-C: aging bookkeeping for the single serial lane. Pending-first is kept,
+/// but a due read-only reconcile that keeps losing the lane is given a bounded
+/// service quota instead of starving (or reverting to FIFO).
+#[derive(Default)]
+struct ReconcileAging {
+    due_since: Option<(String, Instant)>,
+    last_attempt: Option<Instant>,
+    attempts: u64,
+    aged_overrides: u64,
+    max_wait: Duration,
+    budget: Option<Duration>,
+}
 #[derive(Default)]
 pub(crate) struct NamespaceRuntime {
     recovery: HashMap<String, Recovery>,
     observed: Option<(Instant, NamespaceScheduleSnapshot)>,
     dispatch: DispatchRuntime,
+    scan: Option<ScanProgress>,
+    scan_cycles: u64,
+    aging: ReconcileAging,
 }
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct NamespaceScheduleSnapshot {
@@ -58,6 +177,34 @@ pub struct NamespaceScheduleSnapshot {
     /// #57 additive: independent `pending` candidates observed while scanning.
     /// Zero with `selected_state = "uncertain"` is the starvation signature.
     pub eligible_pending: u64,
+    /// #57-A additive: journal rows examined by the front window + continuation
+    /// page in this round.
+    pub scanned: u64,
+    /// #57-A additive: continuation resume cursor (first unscanned journal seq).
+    /// Zero when the next round starts a fresh cycle from the head.
+    pub scan_cursor: i64,
+    /// #57-A additive: completed full scan cycles in this process.
+    pub scan_cycles: u64,
+    /// #57-A additive: the whole nonterminal journal was examined this round.
+    pub scan_complete: bool,
+    /// #57-A additive: why the scan stopped before exhausting the queue
+    /// (`window_limit` / `body_budget` / `oversized_body` / `invalid_body` /
+    /// `unresolved_state` / `scan_prefix_budget`). `None` means no truncation.
+    pub truncation_reason: Option<String>,
+    /// #57-A additive: operation whose unreadable/oversized body or unknown
+    /// state is a hard barrier; it names the recovery entry point.
+    pub barrier_operation: Option<String>,
+    /// #57-A/#57-C additive: independent pending rows that were executable but
+    /// lost this round's slot to the reconcile aging quota.
+    pub executable_unscheduled: u64,
+    /// #57-C additive: how long the oldest due reconcile has waited when the
+    /// selection was taken (zero while it is still waiting in later rounds).
+    pub reconcile_due_age_ms: Option<u64>,
+    /// #57-C additive: read-only reconcile attempts accounted in-process.
+    pub reconcile_attempts: u64,
+    /// #57-C additive: times the aging quota gave the lane to a waiting
+    /// reconcile instead of the independent pending candidate.
+    pub reconcile_aged_overrides: u64,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct QueueHealth {
@@ -84,6 +231,19 @@ pub struct QueueHealth {
     pub last_starvation_event: Option<String>,
     /// #57 additive: dispatch rounds accounted in this process.
     pub dispatch_rounds: u64,
+    /// #57-C additive: age of the most recent read-only reconcile attempt.
+    pub reconcile_last_attempt_age_ms: Option<u64>,
+    /// #57-C additive: current wait of a due reconcile that is still deferred.
+    pub reconcile_due_age_ms: Option<u64>,
+    /// #57-C additive: longest observed deferral of a due reconcile before the
+    /// lane was granted; bounded by the aging budget plus one attempt budget.
+    pub reconcile_max_wait_ms: u64,
+    /// #57-C additive: read-only reconcile attempts accounted in-process.
+    pub reconcile_attempts: u64,
+    /// #57-C additive: aging-quota lane grants.
+    pub reconcile_aged_overrides: u64,
+    /// #57-C additive: declared reconcile aging budget in milliseconds.
+    pub reconcile_aging_budget_ms: u64,
 }
 #[derive(Clone)]
 pub(crate) struct NamespaceSelection {
@@ -98,7 +258,7 @@ pub struct NamespaceOperation {
     pub kind: String,
     pub state: String,
 }
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Footprint {
     writes: HashSet<String>,
     reads: HashSet<String>,
@@ -234,7 +394,283 @@ fn footprint(store: &Store, q: &NamespaceSelection) -> Result<Footprint> {
 fn uncertain(state: &str) -> bool {
     matches!(state, "uncertain" | "cleanup_uncertain")
 }
+/// #57-A: one bounded window scan's outcome.
+struct WindowScan {
+    pending: Option<NamespaceSelection>,
+    pending_seq: Option<i64>,
+    inflight: Option<NamespaceSelection>,
+    reconcile: Option<NamespaceSelection>,
+    /// First journal sequence not yet scanned by this window (resume cursor).
+    next_seq: i64,
+    stop: Option<ScanStop>,
+    exhausted: bool,
+    /// Operation whose body/state stopped the scan and cannot be crossed.
+    barrier_operation: Option<String>,
+}
+fn millis(duration: Duration) -> u64 {
+    duration.as_millis().min(u128::from(u64::MAX)) as u64
+}
 impl Store {
+    /// #57-A: scan one bounded journal window and report what it found.
+    ///
+    /// `barrier` must already contain every earlier unfinished intent outside
+    /// this window; `intents` receives the window's intents so the caller can
+    /// keep a resumable prefix cache. Dependency safety is unchanged from the
+    /// previous one-shot scan: a candidate is only executable when its write
+    /// set, read set and paths do not overlap any earlier intent's sets.
+    #[allow(clippy::too_many_arguments)]
+    fn namespace_scan_window(
+        &self,
+        start: i64,
+        limit: usize,
+        body_budget: usize,
+        barrier: &mut Barrier,
+        intents: &mut Vec<ScanIntent>,
+        observation: &mut NamespaceScheduleSnapshot,
+        now: Instant,
+    ) -> Result<WindowScan> {
+        let mut scan = WindowScan {
+            pending: None,
+            pending_seq: None,
+            inflight: None,
+            reconcile: None,
+            next_seq: start,
+            stop: None,
+            exhausted: false,
+            barrier_operation: None,
+        };
+        let headers = self
+            .db
+            .prepare(
+                "SELECT seq,id,kind,state,length(CAST(body AS BLOB)),id IN (SELECT operation FROM access_blocked_operations) FROM namespace_ops WHERE state NOT IN ('committed','superseded') AND seq>=?1 ORDER BY seq LIMIT ?2",
+            )?
+            .query_map(
+                params![
+                    start,
+                    i64::try_from(limit.saturating_add(1)).unwrap_or(i64::MAX)
+                ],
+                |r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                        r.get::<_, String>(3)?,
+                        r.get::<_, i64>(4)?,
+                        r.get::<_, bool>(5)?,
+                    ))
+                },
+            )?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        if headers.len() > limit {
+            scan.stop = Some(ScanStop::Window);
+        }
+        let mut total = 0usize;
+        for (seq, operation, kind, state, bytes, denied_header) in headers.into_iter().take(limit) {
+            let bytes = usize::try_from(bytes)
+                .map_err(|_| Error::State("negative namespace body size".into()))?;
+            total = total.saturating_add(bytes);
+            if bytes > 1024 * 1024 {
+                // A body this large cannot be parsed inside the round budget;
+                // it stays a hard barrier instead of being skipped, because a
+                // later intent may depend on an intent that was never read.
+                scan.stop = Some(ScanStop::OversizedBody);
+                scan.next_seq = seq;
+                scan.barrier_operation = Some(operation);
+                break;
+            }
+            if total > body_budget {
+                // Bounded per-round body work: the unscanned row is the resume
+                // cursor, so the next round continues exactly here.
+                scan.stop = Some(ScanStop::BodyBudget);
+                scan.next_seq = seq;
+                break;
+            }
+            if !matches!(
+                state.as_str(),
+                "pending"
+                    | "cleanup_pending"
+                    | "uncertain"
+                    | "cleanup_uncertain"
+                    | "conflict"
+                    | "inflight"
+                    | "cleanup_inflight"
+            ) {
+                scan.stop = Some(ScanStop::UnresolvedState);
+                scan.next_seq = seq;
+                scan.barrier_operation = Some(operation);
+                break;
+            }
+            scan.next_seq = seq.saturating_add(1);
+            observation.scanned = observation.scanned.saturating_add(1);
+            let body: String = self.db.query_row(
+                "SELECT body FROM namespace_ops WHERE id=?1",
+                [&operation],
+                |r| r.get(0),
+            )?;
+            let q = NamespaceSelection {
+                operation,
+                kind,
+                state,
+                body,
+            };
+            // Keep at most one native mutation in flight, including callers
+            // that re-enter a selector between mark_started and sending RPC.
+            if matches!(q.state.as_str(), "inflight" | "cleanup_inflight") {
+                scan.inflight = Some(q);
+                return Ok(scan);
+            }
+            let shape = match footprint(self, &q) {
+                Ok(shape) => shape,
+                Err(Error::Db(rusqlite::Error::QueryReturnedNoRows)) => {
+                    scan.stop = Some(ScanStop::InvalidBody);
+                    scan.next_seq = seq;
+                    scan.barrier_operation = Some(q.operation);
+                    break;
+                }
+                Err(error @ (Error::Db(_) | Error::Io(_))) => return Err(error),
+                Err(_) => {
+                    scan.stop = Some(ScanStop::InvalidBody);
+                    scan.next_seq = seq;
+                    scan.barrier_operation = Some(q.operation);
+                    break;
+                }
+            };
+            let digest = crate::sha256(q.body.as_bytes());
+            let denied = denied_header
+                || (matches!(q.state.as_str(), "pending" | "cleanup_pending")
+                    && crate::write_permissions::targets_denied(
+                        self,
+                        &crate::write_permissions::namespace_targets(&q.kind, &q.body)?,
+                    )?);
+            let dependent = barrier.overlaps(&shape);
+            let deferred = uncertain(&q.state)
+                && self
+                    .namespace_runtime
+                    .lock()
+                    .unwrap()
+                    .recovery
+                    .get(&q.operation)
+                    .is_some_and(|r| r.digest == digest && r.next > now);
+            if dependent {
+                observation.dependency_blocked =
+                    observation.dependency_blocked.saturating_add(1);
+            }
+            if denied {
+                observation.permission_blocked =
+                    observation.permission_blocked.saturating_add(1);
+            }
+            if deferred {
+                observation.deferred_reconciliation =
+                    observation.deferred_reconciliation.saturating_add(1);
+            }
+            if !dependent && !denied && !deferred {
+                match q.state.as_str() {
+                    // #57 pending-first: an independent mutation must never
+                    // queue behind a read-only reconcile, so it wins the
+                    // dispatch slot immediately.
+                    "pending" | "cleanup_pending" => {
+                        observation.eligible_pending =
+                            observation.eligible_pending.saturating_add(1);
+                        scan.pending_seq = Some(seq);
+                        scan.pending = Some(q);
+                        return Ok(scan);
+                    }
+                    "uncertain" | "cleanup_uncertain" => {
+                        if scan.reconcile.is_none() {
+                            scan.reconcile = Some(q.clone());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            // Every scanned intent constrains later candidates, including
+            // conflicts, deferred reconciles and permission-gated mutations.
+            barrier.add(&shape);
+            intents.push(ScanIntent {
+                seq,
+                operation: q.operation.clone(),
+                state: q.state.clone(),
+                digest,
+                footprint: shape,
+            });
+        }
+        scan.exhausted = scan.stop.is_none();
+        Ok(scan)
+    }
+    /// #57-A: merge the freshly scanned head with the cached continuation
+    /// prefix, re-reading the cached middle so a committed row is pruned and a
+    /// rewritten body re-parses instead of leaving a stale dependency footprint.
+    #[allow(clippy::too_many_arguments)]
+    fn namespace_resync_prefix(
+        &self,
+        cache: &mut ScanProgress,
+        fresh_head: Vec<ScanIntent>,
+        head_end: i64,
+        observation: &mut NamespaceScheduleSnapshot,
+    ) -> Result<Option<(ScanStop, Option<String>)>> {
+        if head_end >= cache.cursor {
+            // The fresh head covered the whole cached prefix.
+            cache.intents = fresh_head;
+            cache.cursor = head_end;
+            return Ok(None);
+        }
+        let middle_start = head_end;
+        let middle_end = cache.cursor;
+        let mut synced = fresh_head;
+        let mut cached: HashMap<i64, ScanIntent> = std::mem::take(&mut cache.intents)
+            .into_iter()
+            .filter(|intent| intent.seq >= middle_start && intent.seq < middle_end)
+            .map(|intent| (intent.seq, intent))
+            .collect();
+        let rows = self
+            .db
+            .prepare(
+                "SELECT seq,id,kind,state,body FROM namespace_ops WHERE state NOT IN ('committed','superseded') AND seq>=?1 AND seq<?2 ORDER BY seq",
+            )?
+            .query_map(params![middle_start, middle_end], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, String>(4)?,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        for (seq, operation, kind, state, body) in rows {
+            let digest = crate::sha256(body.as_bytes());
+            let footprint = match cached.remove(&seq) {
+                Some(intent) if intent.digest == digest => intent.footprint,
+                _ => {
+                    let q = NamespaceSelection {
+                        operation: operation.clone(),
+                        kind,
+                        state: state.clone(),
+                        body,
+                    };
+                    match footprint(self, &q) {
+                        Ok(footprint) => footprint,
+                        Err(error @ (Error::Db(_) | Error::Io(_))) => return Err(error),
+                        Err(_) => {
+                            return Ok(Some((ScanStop::InvalidBody, Some(operation))));
+                        }
+                    }
+                }
+            };
+            synced.push(ScanIntent {
+                seq,
+                operation,
+                state,
+                digest,
+                footprint,
+            });
+        }
+        synced.sort_by_key(|intent| intent.seq);
+        cache.intents = synced;
+        cache.cursor = middle_end;
+        Ok(None)
+    }
+
     pub(crate) fn namespace_selection(&self) -> Result<Option<NamespaceSelection>> {
         // An in-flight request anywhere in the journal owns the serial lane.
         // This also preserves the mark_started -> fresh getter handoff.
@@ -264,135 +700,266 @@ impl Store {
                     body,
                 })
             };
+            observation.selected_state = selection.as_ref().map(|q| q.state.clone());
             self.namespace_runtime.lock().unwrap().observed = Some((Instant::now(), observation));
             return Ok(selection);
         }
-        let headers=self.db.prepare(
-            "SELECT id,kind,state,length(CAST(body AS BLOB)),id IN (SELECT operation FROM access_blocked_operations) FROM namespace_ops WHERE state NOT IN ('committed','superseded') ORDER BY seq LIMIT 257")?
-            .query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,i64>(3)?,r.get::<_,bool>(4)?)))?
-            .collect::<std::result::Result<Vec<_>,_>>()?;
-        let header_count = headers.len();
-        let mut observation = NamespaceScheduleSnapshot {
-            truncated: headers.len() > LIMIT,
-            ..Default::default()
-        };
-        let mut preceding = Vec::<Footprint>::new();
-        let mut total = 0usize;
-        let mut selected_inflight = None;
-        let mut pending_candidate = None;
-        let mut reconcile_candidate = None;
         let now = Instant::now();
-        for (operation, kind, state, bytes, denied) in headers.into_iter().take(LIMIT) {
-            observation.observed += 1;
-            let bytes = usize::try_from(bytes)
-                .map_err(|_| Error::State("negative namespace body size".into()))?;
-            total = total.saturating_add(bytes);
-            if bytes > 1024 * 1024 || total > BODY_BUDGET {
-                observation.truncated = true;
-                observation.unresolved_barrier = true;
-                break;
-            }
-            let body = self.db.query_row(
-                "SELECT body FROM namespace_ops WHERE id=?1",
-                [&operation],
-                |r| r.get(0),
-            )?;
-            let q = NamespaceSelection {
-                operation,
-                kind,
-                state,
-                body,
-            };
-            if !matches!(
-                q.state.as_str(),
-                "pending"
-                    | "cleanup_pending"
-                    | "uncertain"
-                    | "cleanup_uncertain"
-                    | "conflict"
-                    | "inflight"
-                    | "cleanup_inflight"
-            ) {
-                observation.unresolved_barrier = true;
-                break;
-            }
-            // Keep at most one native mutation in flight, including callers
-            // that re-enter a selector between mark_started and sending RPC.
-            if matches!(q.state.as_str(), "inflight" | "cleanup_inflight") {
-                selected_inflight = Some(q);
-                break;
-            }
-            let shape = match footprint(self, &q) {
-                Ok(shape) => shape,
-                Err(Error::Db(rusqlite::Error::QueryReturnedNoRows)) => {
-                    observation.unresolved_barrier = true;
-                    break;
-                }
-                Err(error @ (Error::Db(_) | Error::Io(_))) => return Err(error),
-                Err(_) => {
-                    observation.unresolved_barrier = true;
-                    break;
-                }
-            };
-            let denied = denied || (matches!(q.state.as_str(), "pending" | "cleanup_pending")
-                && crate::write_permissions::targets_denied(self,&crate::write_permissions::namespace_targets(&q.kind,&q.body)?)?);
-            let dependent = preceding.iter().any(|prior| prior.overlaps(&shape));
-            let deferred = uncertain(&q.state)
-                && self
-                    .namespace_runtime
-                    .lock()
-                    .unwrap()
-                    .recovery
-                    .get(&q.operation)
-                    .is_some_and(|r| r.digest == crate::sha256(q.body.as_bytes()) && r.next > now);
-            if dependent {
-                observation.dependency_blocked += 1;
-            }
-            if denied {
-                observation.permission_blocked += 1;
-            }
-            if deferred {
-                observation.deferred_reconciliation += 1;
-            }
-            if !dependent && !denied && !deferred {
-                match q.state.as_str() {
-                    // #57 pending-first: an independent mutation must never
-                    // queue behind a read-only reconcile, so it wins the
-                    // dispatch slot immediately. This is the reserved quota
-                    // that keeps the 3,114-row pending tail moving.
-                    "pending" | "cleanup_pending" => {
-                        observation.eligible_pending += 1;
-                        pending_candidate = Some(q);
-                        break;
-                    }
-                    // Remember the first due reconcile but keep scanning: the
-                    // scan must continue to prove whether a pending candidate
-                    // exists, while every skipped intent still constrains later
-                    // operations through `preceding`.
-                    "uncertain" | "cleanup_uncertain" => {
-                        if reconcile_candidate.is_none() {
-                            reconcile_candidate = Some(q);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            // Conflict, uncertain and permission-gated intents still constrain
-            // every later operation. Shared read-only parents alone do not.
-            preceding.push(shape);
+        let mut progress = self.namespace_runtime.lock().unwrap().scan.take();
+        let mut observation = NamespaceScheduleSnapshot::default();
+        let outcome = self.namespace_selection_paged(&mut observation, &mut progress, now);
+        let mut runtime = self.namespace_runtime.lock().unwrap();
+        runtime.scan = progress;
+        observation.observed = observation.scanned;
+        observation.scan_cycles = runtime.scan_cycles;
+        runtime.observed = Some((now, observation));
+        outcome
+    }
+
+    /// #57-A/#57-C: bounded front window plus resumable continuation pages.
+    fn namespace_selection_paged(
+        &self,
+        observation: &mut NamespaceScheduleSnapshot,
+        progress: &mut Option<ScanProgress>,
+        now: Instant,
+    ) -> Result<Option<NamespaceSelection>> {
+        // The fixed front window is rescanned from the journal head every round:
+        // pending-first priority must never wait for the continuation cursor.
+        let mut front_barrier = Barrier::default();
+        let mut front_intents = Vec::new();
+        let front = self.namespace_scan_window(
+            0,
+            LIMIT,
+            BODY_BUDGET,
+            &mut front_barrier,
+            &mut front_intents,
+            observation,
+            now,
+        )?;
+        if let Some(selection) = front.inflight {
+            observation.truncated = true;
+            observation.unresolved_barrier = true;
+            observation.selected = true;
+            observation.selected_state = Some(selection.state.clone());
+            observation.scan_cursor = progress.as_ref().map_or(0, |p| p.cursor);
+            return Ok(Some(selection));
         }
-        observation.truncated |= observation.observed < header_count as u64;
-        // At most one read-only reconcile per dispatch round; pending work has
-        // priority, so a reconcile is selected only when no independent pending
-        // candidate exists in this scan window.
-        let selection = selected_inflight
-            .or(pending_candidate)
-            .or(reconcile_candidate);
+        if front.stop.is_some() {
+            observation.truncated = true;
+        }
+        if let Some(selection) = front.pending {
+            if observation.truncation_reason.is_none() {
+                observation.truncation_reason = front.stop.map(|stop| stop.reason().to_owned());
+            }
+            return Ok(self.namespace_finish_selection(
+                observation,
+                progress,
+                now,
+                Some(selection),
+                front.reconcile,
+            ));
+        }
+        let front_hard = matches!(
+            front.stop,
+            Some(ScanStop::OversizedBody | ScanStop::InvalidBody | ScanStop::UnresolvedState)
+        );
+        if front_hard {
+            observation.unresolved_barrier = true;
+            observation.truncation_reason = front.stop.map(|stop| stop.reason().to_owned());
+            observation.barrier_operation = front.barrier_operation.clone();
+        }
+        if front.exhausted {
+            // The whole nonterminal journal fitted in the front window: the
+            // continuation cache is not needed.
+            observation.scan_complete = true;
+            let mut runtime = self.namespace_runtime.lock().unwrap();
+            runtime.scan_cycles = runtime.scan_cycles.saturating_add(1);
+            drop(runtime);
+            *progress = None;
+            return Ok(self.namespace_finish_selection(
+                observation,
+                progress,
+                now,
+                None,
+                front.reconcile,
+            ));
+        }
+        // Merge the fresh head into the cached continuation prefix.
+        let mut cache = progress.take().unwrap_or_default();
+        if front_hard {
+            // The head scan stopped on a row that cannot be crossed; reusing an
+            // old cache would prove later candidates against a stale prefix.
+            *progress = None;
+            return Ok(self.namespace_finish_selection(
+                observation,
+                progress,
+                now,
+                None,
+                front.reconcile,
+            ));
+        }
+        if let Some((stop, operation)) =
+            self.namespace_resync_prefix(&mut cache, front_intents, front.next_seq, observation)?
+        {
+            observation.truncated = true;
+            observation.unresolved_barrier = true;
+            observation.truncation_reason = Some(stop.reason().to_owned());
+            observation.barrier_operation = operation;
+            *progress = None;
+            return Ok(self.namespace_finish_selection(
+                observation,
+                progress,
+                now,
+                None,
+                front.reconcile,
+            ));
+        }
+        if cache.intents.len() > SCAN_CACHE_LIMIT {
+            observation.truncated = true;
+            observation.unresolved_barrier = true;
+            observation.truncation_reason = Some(ScanStop::PrefixBudget.reason().to_owned());
+            *progress = None;
+            return Ok(self.namespace_finish_selection(
+                observation,
+                progress,
+                now,
+                None,
+                front.reconcile,
+            ));
+        }
+        // One bounded continuation page beyond the cached prefix.
+        let mut barrier = Barrier::rebuild(&cache.intents);
+        let tail = self.namespace_scan_window(
+            cache.cursor,
+            CONTINUATION_LIMIT,
+            BODY_BUDGET,
+            &mut barrier,
+            &mut cache.intents,
+            observation,
+            now,
+        )?;
+        if tail.stop.is_some() {
+            observation.truncated = true;
+            if observation.truncation_reason.is_none() {
+                observation.truncation_reason = tail.stop.map(|stop| stop.reason().to_owned());
+            }
+        }
+        let tail_hard = matches!(
+            tail.stop,
+            Some(ScanStop::OversizedBody | ScanStop::InvalidBody | ScanStop::UnresolvedState)
+        );
+        if tail_hard {
+            observation.unresolved_barrier = true;
+            observation.barrier_operation = tail.barrier_operation.clone();
+        }
+        if let Some(selection) = tail.inflight {
+            observation.selected = true;
+            observation.selected_state = Some(selection.state.clone());
+            let cursor = cache.cursor;
+            *progress = Some(cache);
+            observation.scan_cursor = cursor;
+            return Ok(Some(selection));
+        }
+        if let Some(seq) = tail.pending_seq {
+            // Re-examine the candidate next round: the mutation gates may hand
+            // the same intent back if the local ordering gate refuses it.
+            cache.cursor = seq;
+        } else {
+            cache.cursor = tail.next_seq;
+        }
+        if tail.exhausted {
+            // A full continuation cycle completed; the next round rescans the
+            // head and starts a new cycle, so intents that became due are
+            // reconsidered instead of being skipped forever.
+            observation.scan_complete = true;
+            let mut runtime = self.namespace_runtime.lock().unwrap();
+            runtime.scan_cycles = runtime.scan_cycles.saturating_add(1);
+            drop(runtime);
+            *progress = None;
+        } else if cache.intents.len() > SCAN_CACHE_LIMIT {
+            observation.truncated = true;
+            observation.unresolved_barrier = true;
+            observation.truncation_reason = Some(ScanStop::PrefixBudget.reason().to_owned());
+            *progress = None;
+        } else {
+            *progress = Some(cache);
+        }
+        let reconcile = front.reconcile.or(tail.reconcile);
+        Ok(self.namespace_finish_selection(observation, progress, now, tail.pending, reconcile))
+    }
+
+    /// #57-C: pending-first with a bounded reconcile aging quota.
+    ///
+    /// Pending work still wins the single serial lane, but a due read-only
+    /// reconcile that keeps losing it is promoted once its declared aging budget
+    /// expires, so neither class can starve the other and the order does not
+    /// revert to the old global FIFO.
+    fn namespace_finish_selection(
+        &self,
+        observation: &mut NamespaceScheduleSnapshot,
+        progress: &mut Option<ScanProgress>,
+        now: Instant,
+        pending: Option<NamespaceSelection>,
+        reconcile: Option<NamespaceSelection>,
+    ) -> Option<NamespaceSelection> {
+        let mut runtime = self.namespace_runtime.lock().unwrap();
+        let budget = runtime.aging.budget.unwrap_or(RECONCILE_AGING_BUDGET);
+        if let Some(reconcile) = &reconcile {
+            match &runtime.aging.due_since {
+                Some((operation, _)) if operation == &reconcile.operation => {}
+                _ => runtime.aging.due_since = Some((reconcile.operation.clone(), now)),
+            }
+        }
+        let due_age = runtime
+            .aging
+            .due_since
+            .as_ref()
+            .filter(|(operation, _)| reconcile.as_ref().is_some_and(|r| &r.operation == operation))
+            .map(|(_, since)| now.saturating_duration_since(*since));
+        observation.reconcile_due_age_ms = due_age.map(millis);
+        let aged = pending.is_some() && due_age.is_some_and(|age| age >= budget);
+        let selection = if aged {
+            observation.executable_unscheduled =
+                observation.executable_unscheduled.saturating_add(1);
+            runtime.aging.aged_overrides = runtime.aging.aged_overrides.saturating_add(1);
+            reconcile.clone()
+        } else {
+            pending.or(reconcile)
+        };
+        if selection.as_ref().is_some_and(|q| uncertain(&q.state)) {
+            if let Some((_, since)) = runtime.aging.due_since.take() {
+                let wait = now.saturating_duration_since(since);
+                runtime.aging.max_wait = runtime.aging.max_wait.max(wait);
+                observation.reconcile_due_age_ms = Some(millis(wait));
+            }
+            runtime.aging.attempts = runtime.aging.attempts.saturating_add(1);
+            runtime.aging.last_attempt = Some(now);
+        } else if selection.is_none() {
+            runtime.aging.due_since = None;
+        }
+        observation.reconcile_attempts = runtime.aging.attempts;
+        observation.reconcile_aged_overrides = runtime.aging.aged_overrides;
         observation.selected = selection.is_some();
         observation.selected_state = selection.as_ref().map(|q| q.state.clone());
-        self.namespace_runtime.lock().unwrap().observed = Some((now, observation));
-        Ok(selection)
+        drop(runtime);
+        observation.scan_cursor = progress.as_ref().map_or(0, |p| p.cursor);
+        selection
     }
+
+    /// #57-C: override the reconcile aging budget (default 10 s). Tests use a
+    /// short budget; production keeps the declared default.
+    pub fn set_namespace_reconcile_aging(&mut self, budget: Duration) {
+        self.namespace_runtime.lock().unwrap().aging.budget = Some(budget);
+    }
+    /// #57-C test hook: simulate elapsed waiting for the oldest due reconcile
+    /// without sleeping in a test. Moves its `due_since` backwards by `age`.
+    pub fn age_namespace_reconcile_deadline(&mut self, age: Duration) {
+        let mut runtime = self.namespace_runtime.lock().unwrap();
+        if let Some((_, since)) = runtime.aging.due_since.as_mut() {
+            *since = since.checked_sub(age).unwrap_or(*since);
+        }
+    }
+
     pub fn next_namespace_operation(&self) -> Result<Option<NamespaceOperation>> {
         Ok(self.namespace_selection()?.map(|q| NamespaceOperation {
             operation: q.operation,
@@ -649,6 +1216,21 @@ impl Store {
                 None
             },
             dispatch_rounds: runtime.dispatch.rounds,
+            reconcile_last_attempt_age_ms: runtime
+                .aging
+                .last_attempt
+                .map(|at| millis(now.saturating_duration_since(at))),
+            reconcile_due_age_ms: runtime
+                .aging
+                .due_since
+                .as_ref()
+                .map(|(_, since)| millis(now.saturating_duration_since(*since))),
+            reconcile_max_wait_ms: millis(runtime.aging.max_wait),
+            reconcile_attempts: runtime.aging.attempts,
+            reconcile_aged_overrides: runtime.aging.aged_overrides,
+            reconcile_aging_budget_ms: millis(
+                runtime.aging.budget.unwrap_or(RECONCILE_AGING_BUDGET),
+            ),
         })
     }
 }
