@@ -306,6 +306,10 @@ struct MaintenanceCursor {
     blob_removed_bytes: u64,
     removed_bytes: u64,
     released: Vec<String>,
+    /// Inodes for cache bodies released by this round, mapped while the Store
+    /// lock is held; the caller queues one Inode invalidation per entry after
+    /// every lock is released (legacy `maintain_cache` behaviour, #90-A fix).
+    pending_inodes: Vec<u64>,
     clean_draft_rows: u64,
     clean_draft_commits: u64,
     draft_files_removed: u64,
@@ -567,6 +571,8 @@ impl Bridge {
         }
         let mut windows = 0u32;
         let mut produced: Option<drive_core::cache_policy::CacheTrim> = None;
+        /// Inodes released during this call, queued only once no lock is held.
+        let mut released_inodes: Vec<u64> = Vec::new();
         while windows < GC_MAX_WINDOWS_PER_CALL as u32
             && call_started.elapsed() < GC_ROUND_TIME_BUDGET
         {
@@ -717,6 +723,7 @@ impl Bridge {
                         + cursor.draft_files_removed
                         + cursor.released.len() as u64;
                     let result = self.maintenance_usage_snapshot(cursor, &mut stats, calibrate)?;
+                    released_inodes.append(&mut cursor.pending_inodes);
                     maintenance.memo = Some(MaintenanceMemo {
                         revision: result.revision,
                         at: std::time::Instant::now(),
@@ -734,14 +741,25 @@ impl Bridge {
                 }
             }
         }
-        if let Some(result) = produced {
+        if let Some(mut result) = produced {
+            for ino in released_inodes.drain(..) {
+                self.enqueue_invalidation(Invalidation::Inode(ino));
+                result.maintenance.released_inode_invalidations =
+                    result.maintenance.released_inode_invalidations.saturating_add(1);
+            }
             return Ok(result);
         }
         // The call budget was exhausted mid-round: keep the cursor, but still
         // return a consistent accounting snapshot so the cache loop can update
         // its pressure/debounce state. The next call resumes the round.
         let cursor = maintenance.cursor.as_mut().expect("maintenance cursor");
-        let result = self.maintenance_usage_snapshot(cursor, &mut stats, false)?;
+        released_inodes.append(&mut cursor.pending_inodes);
+        let mut result = self.maintenance_usage_snapshot(cursor, &mut stats, false)?;
+        for ino in released_inodes.drain(..) {
+            self.enqueue_invalidation(Invalidation::Inode(ino));
+            result.maintenance.released_inode_invalidations =
+                result.maintenance.released_inode_invalidations.saturating_add(1);
+        }
         Ok(result)
     }
 
@@ -814,6 +832,16 @@ impl Bridge {
             let (new_released, _projected) = store
                 .release_over_limit(now, &active, &protected, usage.content_bytes, 256)
                 .map_err(io::Error::other)?;
+            // Map every newly released id to its inode inside the Store lock
+            // (exactly the legacy trim step). The caller queues the
+            // invalidations only after dropping Store/flights.
+            for id in &new_released {
+                if let Ok(record) = store.record(id) {
+                    if !cursor.pending_inodes.contains(&record.ino) {
+                        cursor.pending_inodes.push(record.ino);
+                    }
+                }
+            }
             stats.released = stats.released.saturating_add(new_released.len() as u64);
             released.extend(new_released);
         }
