@@ -80,8 +80,6 @@ impl ScanStop {
 #[derive(Clone)]
 struct ScanIntent {
     seq: i64,
-    operation: String,
-    state: String,
     digest: String,
     footprint: Footprint,
 }
@@ -265,18 +263,6 @@ struct Footprint {
     paths: Vec<String>,
 }
 impl Footprint {
-    fn overlaps(&self, other: &Self) -> bool {
-        !self.writes.is_disjoint(&other.writes)
-            || !self.writes.is_disjoint(&other.reads)
-            || !self.reads.is_disjoint(&other.writes)
-            || self.paths.iter().any(|a| {
-                other.paths.iter().any(|b| {
-                    a == b
-                        || a.strip_prefix(b).is_some_and(|rest| rest.starts_with('/'))
-                        || b.strip_prefix(a).is_some_and(|rest| rest.starts_with('/'))
-                })
-            })
-    }
     fn path(&mut self, path: &str) -> Result<()> {
         if path.is_empty()
             || path.len() > 16384
@@ -588,8 +574,6 @@ impl Store {
             barrier.add(&shape);
             intents.push(ScanIntent {
                 seq,
-                operation: q.operation.clone(),
-                state: q.state.clone(),
                 digest,
                 footprint: shape,
             });
@@ -606,7 +590,6 @@ impl Store {
         cache: &mut ScanProgress,
         fresh_head: Vec<ScanIntent>,
         head_end: i64,
-        observation: &mut NamespaceScheduleSnapshot,
     ) -> Result<Option<(ScanStop, Option<String>)>> {
         if head_end >= cache.cursor {
             // The fresh head covered the whole cached prefix.
@@ -659,8 +642,6 @@ impl Store {
             };
             synced.push(ScanIntent {
                 seq,
-                operation,
-                state,
                 digest,
                 footprint,
             });
@@ -746,6 +727,9 @@ impl Store {
         }
         if front.stop.is_some() {
             observation.truncated = true;
+            if observation.truncation_reason.is_none() {
+                observation.truncation_reason = front.stop.map(|stop| stop.reason().to_owned());
+            }
         }
         if let Some(selection) = front.pending {
             if observation.truncation_reason.is_none() {
@@ -799,7 +783,7 @@ impl Store {
             ));
         }
         if let Some((stop, operation)) =
-            self.namespace_resync_prefix(&mut cache, front_intents, front.next_seq, observation)?
+            self.namespace_resync_prefix(&mut cache, front_intents, front.next_seq)?
         {
             observation.truncated = true;
             observation.unresolved_barrier = true;
