@@ -268,3 +268,54 @@ fn mount_then_initialization_snapshot_refresh_keeps_excluded_paths_hidden() {
     assert_missing(&mount.join("node_modules/left-pad/index.js"));
     drop(session);
 }
+
+/// Issue #56B F2: local-only content is served only from local state. A bound
+/// node whose body was reclaimed (or never downloaded) must answer ENOENT
+/// instead of starting a hydration; hidden mode keeps the old path.
+#[test]
+fn local_only_uncached_content_is_not_served() {
+    let (_temp, store, _state, fs) =
+        open_fs_mode(&snapshot(), &[r"^A\.txt$"], ExcludeMode::LocalOnly);
+    let (ino, cached) = {
+        let s = store.lock().unwrap();
+        (
+            s.lookup(ROOT, "A.txt").unwrap().ino,
+            s.open_cached("101").is_ok(),
+        )
+    };
+    assert!(!cached, "synthetic snapshot deliberately has no body");
+    assert!(
+        fs.local_only_content_unavailable(ino, !cached),
+        "local-only missing content must be refused before hydration"
+    );
+    let (_temp2, store2, _state2, fs2) = open_fs(&snapshot(), &[r"^A\.txt$"]);
+    let ino2 = store2.lock().unwrap().lookup(ROOT, "A.txt").unwrap().ino;
+    assert!(
+        !fs2.local_only_content_unavailable(ino2, true),
+        "hidden mode keeps its existing hydration path"
+    );
+}
+
+/// Issue #56B F2 (kernel): reading an uncached local-only file returns ENOENT
+/// and never calls the hydrator.
+#[test]
+#[ignore = "requires an ordinary Linux user and /dev/fuse; run explicitly"]
+fn local_only_uncached_read_answers_enoent_without_hydration() {
+    struct NoHydrate;
+    impl Hydrator for NoHydrate {
+        fn hydrate(
+            &self,
+            _node: &Node,
+        ) -> std::result::Result<Arc<drive_core::ReadHandle>, i32> {
+            panic!("local-only content must not hydrate");
+        }
+    }
+    let (temp, _store, _state, fs) =
+        open_fs_mode(&snapshot(), &[r"^A\.txt$"], ExcludeMode::LocalOnly);
+    let fs = fs.with_hydrator(Arc::new(NoHydrate));
+    let (mount, session) = mount_at(&temp, fs);
+    assert!(std::fs::metadata(mount.join("A.txt")).is_ok());
+    let error = std::fs::read(mount.join("A.txt")).unwrap_err();
+    assert_eq!(error.raw_os_error(), Some(libc::ENOENT));
+    drop(session);
+}

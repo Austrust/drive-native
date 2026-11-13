@@ -96,3 +96,32 @@ fn quiescing_local_only_nodes_removes_sync_intents_but_keeps_local_content() {
         "local content stays protected from the cleanup"
     );
 }
+
+/// Issue #56B F1 (RED first): a `local_only` delete of a remote-bound file leaves
+/// a local tombstone plus a pending `remove` namespace operation. Quiescing the
+/// explicit id must drop that intent even though the node is now `deleted=1`;
+/// otherwise the namespace scheduler could delete the file on the server.
+#[test]
+fn quiescing_a_local_only_tombstone_drops_the_remove_intent() {
+    let (_dir, mut store) = fixture();
+    store.unlink_local("root", "A.txt", "A", false).unwrap();
+    assert!(
+        store.next_remove().unwrap().is_some(),
+        "fixture must queue a remove intent before the fix is exercised"
+    );
+    assert_eq!(store.pending_namespace_operations().unwrap(), 1);
+    let quiesced = store
+        .quiesce_local_only_nodes(&["A".to_string()])
+        .unwrap();
+    assert_eq!(quiesced, 1);
+    assert!(
+        store.next_remove().unwrap().is_none(),
+        "local_only must never leave a dispatchable remote remove"
+    );
+    assert_eq!(store.pending_namespace_operations().unwrap(), 0);
+    let deleted: bool = store
+        .db
+        .query_row("SELECT deleted FROM nodes WHERE id='A'", [], |r| r.get(0))
+        .unwrap();
+    assert!(deleted, "the node stays a local tombstone");
+}

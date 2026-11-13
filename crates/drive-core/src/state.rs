@@ -1970,8 +1970,12 @@ impl Store {
         let tx = self.db.transaction()?;
         let mut quiesced = 0u64;
         for id in ids {
+            // The explicit id list may contain a node that a local unlink/rename
+            // just turned into a tombstone (`deleted=1`). Keeping the row is the
+            // point of local_only, but its pending sync intent must still go, or
+            // the scheduler could dispatch a remote remove/rename (#56B F1).
             let exists: bool = tx.query_row(
-                "SELECT EXISTS(SELECT 1 FROM nodes WHERE id=?1 AND deleted=0)",
+                "SELECT EXISTS(SELECT 1 FROM nodes WHERE id=?1)",
                 [id],
                 |r| r.get(0),
             )?;

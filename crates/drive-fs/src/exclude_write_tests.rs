@@ -229,3 +229,61 @@ fn empty_rules_keep_the_unfiltered_write_baseline() {
     assert!(guard.lookup(ROOT, "ok.txt").is_ok());
     assert!(guard.lookup(ROOT, "okdir").is_ok());
 }
+
+/// Issue #56B F1: deleting a remote-bound `local_only` file must not leave a
+/// pending `remove` namespace operation (that operation would let the scheduler
+/// delete the file on the server).
+#[test]
+#[ignore = "requires ordinary Linux user and /dev/fuse"]
+fn local_only_unlink_of_a_bound_file_queues_no_remove() {
+    let (temp, store, fs) = open_fs_mode(&snapshot(), &[r"^A\.txt$"], ExcludeMode::LocalOnly);
+    let (mount, session) = mount_at(&temp, fs);
+    std::fs::remove_file(mount.join("A.txt")).unwrap();
+    assert!(!mount.join("A.txt").exists(), "local view is deleted");
+    let (remove, pending) = {
+        let s = store.lock().unwrap();
+        (
+            s.next_remove().unwrap().is_some(),
+            s.pending_namespace_operations().unwrap(),
+        )
+    };
+    assert!(!remove, "local_only unlink must not queue a remote remove");
+    assert_eq!(pending, 0);
+    drop(session);
+}
+
+/// Issue #56B F1: rmdir/rename that touch a `local_only` path stay local and
+/// leave no namespace operation behind, including a replaced bound target.
+#[test]
+#[ignore = "requires ordinary Linux user and /dev/fuse"]
+fn local_only_rmdir_and_rename_queue_no_namespace_operations() {
+    let nodes = vec![
+        node(ROOT, None, "Lab", true),
+        node("400", Some(ROOT), "cache", true),
+        node("401", Some(ROOT), "A.txt", false),
+        node("402", Some(ROOT), "install.iso", false),
+    ];
+    let (temp, store, fs) = open_fs_mode(
+        &nodes,
+        &[r"^cache$", r"^A\.txt$"],
+        ExcludeMode::LocalOnly,
+    );
+    let (mount, session) = mount_at(&temp, fs);
+    std::fs::remove_dir(mount.join("cache")).unwrap();
+    std::fs::rename(mount.join("install.iso"), mount.join("A.txt")).unwrap();
+    assert!(mount.join("A.txt").exists());
+    assert!(!mount.join("cache").exists());
+    {
+        let s = store.lock().unwrap();
+        assert!(
+            s.next_remove().unwrap().is_none(),
+            "no dispatchable remove may survive"
+        );
+        assert!(
+            s.next_rename().unwrap().is_none(),
+            "no dispatchable rename may survive"
+        );
+        assert_eq!(s.pending_namespace_operations().unwrap(), 0);
+    }
+    drop(session);
+}

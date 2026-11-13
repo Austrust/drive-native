@@ -271,6 +271,13 @@ impl CacheFilesystem {
             .is_some_and(|index| index.entry_excluded(parent, name))
     }
 
+    /// Issue #56B F2: local-only content is served only from local state. When
+    /// `missing` is true (no cached body, no draft) the mount must answer ENOENT
+    /// instead of hydrating the body from the server.
+    pub(crate) fn local_only_content_unavailable(&self, ino: u64, missing: bool) -> bool {
+        missing && self.local_only_inode(ino)
+    }
+
     /// True when a not-yet-created entry below `parent` matches a `local_only`
     /// rule (#56B); the operation is allowed but its sync intents are dropped.
     pub(crate) fn local_only_child(&self, parent: u64, name: &str, is_dir: bool) -> bool {
@@ -290,6 +297,7 @@ impl CacheFilesystem {
         let store = self.store.clone();
         let notify = self.notify.clone();
         let hydrator = self.hydrator.clone();
+        let exclusion = self.exclusion.clone();
         let name = name.to_owned();
         let parent_ino = parent;
         self.queue.submit(Box::new(move || {
@@ -298,6 +306,11 @@ impl CacheFilesystem {
                 let parent_id = preview::authoritative(&s, parent_ino, libc::EROFS)?.node.id;
                 let id = s.lookup(&parent_id, &name)?.node.id;
                 permissions::remove(&s, &parent_id, &id, directory)?;
+                // Mark before the tombstone exists so the scheduler guard covers
+                // the in-flight window; quiesce then removes the remove intent.
+                if let Some(state) = &exclusion {
+                    state.mark_local_only_node(&id);
+                }
                 let ino = s.record(&id)?.ino;
                 s.unlink_local(&parent_id, &name, &id, directory)?;
                 s.quiesce_local_only_nodes(std::slice::from_ref(&id))?;
@@ -340,6 +353,7 @@ impl CacheFilesystem {
         let store = self.store.clone();
         let notify = self.notify.clone();
         let hydrator = self.hydrator.clone();
+        let exclusion = self.exclusion.clone();
         let (parent_ino, newparent_ino) = (parent, newparent);
         self.queue.submit(Box::new(move || {
             let result = (|| -> drive_core::Result<()> {
@@ -353,6 +367,13 @@ impl CacheFilesystem {
                     .ok()
                     .map(|target| target.node.id)
                     .filter(|target| target != &source);
+                // Cover the rename/tombstone window before the journal rows exist.
+                if let Some(state) = &exclusion {
+                    state.mark_local_only_node(&source);
+                    if let Some(target) = &target {
+                        state.mark_local_only_node(target);
+                    }
+                }
                 s.rename_local(&p, &name, &np, &newname, flags & (libc::RENAME_NOREPLACE as u32) != 0)?;
                 let mut ids = vec![source];
                 if let Some(target) = target {
@@ -1139,7 +1160,9 @@ impl Filesystem for CacheFilesystem {
             reply.error(libc::ENOENT);
             return;
         }
-        writable::open(self, ino, flags, reply, deadline)
+        // Issue #56B F2: an uncached local-only body must not hydrate.
+        let local_only = self.local_only_inode(ino);
+        writable::open(self, ino, flags, reply, deadline, local_only)
     }
     fn write(
         &mut self,
@@ -1229,6 +1252,9 @@ impl Filesystem for CacheFilesystem {
         let deadline = request::RequestDeadline::new(request::Op::Read);
         let reply = self.reads.register(req.unique(), reply);
         let cancel = reply.cancellation();
+        // Issue #56B F2: local-only content is served only when it is already
+        // local; the missing branch below answers ENOENT instead of hydrating.
+        let local_only = self.local_only_inode(ino);
         let handles = self.handles.clone();
         let network_queue = self.network_queue.clone();
         let hydrator = self.hydrator.clone();
@@ -1260,6 +1286,11 @@ impl Filesystem for CacheFilesystem {
             };
             if let Some(content) = cached {
                 reply_read(&store,ino,content, offset, size, reply);
+                return;
+            }
+            if local_only {
+                // #56B F2: never start a server download for a local-only path.
+                reply.error(libc::ENOENT);
                 return;
             }
             let Some(hydrator) = hydrator else {

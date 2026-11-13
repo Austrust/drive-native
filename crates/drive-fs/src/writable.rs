@@ -91,6 +91,7 @@ pub(super) fn open(
     flags: i32,
     reply: ReplyOpen,
     deadline: request::RequestDeadline,
+    local_only: bool,
 ) {
     let writable = flags & libc::O_ACCMODE != libc::O_RDONLY;
     if (writable || flags & libc::O_TRUNC != 0) && !fs.writable {
@@ -120,6 +121,11 @@ pub(super) fn open(
                 return;
             }
         };
+        if local_only && matches!(body, OpenContent::Missing(_)) {
+            // #56B F2: local-only content is never fetched from the server.
+            reply.error(libc::ENOENT);
+            return;
+        }
         if flags & libc::O_TRUNC != 0 {
             match draft(&store, &handles, &updates, &hydrator, &id, body, true, permissions::Action::WriteContent) {
                 Ok(d) => {
