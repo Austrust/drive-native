@@ -28,11 +28,13 @@
 //!   worker's own `Store::open_read_only` handle, outside the writer guard. The
 //!   journal entry is an invalidation, so a re-read may observe newer committed
 //!   facts; replaying a later page only re-reads current facts and is idempotent.
-//! - Publication is base + sparse delta: the worker keeps mutable maps and
-//!   publishes the immutable previous base (`Arc` shared between projections)
-//!   plus only the rows/child edges that changed since it. A delta wider than
-//!   `max(len / 8, COMPACT_MIN_DELTA)` triggers one compaction, which rebuilds
-//!   the base once instead of cloning per publish.
+//! - Publication is base + sparse delta: the worker keeps one immutable base
+//!   snapshot (`Arc` shared between every projection and the worker itself)
+//!   plus only the rows/child edges that changed since it, and answers its own
+//!   queries through a merged view over the two — so the projection is resident
+//!   exactly once. A delta wider than `max(len / 8, COMPACT_MIN_DELTA)` triggers
+//!   one compaction, which rebuilds the base once instead of cloning per
+//!   publish.
 //! - Degradation is a visible, retryable state. Every former "disable" (missing
 //!   notifications, read-only open failure, bootstrap failure, oversize
 //!   profile, rebuild failure) and a run of read failures moves the cache to
@@ -184,6 +186,106 @@ impl ProjectionBase {
             len,
         }
     }
+
+    /// Materialises a merged view (`base` plus the sparse deltas) into one
+    /// immutable snapshot. Used by compaction: the worker replaces its shared
+    /// base here instead of keeping a third full copy of the projection.
+    fn from_view(
+        base: &ProjectionBase,
+        rows: &HashMap<String, Option<StatusSeed>>,
+        len: usize,
+    ) -> Self {
+        let mut merged: HashMap<String, StatusSeed> = HashMap::with_capacity(len);
+        for (id, seed) in &base.rows {
+            if !rows.contains_key(id) {
+                merged.insert(id.clone(), seed.clone());
+            }
+        }
+        for (id, seed) in rows {
+            if let Some(seed) = seed {
+                merged.insert(id.clone(), seed.clone());
+            }
+        }
+        debug_assert_eq!(merged.len(), len);
+        let children = build_children(&merged);
+        Self {
+            rows: merged,
+            children,
+            len,
+        }
+    }
+
+    /// Test-only estimate of the heap bytes this snapshot owns. The #67 W3
+    /// resident tests compare it with the worker's estimate to prove the worker
+    /// keeps one shared copy of the projection instead of a second full clone.
+    #[cfg(test)]
+    fn resident_bytes_estimate(&self) -> usize {
+        rows_bytes_estimate(&self.rows) + children_bytes_estimate(&self.children)
+    }
+}
+
+/// Test-only: approximate heap bytes of `parent -> visible children` edges.
+#[cfg(test)]
+fn children_bytes_estimate(children: &HashMap<String, Children>) -> usize {
+    std::mem::size_of::<HashMap<String, Children>>()
+        + children.capacity() * (std::mem::size_of::<(String, Children)>() + 1)
+        + children
+            .iter()
+            .map(|(parent, list)| {
+                parent.capacity()
+                    + list.capacity() * (std::mem::size_of::<(String, bool)>() + 1)
+                    + list.iter().map(|(child, _)| child.capacity()).sum::<usize>()
+            })
+            .sum::<usize>()
+}
+
+/// Test-only: approximate heap bytes of the row map (keys, bucket table and the
+/// per-row `id`/`parent` strings; `StatusSeed` itself lives inline in the table).
+#[cfg(test)]
+fn rows_bytes_estimate(rows: &HashMap<String, StatusSeed>) -> usize {
+    std::mem::size_of::<HashMap<String, StatusSeed>>()
+        + rows.capacity() * (std::mem::size_of::<(String, StatusSeed)>() + 1)
+        + rows
+            .iter()
+            .map(|(key, seed)| {
+                key.capacity()
+                    + seed.id.capacity()
+                    + seed.parent.as_ref().map_or(0, String::capacity)
+            })
+            .sum::<usize>()
+}
+
+/// Test-only: approximate heap bytes of the sparse row delta.
+#[cfg(test)]
+fn row_delta_bytes_estimate(delta: &HashMap<String, Option<StatusSeed>>) -> usize {
+    std::mem::size_of::<HashMap<String, Option<StatusSeed>>>()
+        + delta.capacity() * (std::mem::size_of::<(String, Option<StatusSeed>)>() + 1)
+        + delta
+            .iter()
+            .map(|(id, seed)| {
+                id.capacity()
+                    + seed.as_ref().map_or(0, |seed| {
+                        seed.id.capacity() + seed.parent.as_ref().map_or(0, String::capacity)
+                    })
+            })
+            .sum::<usize>()
+}
+
+/// Test-only: approximate heap bytes of the sparse child-edge delta.
+#[cfg(test)]
+fn child_delta_bytes_estimate(delta: &HashMap<String, ChildDelta>) -> usize {
+    std::mem::size_of::<HashMap<String, ChildDelta>>()
+        + delta.capacity() * (std::mem::size_of::<(String, ChildDelta)>() + 1)
+        + delta
+            .iter()
+            .map(|(parent, child)| {
+                parent.capacity()
+                    + child.removed.capacity() * (std::mem::size_of::<String>() + 1)
+                    + child.removed.iter().map(String::capacity).sum::<usize>()
+                    + child.changed.capacity() * (std::mem::size_of::<(String, bool)>() + 1)
+                    + child.changed.keys().map(String::capacity).sum::<usize>()
+            })
+            .sum::<usize>()
 }
 
 /// Child-edge changes for one parent since the base snapshot.
@@ -256,29 +358,10 @@ impl StatusProjection {
     /// desktop tree needs an owned batch per directory), so returning `Children`
     /// keeps the immutable-formula simple without extra copying on this path.
     pub(crate) fn children(&self, id: &str) -> Children {
-        let base = self.base.children.get(id).map(Vec::as_slice).unwrap_or(&[]);
-        let Some(delta) = self.delta.children.get(id) else {
-            return base.to_vec();
-        };
-        if delta.is_empty() {
-            return base.to_vec();
-        }
-        let mut out: Children = Vec::with_capacity(base.len() + delta.changed.len());
-        for (child, directory) in base {
-            if delta.removed.contains(child) || delta.changed.contains_key(child) {
-                continue;
-            }
-            out.push((child.clone(), *directory));
-        }
-        let mut added: Children = delta
-            .changed
-            .iter()
-            .map(|(child, directory)| (child.clone(), *directory))
-            .collect();
-        added.sort_by(|left, right| left.0.cmp(&right.0));
-        out.extend(added);
-        out.sort_by(|left, right| left.0.cmp(&right.0));
-        out
+        merge_children(
+            self.base.children.get(id).map(Vec::as_slice).unwrap_or(&[]),
+            self.delta.children.get(id),
+        )
     }
 
     /// Every visible seed row (base rows not overridden by the delta, then the
@@ -300,12 +383,65 @@ impl StatusProjection {
         Arc::ptr_eq(&self.base, &other.base)
     }
 
+    /// Test-only estimate of the heap bytes owned by this projection's immutable
+    /// base snapshot. Publications share one base, so this is the single-copy
+    /// reference the worker's resident estimate is compared against (#67 W3).
+    #[cfg(test)]
+    pub(crate) fn base_resident_bytes_estimate(&self) -> usize {
+        self.base.resident_bytes_estimate()
+    }
+
     pub(crate) fn len(&self) -> usize {
         self.len
     }
 
     pub(crate) fn generation(&self) -> u64 {
         self.generation
+    }
+}
+
+/// Read-only merged view of an immutable [`ProjectionBase`] plus the sparse
+/// deltas applied on top of it. The worker answers its own queries through this
+/// view instead of keeping a second full copy of the base (#67 W3).
+struct ProjectionView<'a> {
+    base: &'a ProjectionBase,
+    rows: &'a HashMap<String, Option<StatusSeed>>,
+    children: &'a HashMap<String, ChildDelta>,
+}
+
+impl<'a> ProjectionView<'a> {
+    /// The visible row for `id`: the delta wins, `None` there means removed.
+    fn row(&self, id: &str) -> Option<&StatusSeed> {
+        match self.rows.get(id) {
+            Some(next) => next.as_ref(),
+            None => self.base.rows.get(id),
+        }
+    }
+
+    fn has_row(&self, id: &str) -> bool {
+        self.row(id).is_some()
+    }
+
+    /// Visible children of `id`, merged exactly like a published projection's.
+    fn children(&self, id: &str) -> Children {
+        merge_children(
+            self.base.children.get(id).map(Vec::as_slice).unwrap_or(&[]),
+            self.children.get(id),
+        )
+    }
+
+    /// Whether `id` currently has at least one visible child edge. Equivalent to
+    /// the old `children.contains_key(id)` (that map only ever holds non-empty
+    /// lists), without materialising the full list on the common no-delta path.
+    fn has_visible_children(&self, id: &str) -> bool {
+        match self.children.get(id) {
+            None => self
+                .base
+                .children
+                .get(id)
+                .is_some_and(|children| !children.is_empty()),
+            Some(_) => !self.children(id).is_empty(),
+        }
     }
 }
 
@@ -323,6 +459,33 @@ fn build_children(rows: &HashMap<String, StatusSeed>) -> HashMap<String, Childre
         list.sort_by(|a, b| a.0.cmp(&b.0));
     }
     children
+}
+
+/// Merges one parent's base child list with the sparse delta recorded for it.
+///
+/// Both the published [`StatusProjection`] and the worker's [`ProjectionView`]
+/// call this one function, so a snapshot and the worker can never diverge in
+/// removal, insertion or sort-order semantics (#67 W3).
+fn merge_children(base: &[(String, bool)], delta: Option<&ChildDelta>) -> Children {
+    let Some(delta) = delta.filter(|delta| !delta.is_empty()) else {
+        return base.to_vec();
+    };
+    let mut out: Children = Vec::with_capacity(base.len() + delta.changed.len());
+    for (child, directory) in base {
+        if delta.removed.contains(child) || delta.changed.contains_key(child) {
+            continue;
+        }
+        out.push((child.clone(), *directory));
+    }
+    let mut added: Children = delta
+        .changed
+        .iter()
+        .map(|(child, directory)| (child.clone(), *directory))
+        .collect();
+    added.sort_by(|left, right| left.0.cmp(&right.0));
+    out.extend(added);
+    out.sort_by(|left, right| left.0.cmp(&right.0));
+    out
 }
 
 fn same_seed(left: &StatusSeed, right: &StatusSeed) -> bool {
@@ -514,6 +677,11 @@ pub(crate) struct StatusCache {
     compactions: AtomicU64,
     publish_delta_entries: AtomicU64,
     base_shares: AtomicU64,
+    /// Test-only (#67 W3): heap bytes the worker reported for its projection
+    /// state right before the last publication. The resident regression tests
+    /// compare it with the shared base's single-copy estimate.
+    #[cfg(test)]
+    worker_resident_bytes: AtomicU64,
     config: CacheConfig,
     /// Test-only capture of the structured lifecycle lines the product writes to
     /// stderr; lets tests assert the same events without hijacking stderr.
@@ -583,6 +751,8 @@ impl StatusCache {
             compactions: AtomicU64::new(0),
             publish_delta_entries: AtomicU64::new(0),
             base_shares: AtomicU64::new(0),
+            #[cfg(test)]
+            worker_resident_bytes: AtomicU64::new(0),
             config,
             #[cfg(test)]
             health_events: Mutex::new(Vec::new()),
@@ -602,6 +772,21 @@ impl StatusCache {
     #[cfg(test)]
     pub(crate) fn publishes(&self) -> u64 {
         self.publishes.load(Ordering::Relaxed)
+    }
+
+    /// Test-only (#67 W3): the worker's last reported heap estimate for its
+    /// projection state (shared immutable base plus sparse deltas).
+    #[cfg(test)]
+    pub(crate) fn worker_resident_bytes(&self) -> u64 {
+        self.worker_resident_bytes.load(Ordering::Relaxed)
+    }
+
+    /// Test-only (#67 W3): records the worker's projection-state heap estimate
+    /// right before a publication.
+    #[cfg(test)]
+    fn record_worker_resident_bytes(&self, bytes: usize) {
+        self.worker_resident_bytes
+            .store(bytes as u64, Ordering::Relaxed);
     }
 
     pub(crate) fn snapshot(&self) -> Option<Arc<StatusProjection>> {
@@ -1015,15 +1200,20 @@ enum Batch {
 
 /// Worker state for one cache cycle. Everything mutable is owned here and only
 /// published through sparse deltas.
+///
+/// The worker never keeps a second full copy of the projection: `base` is the
+/// immutable snapshot shared with every published projection, and all mutations
+/// are recorded in the sparse `row_delta`/`child_delta` maps on top of it
+/// (#67 W3). Queries go through [`Worker::view`].
 struct Worker<'a> {
     cache: &'a StatusCache,
     store: drive_core::Store,
     config: CacheConfig,
     cursor: StatusCursor,
     base: Arc<ProjectionBase>,
-    rows: HashMap<String, StatusSeed>,
-    children: HashMap<String, Children>,
+    /// Visible-row changes since `base` (`None` = removed).
     row_delta: HashMap<String, Option<StatusSeed>>,
+    /// Child-edge changes since `base`.
     child_delta: HashMap<String, ChildDelta>,
     len: usize,
     dirty: bool,
@@ -1046,8 +1236,6 @@ impl<'a> Worker<'a> {
                 sequence: 0,
             },
             base: Arc::new(ProjectionBase::default()),
-            rows: HashMap::new(),
-            children: HashMap::new(),
             row_delta: HashMap::new(),
             child_delta: HashMap::new(),
             len: 0,
@@ -1058,8 +1246,27 @@ impl<'a> Worker<'a> {
         }
     }
 
+    /// Read-only merged view over the shared base and the sparse deltas.
+    fn view(&self) -> ProjectionView<'_> {
+        ProjectionView {
+            base: &self.base,
+            rows: &self.row_delta,
+            children: &self.child_delta,
+        }
+    }
+
     fn fault(&self, kind: FaultKind) -> bool {
         self.cache.fault(kind)
+    }
+
+    /// Test-only (#67 W3) estimate of the heap bytes owned by this worker's
+    /// projection state: the shared immutable base (one copy for the whole
+    /// process) plus the sparse deltas recorded since the last rebase.
+    #[cfg(test)]
+    fn resident_bytes_estimate(&self) -> usize {
+        self.base.resident_bytes_estimate()
+            + row_delta_bytes_estimate(&self.row_delta)
+            + child_delta_bytes_estimate(&self.child_delta)
     }
 
     /// Initial snapshot plus startup journal replay up to `STARTUP_REPLAY_LIMIT`.
@@ -1281,6 +1488,7 @@ impl<'a> Worker<'a> {
     /// newer than the page) is safe: replaying a later page only re-reads the
     /// same facts.
     fn resolve(&self, page: JournalPage) -> drive_core::Result<Option<Batch>> {
+        let view = self.view();
         let mut ids: HashSet<String> = HashSet::new();
         let mut keys: HashSet<(Option<String>, String)> = HashSet::new();
         let mut subtree_roots: Vec<String> = Vec::new();
@@ -1311,7 +1519,7 @@ impl<'a> Worker<'a> {
                 keys.insert((change.new_parent.clone(), name.clone()));
             }
             if change.scope == ChangeScope::SubtreeAndAncestors
-                && subtree_needs_refresh(&self.rows, &self.children, change)
+                && subtree_needs_refresh(&view, change)
             {
                 // A namespace-root location (`parent IS NULL`) would make the
                 // scoped query take its full-scan fallback; never do that.
@@ -1332,17 +1540,15 @@ impl<'a> Worker<'a> {
         if !subtree_roots.is_empty() {
             subtree_roots.sort_unstable();
             subtree_roots.dedup();
-            // Old visible rows below the roots come from the published children
-            // map; the scoped query then tells which of them are still visible.
+            // Old visible rows below the roots come from the merged view; the
+            // scoped query then tells which of them are still visible.
             let mut stack = subtree_roots.clone();
             while let Some(id) = stack.pop() {
                 if !walked.insert(id.clone()) {
                     continue;
                 }
-                if let Some(children) = self.children.get(&id) {
-                    for (child, _) in children {
-                        stack.push(child.clone());
-                    }
+                for (child, _) in view.children(&id) {
+                    stack.push(child.clone());
                 }
             }
             if walked.len() > SUBTREE_APPLY_LIMIT {
@@ -1438,16 +1644,14 @@ impl<'a> Worker<'a> {
         true
     }
 
-    /// Replaces the working state with a fresh full scan: this is the only place
-    /// that clones the whole projection (bootstrap, rebuild, compaction).
+    /// Replaces the working state with a fresh full scan: the immutable base
+    /// becomes the only full copy and the sparse deltas are reset (#67 W3).
     fn install_full(&mut self, rows: Vec<StatusSeed>) -> bool {
         if rows.len() > self.config.max_nodes {
             return false;
         }
         let base = ProjectionBase::from_rows(rows);
         self.len = base.len;
-        self.rows = base.rows.clone();
-        self.children = base.children.clone();
         self.base = Arc::new(base);
         self.row_delta.clear();
         self.child_delta.clear();
@@ -1462,7 +1666,7 @@ impl<'a> Worker<'a> {
     }
 
     fn set_row(&mut self, id: &str, next: Option<StatusSeed>) {
-        let previous = self.rows.get(id).cloned();
+        let previous = self.view().row(id).cloned();
         match (previous, next) {
             (Some(previous), Some(next)) => {
                 if same_seed(&previous, &next) {
@@ -1476,58 +1680,38 @@ impl<'a> Worker<'a> {
                     }
                     self.upsert_child(&next);
                 }
-                self.row_delta.insert(id.to_owned(), Some(next.clone()));
-                self.rows.insert(id.to_owned(), next);
+                self.row_delta.insert(id.to_owned(), Some(next));
             }
             (Some(previous), None) => {
                 if let Some(parent) = &previous.parent {
                     self.remove_child(parent, id);
                 }
-                self.rows.remove(id);
                 self.len = self.len.saturating_sub(1);
                 self.row_delta.insert(id.to_owned(), None);
             }
             (None, Some(next)) => {
                 self.upsert_child(&next);
-                self.row_delta.insert(id.to_owned(), Some(next.clone()));
-                self.rows.insert(id.to_owned(), next);
+                self.row_delta.insert(id.to_owned(), Some(next));
                 self.len += 1;
             }
             (None, None) => {}
         }
         self.dirty = true;
         // `id` is the map key; keep the stored row id authoritative.
-        debug_assert!(self.rows.get(id).is_none_or(|row| row.id == id));
+        debug_assert!(self.view().row(id).is_none_or(|row| row.id == id));
     }
 
     fn upsert_child(&mut self, seed: &StatusSeed) {
-        let Some(parent) = seed.parent.clone() else {
+        let Some(parent) = seed.parent.as_ref() else {
             return;
         };
-        let children = self.children.entry(parent.clone()).or_default();
-        let index = children.binary_search_by(|(child, _)| child.as_str().cmp(seed.id.as_str()));
-        let entry = (seed.id.clone(), seed.directory);
-        match index {
-            Ok(index) => children[index] = entry,
-            Err(index) => children.insert(index, entry),
-        }
-        let delta = self.child_delta.entry(parent).or_default();
+        let delta = self.child_delta.entry(parent.clone()).or_default();
         delta.removed.remove(&seed.id);
         delta.changed.insert(seed.id.clone(), seed.directory);
         self.dirty = true;
     }
 
     fn remove_child(&mut self, parent: &str, id: &str) {
-        let mut emptied = false;
-        if let Some(children) = self.children.get_mut(parent) {
-            if let Ok(index) = children.binary_search_by(|(child, _)| child.as_str().cmp(id)) {
-                children.remove(index);
-            }
-            emptied = children.is_empty();
-        }
-        if emptied {
-            self.children.remove(parent);
-        }
         let delta = self.child_delta.entry(parent.to_owned()).or_default();
         delta.changed.remove(id);
         delta.removed.insert(id.to_owned());
@@ -1546,11 +1730,14 @@ impl<'a> Worker<'a> {
         if self.delta_entries() <= threshold {
             return;
         }
-        self.base = Arc::new(ProjectionBase {
-            rows: self.rows.clone(),
-            children: self.children.clone(),
-            len: self.len,
-        });
+        // Rebase the shared snapshot from the merged view. The old base stays
+        // alive only while a reader's snapshot holds it; the worker itself never
+        // keeps a second full copy (#67 W3).
+        self.base = Arc::new(ProjectionBase::from_view(
+            &self.base,
+            &self.row_delta,
+            self.len,
+        ));
         self.row_delta.clear();
         self.child_delta.clear();
         self.cache.compactions.fetch_add(1, Ordering::Relaxed);
@@ -1568,6 +1755,9 @@ impl<'a> Worker<'a> {
         // The published projection shares the previous immutable base; only the
         // sparse delta is owned by this generation.
         self.cache.base_shares.fetch_add(1, Ordering::Relaxed);
+        #[cfg(test)]
+        self.cache
+            .record_worker_resident_bytes(self.resident_bytes_estimate());
         let projection = Arc::new(StatusProjection {
             generation,
             base: Arc::clone(&self.base),
@@ -1632,16 +1822,12 @@ impl<'a> Worker<'a> {
 /// subtree even though no child edge exists yet. Refreshing only the named row
 /// would leave those descendant rows missing until the next full rebuild (#8
 /// H1). A move of a hidden node is therefore treated like a directory move.
-fn subtree_needs_refresh(
-    rows: &HashMap<String, StatusSeed>,
-    children: &HashMap<String, Children>,
-    change: &StatusChange,
-) -> bool {
+fn subtree_needs_refresh(view: &ProjectionView<'_>, change: &StatusChange) -> bool {
     let Some(node) = change.new_node.as_ref().or(change.old_node.as_ref()) else {
         return false;
     };
-    let was_hidden = !rows.contains_key(node);
-    let was_visible_directory = children.contains_key(node);
+    let was_hidden = !view.has_row(node);
+    let was_visible_directory = view.has_visible_children(node);
     match change.source.as_str() {
         "namespace_overlay" => was_visible_directory || (was_hidden && change.new_node.is_some()),
         // A move changes the inherited `access_blocked` chain below the moved

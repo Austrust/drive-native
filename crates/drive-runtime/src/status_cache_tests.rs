@@ -5,7 +5,7 @@
 //! `Store::open_read_only` scan of the same database.
 use super::{
     CacheConfig, CacheState, DegradeReason, FaultKind, Faults, MAX_CACHED_NODES, StatusCache,
-    StatusCacheMetrics, StatusProjection,
+    StatusCacheMetrics, StatusProjection, Worker,
 };
 use crate::service::{Profile, Service};
 use drive_core::{
@@ -109,6 +109,58 @@ fn full_rows(service: &Service) -> Vec<SeedTuple> {
             .map(tuple)
             .collect(),
     )
+}
+
+/// Visible child edges of `parent`, sorted the way a full seed scan orders them.
+fn full_children(service: &Service, parent: &str) -> Vec<(String, bool)> {
+    let store = Store::open_read_only(&service.bridge.store.root()).unwrap();
+    let mut children: Vec<(String, bool)> = store
+        .desktop_status_seeds()
+        .unwrap()
+        .iter()
+        .filter(|seed| seed.parent.as_deref() == Some(parent))
+        .map(|seed| (seed.id.clone(), seed.directory))
+        .collect();
+    children.sort_by(|left, right| left.0.cmp(&right.0));
+    children
+}
+
+/// Synthetic projection rows for the structural resident test. Installing them
+/// through `Worker::install_full` needs no SQLite fixture: the test only compares
+/// the worker's resident structures with the immutable base it publishes.
+fn synthetic_seeds(count: usize) -> Vec<StatusSeed> {
+    const DIRS: usize = 20;
+    assert!(count > 1 + DIRS, "count too small");
+    let mut rows = Vec::with_capacity(count);
+    rows.push(StatusSeed {
+        id: "root".into(),
+        parent: None,
+        directory: true,
+        pinned: false,
+        overlay: false,
+        detailed: false,
+    });
+    for index in 0..DIRS {
+        rows.push(StatusSeed {
+            id: format!("d{index:03}"),
+            parent: Some("root".into()),
+            directory: true,
+            pinned: false,
+            overlay: false,
+            detailed: false,
+        });
+    }
+    for index in 0..count - 1 - DIRS {
+        rows.push(StatusSeed {
+            id: format!("f{index:06}"),
+            parent: Some(format!("d{:03}", index % DIRS)),
+            directory: false,
+            pinned: index % 17 == 0,
+            overlay: false,
+            detailed: index % 13 == 0,
+        });
+    }
+    rows
 }
 
 fn projection_rows(projection: &StatusProjection) -> Vec<SeedTuple> {
@@ -524,6 +576,22 @@ fn projection_startup_delta_and_rebuild_costs() {
     let startup_elapsed = started.elapsed();
     assert_eq!(projection_rows(&projection), full);
 
+    // #67 W3: the projection must be resident once. The worker reports the heap
+    // size of its projection state (shared immutable base + sparse deltas) right
+    // before each publication; compare it with the base snapshot readers hold.
+    let base_bytes = projection.base_resident_bytes_estimate();
+    let worker_bytes = cache.worker_resident_bytes() as usize;
+    println!(
+        "RESIDENT projection_base_bytes={base_bytes} worker_bytes={worker_bytes} ratio={:.3}",
+        worker_bytes as f64 / base_bytes as f64
+    );
+    assert!(
+        worker_bytes <= base_bytes * 5 / 4,
+        "worker holds {worker_bytes} heap bytes for a {base_bytes}-byte shared base \
+         (ratio {:.2}); the projection must be resident once (#67 W3)",
+        worker_bytes as f64 / base_bytes as f64
+    );
+
     // One incremental commit: node-level invalidation only. The publication
     // throttle (250ms) means the measured latency includes at most one window.
     let before = projection.generation();
@@ -865,7 +933,7 @@ fn local_creation_and_removal_flow_into_the_projection() {
 /// while the directory's aggregate status is silently wrong.
 #[test]
 fn hidden_to_visible_subtree_invalidations_are_recognized() {
-    use super::{build_children, subtree_needs_refresh};
+    use super::{ProjectionBase, ProjectionView, build_children, subtree_needs_refresh};
     use drive_core::status_changes::{ChangeScope, StatusChange};
     use std::collections::HashMap;
 
@@ -909,6 +977,18 @@ fn hidden_to_visible_subtree_invalidations_are_recognized() {
     rows.insert("d".into(), seed("d", Some("root"), true));
     rows.insert("f".into(), seed("f", Some("d"), false));
     let children = build_children(&rows);
+    let base = ProjectionBase {
+        rows,
+        children,
+        len: 3,
+    };
+    let row_delta = HashMap::new();
+    let child_delta = HashMap::new();
+    let view = ProjectionView {
+        base: &base,
+        rows: &row_delta,
+        children: &child_delta,
+    };
 
     // (a) overlay edit that points hidden `p` back at the visible parent `d`.
     let overlay_reveal = change(
@@ -919,14 +999,14 @@ fn hidden_to_visible_subtree_invalidations_are_recognized() {
         Some("d"),
     );
     assert!(
-        subtree_needs_refresh(&rows, &children, &overlay_reveal),
+        subtree_needs_refresh(&view, &overlay_reveal),
         "an overlay edit that reveals a hidden directory must refresh its subtree"
     );
 
     // (b) move of the hidden directory out of the denied subtree.
     let move_reveal = change("nodes", Some("p"), Some("p"), Some("D"), Some("d"));
     assert!(
-        subtree_needs_refresh(&rows, &children, &move_reveal),
+        subtree_needs_refresh(&view, &move_reveal),
         "moving a hidden directory into visibility must refresh its subtree"
     );
 
@@ -940,13 +1020,12 @@ fn hidden_to_visible_subtree_invalidations_are_recognized() {
         Some("root"),
         Some("root"),
     );
-    assert!(!subtree_needs_refresh(&rows, &children, &acl_hide));
+    assert!(!subtree_needs_refresh(&view, &acl_hide));
 
     // Controls: row-local writes must not widen into a subtree query.
     let visible_file_move = change("nodes", Some("f"), Some("f"), Some("d"), Some("root"));
     assert!(!subtree_needs_refresh(
-        &rows,
-        &children,
+        &view,
         &visible_file_move
     ));
     let visible_file_overlay = change(
@@ -957,18 +1036,17 @@ fn hidden_to_visible_subtree_invalidations_are_recognized() {
         Some("d"),
     );
     assert!(!subtree_needs_refresh(
-        &rows,
-        &children,
+        &view,
         &visible_file_overlay
     ));
     let rename = change("nodes", Some("d"), Some("d"), Some("root"), Some("root"));
-    assert!(!subtree_needs_refresh(&rows, &children, &rename));
+    assert!(!subtree_needs_refresh(&view, &rename));
     let insert = change("nodes", None, Some("new"), Some("d"), Some("d"));
-    assert!(!subtree_needs_refresh(&rows, &children, &insert));
+    assert!(!subtree_needs_refresh(&view, &insert));
 
     // A visible directory still widens on a move.
     let visible_dir_move = change("nodes", Some("d"), Some("d"), Some("root"), Some("top"));
-    assert!(subtree_needs_refresh(&rows, &children, &visible_dir_move));
+    assert!(subtree_needs_refresh(&view, &visible_dir_move));
 }
 
 /// Regression for queue review R1: the subtree walk's "remove rows that the
@@ -1469,5 +1547,100 @@ fn lock_budget_overruns_are_reported_on_the_product_health_channel() {
     let health = cache.health_snapshot();
     assert!(health.lock_budget_violations >= 1);
     assert!(health.lock_holds >= 1);
+    stop_and_join(&service, task);
+}
+
+// ---------------------------------------------------------------------------
+// #67 W3: the projection is resident once (immutable base + sparse deltas).
+// ---------------------------------------------------------------------------
+
+/// #67 W3-A: the worker must not keep a second full copy of the projection next
+/// to the immutable base it publishes. `install_full` used to clone the base's
+/// row and child maps into the worker, so its resident structures were ~2x the
+/// published snapshot; the requirement is one shared base plus sparse deltas.
+#[test]
+fn worker_keeps_a_single_resident_projection_copy() {
+    let (_dir, service) = fixture();
+    // A stopped cache handle still exposes the worker config the structural test
+    // needs; no background worker is involved in the assertion below.
+    let (cache, task) = start(&service, MAX_CACHED_NODES);
+    let _ = wait_ready(&cache);
+    stop_and_join(&service, task);
+
+    let store = Store::open_read_only(&service.bridge.store.root()).unwrap();
+    let mut worker = Worker::new(&cache, store);
+    assert!(worker.install_full(synthetic_seeds(10_000)));
+
+    let single_copy = worker.base.resident_bytes_estimate();
+    let resident = worker.resident_bytes_estimate();
+    assert!(
+        resident <= single_copy * 5 / 4,
+        "worker holds {resident} heap bytes for a {single_copy}-byte projection \
+         (ratio {:.2}); W3 requires one shared base plus sparse deltas",
+        resident as f64 / single_copy as f64
+    );
+}
+
+/// #67 W3-A: the worker's merged view (immutable base + sparse deltas) must
+/// materialise the same rows and sorted child edges as a full scan after a
+/// move-heavy delta forces a base compaction.
+#[test]
+fn move_heavy_compaction_keeps_rows_and_children_on_the_oracle() {
+    const MOVED: usize = 300;
+    let (_dir, service) = fixture();
+    let mut nodes = vec![
+        node("root", None, true),
+        node("folder", Some("root"), true),
+        node("other", Some("root"), true),
+        node("one", Some("folder"), false),
+        node("two", Some("folder"), false),
+    ];
+    for index in 0..600 {
+        nodes.push(node(&format!("n{index}"), Some("folder"), false));
+    }
+    {
+        // Seed before the cache starts so bootstrap takes the 605 rows as base.
+        let mut store = service.bridge.store.lock().unwrap();
+        store
+            .install_remote_snapshot(&nodes, "2", "server")
+            .unwrap();
+    }
+    let (cache, task) = start(&service, MAX_CACHED_NODES);
+    let first = wait_ready(&cache);
+    assert_eq!(first.len(), 605);
+
+    // Each move rewrites one row plus one old-parent removal and one new-parent
+    // insert: 300 moves produce 900 delta entries, wider than max(len/8, 512).
+    {
+        let mut store = service.bridge.store.lock().unwrap();
+        let events: Vec<drive_core::Event> = (0..MOVED)
+            .map(|index| drive_core::Event {
+                id: format!("m{index}"),
+                change: drive_core::Change::Upsert(node(&format!("n{index}"), Some("other"), false)),
+            })
+            .collect();
+        store
+            .receive(&drive_core::Batch {
+                from: "2".into(),
+                to: "3".into(),
+                events,
+            })
+            .unwrap();
+        store.drain().unwrap();
+    }
+    let projection = wait_matches(&service, &cache, "move-heavy delta", first.generation());
+    assert!(
+        cache.metrics().compactions >= 1,
+        "a 900-entry delta must compact the 605-row base"
+    );
+    assert_eq!(projection_rows(&projection), full_rows(&service));
+    for parent in ["root", "folder", "other"] {
+        assert_eq!(
+            projection.children(parent),
+            full_children(&service, parent),
+            "child edges of {parent} must match a full scan after compaction"
+        );
+    }
+
     stop_and_join(&service, task);
 }
