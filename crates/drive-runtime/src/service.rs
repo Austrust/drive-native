@@ -1076,10 +1076,11 @@ impl Service {
         &self,
         key: drive_core::shared_store::CommitState,
     ) -> Option<crate::desktop::OverviewDerived> {
-        self.overview_cache
+        let guard = self
+            .overview_cache
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .filter(|derived| derived.key == key)
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        guard.as_ref().filter(|derived| derived.key == key).cloned()
     }
     /// Publish derived counters for a generation this projection just read.
     pub(crate) fn cache_overview_derived(&self, derived: crate::desktop::OverviewDerived) {
