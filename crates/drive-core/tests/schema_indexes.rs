@@ -27,11 +27,11 @@ const CANDIDATE_INDEXES: [(&str, &str); 12] = [
     ),
     (
         "operations_node_active",
-        "ON operations(node) WHERE state IN ('pending','inflight','uncertain','conflict')",
+        "ON operations(node) WHERE state IN ('pending','inflight','uncertain','conflict','abandoned')",
     ),
     (
         "operations_blob_active",
-        "ON operations(blob) WHERE blob IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict')",
+        "ON operations(blob) WHERE blob IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict','abandoned')",
     ),
     (
         "operations_uncertain_reconcile",
@@ -64,11 +64,11 @@ const INDEX_DEFINITIONS: [(&str, &str); 12] = [
     ),
     (
         "operations_node_active",
-        "ON operations(node) WHERE state IN ('pending','inflight','uncertain','conflict')",
+        "ON operations(node) WHERE state IN ('pending','inflight','uncertain','conflict','abandoned')",
     ),
     (
         "operations_blob_active",
-        "ON operations(blob) WHERE blob IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict')",
+        "ON operations(blob) WHERE blob IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict','abandoned')",
     ),
     (
         "operations_uncertain_reconcile",
@@ -310,14 +310,16 @@ fn queries_select_the_v28_indexes() {
         "operations_countable",
     );
     // Per-node operation probes (conflicts, blob protection) target active rows.
+    // Issue #91: the protection set is five-valued, so the production predicates
+    // mirror the abandoned state as well.
     assert_plan_uses(
         &db,
-        "SELECT EXISTS(SELECT 1 FROM operations WHERE node=?1 AND state IN ('pending','inflight','uncertain','conflict'))",
+        "SELECT EXISTS(SELECT 1 FROM operations WHERE node=?1 AND state IN ('pending','inflight','uncertain','conflict','abandoned'))",
         "operations_node_active",
     );
     assert_plan_uses(
         &db,
-        "SELECT EXISTS(SELECT 1 FROM operations WHERE blob=?1 AND state IN ('pending','inflight','uncertain','conflict'))",
+        "SELECT EXISTS(SELECT 1 FROM operations WHERE blob=?1 AND state IN ('pending','inflight','uncertain','conflict','abandoned'))",
         "operations_blob_active",
     );
     // Uncertain upload reconciliation is a range scan over the retry clock.
@@ -469,6 +471,166 @@ fn store_upgrade_drops_legacy_unused_sync_history_indexes_and_keeps_rows() {
         .query_row("SELECT COUNT(*) FROM sync_history", [], |r| r.get(0))
         .unwrap();
     assert_eq!(rows, 2, "dropping indexes must not lose retained history rows");
+    drop(db);
+    drop(store);
+}
+
+// ---- issue #91: abandoned is part of the active protection set --------------
+
+/// The cache-protection state set is five-valued: `cache_policy` protects
+/// `pending`,`inflight`,`uncertain`,`conflict` **and** `abandoned` (the upload
+/// result is unknown, so the blob may be the only local copy). A four-state
+/// partial index cannot answer that predicate completely, so the planner falls
+/// back to the full-history `operations_node` index or a table scan.
+fn assert_active_indexes_cover_abandoned(db: &Connection) {
+    for name in ["operations_node_active", "operations_blob_active"] {
+        let sql = index_sql(db, name).unwrap_or_else(|| panic!("missing index {name}"));
+        assert!(
+            sql.contains("'abandoned'"),
+            "#91: {name} must cover the five-state protection set: {sql}"
+        );
+    }
+}
+
+#[test]
+fn fresh_database_active_indexes_cover_abandoned() {
+    let d = tempfile::tempdir().unwrap();
+    let store = Store::open(d.path()).unwrap();
+    let db = Connection::open(database(d.path())).unwrap();
+    assert_active_indexes_cover_abandoned(&db);
+    drop(db);
+    drop(store);
+}
+
+/// An existing profile that already reached the current schema version still
+/// carries the old four-state indexes. `CREATE INDEX IF NOT EXISTS` cannot
+/// repair them, so `Store::open` must reconcile the definition explicitly.
+/// Reopening must be idempotent and must not lose rows.
+#[test]
+fn legacy_four_state_indexes_are_migrated_on_open() {
+    let d = tempfile::tempdir().unwrap();
+    drop(Store::open(d.path()).unwrap());
+    let db = Connection::open(database(d.path())).unwrap();
+    db.execute_batch(
+        "DROP INDEX IF EXISTS operations_node_active;
+         DROP INDEX IF EXISTS operations_blob_active;
+         CREATE INDEX operations_node_active ON operations(node)
+             WHERE state IN ('pending','inflight','uncertain','conflict');
+         CREATE INDEX operations_blob_active ON operations(blob)
+             WHERE blob IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict');
+         INSERT INTO operations(id,node,kind,base,generation,state)
+             VALUES('legacy-op-1','legacy-node','upload','v1',1,'abandoned');",
+    )
+    .unwrap();
+    assert!(!index_sql(&db, "operations_node_active").unwrap().contains("'abandoned'"));
+    drop(db);
+
+    let store = Store::open(d.path()).unwrap();
+    let db = Connection::open(database(d.path())).unwrap();
+    assert_active_indexes_cover_abandoned(&db);
+    let rows: i64 = db
+        .query_row("SELECT COUNT(*) FROM operations", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(rows, 1, "index migration must not drop operations rows");
+    drop(db);
+    drop(store);
+
+    // Idempotent: a second open sees the reconciled definition and keeps it.
+    let store = Store::open(d.path()).unwrap();
+    let db = Connection::open(database(d.path())).unwrap();
+    assert_active_indexes_cover_abandoned(&db);
+    drop(db);
+    drop(store);
+}
+
+/// The production five-state predicates (operations node and blob protection,
+/// and the cache candidate guard) must be answered by the partial indexes, not
+/// by scanning committed operation history.
+#[test]
+fn five_state_protection_queries_use_the_active_indexes() {
+    let d = tempfile::tempdir().unwrap();
+    let store = Store::open(d.path()).unwrap();
+    let db = Connection::open(database(d.path())).unwrap();
+    db.execute_batch(
+        "INSERT INTO operations(id,node,kind,base,generation,state,blob)
+         WITH RECURSIVE generate(n) AS (SELECT 0 UNION ALL SELECT n+1 FROM generate WHERE n < 4999)
+         SELECT 'op'||n, 'n'||n, 'upload', 'v1', 1,
+                CASE WHEN n % 1000 = 0 THEN 'uncertain' ELSE 'committed' END,
+                NULL
+         FROM generate;
+         INSERT INTO operations(id,node,kind,base,generation,state,blob)
+         VALUES('abandoned-op','abandoned-node','upload','v1',1,'abandoned','abandoned-blob');",
+    )
+    .unwrap();
+    assert_plan_uses(
+        &db,
+        "SELECT EXISTS(SELECT 1 FROM operations WHERE node=?1 AND state IN ('pending','inflight','uncertain','conflict','abandoned'))",
+        "operations_node_active",
+    );
+    assert_plan_uses(
+        &db,
+        "SELECT EXISTS(SELECT 1 FROM operations WHERE blob=?1 AND state IN ('pending','inflight','uncertain','conflict','abandoned'))",
+        "operations_blob_active",
+    );
+    // `CACHE_CANDIDATES_SQL`'s ops_node CTE: DISTINCT over the five-state set.
+    assert_plan_uses(
+        &db,
+        "SELECT DISTINCT node FROM operations WHERE node IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict','abandoned')",
+        "operations_node_active",
+    );
+    assert_plan_uses(
+        &db,
+        "SELECT DISTINCT blob FROM operations WHERE blob IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict','abandoned')",
+        "operations_blob_active",
+    );
+    drop(db);
+    drop(store);
+}
+
+/// Issue #91 scale evidence: fix the five-state protection-set size and grow the
+/// committed history to 100k. The protection branches must stay index-bound
+/// instead of walking the history. Run explicitly via `--ignored --nocapture`.
+#[test]
+#[ignore = "manual query-plan/scale evidence; run on the remote builder"]
+fn five_state_protection_plan_is_history_independent_at_100k() {
+    let d = tempfile::tempdir().unwrap();
+    let store = Store::open(d.path()).unwrap();
+    let db = Connection::open(database(d.path())).unwrap();
+    db.execute_batch(
+        "BEGIN;
+         INSERT INTO operations(id,node,kind,base,generation,state,blob)
+         WITH RECURSIVE generate(n) AS (SELECT 0 UNION ALL SELECT n+1 FROM generate WHERE n < 99999)
+         SELECT 'op'||n, 'n'||n, 'upload', 'v1', 1,
+                CASE WHEN n % 250 = 0 THEN 'abandoned' ELSE 'committed' END,
+                CASE WHEN n % 250 = 0 THEN 'blob'||n ELSE NULL END
+         FROM generate;
+         INSERT INTO operations(id,node,kind,base,generation,state,blob)
+         SELECT 'live'||n,'n'||n,'upload','v1',1,'pending','live-blob'||n
+         FROM generate WHERE n < 40;
+         COMMIT;",
+    )
+    .unwrap();
+    for (label, sql) in [
+        (
+            "ops_node",
+            "SELECT DISTINCT node FROM operations WHERE node IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict','abandoned')",
+        ),
+        (
+            "protected_blobs",
+            "SELECT DISTINCT blob FROM operations WHERE blob IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict','abandoned')",
+        ),
+    ] {
+        let plan = query_plan(&db, sql);
+        eprintln!("PROTECTION_PLAN {label}: {plan:?}");
+        assert!(
+            plan.iter().any(|line| line.contains("_active")),
+            "{label}: five-state branch must use the active partial index: {plan:?}"
+        );
+        assert!(
+            !plan.iter().any(|line| line.contains("SCAN operations")),
+            "{label}: five-state branch must not scan history: {plan:?}"
+        );
+    }
     drop(db);
     drop(store);
 }

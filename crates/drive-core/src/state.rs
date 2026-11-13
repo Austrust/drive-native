@@ -398,11 +398,73 @@ fn install_commit_diagnostics_view(db: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Issue #91: the cache-protection state set is five-valued. `cache_policy`'s
+/// candidate discovery protects `pending`,`inflight`,`uncertain`,`conflict` and
+/// `abandoned`; a four-state partial index cannot answer that query completely
+/// (the five-state predicate does not imply the four-state one), so the planner
+/// falls back to the full-history `operations_node` index.
+///
+/// The DDL below is the single source of truth for both the fresh database path
+/// and the same-version reconcile in [`install_current_schema_ddl`].
+pub(crate) const OPERATIONS_NODE_ACTIVE_INDEX: &str = "CREATE INDEX IF NOT EXISTS operations_node_active ON operations(node) WHERE state IN ('pending','inflight','uncertain','conflict','abandoned')";
+pub(crate) const OPERATIONS_BLOB_ACTIVE_INDEX: &str = "CREATE INDEX IF NOT EXISTS operations_blob_active ON operations(blob) WHERE blob IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict','abandoned')";
+
+/// Reconcile one partial index definition inside the open migration transaction.
+///
+/// `CREATE INDEX IF NOT EXISTS` alone cannot repair a same-name index created by
+/// an older build: SQLite keeps the old definition. The stored
+/// `sqlite_master.sql` is inspected and the index is rebuilt when it does not
+/// carry `required` (the predicate term of the current definition). DROP+CREATE
+/// is idempotent, so an interrupted open simply re-runs the repair.
+fn reconcile_partial_index(
+    db: &Connection,
+    name: &str,
+    required: &str,
+    create_sql: &str,
+) -> Result<()> {
+    let existing: Option<String> = db
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type='index' AND name=?1",
+            [name],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if existing.as_deref().is_some_and(|sql| sql.contains(required)) {
+        return Ok(());
+    }
+    db.execute_batch(&format!("DROP INDEX IF EXISTS {name};"))?;
+    db.execute_batch(create_sql)?;
+    Ok(())
+}
+
+/// Same-version DDL repair: run on every writer open, including databases whose
+/// `user_version` already equals [`STATE_SCHEMA_VERSION`]. A database migrated by
+/// an earlier build still carries the old views/indexes, and schema versions only
+/// grow, so the current definition is reconciled here instead of via a bump.
+fn install_current_schema_ddl(db: &Connection) -> Result<()> {
+    install_commit_diagnostics_view(db)?;
+    // Issue #91: four-state -> five-state active protection indexes.
+    reconcile_partial_index(
+        db,
+        "operations_node_active",
+        "'abandoned'",
+        OPERATIONS_NODE_ACTIVE_INDEX,
+    )?;
+    reconcile_partial_index(
+        db,
+        "operations_blob_active",
+        "'abandoned'",
+        OPERATIONS_BLOB_ACTIVE_INDEX,
+    )?;
+    Ok(())
+}
+
 fn migrate_v29(db: &Connection, version: i64) -> Result<()> {
     if version >= 29 {
-        // Same-version DDL repair: the projection must match the current code
-        // even when the schema version was already raised by an earlier build.
-        return install_commit_diagnostics_view(db);
+        // Same-version DDL repair: the projection and the operations partial
+        // indexes must match the current code even when the schema version was
+        // already raised by an earlier build (#91).
+        return install_current_schema_ddl(db);
     }
     // (a) operations: unified commit diagnosis (#9 core).
     add_missing_columns(
@@ -508,8 +570,9 @@ fn migrate_v29(db: &Connection, version: i64) -> Result<()> {
         ",
     )?;
     // (g) One read-only join for the status interface; the authoritative state
-    // stays in each journal, this view only normalises the diagnosis.
-    install_commit_diagnostics_view(db)?;
+    // stays in each journal, this view only normalises the diagnosis. The
+    // current partial-index definitions are reconciled in the same pass (#91).
+    install_current_schema_ddl(db)?;
     // (h) Legacy backfill. Idempotent: every statement is gated on
     // `outcome IS NULL`, so a re-run (or the fresh-database path, which has no
     // rows) cannot overwrite a diagnosis written by TB2 later.
@@ -1027,13 +1090,13 @@ impl Store {
         // `operations_countable` is the exact predicate of `pending_operations`
         // and the cache candidate guard; the previous partial index keyed on
         // `id` could satisfy existence tests but not this aggregate.
-        db.execute_batch(
+        db.execute_batch(&format!(
             "CREATE INDEX IF NOT EXISTS operations_countable ON operations(id) WHERE state IN ('pending','inflight','uncertain');
-             CREATE INDEX IF NOT EXISTS operations_node_active ON operations(node) WHERE state IN ('pending','inflight','uncertain','conflict');
-             CREATE INDEX IF NOT EXISTS operations_blob_active ON operations(blob) WHERE blob IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict');
+             {OPERATIONS_NODE_ACTIVE_INDEX};
+             {OPERATIONS_BLOB_ACTIVE_INDEX};
              CREATE INDEX IF NOT EXISTS operations_uncertain_reconcile ON operations(reconcile_at) WHERE kind='upload' AND state='uncertain';
-             CREATE INDEX IF NOT EXISTS inbox_pending ON inbox(seq) WHERE done=0;",
-        )?;
+             CREATE INDEX IF NOT EXISTS inbox_pending ON inbox(seq) WHERE done=0;"
+        ))?;
         crate::initialization_store::migrate(&db)?;
         crate::preview::migrate(&db)?;
         // The `repairing` flag is about the v28 durable sync-history row counter
