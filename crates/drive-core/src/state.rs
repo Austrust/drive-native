@@ -5,11 +5,14 @@ use sha2::{Digest, Sha256};
 #[path = "sync_history.rs"]
 pub mod sync_history;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs::{self, File},
     io::{Read, Write},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -222,6 +225,9 @@ pub struct Store {
     /// In-memory only: recovery replays the receipt and `seen` is the durable
     /// idempotency boundary.
     pub(crate) apply_progress: Option<ApplyProgress>,
+    /// Issue #89: cached storage summary (draft/quarantine/backup accounting)
+    /// with the writer-shared generation and bounded TTL.
+    pub(crate) storage_summary: StorageSummaryWindow,
 }
 
 /// Counters that make the draft write path observable without tracing every
@@ -398,11 +404,101 @@ fn install_commit_diagnostics_view(db: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Issue #91: the cache-protection state set is five-valued. `cache_policy`'s
+/// candidate discovery protects `pending`,`inflight`,`uncertain`,`conflict` and
+/// `abandoned`; a four-state partial index cannot answer that query completely
+/// (the five-state predicate does not imply the four-state one), so the planner
+/// falls back to the full-history `operations_node` index.
+///
+/// The DDL below is the single source of truth for both the fresh database path
+/// and the same-version reconcile in [`install_current_schema_ddl`].
+pub(crate) const OPERATIONS_NODE_ACTIVE_INDEX: &str = "CREATE INDEX IF NOT EXISTS operations_node_active ON operations(node) WHERE state IN ('pending','inflight','uncertain','conflict','abandoned')";
+pub(crate) const OPERATIONS_BLOB_ACTIVE_INDEX: &str = "CREATE INDEX IF NOT EXISTS operations_blob_active ON operations(blob) WHERE blob IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict','abandoned')";
+
+/// Issue #88: diagnostics indexes. The overview counts and the top-20 list only
+/// read rows that carry an outcome; `(outcome,next_retry_at,id)` lets each
+/// outcome class be a range scan ordered by the retry clock, so the successful
+/// `confirmed` history no longer has to be scanned or sorted on every overview.
+pub(crate) const OPERATIONS_DIAGNOSTICS_INDEX: &str = "CREATE INDEX IF NOT EXISTS operations_diagnostics ON operations(outcome,next_retry_at,id) WHERE outcome IS NOT NULL";
+pub(crate) const NAMESPACE_OPS_DIAGNOSTICS_INDEX: &str = "CREATE INDEX IF NOT EXISTS namespace_ops_diagnostics ON namespace_ops(outcome,next_retry_at,id) WHERE outcome IS NOT NULL";
+pub(crate) const TRANSFERS_DIAGNOSTICS_INDEX: &str = "CREATE INDEX IF NOT EXISTS transfers_diagnostics ON transfers(outcome,next_retry_at,id) WHERE outcome IS NOT NULL";
+
+/// Reconcile one partial index definition inside the open migration transaction.
+///
+/// `CREATE INDEX IF NOT EXISTS` alone cannot repair a same-name index created by
+/// an older build: SQLite keeps the old definition. The stored
+/// `sqlite_master.sql` is inspected and the index is rebuilt when it does not
+/// carry `required` (the predicate term of the current definition). DROP+CREATE
+/// is idempotent, so an interrupted open simply re-runs the repair.
+fn reconcile_partial_index(
+    db: &Connection,
+    name: &str,
+    required: &str,
+    create_sql: &str,
+) -> Result<()> {
+    let existing: Option<String> = db
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type='index' AND name=?1",
+            [name],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if existing.as_deref().is_some_and(|sql| sql.contains(required)) {
+        return Ok(());
+    }
+    db.execute_batch(&format!("DROP INDEX IF EXISTS {name};"))?;
+    db.execute_batch(create_sql)?;
+    Ok(())
+}
+
+/// Same-version DDL repair: run on every writer open, including databases whose
+/// `user_version` already equals [`STATE_SCHEMA_VERSION`]. A database migrated by
+/// an earlier build still carries the old views/indexes, and schema versions only
+/// grow, so the current definition is reconciled here instead of via a bump.
+fn install_current_schema_ddl(db: &Connection) -> Result<()> {
+    install_commit_diagnostics_view(db)?;
+    // Issue #91: four-state -> five-state active protection indexes.
+    reconcile_partial_index(
+        db,
+        "operations_node_active",
+        "'abandoned'",
+        OPERATIONS_NODE_ACTIVE_INDEX,
+    )?;
+    reconcile_partial_index(
+        db,
+        "operations_blob_active",
+        "'abandoned'",
+        OPERATIONS_BLOB_ACTIVE_INDEX,
+    )?;
+    // Issue #88: per-journal diagnostics indexes (new names, so an old profile
+    // simply gains them here; the definition check keeps re-opens idempotent).
+    reconcile_partial_index(
+        db,
+        "operations_diagnostics",
+        "ON operations(outcome,next_retry_at,id)",
+        OPERATIONS_DIAGNOSTICS_INDEX,
+    )?;
+    reconcile_partial_index(
+        db,
+        "namespace_ops_diagnostics",
+        "ON namespace_ops(outcome,next_retry_at,id)",
+        NAMESPACE_OPS_DIAGNOSTICS_INDEX,
+    )?;
+    reconcile_partial_index(
+        db,
+        "transfers_diagnostics",
+        "ON transfers(outcome,next_retry_at,id)",
+        TRANSFERS_DIAGNOSTICS_INDEX,
+    )?;
+    Ok(())
+}
+
 fn migrate_v29(db: &Connection, version: i64) -> Result<()> {
     if version >= 29 {
-        // Same-version DDL repair: the projection must match the current code
-        // even when the schema version was already raised by an earlier build.
-        return install_commit_diagnostics_view(db);
+        // Same-version DDL repair: the projection and the operations partial
+        // indexes must match the current code even when the schema version was
+        // already raised by an earlier build (#91).
+        return install_current_schema_ddl(db);
     }
     // (a) operations: unified commit diagnosis (#9 core).
     add_missing_columns(
@@ -508,8 +604,9 @@ fn migrate_v29(db: &Connection, version: i64) -> Result<()> {
         ",
     )?;
     // (g) One read-only join for the status interface; the authoritative state
-    // stays in each journal, this view only normalises the diagnosis.
-    install_commit_diagnostics_view(db)?;
+    // stays in each journal, this view only normalises the diagnosis. The
+    // current partial-index definitions are reconciled in the same pass (#91).
+    install_current_schema_ddl(db)?;
     // (h) Legacy backfill. Idempotent: every statement is gated on
     // `outcome IS NULL`, so a re-run (or the fresh-database path, which has no
     // rows) cannot overwrite a diagnosis written by TB2 later.
@@ -626,7 +723,14 @@ pub struct MigrationBackupInventory {
 
 /// Additive cheap storage block for `GetOverview` (issue #60). Names follow the
 /// `GetCacheSettings.usage` fields so both surfaces stay self-consistent.
-#[derive(Clone, Debug, Default, Serialize)]
+///
+/// Issue #89: the block is a cached derived summary. The additive freshness
+/// fields tell consumers when it was collected and whether it is a stale
+/// fallback after a failed scan, so a degradation is explainable instead of
+/// being reported as zero bytes. `GetCacheSettings` keeps its exact
+/// `draft_usage`/`cache_usage` scan semantics; this block is the fast overview
+/// projection only.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct StorageSummary {
     pub drafts_bytes: u64,
     pub drafts_unreferenced_bytes: u64,
@@ -638,6 +742,149 @@ pub struct StorageSummary {
     pub backup_bytes: u64,
     pub backup_reclaimable_bytes: u64,
     pub backup_protected_bytes: u64,
+    /// When the underlying draft/backup scan was collected (unix seconds; 0
+    /// when no scan ever succeeded).
+    #[serde(default)]
+    pub collected_at: u64,
+    /// True when this block is a fallback: the latest refresh failed and the
+    /// values (if any) are from the previous successful scan.
+    #[serde(default)]
+    pub stale: bool,
+    /// Human-readable reason for `stale` (scan/permission error). Never silently
+    /// replaced by zero statistics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Issue #89: how long a published storage summary may be served before the
+/// filesystem is scanned again. Explicit draft events bump the storage
+/// generation immediately; the TTL is the calibration window for changes the
+/// store cannot observe as events (size changes of an existing file, backup
+/// rotation, externally removed files, draft classification changes).
+pub const STORAGE_SUMMARY_TTL_SECONDS: u64 = 2;
+
+/// Issue #89 observability: refresh/hit counters and the filesystem work the
+/// storage summary actually performed. Diagnostic only; no behavior depends on
+/// these values.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct StorageSummaryStats {
+    pub hits: u64,
+    pub refreshes: u64,
+    pub stale_served: u64,
+    pub scan_errors: u64,
+    pub directory_enumerations: u64,
+    pub file_stats: u64,
+}
+
+/// Issue #89: the writer-owned freshness signal. Shared by reference between
+/// the writer `Store` and every read-only handle it opens, so a draft mutation
+/// invalidates a summary published by a pooled read-only overview connection
+/// without any lock or SQL round-trip.
+pub(crate) struct StorageSummaryShared {
+    generation: AtomicU64,
+    hits: AtomicU64,
+    refreshes: AtomicU64,
+    stale_served: AtomicU64,
+    scan_errors: AtomicU64,
+    directory_enumerations: AtomicU64,
+    file_stats: AtomicU64,
+}
+
+impl StorageSummaryShared {
+    fn new() -> Self {
+        Self {
+            generation: AtomicU64::new(0),
+            hits: AtomicU64::new(0),
+            refreshes: AtomicU64::new(0),
+            stale_served: AtomicU64::new(0),
+            scan_errors: AtomicU64::new(0),
+            directory_enumerations: AtomicU64::new(0),
+            file_stats: AtomicU64::new(0),
+        }
+    }
+    fn generation(&self) -> u64 {
+        self.generation.load(Ordering::Acquire)
+    }
+    fn bump(&self) {
+        self.generation.fetch_add(1, Ordering::Release);
+    }
+    fn record_hit(&self) {
+        self.hits.fetch_add(1, Ordering::Relaxed);
+    }
+    fn record_refresh(&self) {
+        self.refreshes.fetch_add(1, Ordering::Relaxed);
+    }
+    fn record_stale(&self) {
+        self.stale_served.fetch_add(1, Ordering::Relaxed);
+    }
+    fn record_scan_error(&self) {
+        self.scan_errors.fetch_add(1, Ordering::Relaxed);
+    }
+    /// Count one directory enumeration and the file metadata reads it performs.
+    pub(crate) fn record_scan_work(&self, file_stats: u64) {
+        self.directory_enumerations.fetch_add(1, Ordering::Relaxed);
+        self.file_stats.fetch_add(file_stats, Ordering::Relaxed);
+    }
+    pub(crate) fn record_file_stats(&self, count: u64) {
+        self.file_stats.fetch_add(count, Ordering::Relaxed);
+    }
+    fn stats(&self) -> StorageSummaryStats {
+        StorageSummaryStats {
+            hits: self.hits.load(Ordering::Relaxed),
+            refreshes: self.refreshes.load(Ordering::Relaxed),
+            stale_served: self.stale_served.load(Ordering::Relaxed),
+            scan_errors: self.scan_errors.load(Ordering::Relaxed),
+            directory_enumerations: self.directory_enumerations.load(Ordering::Relaxed),
+            file_stats: self.file_stats.load(Ordering::Relaxed),
+        }
+    }
+}
+
+#[cfg(test)]
+static STORAGE_SUMMARY_CACHE_BYPASS: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Force the uncached (pre-fix) scan on every read so the issue #89 red evidence
+/// (`notes/test-logs/r5/storage/red-89.log`) can be reproduced from this tree.
+#[cfg(test)]
+pub(crate) fn set_storage_summary_cache_bypass_for_red(enabled: bool) {
+    STORAGE_SUMMARY_CACHE_BYPASS.store(enabled, Ordering::Release);
+}
+
+#[cfg(test)]
+fn storage_summary_cache_bypass() -> bool {
+    STORAGE_SUMMARY_CACHE_BYPASS.load(Ordering::Acquire)
+}
+
+/// One published derived summary and the two keys that make it valid: the
+/// shared storage generation and this connection's `PRAGMA data_version`.
+#[derive(Clone, Debug)]
+struct PublishedStorageSummary {
+    generation: u64,
+    data_version: i64,
+    collected_at: u64,
+    summary: StorageSummary,
+}
+
+/// Issue #89: per-`Store` publication slot plus the writer-shared generation and
+/// statistics. The publication is per connection because `PRAGMA data_version`
+/// values are only meaningful on the connection that read them.
+pub(crate) struct StorageSummaryWindow {
+    shared: Arc<StorageSummaryShared>,
+    published: Mutex<Option<PublishedStorageSummary>>,
+}
+
+impl StorageSummaryWindow {
+    fn new(shared: Arc<StorageSummaryShared>) -> Self {
+        Self {
+            shared,
+            published: Mutex::new(None),
+        }
+    }
+    /// The writer-shared generation/statistics handle (issue #89).
+    pub(crate) fn shared(&self) -> &Arc<StorageSummaryShared> {
+        &self.shared
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -655,13 +902,14 @@ fn unix_seconds() -> u64 {
 /// List `state-before-v*.sqlite` snapshots in the profile root. A missing
 /// directory is an empty inventory, not an error: read-only handles open an
 /// existing database inside a root that may not list backups yet.
-fn migration_backup_files(root: &Path) -> Result<Vec<MigrationBackupFile>> {
+fn migration_backup_files(root: &Path) -> Result<(Vec<MigrationBackupFile>, u64)> {
     let entries = match fs::read_dir(root) {
         Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok((Vec::new(), 0)),
         Err(error) => return Err(error.into()),
     };
     let mut files = Vec::new();
+    let mut scanned = 0u64;
     for entry in entries {
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().into_owned();
@@ -678,6 +926,7 @@ fn migration_backup_files(root: &Path) -> Result<Vec<MigrationBackupFile>> {
             .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|elapsed| elapsed.as_secs())
             .unwrap_or(0);
+        scanned += 1;
         files.push(MigrationBackupFile {
             path: entry.path(),
             name,
@@ -685,7 +934,7 @@ fn migration_backup_files(root: &Path) -> Result<Vec<MigrationBackupFile>> {
             modified,
         });
     }
-    Ok(files)
+    Ok((files, scanned))
 }
 
 /// Newest two by mtime (name breaks ties deterministically), except snapshots
@@ -712,30 +961,36 @@ fn partition_migration_backups(
     (retained, cleanable)
 }
 
-fn migration_backup_inventory_at(root: &Path, now: u64) -> Result<MigrationBackupInventory> {
-    let files = migration_backup_files(root)?;
+fn migration_backup_inventory_at_scanned(
+    root: &Path,
+    now: u64,
+) -> Result<(MigrationBackupInventory, u64)> {
+    let (files, scanned) = migration_backup_files(root)?;
     let total_bytes = files.iter().map(|file| file.bytes).sum();
     let (retained, cleanable) = partition_migration_backups(files, now);
-    Ok(MigrationBackupInventory {
-        count: retained.len() + cleanable.len(),
-        total_bytes,
-        retained_bytes: retained.iter().map(|file| file.bytes).sum(),
-        cleanable_bytes: cleanable.iter().map(|file| file.bytes).sum(),
-        cleanable: cleanable
-            .into_iter()
-            .map(|file| MigrationBackupEntry {
-                name: file.name,
-                bytes: file.bytes,
-                age_seconds: now.saturating_sub(file.modified),
-            })
-            .collect(),
-    })
+    Ok((
+        MigrationBackupInventory {
+            count: retained.len() + cleanable.len(),
+            total_bytes,
+            retained_bytes: retained.iter().map(|file| file.bytes).sum(),
+            cleanable_bytes: cleanable.iter().map(|file| file.bytes).sum(),
+            cleanable: cleanable
+                .into_iter()
+                .map(|file| MigrationBackupEntry {
+                    name: file.name,
+                    bytes: file.bytes,
+                    age_seconds: now.saturating_sub(file.modified),
+                })
+                .collect(),
+        },
+        scanned,
+    ))
 }
 
 /// Apply retention to the snapshots on disk. Deletion failures are ignored:
 /// a read-only or busy file must not block startup, and the next open retries.
 fn rotate_migration_backups(root: &Path, now: u64) -> Result<u64> {
-    let files = migration_backup_files(root)?;
+    let (files, _scanned) = migration_backup_files(root)?;
     let (_, cleanable) = partition_migration_backups(files, now);
     let mut removed = 0;
     for file in cleanable {
@@ -775,6 +1030,143 @@ fn check_migration_backup_space(root: &Path) -> Result<()> {
     let estimate = migration_backup_estimate_bytes(root);
     let required = estimate.saturating_mul(MIGRATION_BACKUP_SPACE_FACTOR);
     backup_headroom_check(required, filesystem_available_bytes(root))
+}
+
+/// Issue #87: prepare/absorb state for the durable `excluded_purged` id list.
+///
+/// Preparation happens before the purge transaction (reading and parsing the
+/// previous list plus its membership set), so the write transaction only does
+/// the per-node SQL and an O(K) merge. The stable serialization order stays
+/// `previous ++ new ids in purge order`; a duplicate already present in
+/// `previous` is kept exactly as the former `Vec::contains` merge kept it.
+pub(crate) struct ExcludedPurgedMerge {
+    /// Raw metadata value preparation read; the transaction validates it before
+    /// publishing the merged list.
+    raw: Option<String>,
+    previous: Vec<String>,
+    /// Membership set built once during preparation: expected O(1) per purged
+    /// id instead of the former `Vec::contains` linear scan.
+    seen: HashSet<String>,
+}
+
+/// Membership probes performed by the merge (issue #87 red/green evidence).
+/// The former implementation counted one probe per compared `Vec` element
+/// (K(K-1)/2 for K unique ids); the prepared hash set performs one probe per
+/// absorbed id.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct ExcludedPurgeProfile {
+    pub probes: u64,
+    pub prepare_ns: u64,
+    pub absorb_ns: u64,
+    pub transaction_ns: u64,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Force the former `Vec::contains` merge in a unit test. This exists only
+    /// so the red evidence (`notes/test-logs/r5/storage/red-87.log`) can be
+    /// reproduced from this branch through the real purge path.
+    static LEGACY_EXCLUDED_PURGE_MERGE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+pub(crate) fn set_legacy_excluded_purge_merge_for_red(enabled: bool) {
+    LEGACY_EXCLUDED_PURGE_MERGE.with(|flag| flag.set(enabled));
+}
+
+#[cfg(test)]
+thread_local! {
+    static EXCLUDED_PURGE_PROFILE: std::cell::Cell<ExcludedPurgeProfile> =
+        const { std::cell::Cell::new(ExcludedPurgeProfile {
+            probes: 0,
+            prepare_ns: 0,
+            absorb_ns: 0,
+            transaction_ns: 0,
+        }) };
+}
+
+#[cfg(test)]
+fn record_excluded_purge(cell: impl FnOnce(&mut ExcludedPurgeProfile)) {
+    EXCLUDED_PURGE_PROFILE.with(|profile| {
+        let mut value = profile.get();
+        cell(&mut value);
+        profile.set(value);
+    });
+}
+
+#[cfg(test)]
+pub(crate) fn reset_excluded_purge_profile() {
+    EXCLUDED_PURGE_PROFILE.with(|profile| profile.set(ExcludedPurgeProfile::default()));
+}
+
+#[cfg(test)]
+pub(crate) fn excluded_purge_profile() -> ExcludedPurgeProfile {
+    EXCLUDED_PURGE_PROFILE.with(std::cell::Cell::get)
+}
+
+/// Read the durable list of ids a previous exclusion purge hid.
+fn excluded_purged_raw(conn: &Connection) -> Result<Option<String>> {
+    Ok(conn
+        .query_row(
+            "SELECT value FROM metadata WHERE key='excluded_purged'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?)
+}
+
+impl ExcludedPurgedMerge {
+    /// Parse the previous list once and build the set the merge probes. This is
+    /// the O(P) part, deliberately performed before the purge transaction.
+    pub(crate) fn prepare(raw: Option<String>) -> Self {
+        let previous: Vec<String> = raw.as_deref().and_then(excluded_purged_ids).unwrap_or_default();
+        let mut seen = HashSet::with_capacity(previous.len());
+        for id in &previous {
+            seen.insert(id.clone());
+        }
+        Self { raw, previous, seen }
+    }
+
+    pub(crate) fn raw(&self) -> Option<&str> {
+        self.raw.as_deref()
+    }
+
+    /// Absorb the ids this purge actually hid into the stable serialized order.
+    /// The `seen` set already contains the previous ids, so a membership test is
+    /// one hash probe and the whole merge is expected O(K) after preparation.
+    pub(crate) fn absorb(mut self, persisted: Vec<String>) -> Vec<String> {
+        let mut merged = std::mem::take(&mut self.previous);
+        for id in persisted {
+            #[cfg(test)]
+            if LEGACY_EXCLUDED_PURGE_MERGE.with(std::cell::Cell::get) {
+                // Red replay: the exact former `Vec::contains` loop.
+                let mut duplicate = false;
+                for existing in &merged {
+                    record_excluded_purge(|profile| profile.probes += 1);
+                    if existing == &id {
+                        duplicate = true;
+                        break;
+                    }
+                }
+                if !duplicate {
+                    merged.push(id);
+                }
+                continue;
+            }
+            #[cfg(test)]
+            record_excluded_purge(|profile| profile.probes += 1);
+            if self.seen.insert(id.clone()) {
+                merged.push(id);
+            }
+        }
+        merged
+    }
+}
+
+/// Parse the `excluded_purged` metadata JSON array.
+fn excluded_purged_ids(raw: &str) -> Option<Vec<String>> {
+    serde_json::from_str(raw).ok()
 }
 
 impl Store {
@@ -919,13 +1311,13 @@ impl Store {
         // `operations_countable` is the exact predicate of `pending_operations`
         // and the cache candidate guard; the previous partial index keyed on
         // `id` could satisfy existence tests but not this aggregate.
-        db.execute_batch(
+        db.execute_batch(&format!(
             "CREATE INDEX IF NOT EXISTS operations_countable ON operations(id) WHERE state IN ('pending','inflight','uncertain');
-             CREATE INDEX IF NOT EXISTS operations_node_active ON operations(node) WHERE state IN ('pending','inflight','uncertain','conflict');
-             CREATE INDEX IF NOT EXISTS operations_blob_active ON operations(blob) WHERE blob IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict');
+             {OPERATIONS_NODE_ACTIVE_INDEX};
+             {OPERATIONS_BLOB_ACTIVE_INDEX};
              CREATE INDEX IF NOT EXISTS operations_uncertain_reconcile ON operations(reconcile_at) WHERE kind='upload' AND state='uncertain';
-             CREATE INDEX IF NOT EXISTS inbox_pending ON inbox(seq) WHERE done=0;",
-        )?;
+             CREATE INDEX IF NOT EXISTS inbox_pending ON inbox(seq) WHERE done=0;"
+        ))?;
         crate::initialization_store::migrate(&db)?;
         crate::preview::migrate(&db)?;
         // The `repairing` flag is about the v28 durable sync-history row counter
@@ -972,6 +1364,7 @@ impl Store {
             permission_cache: Mutex::new(crate::write_permissions::PermissionCache::new()),
             barrier: Default::default(),
             apply_progress: None,
+            storage_summary: StorageSummaryWindow::new(Arc::new(StorageSummaryShared::new())),
         };
         // Bound bookkeeping written before schema 28 (superseded operations,
         // old terminal namespace history, applied inbox receipts, duplicate
@@ -989,7 +1382,11 @@ impl Store {
     /// database is missing, does not match this build's schema or is not in WAL
     /// mode; those cases keep the one-writer contract intact.
     pub fn open_read_only(root: &Path) -> Result<Self> {
-        Self::open_read_only_with(root, Arc::new(Mutex::new(Default::default())))
+        Self::open_read_only_with(
+            root,
+            Arc::new(Mutex::new(Default::default())),
+            Arc::new(StorageSummaryShared::new()),
+        )
     }
     /// Read-only handle whose scheduler diagnostics come from the live writer's
     /// `NamespaceRuntime` instead of a private empty copy. The SQLite connection
@@ -997,12 +1394,14 @@ impl Store {
     pub(crate) fn open_read_only_observing(
         root: &Path,
         namespace_runtime: Arc<Mutex<crate::namespace_schedule::NamespaceRuntime>>,
+        storage_summary: Arc<StorageSummaryShared>,
     ) -> Result<Self> {
-        Self::open_read_only_with(root, namespace_runtime)
+        Self::open_read_only_with(root, namespace_runtime, storage_summary)
     }
     fn open_read_only_with(
         root: &Path,
         namespace_runtime: Arc<Mutex<crate::namespace_schedule::NamespaceRuntime>>,
+        storage_summary: Arc<StorageSummaryShared>,
     ) -> Result<Self> {
         let root = root.to_owned();
         let database = root.join("state.sqlite");
@@ -1046,19 +1445,160 @@ impl Store {
             permission_cache: Mutex::new(crate::write_permissions::PermissionCache::new()),
             barrier: Default::default(),
             apply_progress: None,
+            storage_summary: StorageSummaryWindow::new(storage_summary),
         })
     }
+    /// `PRAGMA data_version` of this connection (issue #88).
+    ///
+    /// SQLite changes this value when *another* connection commits and leaves it
+    /// unchanged for this connection's own commits. A read-only handle opened
+    /// beside the writer therefore observes every writer commit here, which is
+    /// exactly the cache-invalidation signal the desktop overview needs. Callers
+    /// must take cached reads on a read-only connection; the writer's own value
+    /// cannot see its own commits.
+    pub fn data_version(&self) -> Result<i64> {
+        Ok(self
+            .db
+            .query_row("PRAGMA data_version", [], |row| row.get(0))?)
+    }
+
     /// Issue #60: additive migration-backup storage diagnostics. Read-only
     /// handles scan the same profile root and report the same numbers.
     pub fn backup_inventory(&self) -> Result<MigrationBackupInventory> {
-        migration_backup_inventory_at(&self.root, unix_seconds())
+        let (inventory, scanned) =
+            migration_backup_inventory_at_scanned(&self.root, unix_seconds())?;
+        self.storage_summary
+            .shared
+            .record_scan_work(scanned);
+        Ok(inventory)
     }
+    /// Issue #89: record a draft/backup lifecycle change so every cached
+    /// storage summary (including ones published by pooled read-only overview
+    /// handles) is invalidated before the next read.
+    pub(crate) fn bump_storage_generation(&self) {
+        self.storage_summary.shared.bump();
+    }
+
+    /// Cumulative refresh/hit/filesystem-work counters of the storage summary
+    /// cache. Diagnostic only.
+    pub fn storage_summary_stats(&self) -> StorageSummaryStats {
+        self.storage_summary.shared.stats()
+    }
+
     /// Cheap storage projection for `GetOverview`: drafts and migration
     /// snapshots only. Cache-body reclaim accounting stays in
     /// `cache_usage`/`GetCacheSettings` because candidate discovery walks the
     /// blob directory and must not run on the overview hot path.
+    ///
+    /// Issue #89: the derived block is served from a bounded freshness window
+    /// keyed by the shared storage generation and this connection's
+    /// `PRAGMA data_version`, so a steady overview does not enumerate the
+    /// drafts directory or stat every quarantine record again. A failed refresh
+    /// never turns into zero statistics: the last good block is marked
+    /// `stale`/`error`, or an explicit error-marked block is returned.
     pub fn storage_summary(&self) -> Result<StorageSummary> {
-        let now = unix_seconds();
+        self.storage_summary_at(unix_seconds())
+    }
+
+    /// [`Self::storage_summary`] with an injected clock (tests and deterministic
+    /// freshness checks).
+    pub(crate) fn storage_summary_at(&self, now: u64) -> Result<StorageSummary> {
+        #[cfg(test)]
+        if storage_summary_cache_bypass() {
+            // Red replay: the exact pre-cache behavior (full scan per read,
+            // errors propagated).
+            return match self.compute_storage_summary(now) {
+                Ok(summary) => {
+                    self.storage_summary.shared.record_refresh();
+                    Ok(summary)
+                }
+                Err(error) => {
+                    self.storage_summary.shared.record_scan_error();
+                    self.storage_summary.shared.record_stale();
+                    Err(error)
+                }
+            };
+        }
+        let generation = self.storage_summary.shared.generation();
+        let data_version = self.data_version()?;
+        {
+            let published = self
+                .storage_summary
+                .published
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(entry) = published.as_ref() {
+                if entry.generation == generation
+                    && entry.data_version == data_version
+                    && now.saturating_sub(entry.collected_at) <= STORAGE_SUMMARY_TTL_SECONDS
+                {
+                    self.storage_summary.shared.record_hit();
+                    let mut summary = entry.summary.clone();
+                    summary.collected_at = entry.collected_at;
+                    summary.stale = false;
+                    summary.error = None;
+                    return Ok(summary);
+                }
+            }
+        }
+        match self.compute_storage_summary(now) {
+            Ok(mut summary) => {
+                summary.collected_at = now;
+                summary.stale = false;
+                summary.error = None;
+                self.storage_summary.shared.record_refresh();
+                // Publish only when the source connection did not commit while
+                // the scan was running; otherwise the numbers may mix two
+                // states, so the block is returned but not cached.
+                let after = self.data_version()?;
+                if after == data_version {
+                    let mut published = self
+                        .storage_summary
+                        .published
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    *published = Some(PublishedStorageSummary {
+                        generation,
+                        data_version: after,
+                        collected_at: now,
+                        summary: summary.clone(),
+                    });
+                } else {
+                    summary.stale = true;
+                    summary.error =
+                        Some("storage scan crossed a concurrent commit; retry".into());
+                }
+                Ok(summary)
+            }
+            Err(error) => {
+                self.storage_summary.shared.record_scan_error();
+                self.storage_summary.shared.record_stale();
+                let previous = self
+                    .storage_summary
+                    .published
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .as_ref()
+                    .map(|entry| entry.summary.clone());
+                let message = error.to_string();
+                Ok(match previous {
+                    Some(mut summary) => {
+                        summary.stale = true;
+                        summary.error = Some(message);
+                        summary
+                    }
+                    None => StorageSummary {
+                        stale: true,
+                        error: Some(message),
+                        ..StorageSummary::default()
+                    },
+                })
+            }
+        }
+    }
+
+    /// One uncached draft + backup scan for [`Self::storage_summary_at`].
+    fn compute_storage_summary(&self, now: u64) -> Result<StorageSummary> {
         let drafts = self.draft_usage(now)?;
         let backups = self.backup_inventory()?;
         Ok(StorageSummary {
@@ -1072,6 +1612,9 @@ impl Store {
             backup_bytes: backups.total_bytes,
             backup_reclaimable_bytes: backups.cleanable_bytes,
             backup_protected_bytes: backups.retained_bytes,
+            collected_at: now,
+            stale: false,
+            error: None,
         })
     }
     /// Memoized effective decision for the writer connection (#26). Read-only
@@ -1821,6 +2364,21 @@ impl Store {
         if ids.is_empty() {
             return Ok(0);
         }
+        // Issue #87: prepare the previous id list (JSON parse + membership
+        // structure) before the write transaction. The transaction re-reads the
+        // raw value and falls back to a fresh preparation if it moved; a second
+        // writer cannot race here (one writer per profile), so this is only a
+        // defensive snapshot check.
+        #[cfg(test)]
+        let prepare_started = std::time::Instant::now();
+        let merge = ExcludedPurgedMerge::prepare(excluded_purged_raw(&self.db)?);
+        let prepared_raw = merge.raw().map(str::to_owned);
+        #[cfg(test)]
+        record_excluded_purge(|profile| {
+            profile.prepare_ns += u64::try_from(prepare_started.elapsed().as_nanos()).unwrap_or(u64::MAX)
+        });
+        #[cfg(test)]
+        let transaction_started = std::time::Instant::now();
         let tx = self.db.transaction()?;
         let mut purged = 0u64;
         let mut persisted: Vec<String> = Vec::new();
@@ -1866,21 +2424,19 @@ impl Store {
             persisted.push(id.clone());
         }
         if purged > 0 {
-            let previous: Vec<String> = tx
-                .query_row(
-                    "SELECT value FROM metadata WHERE key='excluded_purged'",
-                    [],
-                    |r| r.get::<_, String>(0),
-                )
-                .optional()?
-                .and_then(|raw| serde_json::from_str(&raw).ok())
-                .unwrap_or_default();
-            let mut merged = previous;
-            for id in persisted {
-                if !merged.contains(&id) {
-                    merged.push(id);
-                }
-            }
+            let current_raw = excluded_purged_raw(&tx)?;
+            let merge = if current_raw == prepared_raw {
+                merge
+            } else {
+                ExcludedPurgedMerge::prepare(current_raw)
+            };
+            #[cfg(test)]
+            let absorb_started = std::time::Instant::now();
+            let merged = merge.absorb(persisted);
+            #[cfg(test)]
+            record_excluded_purge(|profile| {
+                profile.absorb_ns += u64::try_from(absorb_started.elapsed().as_nanos()).unwrap_or(u64::MAX)
+            });
             tx.execute(
                 "INSERT OR REPLACE INTO metadata(key,value) VALUES('excluded_purged',?1)",
                 [serde_json::to_string(&merged)?],
@@ -1889,6 +2445,15 @@ impl Store {
             tx.execute("DELETE FROM metadata WHERE key='fs_inodes_complete'", [])?;
         }
         tx.commit()?;
+        #[cfg(test)]
+        record_excluded_purge(|profile| {
+            profile.transaction_ns += u64::try_from(transaction_started.elapsed().as_nanos()).unwrap_or(u64::MAX)
+        });
+        if purged > 0 {
+            // Issue #89: the purge dropped local draft/work rows that the storage
+            // summary counts.
+            self.bump_storage_generation();
+        }
         Ok(purged)
     }
 
@@ -2028,6 +2593,10 @@ impl Store {
             tx.execute("DELETE FROM metadata WHERE key='fs_inodes_complete'", [])?;
         }
         tx.commit()?;
+        if restored > 0 {
+            // Issue #89: visibility changes the draft orphan classification.
+            self.bump_storage_generation();
+        }
         Ok(restored)
     }
 
@@ -2077,6 +2646,11 @@ impl Store {
             quiesced += 1;
         }
         tx.commit()?;
+        if quiesced > 0 {
+            // Issue #89: dropping queued work changes the draft
+            // unreferenced/reclaimable classification.
+            self.bump_storage_generation();
+        }
         Ok(quiesced)
     }
 
@@ -3026,6 +3600,10 @@ pub(crate) fn valid_node(n: &Node) -> Result<()> {
 pub fn sha256(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
+
+#[cfg(test)]
+#[path = "storage_summary_cache_tests.rs"]
+mod storage_summary_cache_tests;
 
 #[cfg(test)]
 mod cache_availability_tests {
