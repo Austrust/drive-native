@@ -1259,10 +1259,16 @@ impl Filesystem for CacheFilesystem {
             reply.error(libc::EINVAL);
             return;
         }
-        // Issue #59: a cache-miss read can wait for a slow worker download; the
-        // deadline reports (and degrades on) that wait instead of hiding it.
+        // Issue #59: the deadline is a real reply race now, not a post-hoc
+        // check. The watchdog claims the one kernel reply when the opcode
+        // budget expires, even if the hydration worker is still blocked.
         let deadline = request::RequestDeadline::new(request::Op::Read);
-        let reply = self.reads.register(req.unique(), reply);
+        let reply = self.reads.register_measured(
+            req.unique(),
+            reply,
+            deadline.started(),
+            deadline.budget(),
+        );
         let cancel = reply.cancellation();
         // Issue #56B F2: local-only content is served only when it is already
         // local; the missing branch below answers ENOENT instead of hydrating.
@@ -1271,8 +1277,24 @@ impl Filesystem for CacheFilesystem {
         let network_queue = self.network_queue.clone();
         let hydrator = self.hydrator.clone();
         let store = self.store.clone();
+        let enqueued = Instant::now();
         self.read_queue.submit(Box::new(move || {
-            if let Err(e)=permissions::read_on_worker(&store,ino,permissions::Action::Read){reply.error(e);return;}
+            let _deadline = deadline;
+            request::record_read_stage(request::ReadStage::Queue, enqueued.elapsed());
+            // Expired/cancelled work is skipped before any expensive step, and
+            // a reply already claimed by the watchdog is never sent twice.
+            match abandon(&cancel, &reply) {
+                Abandon::Live => {}
+                Abandon::Answered => return,
+                Abandon::Error(error) => { let _ = reply.error(error); return; }
+            }
+            let store_wait = Instant::now();
+            let permission = permissions::read_on_worker(&store, ino, permissions::Action::Read);
+            request::record_read_stage(request::ReadStage::StoreWait, store_wait.elapsed());
+            if let Err(e) = permission {
+                reply.error(e);
+                return;
+            }
             let (cached, missing) = {
                 let table = handles.lock().unwrap();
                 match table.entries.get(&fh) {
@@ -1283,10 +1305,15 @@ impl Filesystem for CacheFilesystem {
                             let d = d.clone();
                             drop(table);
                             let mut data = vec![0; size as usize];
+                            let reply_time = Instant::now();
                             match d.read_at(&mut data, offset as u64) {
-                                Ok(n) => permissions::publish_read(&store,ino,|r|match r{Ok(())=>reply.data(&data[..n]),Err(e)=>reply.error(e)}),
-                                Err(e) => reply.error(e.raw_os_error().unwrap_or(libc::EIO)),
+                                Ok(n) => permissions::publish_read(&store, ino, |r| match r {
+                                    Ok(()) => { reply.data(&data[..n]); }
+                                    Err(e) => { reply.error(e); }
+                                }),
+                                Err(e) => { reply.error(e.raw_os_error().unwrap_or(libc::EIO)); }
                             }
+                            request::record_read_stage(request::ReadStage::Reply, reply_time.elapsed());
                             return;
                         }
                     },
@@ -1297,7 +1324,9 @@ impl Filesystem for CacheFilesystem {
                 }
             };
             if let Some(content) = cached {
-                reply_read(&store,ino,content, offset, size, reply);
+                let reply_time = Instant::now();
+                reply_read(&store, ino, content, offset, size, reply);
+                request::record_read_stage(request::ReadStage::Reply, reply_time.elapsed());
                 return;
             }
             if local_only {
@@ -1309,18 +1338,41 @@ impl Filesystem for CacheFilesystem {
                 reply.error(libc::ENETDOWN);
                 return;
             };
+            match abandon(&cancel, &reply) {
+                Abandon::Live => {}
+                Abandon::Answered => return,
+                Abandon::Error(error) => { let _ = reply.error(error); return; }
+            }
+            let worker_enqueued = Instant::now();
             network_queue.submit(Box::new(move || {
-                match hydrator.hydrate_cancellable(&missing.unwrap(), &cancel) {
+                match abandon(&cancel, &reply) {
+                    Abandon::Live => {}
+                    Abandon::Answered => return,
+                    Abandon::Error(error) => { let _ = reply.error(error); return; }
+                }
+                request::hydration_started();
+                let result = hydrator.hydrate_cancellable(&missing.unwrap(), &cancel);
+                request::hydration_finished();
+                request::record_read_stage(request::ReadStage::WorkerWait, worker_enqueued.elapsed());
+                match result {
                     Ok(content) => {
-                        if deadline.expired() {
-                            // The worker call cannot be preempted; the budget is
-                            // enforced at the reply boundary with one event and
-                            // a defined error instead of an invisible stall.
-                            deadline.timeout(&format!("detail=worker_wait ino={ino}"));
-                            reply.error(libc::EIO);
+                        // The worker call cannot be preempted by userspace. If
+                        // the watchdog already answered, the body is dropped
+                        // here instead of becoming a second reply; it is also
+                        // never installed into the handle.
+                        match abandon_result(&cancel, &reply) {
+                            Abandon::Live => {}
+                            Abandon::Answered => return,
+                            Abandon::Error(error) => { let _ = reply.error(error); return; }
+                        }
+                        let store_wait = Instant::now();
+                        let permission =
+                            permissions::read_on_worker(&store, ino, permissions::Action::Read);
+                        request::record_read_stage(request::ReadStage::StoreWait, store_wait.elapsed());
+                        if let Err(e) = permission {
+                            reply.error(e);
                             return;
                         }
-                        if let Err(e)=permissions::read_on_worker(&store,ino,permissions::Action::Read){reply.error(e);return;}
                         let mut h = handles.lock().unwrap();
                         let Some(entry) = h.entries.get_mut(&fh) else {
                             reply.error(libc::EBADF);
@@ -1333,19 +1385,26 @@ impl Filesystem for CacheFilesystem {
                         }
                         let current = entry.content.clone();
                         drop(h);
+                        let reply_time = Instant::now();
                         match current {
-                            OpenContent::Cached(c) => reply_read(&store,ino,c, offset, size, reply),
+                            OpenContent::Cached(c) => {
+                                reply_read(&store, ino, c, offset, size, reply);
+                            }
                             OpenContent::Draft(d) => {
                                 let mut data = vec![0; size as usize];
                                 match d.read_at(&mut data, offset as u64) {
-                                    Ok(n) => permissions::publish_read(&store,ino,|r|match r{Ok(())=>reply.data(&data[..n]),Err(e)=>reply.error(e)}),
-                                    Err(e) => reply.error(e.raw_os_error().unwrap_or(libc::EIO)),
+                                    Ok(n) => permissions::publish_read(&store, ino, |r| match r {
+                                        Ok(()) => { reply.data(&data[..n]); }
+                                        Err(e) => { reply.error(e); }
+                                    }),
+                                    Err(e) => { reply.error(e.raw_os_error().unwrap_or(libc::EIO)); }
                                 }
                             }
-                            OpenContent::Missing(_) => reply.error(libc::EIO),
+                            OpenContent::Missing(_) => { reply.error(libc::EIO); }
                         }
+                        request::record_read_stage(request::ReadStage::Reply, reply_time.elapsed());
                     }
-                    Err(code) => reply.error(code),
+                    Err(code) => { reply.error(code); }
                 }
             }));
         }));
@@ -1366,10 +1425,58 @@ impl Filesystem for CacheFilesystem {
     }
 }
 
+/// Issue #59: outcome of the "should this queued read still run?" check.
+enum Abandon {
+    /// Still live: do the work.
+    Live,
+    /// A competing path already claimed the single reply; drop this result.
+    Answered,
+    /// Expired or cancelled before starting; answer the defined error.
+    Error(i32),
+}
+/// Check a queued task *before* it starts: an already-answered request whose
+/// budget expired is an expired-task skip (no expensive work started).
+fn abandon(cancel: &ReadCancellation, reply: &ReadReply) -> Abandon {
+    if reply.is_answered() {
+        if cancel.is_expired() {
+            request::record_expired_skip();
+        } else {
+            reply.record_lost();
+        }
+        return Abandon::Answered;
+    }
+    match cancel.abandoned_error() {
+        Some(error) => {
+            request::record_expired_skip();
+            Abandon::Error(error)
+        }
+        None => Abandon::Live,
+    }
+}
+
+/// Check the result of work that already ran: a body that arrives after the
+/// deadline watchdog answered is a discarded late result, never a second reply.
+fn abandon_result(cancel: &ReadCancellation, reply: &ReadReply) -> Abandon {
+    if reply.is_answered() {
+        reply.record_lost();
+        return Abandon::Answered;
+    }
+    match cancel.abandoned_error() {
+        Some(error) => {
+            request::record_expired_skip();
+            Abandon::Error(error)
+        }
+        None => Abandon::Live,
+    }
+}
+
 fn reply_read(store:&drive_core::SharedStore,ino:u64,content: Arc<ReadHandle>, offset: i64, size: u32, reply: ReadReply) {
     let mut data = vec![0; size as usize];
     match content.read_at(&mut data, offset as u64) {
-        Ok(n) => permissions::publish_read(&store,ino,|r|match r{Ok(())=>reply.data(&data[..n]),Err(e)=>reply.error(e)}),
-        Err(e) => reply.error(e.raw_os_error().unwrap_or(libc::EIO)),
+        Ok(n) => permissions::publish_read(&store,ino,|r|match r{
+            Ok(())=>{ reply.data(&data[..n]); }
+            Err(e)=>{ reply.error(e); }
+        }),
+        Err(e) => { reply.error(e.raw_os_error().unwrap_or(libc::EIO)); }
     }
 }
