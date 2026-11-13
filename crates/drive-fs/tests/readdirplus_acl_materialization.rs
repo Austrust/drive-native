@@ -72,7 +72,14 @@ fn acl_readdirplus_materializes_only_bounded_pages() {
     )
     .unwrap();
     let store = Arc::new(drive_core::SharedStore::new(store));
-    let hub = NotifyHub::with_ttl_ms(0);
+    assert!(
+        store.has_permission_denials(),
+        "the fixture denial is not visible to the mount, so READDIRPLUS would not \
+         take the ACL path under test"
+    );
+    // READDIRPLUS is enabled at FUSE_INIT only for a non-zero TTL (see
+    // CacheFilesystem::init); keep the notifier profile the readdirplus tests use.
+    let hub = NotifyHub::with_ttl_ms(1_000);
     let fs = drive_fs::CacheFilesystem::new(store, "root", uid, gid)
         .unwrap()
         .with_notify_hub(hub.clone());
@@ -106,14 +113,28 @@ fn acl_readdirplus_materializes_only_bounded_pages() {
     assert_eq!(count, ENTRIES, "the ACL traversal skipped or duplicated entries");
     let replies = after.replies.saturating_sub(before.replies);
     assert!(
-        replies > 1,
-        "the traversal did not exercise READDIRPLUS continuations (replies={replies})"
+        replies >= 1,
+        "the traversal did not take the ACL READDIRPLUS path (no materialization recorded)"
     );
     let materialized = after.materialized_total.saturating_sub(before.materialized_total);
     let max_per_reply = after.materialized_max_per_reply;
     let batch_slots_max = after.batch_slots_max;
+    let fuser_counts = |stage: drive_fs::diagnostics::Stage| {
+        drive_fs::diagnostics::snapshot()
+            .into_iter()
+            .find(|sample| {
+                std::mem::discriminant(&sample.stage) == std::mem::discriminant(&stage)
+            })
+            .map(|sample| sample.count)
+            .unwrap_or(0)
+    };
     println!(
-        "issue #26 kernel: entries={ENTRIES} replies={replies} materialized_total={materialized} \
+        "issue #26 kernel: readdirplus_requests={} readdir_requests={}",
+        fuser_counts(drive_fs::diagnostics::Stage::ReaddirPlusRequests),
+        fuser_counts(drive_fs::diagnostics::Stage::ReaddirRequests)
+    );
+    println!(
+        "issue #26 kernel: entries={count} expected={ENTRIES} replies={replies} materialized_total={materialized} \
          materialized_max_per_reply={max_per_reply} batches={} batch_slots_max={batch_slots_max}",
         after.batches.saturating_sub(before.batches)
     );

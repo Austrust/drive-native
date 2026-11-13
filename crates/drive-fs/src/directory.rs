@@ -1069,7 +1069,7 @@ fn send_acl_plus(store:&drive_core::SharedStore,notify:&NotifyHub,view:&View,off
             let full_entry=match record {
                 Some(record)=>{
                     let(_,ttl)=preview::reply_ttls(notify,record.cacheable,true);
-                    reply.add_with_timeouts(*ino,cookie,name,&ENTRY_TTL,&ttl,&preview::posix_attr(&record,uid,gid),0)
+                    reply.add_with_timeouts(ino,cookie,name,&ENTRY_TTL,&ttl,&preview::posix_attr(&record,uid,gid),0)
                 }
                 None=>reply.add_without_lookup(ino,cookie,name,origin.kind(index+position)),
             };
