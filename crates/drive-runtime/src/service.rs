@@ -310,6 +310,10 @@ pub(crate) const CACHE_USAGE_MEMO_TTL: std::time::Duration =
 /// and returns it on drop, so sequential polls pay the open once and a
 /// concurrent burst only fills the idle capacity.
 const READ_ONLY_POOL_CAPACITY: usize = 8;
+/// How long a cold-batch joiner waits for the leader before running its own
+/// authoritative read (bounded so a leader waiting for a long writer hold never
+/// wedges unrelated pollers).
+const COLD_STATES_JOIN_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
 
 pub(crate) struct ReadOnlyPool {
     shared: Arc<drive_core::SharedStore>,
@@ -975,10 +979,27 @@ impl Service {
                         return result;
                     }
                     None => {
-                        gate = self
+                        let (next, timeout) = self
                             .cold_states_changed
-                            .wait(gate)
+                            .wait_timeout(gate, COLD_STATES_JOIN_WAIT)
                             .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        gate = next;
+                        if timeout.timed_out() {
+                            // The leader may be waiting for a long writer hold;
+                            // do not add its latency to every joiner. Leave the
+                            // gate and run the authoritative read locally.
+                            if waited {
+                                waited = false;
+                                if let Some(entry) = gate.as_mut() {
+                                    entry.followers = entry.followers.saturating_sub(1);
+                                    if entry.followers == 0 && entry.outcome.is_some() {
+                                        *gate = None;
+                                    }
+                                }
+                                self.cold_states_changed.notify_all();
+                            }
+                            break;
+                        }
                     }
                 }
             }
@@ -1002,6 +1023,8 @@ impl Service {
             }
         };
         if !publish {
+            #[cfg(test)]
+            self.count_cold_states_computation();
             return work();
         }
         #[cfg(test)]
