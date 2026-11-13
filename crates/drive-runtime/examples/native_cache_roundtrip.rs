@@ -100,6 +100,7 @@ async fn main() -> Result<()> {
         mount: mount.clone(),
         writable: true, local_policy: None, writable_source: None,
         exclude_patterns: Vec::new(),
+        exclude_mode: drive_core::exclude::ExcludeMode::default(),
     };
     let config = scratch.path().join("profile.json");
     std::fs::write(&config, serde_json::to_vec(&profile)?)?;

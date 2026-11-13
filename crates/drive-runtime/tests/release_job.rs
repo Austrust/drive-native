@@ -51,6 +51,7 @@ fn profile() -> Profile {
         local_policy: None,
         writable_source: None,
         exclude_patterns: Vec::new(),
+        exclude_mode: drive_core::exclude::ExcludeMode::default(),
     }
 }
 

@@ -7,6 +7,39 @@
 
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
+
+/// How a matching exclusion pattern is presented to the local mount (#56B).
+///
+/// `LocalOnly` is the profile default since issue #56: matched paths stay
+/// visible and writable locally but never sync. `Hidden` keeps the issue #50
+/// behaviour where matched paths answer `ENOENT` and are purged from the local
+/// view.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExcludeMode {
+    /// Visible/usable locally, never uploaded, downloaded or removed remotely.
+    #[default]
+    LocalOnly,
+    /// Issue #50 behaviour: hidden from every local read path and purged.
+    Hidden,
+}
+
+impl ExcludeMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::LocalOnly => "local_only",
+            Self::Hidden => "hidden",
+        }
+    }
+}
+
+impl fmt::Display for ExcludeMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// A rejected exclusion pattern.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExcludeError {
@@ -347,17 +380,60 @@ impl ExclusionIndex {
 /// the sync bridge. Reads only take a short `RwLock` and clone the `Arc`.
 pub struct ExclusionState {
     rules: ExcludeRules,
+    mode: ExcludeMode,
     index: std::sync::RwLock<std::sync::Arc<ExclusionIndex>>,
+    /// Node ids that were created or written under a `local_only` rule in this
+    /// session. The committed-namespace index covers them after a refresh; this
+    /// set closes the window between a FUSE write and the next index rebuild so
+    /// the scheduler never starts an upload for them.
+    local_only_nodes: std::sync::RwLock<std::collections::HashSet<String>>,
 }
 
 impl ExclusionState {
-    /// Create state for a task. An empty rule list leaves the index empty and
-    /// every fast-path check collapsed to one boolean read.
+    /// Create state for a task with the legacy issue #50 (`hidden`) behaviour.
+    ///
+    /// Production profiles go through [`Self::with_mode`]; this constructor is
+    /// kept for callers and tests that predate #56B. An empty rule list leaves
+    /// the index empty and every fast-path check collapsed to one boolean read.
     pub fn new(rules: ExcludeRules) -> Self {
+        Self::with_mode(rules, ExcludeMode::Hidden)
+    }
+
+    /// Create state for a task with an explicit profile mode.
+    pub fn with_mode(rules: ExcludeRules, mode: ExcludeMode) -> Self {
         Self {
             rules,
+            mode,
             index: std::sync::RwLock::new(std::sync::Arc::new(ExclusionIndex::default())),
+            local_only_nodes: std::sync::RwLock::new(std::collections::HashSet::new()),
         }
+    }
+
+    /// The profile-selected mode; `hidden` is an explicit opt-in.
+    pub fn mode(&self) -> ExcludeMode {
+        self.mode
+    }
+
+    /// True when the mode hides matched paths from the local view (#50).
+    pub fn hides(&self) -> bool {
+        self.mode == ExcludeMode::Hidden
+    }
+
+    /// Record a node created or written under a `local_only` rule so the
+    /// scheduler refuses it before the next full index rebuild.
+    pub fn mark_local_only_node(&self, node_id: &str) {
+        self.local_only_nodes
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(node_id.to_owned());
+    }
+
+    /// True when `node_id` was marked local-only in this session.
+    pub fn is_local_only_node(&self, node_id: &str) -> bool {
+        self.local_only_nodes
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(node_id)
     }
 
     /// The compiled rules (used by the initialization owner and the bridge).
@@ -627,6 +703,10 @@ fn event_touches_exclusion(
 #[cfg(test)]
 #[path = "exclude_index_tests.rs"]
 mod index_tests;
+
+#[cfg(test)]
+#[path = "exclude_local_only_tests.rs"]
+mod local_only_tests;
 
 #[cfg(test)]
 #[path = "exclude_purge_tests.rs"]

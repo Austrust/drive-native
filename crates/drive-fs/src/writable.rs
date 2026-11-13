@@ -326,6 +326,10 @@ pub(super) fn sync(
         }
         SyncRoute::Metadata => {}
     }
+    // Issue #56B: checkpointing a `local_only` file still snapshots the local
+    // bytes, but the resulting upload operation is dropped right away.
+    let local_only = fs.local_only_inode(ino);
+    let exclusion = fs.exclusion.clone();
     let store = fs.store.clone();
     let handles = fs.handles.clone();
     let hydrator = fs.hydrator.clone();
@@ -354,12 +358,25 @@ pub(super) fn sync(
                 let result = drive_core::drafts::checkpoint_draft_shared(&store, &d)
                     .map_err(|e| errno(&e))
                     .and_then(|_| {
-                        store
-                            .lock()
-                            .unwrap()
-                            .creation_saved(&d.node)
-                            .map_err(|e| errno(&e))
+                        let mut s = store.lock().unwrap();
+                        s.creation_saved(&d.node).map_err(|e| errno(&e))?;
+                        // Newly created local-only nodes are not in the committed
+                        // index yet; the session mark covers that window.
+                        let node_local_only = local_only
+                            || exclusion
+                                .as_ref()
+                                .is_some_and(|state| state.is_local_only_node(&d.node));
+                        if node_local_only {
+                            s.quiesce_local_only_nodes(std::slice::from_ref(&d.node))
+                                .map_err(|e| errno(&e))?;
+                        }
+                        Ok(())
                     });
+                if local_only || exclusion.as_ref().is_some_and(|state| state.is_local_only_node(&d.node)) {
+                    if let Some(state) = &exclusion {
+                        state.mark_local_only_node(&d.node);
+                    }
+                }
                 drop(total);
                 result
             }
@@ -483,6 +500,10 @@ pub(super) fn setattr(
     let notify = fs.notify.clone();
     let (uid, gid) = (fs.uid, fs.gid);
     let updates = fs.handle_updates.clone();
+    // Issue #56B: computed before the queue closure so it captures plain values
+    // instead of borrowing the filesystem reference.
+    let local_only = fs.local_only_inode(ino);
+    let exclusion = fs.exclusion.clone();
     fs.queue.submit(Box::new(move || {
         let resolved = if let Some(fh) = fh {
             let h = handles.lock().unwrap();
@@ -525,6 +546,20 @@ pub(super) fn setattr(
                             .unwrap()
                             .creation_saved(&d.node)
                             .map_err(|e| errno(&e))?;
+                        let node_local_only = local_only
+                            || exclusion
+                                .as_ref()
+                                .is_some_and(|state| state.is_local_only_node(&d.node));
+                        if node_local_only {
+                            store
+                                .lock()
+                                .unwrap()
+                                .quiesce_local_only_nodes(std::slice::from_ref(&d.node))
+                                .map_err(|e| errno(&e))?;
+                            if let Some(state) = &exclusion {
+                                state.mark_local_only_node(&d.node);
+                            }
+                        }
                     }
                     store
                         .lock()
@@ -565,6 +600,11 @@ pub(super) fn create(
         reply.error(libc::EINVAL);
         return;
     };
+    // Issue #56B: a local_only target is still created on the local view; its
+    // upload operation and creation intent are dropped before any scheduler
+    // wakeup, and the node is marked so the defense skips it.
+    let local_only = fs.local_only_child(parent, &name, false);
+    let exclusion = fs.exclusion.clone();
     let store = fs.store.clone();
     let handles = fs.handles.clone();
     let notify = fs.notify.clone();
@@ -587,7 +627,16 @@ pub(super) fn create(
             let n = s.create_local_file(&parent.node.id, &name, mode & !umask)?;
             let source = s.open_cached(&n.id)?;
             let draft = Arc::new(s.begin_draft(&n.id, &n.version, Some(&source))?);
+            if local_only {
+                s.quiesce_local_only_nodes(std::slice::from_ref(&n.id))?;
+            }
             let record = s.record(&n.id)?;
+            drop(s);
+            if local_only {
+                if let Some(state) = &exclusion {
+                    state.mark_local_only_node(&n.id);
+                }
+            }
             Ok((record, draft))
         })();
         match result {

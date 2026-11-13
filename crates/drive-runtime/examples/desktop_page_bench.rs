@@ -46,7 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         username:"synthetic".into(),device_id:uuid::Uuid::new_v4().to_string(),
         scope:drive_core::native::Scope {view_id:1,node_id:1,file_id:"root".into(),path:"/".into()},
         mount:PathBuf::from("/tmp/desktop-page-bench"),writable: false, local_policy: None,
-        writable_source: None, exclude_patterns: Vec::new()},
+        writable_source: None, exclude_patterns: Vec::new(), exclude_mode: drive_core::exclude::ExcludeMode::default()},
         store,PathBuf::from("/nonexistent-worker"))?;
     let mut legacy = vec![];
     let mut paged = vec![];

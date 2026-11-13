@@ -4,7 +4,7 @@
 //! The mounted tests need `/dev/fuse` and an ordinary Linux user, so they are
 //! `#[ignore]`d like the other kernel regressions and are run explicitly.
 use super::*;
-use drive_core::exclude::{ExcludeRules, ExclusionState};
+use drive_core::exclude::{ExcludeMode, ExcludeRules, ExclusionState};
 use drive_core::NodeMetadata;
 use std::sync::Arc;
 
@@ -39,14 +39,32 @@ fn snapshot() -> Vec<Node> {
 }
 
 fn state(patterns: &[&str]) -> Arc<ExclusionState> {
-    Arc::new(ExclusionState::new(
+    state_mode(patterns, ExcludeMode::Hidden)
+}
+
+fn state_mode(patterns: &[&str], mode: ExcludeMode) -> Arc<ExclusionState> {
+    Arc::new(ExclusionState::with_mode(
         ExcludeRules::compile(patterns).expect("valid test rules"),
+        mode,
     ))
 }
 
 fn open_fs(
     nodes: &[Node],
     patterns: &[&str],
+) -> (
+    tempfile::TempDir,
+    Arc<drive_core::SharedStore>,
+    Arc<ExclusionState>,
+    CacheFilesystem,
+) {
+    open_fs_mode(nodes, patterns, ExcludeMode::Hidden)
+}
+
+fn open_fs_mode(
+    nodes: &[Node],
+    patterns: &[&str],
+    mode: ExcludeMode,
 ) -> (
     tempfile::TempDir,
     Arc<drive_core::SharedStore>,
@@ -61,7 +79,7 @@ fn open_fs(
     store.ensure_fs_root(ROOT).unwrap();
     store.ensure_filesystem_inodes(ROOT).unwrap();
     let store = Arc::new(drive_core::SharedStore::new(store));
-    let state = state(patterns);
+    let state = state_mode(patterns, mode);
     if !patterns.is_empty() {
         let guard = store.lock().unwrap();
         state.refresh(&guard, ROOT).unwrap();
@@ -144,6 +162,49 @@ fn empty_rules_keep_the_unfiltered_fast_path() {
     assert!(!state.is_active());
     assert!(fs.exclusion_index().is_none());
     assert!(!fs.entry_excluded(1, "node_modules"));
+}
+
+/// Issue #56B: `local_only` (the profile default) keeps matched paths visible
+/// to every read path; only the hidden mode feeds the exclusion helpers.
+#[test]
+fn local_only_mode_keeps_matched_paths_visible_to_read_paths() {
+    let (_temp, store, state, fs) = open_fs_mode(
+        &snapshot(),
+        &[r"(^|/)node_modules/"],
+        ExcludeMode::LocalOnly,
+    );
+    let (hidden_dir, root_ino) = {
+        let guard = store.lock().unwrap();
+        (
+            guard.lookup(ROOT, "node_modules").unwrap().ino,
+            guard.record(ROOT).unwrap().ino,
+        )
+    };
+    assert!(!state.hides());
+    assert!(fs.exclusion_index().is_none(), "no read-path filtering");
+    assert!(!fs.inode_excluded(hidden_dir));
+    assert!(!fs.entry_excluded(root_ino, "node_modules"));
+    assert!(!fs.child_excluded(root_ino, "node_modules", true));
+    // The same index still identifies local-only targets for the write side.
+    assert!(fs.local_only_inode(hidden_dir));
+    assert!(fs.local_only_child(root_ino, "node_modules", true));
+    assert!(!fs.local_only_child(root_ino, "fresh-name", true));
+}
+
+/// Issue #56B: a `local_only` mount lists and serves matched paths.
+#[test]
+#[ignore = "requires an ordinary Linux user and /dev/fuse; run explicitly"]
+fn local_only_mount_keeps_matched_paths_visible() {
+    let (temp, _store, _state, fs) =
+        open_fs_mode(&snapshot(), &[r"(^|/)node_modules/"], ExcludeMode::LocalOnly);
+    let (mount, session) = mount_at(&temp, fs);
+    assert_eq!(
+        names(&mount),
+        ["A.txt", "Pinned", "install.iso", "node_modules"]
+    );
+    assert!(std::fs::metadata(mount.join("node_modules")).is_ok());
+    assert!(std::fs::metadata(mount.join("node_modules/left-pad/index.js")).is_ok());
+    drop(session);
 }
 
 #[test]
