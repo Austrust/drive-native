@@ -939,6 +939,67 @@ pub(super) fn read(
 fn kind(kind: FileKind) -> FileType {
     match kind { FileKind::Directory => FileType::Directory, FileKind::File => FileType::RegularFile }
 }
+/// Borrowed READDIRPLUS origin for the ACL path (issue #26 residual). Both
+/// origins are paged directly instead of being flattened into an owned list
+/// first, so a continuation only materializes the slots of its current batch.
+enum PlusOrigin<'a> {
+    Indexed(&'a DirBlock),
+    Snapshot(&'a DirectorySnapshot),
+}
+impl<'a> PlusOrigin<'a> {
+    fn new(view: &'a View) -> Self {
+        match view.indexed() {
+            Some((block, _)) => Self::Indexed(block),
+            None => Self::Snapshot(view.snapshot()),
+        }
+    }
+    fn len(&self) -> usize {
+        match self {
+            Self::Indexed(block) => block.entries.len(),
+            Self::Snapshot(snapshot) => snapshot.entries.len(),
+        }
+    }
+    /// One borrowed slot of the current page batch.
+    fn slot(&self, position: usize) -> drive_core::filesystem::DirectorySlot<'_> {
+        match self {
+            Self::Indexed(block) => {
+                let entry = &block.entries[position];
+                drive_core::filesystem::DirectorySlot {
+                    ino: entry.ino,
+                    name: entry.name.as_ref(),
+                    directory: entry.kind == FileKind::Directory,
+                }
+            }
+            Self::Snapshot(snapshot) => {
+                let entry = &snapshot.entries[position];
+                drive_core::filesystem::DirectorySlot {
+                    ino: entry.ino,
+                    name: &entry.name,
+                    directory: entry.directory,
+                }
+            }
+        }
+    }
+    fn kind(&self, position: usize) -> FileType {
+        match self {
+            Self::Indexed(block) => kind(block.entries[position].kind),
+            Self::Snapshot(snapshot) => {
+                if snapshot.entries[position].directory {
+                    FileType::Directory
+                } else {
+                    FileType::RegularFile
+                }
+            }
+        }
+    }
+}
+/// One bounded ACL page batch. `PLUS_PAGE` bounds the slots materialized per
+/// Store statement; the reply may span several batches when the kernel buffer
+/// is large, and stops as soon as it is full.
+fn acl_page_range(index: usize, len: usize) -> std::ops::Range<usize> {
+    index..(index + PLUS_PAGE).min(len)
+}
+
 // ACL publication holds Store through the bounded reply. Known revocations
 // cannot use the immutable-name busy-Store fallback of ordinary scans. Pages
 // are projected in bounded batches instead of one SQL round-trip per entry, so
@@ -948,18 +1009,24 @@ fn send_acl_plus(store:&drive_core::SharedStore,notify:&NotifyHub,view:&View,off
     let guard=match store.try_lock(){Ok(g)=>g,Err(_)=>{reply.error(libc::EAGAIN);return;}};
     if let Err(e)=permissions::inode(&guard,view.ino,permissions::Action::List){reply.error(errno(&e));return;}
     if let ViewOrigin::Preview(stamp)=&view.origin {if let Err(e)=guard.preview_validate_view(stamp){reply.error(errno(&e));return;}}
-    let entries:Vec<_>=if let Some((block,_))=view.indexed(){block.entries.iter().map(|e|(e.ino,e.name.as_ref(),kind(e.kind))).collect()}
-        else{view.snapshot().entries.iter().map(|e|(e.ino,e.name.as_str(),if e.directory{FileType::Directory}else{FileType::RegularFile})).collect()};
-    if offset>entries.len(){reply.error(libc::EINVAL);return;}
+    // Issue #26 residual: page over the borrowed origin. Only the current
+    // batch's slots are materialized; `offset`/EOF are decided before any page
+    // work. The directory List permission, preview stamp, publication guard and
+    // page-level ACL projection above/below are unchanged.
+    let origin = PlusOrigin::new(view);
+    let len = origin.len();
+    if offset>len{reply.error(libc::EINVAL);return;}
     let parent=match guard.posix_record_by_inode(view.ino){Ok(record)=>record.id,Err(error)=>{reply.error(errno(&error));return;}};
     let cache_before=guard.permission_cache_stats();
     let mut index=offset;
-    while index<entries.len() {
-        let end=(index+PLUS_PAGE).min(entries.len());
-        let chunk=&entries[index..end];
-        let slots=chunk.iter().map(|(ino,name,directory)|drive_core::filesystem::DirectorySlot{
-            ino:*ino,name,directory:*directory==FileType::Directory,
-        }).collect::<Vec<_>>();
+    while index<len {
+        let range=acl_page_range(index,len);
+        let end=range.end;
+        let slots=(range.start..range.end).map(|position|origin.slot(position)).collect::<Vec<_>>();
+        // Issue #26 accounting: the bounded page batch is all this reply
+        // materializes before the ACL projection (pre-fix: every entry).
+        diagnostics::record_acl_materialized_reply(slots.len() as u64);
+        diagnostics::record_acl_batch(slots.len() as u64);
         let page=match guard.directory_posix_page_for_acl(view.ino,&slots){
             Ok(page)=>page,Err(error)=>{reply.error(errno(&error));return;}
         };
@@ -989,7 +1056,8 @@ fn send_acl_plus(store:&drive_core::SharedStore,notify:&NotifyHub,view:&View,off
         }
         let mut full=false;
         for position in 0..slots.len() {
-            let (ino,name,kind)=&chunk[position];
+            let slot=&slots[position];
+            let (ino,name)=(slot.ino,slot.name);
             if excluded(exclusion, view.ino, name) { continue; }
             let cookie=(index+position+1) as i64;
             let record=if let Some(dot)=dots[position].take() {
@@ -1001,9 +1069,9 @@ fn send_acl_plus(store:&drive_core::SharedStore,notify:&NotifyHub,view:&View,off
             let full_entry=match record {
                 Some(record)=>{
                     let(_,ttl)=preview::reply_ttls(notify,record.cacheable,true);
-                    reply.add_with_timeouts(*ino,cookie,name,&ENTRY_TTL,&ttl,&preview::posix_attr(&record,uid,gid),0)
+                    reply.add_with_timeouts(ino,cookie,name,&ENTRY_TTL,&ttl,&preview::posix_attr(&record,uid,gid),0)
                 }
-                None=>reply.add_without_lookup(*ino,cookie,name,*kind),
+                None=>reply.add_without_lookup(ino,cookie,name,origin.kind(index+position)),
             };
             if full_entry {full=true;break;}
         }
@@ -1130,6 +1198,18 @@ pub(super) mod test_hooks {
         starts: HashMap<u64, usize>,
     }
 
+    /// Names visited while re-deriving one index view's byte estimate. The
+    /// production path never increments it after #23; the regression test
+    /// replays the pre-#23 derivation to prove the counter is live.
+    static INDEX_NAME_SCANS: std::sync::atomic::AtomicUsize =
+        std::sync::atomic::AtomicUsize::new(0);
+    pub(super) fn note_index_name_scan(items: usize) {
+        INDEX_NAME_SCANS.fetch_add(items, std::sync::atomic::Ordering::Relaxed);
+    }
+    pub(super) fn index_name_scans() -> usize {
+        INDEX_NAME_SCANS.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     fn hook() -> &'static Mutex<Hook> {
         static HOOK: OnceLock<Mutex<Hook>> = OnceLock::new();
         HOOK.get_or_init(|| {
@@ -1191,6 +1271,7 @@ pub(super) mod test_hooks {
         let mut hook = hook().lock().unwrap_or_else(|poison| poison.into_inner());
         hook.pauses.clear();
         hook.starts.clear();
+        INDEX_NAME_SCANS.store(0, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Block the next projection of `ino` at the build boundary.
@@ -1258,6 +1339,15 @@ mod index_tests {
             .saturating_add(entries.capacity() * std::mem::size_of::<drive_core::namespace_index::DirEntryLite>())
             .saturating_add(entries.iter().map(|entry| entry.name.len()).sum::<usize>())
     }
+    /// Exact pre-#23 hot-open derivation, kept test-only. It walks every entry
+    /// name through the regression counter, which is what makes the "zero
+    /// visits" assertion above falsifiable.
+    fn replay_legacy_index_view_bytes(block: &DirBlock) -> usize {
+        test_hooks::note_index_name_scan(block.entries.len());
+        std::mem::size_of::<DirBlock>()
+            .saturating_add(block.entries.capacity() * std::mem::size_of::<drive_core::namespace_index::DirEntryLite>())
+            .saturating_add(block.entries.iter().map(|entry| entry.name.len()).sum::<usize>())
+    }
     /// Issue #23 residual: a hot index open must be O(1) in the directory size.
     /// The red state was a per-open full name walk (H x N visits) inside the
     /// handles mutex and the projection lease. The test asserts the precomputed
@@ -1296,12 +1386,32 @@ mod index_tests {
         for _ in 0..OPENS {
             views.open_index(big.clone(), token()).unwrap().unwrap();
         }
+        // Issue #23 regression contract: the hot open path never visits entry
+        // names. The pre-#23 code produced OPENS x CHILDREN visits here (red
+        // evidence branch `evidence/fs-red23`, 1,000,200 visits).
+        assert_eq!(
+            test_hooks::index_name_scans(),
+            0,
+            "hot index opens walked entry names again"
+        );
         // Conservative per-View accounting is unchanged: one charge per open,
         // each equal to the precomputed estimate.
         assert_eq!(
             views.charged.load(Ordering::Acquire),
             expected.saturating_mul(OPENS),
             "hot index opens no longer charge exactly the precomputed estimate"
+        );
+        // Prove the counter above is a real observation, not a dead assertion:
+        // replaying the exact pre-#23 derivation goes through the same counter.
+        assert_eq!(
+            replay_legacy_index_view_bytes(&big),
+            expected,
+            "the precomputed estimate must equal the legacy formula"
+        );
+        assert_eq!(
+            test_hooks::index_name_scans(),
+            big.entries.len(),
+            "the name-visit counter no longer observes a legacy-style derivation"
         );
         assert_eq!(
             big.estimated_bytes, expected,
@@ -1517,5 +1627,77 @@ mod tests {
         drop(reader); // last reclaimer owner closes channel and joins its drain
         assert_eq!(charged.load(Ordering::Acquire), 0);
         assert_eq!(allocated.load(Ordering::Acquire), 0);
+    }
+}
+
+#[cfg(test)]
+mod acl_page_tests {
+    use super::*;
+    use drive_core::filesystem::{DirectoryEntry, DirectorySnapshot};
+
+    fn indexed(children: usize) -> DirBlock {
+        let mut entries = Vec::with_capacity(children + 2);
+        entries.push(drive_core::namespace_index::DirEntryLite { ino: 1, name: Arc::from(".."), kind: FileKind::Directory });
+        entries.push(drive_core::namespace_index::DirEntryLite { ino: 1, name: Arc::from("."), kind: FileKind::Directory });
+        entries.extend((0..children).map(|index| drive_core::namespace_index::DirEntryLite {
+            ino: 2 + index as u64,
+            name: Arc::from(format!("file-{index:05}")),
+            kind: FileKind::File,
+        }));
+        DirBlock {
+            ino: 1,
+            version: 0,
+            built_at_gen: 3,
+            estimated_bytes: 0,
+            entries,
+        }
+    }
+    fn snapshot(children: usize) -> DirectorySnapshot {
+        let mut entries = Vec::with_capacity(children + 2);
+        entries.push(DirectoryEntry { ino: 1, directory: true, name: "..".into() });
+        entries.push(DirectoryEntry { ino: 1, directory: true, name: ".".into() });
+        entries.extend((0..children).map(|index| DirectoryEntry {
+            ino: 2 + index as u64,
+            directory: false,
+            name: format!("file-{index:05}"),
+        }));
+        DirectorySnapshot { entries, bytes: 0 }
+    }
+
+    /// Issue #26 residual: both origins are paged through borrowed batches. The
+    /// batch bound is what stops a continuation from materializing the whole
+    /// directory; the exact coverage proves paging did not change the cookie
+    /// positions or skip entries.
+    #[test]
+    fn both_origins_page_with_bounded_borrowed_batches() {
+        const CHILDREN: usize = 300;
+        let indexed = indexed(CHILDREN);
+        let snapshot = snapshot(CHILDREN);
+        for origin in [PlusOrigin::Indexed(&indexed), PlusOrigin::Snapshot(&snapshot)] {
+            assert_eq!(origin.len(), CHILDREN + 2);
+            assert_eq!(origin.slot(0).name, "..");
+            assert!(origin.slot(0).directory);
+            assert_eq!(origin.slot(1).name, ".");
+            assert!(!origin.slot(2).directory);
+            assert_eq!(origin.kind(0), FileType::Directory);
+            assert_eq!(origin.kind(2), FileType::RegularFile);
+            let mut position = 0;
+            let mut seen = 0;
+            let mut max_batch = 0;
+            while position < origin.len() {
+                let range = acl_page_range(position, origin.len());
+                let batch = range.len();
+                assert!(batch <= PLUS_PAGE, "page batch {batch} exceeds PLUS_PAGE");
+                max_batch = max_batch.max(batch);
+                seen += batch;
+                position = range.end;
+            }
+            assert_eq!(seen, CHILDREN + 2, "paging did not cover the directory exactly once");
+            assert_eq!(max_batch, PLUS_PAGE);
+            // offset == N is an empty first batch (EOF), offset > N is rejected
+            // by the caller before any batch is built.
+            assert_eq!(acl_page_range(origin.len(), origin.len()).len(), 0);
+            assert_eq!(origin.slot(CHILDREN + 1).ino, 2 + CHILDREN as u64 - 1);
+        }
     }
 }

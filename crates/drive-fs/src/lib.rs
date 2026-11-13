@@ -1360,7 +1360,7 @@ impl Filesystem for CacheFilesystem {
                         // the watchdog already answered, the body is dropped
                         // here instead of becoming a second reply; it is also
                         // never installed into the handle.
-                        match abandon(&cancel, &reply) {
+                        match abandon_result(&cancel, &reply) {
                             Abandon::Live => {}
                             Abandon::Answered => return,
                             Abandon::Error(error) => { let _ = reply.error(error); return; }
@@ -1434,7 +1434,29 @@ enum Abandon {
     /// Expired or cancelled before starting; answer the defined error.
     Error(i32),
 }
+/// Check a queued task *before* it starts: an already-answered request whose
+/// budget expired is an expired-task skip (no expensive work started).
 fn abandon(cancel: &ReadCancellation, reply: &ReadReply) -> Abandon {
+    if reply.is_answered() {
+        if cancel.is_expired() {
+            request::record_expired_skip();
+        } else {
+            reply.record_lost();
+        }
+        return Abandon::Answered;
+    }
+    match cancel.abandoned_error() {
+        Some(error) => {
+            request::record_expired_skip();
+            Abandon::Error(error)
+        }
+        None => Abandon::Live,
+    }
+}
+
+/// Check the result of work that already ran: a body that arrives after the
+/// deadline watchdog answered is a discarded late result, never a second reply.
+fn abandon_result(cancel: &ReadCancellation, reply: &ReadReply) -> Abandon {
     if reply.is_answered() {
         reply.record_lost();
         return Abandon::Answered;
