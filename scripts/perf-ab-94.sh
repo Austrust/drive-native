@@ -35,7 +35,9 @@ FIX_TARGET="${FIX_TARGET:-t-integ}"
 FIX_HEAD="${FIX_HEAD:?set FIX_HEAD to the integrated tree SHA}"
 FIX_FIXTURE="${FIX_FIXTURE:-${BASE_FIXTURE%-base}-integ}"
 
-LOCAL_LOG_DIR="$ROOT/notes/test-logs/r5/val"
+# Logs live beside the repo worktree (workspace-level notes/, not committed).
+NOTES_DIR="${NOTES_DIR:-$(cd "$ROOT/.." && pwd)/notes/test-logs/r5/val}"
+LOCAL_LOG_DIR="$NOTES_DIR"
 mkdir -p "$LOCAL_LOG_DIR"
 
 mode_env=()
