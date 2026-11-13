@@ -59,7 +59,7 @@ use crate::service::Service;
 use drive_core::{
     SharedStore,
     desktop_status::StatusSeed,
-    shared_store::{CommitNotifications, StoreGuard},
+    shared_store::{CommitNotifications, CommitState, StoreGuard},
     status_changes::{ChangePage, ChangeScope, JournalBudget, StatusChange, StatusCursor},
 };
 use std::{
@@ -320,6 +320,45 @@ impl ProjectionDelta {
     }
 }
 
+/// The journal invalidations one publication applied on top of the previous
+/// published projection (issue #30).
+///
+/// Desktop aggregation keeps its own rendered tree next to this projection. A
+/// publication carries the exact set of rows/edges that moved, so the render
+/// only has to recompute the affected entries plus their ancestor chain
+/// instead of walking the whole namespace again. The set is relative to the
+/// *previous publication*, not to [`ProjectionBase`], so it must be accumulated
+/// across the journal pages that coalesce into one publish and reset right
+/// after the publish.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ProjectionInvalidation {
+    /// Ids whose seed row changed, was inserted or was removed.
+    pub(crate) rows: HashSet<String>,
+    /// Parents whose visible child edge list changed (a child moved, appeared
+    /// or disappeared).
+    pub(crate) parents: HashSet<String>,
+    /// Ids whose inherited pin/overlay/parent chain changed. Their whole
+    /// visible subtree must refresh inherited flags, not just the row itself.
+    pub(crate) inherited_roots: HashSet<String>,
+}
+
+impl ProjectionInvalidation {
+    fn clear(&mut self) {
+        self.rows.clear();
+        self.parents.clear();
+        self.inherited_roots.clear();
+    }
+
+    fn is_empty(&self) -> bool {
+        self.rows.is_empty() && self.parents.is_empty() && self.inherited_roots.is_empty()
+    }
+
+    /// Upper bound of the rows a consumer of this invalidation has to touch.
+    pub(crate) fn entries(&self) -> usize {
+        self.rows.len() + self.parents.len() + self.inherited_roots.len()
+    }
+}
+
 /// Immutable committed view of the desktop status seeds.
 ///
 /// A projection is a base snapshot plus the sparse delta accumulated since it;
@@ -330,6 +369,15 @@ pub(crate) struct StatusProjection {
     base: Arc<ProjectionBase>,
     delta: Arc<ProjectionDelta>,
     len: usize,
+    /// Committed Store state the published rows were read at (a lower bound:
+    /// rows may include newer facts than this watermark, never older). Readers
+    /// may only treat the projection as caught up when the current
+    /// `SharedStore::change_state()` equals this value.
+    commit: CommitState,
+    /// Invalidations applied between the previous publication and this one, or
+    /// `None` when they are unknown (full rebuild / test snapshot). Consumers
+    /// that maintain a derived render must do a full refresh on `None`.
+    invalidation: Option<Arc<ProjectionInvalidation>>,
 }
 
 impl StatusProjection {
@@ -341,6 +389,11 @@ impl StatusProjection {
             len: base.len,
             base: Arc::new(base),
             delta: Arc::new(ProjectionDelta::default()),
+            commit: CommitState {
+                revision: 0,
+                verified: true,
+            },
+            invalidation: None,
         }
     }
 
@@ -397,6 +450,17 @@ impl StatusProjection {
 
     pub(crate) fn generation(&self) -> u64 {
         self.generation
+    }
+
+    /// Committed Store state the published rows were read at.
+    pub(crate) fn commit(&self) -> CommitState {
+        self.commit
+    }
+
+    /// Invalidations since the previous publication, or `None` when a derived
+    /// render cannot be refreshed incrementally (full rebuild or test snapshot).
+    pub(crate) fn invalidation(&self) -> Option<&ProjectionInvalidation> {
+        self.invalidation.as_deref()
     }
 }
 
@@ -1223,6 +1287,15 @@ struct Worker<'a> {
     /// Pruning is deferred to the next page so it never shares a guard with the
     /// resolution work.
     prune_pending: Option<StatusCursor>,
+    /// Committed state observed under the writer guard for the most recent read
+    /// batch; published with the next projection so consumers can verify the
+    /// projection caught up with the commits it claims to describe.
+    commit: CommitState,
+    /// Invalidation applied since the last published projection (#30).
+    invalidation: ProjectionInvalidation,
+    /// Set when a full rebuild replaced the working state: the delta against the
+    /// previous publication is unknown, so the next publication carries `None`.
+    full_invalidation: bool,
 }
 
 impl<'a> Worker<'a> {
@@ -1243,6 +1316,12 @@ impl<'a> Worker<'a> {
             last_publish: None,
             idle_wait: WAIT,
             prune_pending: None,
+            commit: CommitState {
+                revision: 0,
+                verified: false,
+            },
+            invalidation: ProjectionInvalidation::default(),
+            full_invalidation: false,
         }
     }
 
@@ -1276,6 +1355,9 @@ impl<'a> Worker<'a> {
         let Some(mut guard) = lock_stop_aware(shared, stop) else {
             return Flow::Stop;
         };
+        // No writer can interleave while this guard is held, so the published
+        // commit state is the exact committed state the following scan reads.
+        self.commit = shared.change_state();
         let started = Instant::now();
         let setup: drive_core::Result<StatusCursor> = (|| {
             guard.set_status_journal_budget(JournalBudget {
@@ -1430,6 +1512,10 @@ impl<'a> Worker<'a> {
         let Some(mut guard) = lock_stop_aware(shared, stop) else {
             return Ok(None);
         };
+        // Captured under the guard: no writer can commit between this read and
+        // the journal page, so it is an exact lower bound of what the batch
+        // describes (facts are re-read later and may include newer commits).
+        self.commit = shared.change_state();
         let started = Instant::now();
         let outcome = self.read_locked(&mut guard);
         drop(guard);
@@ -1655,6 +1741,11 @@ impl<'a> Worker<'a> {
         self.base = Arc::new(base);
         self.row_delta.clear();
         self.child_delta.clear();
+        // A rebuild replaces the working state wholesale: the delta against the
+        // previously published projection is unknown, so the publication must
+        // not carry an incremental invalidation (#30).
+        self.invalidation.clear();
+        self.full_invalidation = true;
         self.dirty = true;
         true
     }
@@ -1667,6 +1758,20 @@ impl<'a> Worker<'a> {
 
     fn set_row(&mut self, id: &str, next: Option<StatusSeed>) {
         let previous = self.view().row(id).cloned();
+        // Issue #30: what does this row change invalidate in a derived render?
+        // A pin/overlay/parent change alters the inherited flags of the whole
+        // visible subtree, while a plain row change only invalidates the row and
+        // its ancestor chain. Insert/remove is treated conservatively as both.
+        let inherited_dirty = match (&previous, &next) {
+            (None, None) => false,
+            (Some(previous), Some(next)) => {
+                previous.pinned != next.pinned
+                    || previous.overlay != next.overlay
+                    || previous.parent != next.parent
+            }
+            _ => true,
+        };
+        let row_changed = !matches!((&previous, &next), (None, None));
         match (previous, next) {
             (Some(previous), Some(next)) => {
                 if same_seed(&previous, &next) {
@@ -1696,6 +1801,12 @@ impl<'a> Worker<'a> {
             }
             (None, None) => {}
         }
+        if row_changed {
+            self.invalidation.rows.insert(id.to_owned());
+            if inherited_dirty {
+                self.invalidation.inherited_roots.insert(id.to_owned());
+            }
+        }
         self.dirty = true;
         // `id` is the map key; keep the stored row id authoritative.
         debug_assert!(self.view().row(id).is_none_or(|row| row.id == id));
@@ -1708,6 +1819,7 @@ impl<'a> Worker<'a> {
         let delta = self.child_delta.entry(parent.clone()).or_default();
         delta.removed.remove(&seed.id);
         delta.changed.insert(seed.id.clone(), seed.directory);
+        self.invalidation.parents.insert(parent.clone());
         self.dirty = true;
     }
 
@@ -1715,6 +1827,7 @@ impl<'a> Worker<'a> {
         let delta = self.child_delta.entry(parent.to_owned()).or_default();
         delta.changed.remove(id);
         delta.removed.insert(id.to_owned());
+        self.invalidation.parents.insert(parent.to_owned());
         self.dirty = true;
     }
 
@@ -1758,11 +1871,22 @@ impl<'a> Worker<'a> {
         #[cfg(test)]
         self.cache
             .record_worker_resident_bytes(self.resident_bytes_estimate());
+        // Take (not clone) the accumulated invalidation: it is consumed exactly
+        // once, by the publication that describes it. A rebuild cannot describe
+        // the delta against the previous publication, so it publishes `None`.
+        let invalidation = if std::mem::take(&mut self.full_invalidation) {
+            None
+        } else {
+            Some(Arc::new(std::mem::take(&mut self.invalidation)))
+        };
+        let commit = self.commit;
         let projection = Arc::new(StatusProjection {
             generation,
             base: Arc::clone(&self.base),
             delta: Arc::new(delta),
             len: self.len,
+            commit,
+            invalidation,
         });
         self.cache.publish(projection);
         self.cache.publishes.fetch_add(1, Ordering::Relaxed);
