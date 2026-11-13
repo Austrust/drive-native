@@ -86,6 +86,17 @@ fn now() -> i64 {
 /// that the append/delete triggers keep it exact and the hot path never counts
 /// the retained window.
 pub(crate) fn migrate(db: &Connection, repairing: bool) -> Result<()> {
+    // Follow-up to issue #67 W2 (`notes/W2_INDEX_ANALYSIS.md`): every append and
+    // eviction used to maintain `sync_history_name`, `sync_history_mount_time`
+    // and `sync_history_result`, but no runtime query can use them. The paging
+    // query writes its filters as `? IS NULL OR column=?`, which defeats
+    // filtered index use; the name filter is an `instr()` substring; and no
+    // query filters mount/result by completion time. Dropping them removes the
+    // largest source of residual write amplification without changing a single
+    // query plan. This runs on every open, so a store written by an older binary
+    // is cleaned on its next open; an older binary that re-creates them is
+    // harmless because the next open drops them again. Index removal is
+    // data-neutral, so no schema version bump or migration backup is needed.
     db.execute_batch(
         "CREATE TABLE IF NOT EXISTS sync_history(
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -96,9 +107,9 @@ pub(crate) fn migrate(db: &Connection, repairing: bool) -> Result<()> {
           attempts INTEGER NOT NULL DEFAULT 1 CHECK(attempts>=1),
           error_kind TEXT,error_summary TEXT,started_at INTEGER,completed_at INTEGER NOT NULL,
           detail TEXT, operation_key TEXT NOT NULL UNIQUE);
-         CREATE INDEX IF NOT EXISTS sync_history_mount_time ON sync_history(mount,completed_at DESC);
-         CREATE INDEX IF NOT EXISTS sync_history_name ON sync_history(name COLLATE NOCASE);
-         CREATE INDEX IF NOT EXISTS sync_history_result ON sync_history(result,completed_at DESC);
+         DROP INDEX IF EXISTS sync_history_mount_time;
+         DROP INDEX IF EXISTS sync_history_name;
+         DROP INDEX IF EXISTS sync_history_result;
          CREATE INDEX IF NOT EXISTS sync_history_time ON sync_history(completed_at);
          CREATE INDEX IF NOT EXISTS sync_history_mount_seq ON sync_history(mount,seq DESC);
          CREATE INDEX IF NOT EXISTS sync_history_result_seq ON sync_history(result,seq DESC);
