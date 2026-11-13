@@ -271,7 +271,11 @@ fn gc_reclaim_reverifies_references_after_lock_free_discovery() {
     let mut store = Store::open(dir.path()).unwrap();
     store
         .install_remote_snapshot(
-            &[node("root", None, true), node("live", Some("root"), false)],
+            &[
+                node("root", None, true),
+                node("live", Some("root"), false),
+                node("other", Some("root"), false),
+            ],
             "1",
             "server",
         )
@@ -320,8 +324,37 @@ fn gc_reclaim_reverifies_references_after_lock_free_discovery() {
     assert_eq!(reclaim.removed, 0, "a re-created reference must survive");
     assert!(path.exists());
 
+    // 3b. A shared reference on another node protects the body just as well.
+    store
+        .db
+        .execute("UPDATE nodes SET blob=NULL,local_version=NULL WHERE id='live'", [])
+        .unwrap();
+    store
+        .db
+        .execute(
+            "UPDATE nodes SET blob=?1, local_version='1' WHERE id='other'",
+            [&blob],
+        )
+        .unwrap();
+    let reclaim = store
+        .gc_reclaim_blobs(&inventory.entries, &HashSet::new())
+        .unwrap();
+    assert_eq!(reclaim.removed, 0, "a shared blob must survive");
+    assert!(path.exists());
+    store
+        .db
+        .execute("UPDATE nodes SET blob=NULL,local_version=NULL WHERE id='other'", [])
+        .unwrap();
+
     // 4. An open cached handle also protects the body after its DB pointer goes
     //    away (the unlinked-old-handle case).
+    store
+        .db
+        .execute(
+            "UPDATE nodes SET blob=?1, local_version='1' WHERE id='live'",
+            [&blob],
+        )
+        .unwrap();
     let handle = store.open_cached("live").unwrap();
     store
         .db
@@ -474,4 +507,68 @@ fn scan_blob_inventory_skips_non_blob_entries() {
     assert_eq!(inventory.entries[0].bytes, 4);
     assert_eq!(inventory.total_bytes, 4);
     drop(store);
+}
+
+/// Heavy mechanism evidence (#90-B): C clean drafts deleted by the old
+/// per-row autocommit loop vs the bounded batch transactions, measured in the
+/// same process/tree/profile (WAL + `synchronous=FULL`). Compile in the build
+/// slot; run on the remote heavy slot only.
+///
+///   cargo test -p drive-core --all-features --locked --lib \
+///     clean_draft_delete_legacy_vs_batched_heavy -- --ignored --nocapture
+#[test]
+#[ignore = "heavy mechanism timing; run on the remote heavy slot"]
+fn clean_draft_delete_legacy_vs_batched_heavy() {
+    let batch = GC_CLEAN_DRAFT_BATCH_SIZE;
+    for clean in [1_000usize, 5_000] {
+        // Legacy shape: one autocommit per deleted row, exactly the pre-#90
+        // cycle. This is a private measurement loop, not product code.
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(dir.path()).unwrap();
+        let _ = draft_fixture(&dir, &mut store, clean, 0, 0);
+        let tokens: Vec<String> = {
+            let mut q = store
+                .db
+                .prepare("SELECT token FROM drafts ORDER BY token")
+                .unwrap();
+            q.query_map([], |r| r.get::<_, String>(0))
+                .unwrap()
+                .collect::<std::result::Result<_, _>>()
+                .unwrap()
+        };
+        let started = std::time::Instant::now();
+        for token in &tokens {
+            store
+                .db
+                .execute("DELETE FROM drafts WHERE token=?1 AND dirty=0", [token])
+                .unwrap();
+        }
+        let legacy_elapsed = started.elapsed();
+        assert!(remaining_draft_rows(&store).is_empty());
+
+        // Bounded shape: one transaction per batch.
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(dir.path()).unwrap();
+        let _ = draft_fixture(&dir, &mut store, clean, 0, 0);
+        let started = std::time::Instant::now();
+        let mut rows = 0u64;
+        let mut commits = 0u64;
+        loop {
+            let pruned = store.prune_clean_drafts(usize::MAX).unwrap();
+            rows += pruned.rows;
+            commits += pruned.commits;
+            if pruned.rows == 0 {
+                break;
+            }
+        }
+        let batched_elapsed = started.elapsed();
+        assert_eq!(rows, clean as u64);
+        assert_eq!(commits, clean.div_ceil(batch) as u64);
+        println!(
+            "HEAVY_B c={clean} legacy_commits={clean} legacy_ms={:.3} batched_commits={} batched_ms={:.3}",
+            legacy_elapsed.as_secs_f64() * 1e3,
+            commits,
+            batched_elapsed.as_secs_f64() * 1e3,
+        );
+    }
 }

@@ -328,6 +328,9 @@ pub struct CacheMaintenanceStats {
     pub clean_draft_commits: u64,
     pub draft_files_removed: u64,
     pub released: u64,
+    /// Inode invalidations queued for released cache bodies (legacy
+    /// `maintain_cache` queued one per released id after dropping the locks).
+    pub released_inode_invalidations: u64,
     /// The usage snapshot used a fresh locked scan instead of the lock-free
     /// inventory because the Store revision moved during the round.
     pub calibrated: bool,
@@ -397,6 +400,17 @@ impl Store {
             return Err(Error::State("cache limit out of range".into()));
         }
         self.db.execute("INSERT INTO metadata(key,value) VALUES('cache_limit_bytes',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[bytes.to_string()])?;
+        Ok(())
+    }
+
+    /// Test-support seam for the cache-maintenance regression harness:
+    /// drop the 60 s recent-publication grace on one node so the eviction path
+    /// can select that body immediately. The grace window is deliberately not
+    /// configurable in production and this has no production caller.
+    #[doc(hidden)]
+    pub fn expire_cache_publication_for_test(&mut self, id: &str) -> Result<()> {
+        self.db
+            .execute("DELETE FROM cache_published WHERE node=?1", [id])?;
         Ok(())
     }
     /// Actual file opens only; icon/status and directory queries must not call it.

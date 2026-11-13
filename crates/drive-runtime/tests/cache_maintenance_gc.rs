@@ -14,7 +14,7 @@
 //! * a no-progress pressure round must defer instead of re-walking the
 //!   directories on every wakeup.
 use drive_core::{
-    Node, SharedStore, Store,
+    DownloadTicket, Node, SharedStore, Store, sha256,
     cache_policy::{GC_BLOB_BATCH_SIZE, GC_CLEAN_DRAFT_BATCH_SIZE, GC_MAX_WINDOWS_PER_CALL},
 };
 use drive_runtime::bridge::Bridge;
@@ -227,23 +227,145 @@ fn gc_maintenance_legacy_vs_bounded_hold_heavy() {
         write_orphan_blobs(&dir, n);
         let mut calls = 0;
         let started = Instant::now();
-        let mut stats;
+        let mut max_hold_ns = 0u64;
+        let mut total_hold_ns = 0u64;
+        let mut windows = 0u32;
+        let mut removed = 0u64;
         loop {
-            stats = bridge.maintain_cache().unwrap().maintenance;
+            let stats = bridge.maintain_cache().unwrap().maintenance;
             calls += 1;
+            max_hold_ns = max_hold_ns.max(stats.max_store_lock_hold_ns);
+            total_hold_ns = total_hold_ns.saturating_add(stats.total_store_lock_hold_ns);
+            windows = windows.saturating_add(stats.store_lock_windows);
+            removed = removed.saturating_add(stats.blobs_removed);
             if blob_files(&dir) == 0 || calls > 64 {
                 break;
             }
         }
         let bounded_elapsed = started.elapsed();
         println!(
-            "HEAVY_A n={n} legacy_single_hold_ms={:.3} bounded_max_hold_ms={:.3} bounded_total_hold_ms={:.3} windows={} calls={calls} elapsed_ms={:.3}",
+            "HEAVY_A n={n} legacy_single_hold_ms={:.3} bounded_max_hold_ms={:.3} bounded_total_hold_ms={:.3} windows={windows} calls={calls} elapsed_ms={:.3} removed={removed}",
             legacy_hold.as_secs_f64() * 1e3,
-            stats.max_store_lock_hold_ns as f64 / 1e6,
-            stats.total_store_lock_hold_ns as f64 / 1e6,
-            stats.store_lock_windows,
+            max_hold_ns as f64 / 1e6,
+            total_hold_ns as f64 / 1e6,
             bounded_elapsed.as_secs_f64() * 1e3,
         );
         assert_eq!(blob_files(&dir), 0);
     }
+}
+
+/// #90-A acceptance: while one maintenance round is progressing, other Store
+/// users must keep acquiring the lock between windows (the legacy shape held it
+/// for the whole trim).
+#[test]
+fn background_store_users_progress_between_windows() {
+    let (dir, bridge) = bridge_fixture();
+    const N: usize = 4_096;
+    write_orphan_blobs(&dir, N);
+    let counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let worker = {
+        let bridge = bridge.clone();
+        let counter = counter.clone();
+        let stop = stop.clone();
+        std::thread::spawn(move || {
+            use std::sync::atomic::Ordering;
+            while !stop.load(Ordering::Relaxed) {
+                {
+                    let store = bridge.store.lock().unwrap();
+                    let _ = store.local_revision();
+                }
+                counter.fetch_add(1, Ordering::Relaxed);
+            }
+        })
+    };
+    let mut calls = 0;
+    while blob_files(&dir) > 0 && calls < 16 {
+        bridge.maintain_cache().unwrap();
+        calls += 1;
+    }
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    worker.join().unwrap();
+    assert_eq!(blob_files(&dir), 0);
+    let acquisitions = counter.load(std::sync::atomic::Ordering::Relaxed);
+    assert!(
+        acquisitions > 0,
+        "another Store user must acquire the lock between bounded windows"
+    );
+    println!("BACKGROUND_PROGRESS acquisitions={acquisitions} calls={calls}");
+}
+
+/// #90-A regression guard: the legacy `maintain_cache` mapped each released
+/// cache body to its inode under the Store lock and queued one
+/// `Invalidation::Inode` after dropping the locks, so the kernel drops the
+/// now-invalid cached body. The bounded path must keep that contract.
+#[test]
+fn bounded_trim_publishes_inode_invalidations_for_released_ids() {
+    let (_dir, bridge) = bridge_fixture();
+    {
+        let mut store = bridge.store.lock().unwrap();
+        store
+            .install_remote_snapshot(
+                &[
+                    Node {
+                        id: "root".into(),
+                        parent: None,
+                        name: "root".into(),
+                        version: "1".into(),
+                        directory: true,
+                        metadata: None,
+                    },
+                    Node {
+                        id: "file".into(),
+                        parent: Some("root".into()),
+                        name: "file".into(),
+                        version: "1".into(),
+                        directory: false,
+                        metadata: Some(drive_core::NodeMetadata {
+                            size: 11,
+                            mtime: 1,
+                            mode: 0o644,
+                        }),
+                    },
+                ],
+                "1",
+                "server",
+            )
+            .unwrap();
+        store.ensure_fs_root("root").unwrap();
+        store
+            .publish_download(
+                &DownloadTicket {
+                    id: "file".into(),
+                    version: "1".into(),
+                },
+                b"cached-body",
+                &sha256(b"cached-body"),
+            )
+            .unwrap();
+        // A previously opened cached file already has an inode mapping.
+        assert!(store.record("file").unwrap().ino > 0);
+        // The 60 s recent-publication grace would hide a just-published body
+        // from the eviction path; expire it so this test drives the release
+        // step and its invalidation publication.
+        store.expire_cache_publication_for_test("file").unwrap();
+        store.set_cache_limit(1).unwrap();
+    }
+    let trim = bridge.maintain_cache().unwrap();
+    assert_eq!(
+        trim.released.len(),
+        1,
+        "expected the one over-limit cached body to be released: {:?}",
+        trim.usage
+    );
+    assert_eq!(
+        trim.maintenance.released_inode_invalidations,
+        trim.released.len() as u64,
+        "every released id must publish exactly one Inode invalidation"
+    );
+    println!(
+        "RELEASE_INVALIDATIONS released={} invalidations={}",
+        trim.released.len(),
+        trim.maintenance.released_inode_invalidations
+    );
 }
