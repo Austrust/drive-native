@@ -885,7 +885,8 @@ impl Bridge {
                 }
                 MaintenancePhase::Usage => {
                     let calibrate = cursor.calibrate_round;
-                    let result = self.maintenance_usage_snapshot(cursor, &mut stats, calibrate)?;
+                    let result =
+                        self.maintenance_usage_snapshot(cursor, &mut stats, calibrate, true)?;
                     // Progress is read after the release step: a round that only
                     // evicted cache bodies did make progress and must not enter
                     // the no-progress backoff.
@@ -924,7 +925,8 @@ impl Bridge {
         // its pressure/debounce state. The next call resumes the round.
         let cursor = maintenance.cursor.as_mut().expect("maintenance cursor");
         released_inodes.append(&mut cursor.pending_inodes);
-        let mut result = self.maintenance_usage_snapshot(cursor, &mut stats, false)?;
+        let mut result =
+            self.maintenance_usage_snapshot(cursor, &mut stats, false, false)?;
         for ino in released_inodes.drain(..) {
             self.enqueue_invalidation(Invalidation::Inode(ino));
             result.maintenance.released_inode_invalidations =
@@ -943,6 +945,7 @@ impl Bridge {
         cursor: &mut MaintenanceCursor,
         stats: &mut drive_core::cache_policy::CacheMaintenanceStats,
         calibrate: bool,
+        release: bool,
     ) -> io::Result<drive_core::cache_policy::CacheTrim> {
         use drive_core::cache_policy::CacheUsageInputs;
         let flights = self
@@ -989,7 +992,13 @@ impl Bridge {
         };
         let limit = store.cache_limit().map_err(io::Error::other)?;
         let mut released = cursor.released.clone();
-        if limit != 0 && usage.over_target_bytes > 0 {
+        // #90-A: eviction is only allowed once the GC round completed (the
+        // Usage phase), matching the legacy trim which released only after a
+        // full collection pass. A budget-exhausted mid-round snapshot must stay
+        // accounting-only: a body released there can still be selected as an
+        // orphan by the remaining candidates of the *same* round, which makes
+        // the round's output depend on the lock-free scan order.
+        if release && limit != 0 && usage.over_target_bytes > 0 {
             // Issue #56B: local-only matches keep their cached bodies.
             let protected = {
                 let state = self.exclusion_state();
