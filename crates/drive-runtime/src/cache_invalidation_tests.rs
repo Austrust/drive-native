@@ -108,22 +108,76 @@ fn resumed_round_publishes_each_released_inode_once() {
         let name = uuid::Uuid::new_v4().to_string();
         std::fs::write(dir.path().join("blobs").join(name), b"orphan").unwrap();
     }
-    let mut calls = 0;
+    let mut calls = 0usize;
     let mut saw_resumed = false;
+    let mut released_round: Option<Vec<String>> = None;
+    // Worst case: every lock window is executed by its own call. The windows
+    // needed by the round are one for the Store snapshot, one retired-row pass,
+    // ceil(n / batch) reclaim batches, then the draft/usage phases.
+    let window_ceiling = 2 + n.div_ceil(drive_core::cache_policy::GC_BLOB_BATCH_SIZE) + 3;
     loop {
         let trim = bridge.maintain_cache().unwrap();
         calls += 1;
         saw_resumed |= trim.maintenance.resumed;
-        if blob_files(&dir) == 1 {
+        let files = blob_files(&dir);
+        if calls == 1 {
+            // n = 16*128 + 512 candidates exceed one call's window budget, so
+            // the first call is a mid-round snapshot. A mid-round snapshot is
+            // accounting-only: eviction may only happen on the call that
+            // completes the round, exactly like the legacy trim released after
+            // a full collection pass.
+            assert!(
+                !trim.maintenance.resumed,
+                "the first call must start a new round: {:?}",
+                trim.maintenance
+            );
+            assert!(
+                trim.released.is_empty(),
+                "a budget-exhausted mid-round snapshot must not evict: {:?}",
+                trim.maintenance
+            );
+        }
+        if !trim.released.is_empty() {
+            assert_eq!(
+                trim.released,
+                vec!["file".to_owned()],
+                "only the over-limit cache body may be evicted"
+            );
+            // The completing round reclaims before it evicts, so the released
+            // body is still the only blob left on disk.
+            assert_eq!(
+                files, 1,
+                "after the completing round only the released body may remain"
+            );
+            released_round = Some(trim.released.clone());
+        }
+        if released_round.is_some() {
             break;
         }
-        assert!(calls < 32, "bounded windows must eventually reclaim the orphans");
+        assert!(
+            files >= 1,
+            "a blob disappeared without a completed-round eviction (calls={calls})"
+        );
+        assert!(
+            calls <= window_ceiling,
+            "bounded windows must reclaim the orphans within {window_ceiling} calls              (calls={calls}, files={files}, stats={:?})",
+            trim.maintenance
+        );
     }
     assert!(saw_resumed, "the round must have been resumed across calls");
+    assert_eq!(
+        released_round.as_deref(),
+        Some(&["file".to_owned()][..]),
+        "the resumed round must release the over-limit cache body"
+    );
     assert_eq!(
         inode_invalidations(&bridge),
         vec![ino],
         "a release in a resumed round must emit its inode invalidation exactly once"
     );
-    assert_eq!(blob_files(&dir), 1, "the released body file awaits the next GC round");
+    assert_eq!(
+        blob_files(&dir),
+        1,
+        "the released body stays on disk until a later round reclaims it"
+    );
 }
