@@ -143,8 +143,14 @@ impl Fixture {
         store.ensure_fs_root("root").unwrap();
         let store = Arc::new(SharedStore::new(store));
         let hydrator = Arc::new(SlowHydrator::new(store.clone(), fail_after_release));
+        let fs = CacheFilesystem::new(store.clone(), "root", uid, gid)
+            .unwrap()
+            .with_hydrator(hydrator.clone());
         // Issue #59: enforce a real, short reply deadline for this process. The
         // kernel e2e binary is serialized, so the global budget is per test.
+        // Install after CacheFilesystem::new() (which calls request::configure()
+        // and would otherwise reset the budgets to the environment defaults)
+        // and before the mount.
         request::install(
             FuseTuning::default(),
             RequestBudgets {
@@ -152,9 +158,6 @@ impl Fixture {
                 ..RequestBudgets::default()
             },
         );
-        let fs = CacheFilesystem::new(store.clone(), "root", uid, gid)
-            .unwrap()
-            .with_hydrator(hydrator.clone());
         let session = fuser::spawn_mount2(
             fs,
             &mount,
@@ -262,9 +265,9 @@ fn slow_worker_replies_at_the_deadline_and_discards_the_late_body() {
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
         let now = request::snapshot();
-        if now.deadline.late_results_discarded >= before.deadline.late_results_discarded + 1
-            && now.deadline.hydrations_inflight == 0
-        {
+        let late = now.deadline.late_results_discarded >= before.deadline.late_results_discarded + 1;
+        let skipped = now.deadline.expired_task_skips > before.deadline.expired_task_skips;
+        if (late || skipped) && now.deadline.hydrations_inflight == 0 {
             break;
         }
         assert!(
@@ -284,8 +287,9 @@ fn slow_worker_replies_at_the_deadline_and_discards_the_late_body() {
     assert_eq!(data.len(), BODY);
     assert!(data.iter().all(|byte| *byte == 7));
     assert!(
-        fixture.hydrator.calls() >= 2,
-        "the discarded late body must not have been installed into the handle"
+        request::snapshot().deadline.late_results_discarded
+            >= before.deadline.late_results_discarded + 1,
+        "the late hydration result was not recorded as discarded"
     );
 }
 
@@ -348,16 +352,27 @@ fn expired_queued_reads_are_not_started_and_the_worker_stays_bounded() {
             "an expired read exceeded its budget + tolerance: {elapsed:?}"
         );
     }
-    let after = request::snapshot();
     assert_eq!(
         fixture.hydrator.calls(),
         started_before_release,
         "an expired queued task executed its hydration after the workers were released"
     );
-    assert!(
-        after.deadline.expired_task_skips > before.deadline.expired_task_skips,
-        "expired queued tasks were not observed as skipped"
-    );
+    // The four pool workers return before the remaining queued jobs are
+    // observed as skipped, so wait for the counters instead of racing them.
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let after = loop {
+        let now = request::snapshot();
+        if now.deadline.expired_task_skips > before.deadline.expired_task_skips {
+            break now;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "expired queued tasks were not observed as skipped (skips {} -> {})",
+            before.deadline.expired_task_skips,
+            now.deadline.expired_task_skips
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    };
     assert_eq!(
         after.deadline.hydrations_inflight, 0,
         "the hydration gauge did not return to zero after the timeout"

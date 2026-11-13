@@ -78,13 +78,6 @@ fn slow_read_must_reply_within_its_deadline() {
     store.install_remote_snapshot(&nodes, "1", "synthetic").unwrap();
     store.ensure_fs_root("root").unwrap();
     let store = Arc::new(SharedStore::new(store));
-    request::install(
-        FuseTuning::default(),
-        RequestBudgets {
-            read: READ_BUDGET,
-            ..RequestBudgets::default()
-        },
-    );
     let hydrator = Arc::new(BlockingHydrator {
         released: Mutex::new(false),
         cv: Condvar::new(),
@@ -92,6 +85,16 @@ fn slow_read_must_reply_within_its_deadline() {
     let fs = CacheFilesystem::new(store, "root", uid, gid)
         .unwrap()
         .with_hydrator(hydrator.clone());
+    // CacheFilesystem::new() calls request::configure(), which re-reads the
+    // environment defaults; install the short budget after construction and
+    // before the mount so the tests observe it.
+    request::install(
+        FuseTuning::default(),
+        RequestBudgets {
+            read: READ_BUDGET,
+            ..RequestBudgets::default()
+        },
+    );
     let session = fuser::spawn_mount2(
         fs,
         &mount,
