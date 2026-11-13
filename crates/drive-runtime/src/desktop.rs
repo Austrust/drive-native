@@ -699,6 +699,9 @@ struct StoreOverview {
     open_unknown: i64,
     needs_attention: i64,
     commit_items: Vec<drive_core::commit_diagnostics::CommitDiagnosticRecord>,
+    /// Issue #60: cheap drafts/migration-snapshot storage accounting, additive
+    /// to the existing cache_availability block.
+    storage: drive_core::state::StorageSummary,
 }
 fn elapsed_us(start: Instant) -> u64 {
     u64::try_from(start.elapsed().as_micros()).unwrap_or(u64::MAX)
@@ -742,6 +745,7 @@ fn overview_store(
         needs_attention: drive_core::commit_diagnostics::needs_attention(store)
             .map_err(|_| other())?,
         commit_items: drive_core::commit_diagnostics::list(store, 20).map_err(|_| other())?,
+        storage: store.storage_summary().map_err(|_| other())?,
     })
 }
 pub fn overview(service: &Service) -> io::Result<String> {
@@ -848,6 +852,7 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
         open_unknown,
         needs_attention,
         commit_items,
+        storage,
     } = store_overview;
     let uncertain = queue_health.namespace_uncertain + queue_health.upload_uncertain;
     let sync_state = if error.is_some()
@@ -916,6 +921,7 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
         "connection_diagnostics":service.diagnostics.snapshot(),
         "sync_state":sync_state,"active_transfers":active_transfers,"issue_count":issue_count,
         "cache_availability":{"state":cache.state,"total":cache.total,"offline":cache.offline,"pinned":cache.pinned},
+        "storage":storage,
         "commit_diagnostics":commit_diagnostics,
         "release_job":release_job_summary(service),
         "version":{"build":env!("CARGO_PKG_VERSION"),"state_schema":drive_core::STATE_SCHEMA_VERSION,"ipc":crate::wire::VERSION},

@@ -113,15 +113,63 @@ journal 引用同样是 keep 集的来源：`operations` 中 `pending`/`inflight
 供其他客户端显示进度；它是 additive 字段，`schema` 仍为 1，旧 GUI 忽略即可，
 后台任务本身仍是内存态、不随服务重启保留。
 
-`limit_bytes = 0` 表示**不做自动淘汰**：缓存不会因为超过上限而自动 trim，会一直
-增长到用户手动释放或显式设置上限。需要自动回收时在 GUI 缓存设置中填入正整数
-上限（例如 20 GiB）；设置为 0 时仍可手动释放，只是后台 cache loop 不会自动淘汰。
+## 默认上限（issue #60）
+
+未显式设置 `cache_limit_bytes` 的 profile **不再**是"不淘汰"：有效上限为
+`min(10 GiB, 10 % 文件系统总空间)`（statvfs 不可用时回退 10 GiB）。为避免行为
+静默变化，`GetCacheSettings.usage` 追加：
+
+- `limit_source`：`default`（未设置，使用有界默认）/ `explicit`（用户显式正整数）/
+  `disabled`（显式 0）；
+- `recommended_limit_bytes`：该 profile 在有界默认下会得到的值，供 GUI 展示"建议
+  上限"报告。已有 profile 不会静默迁移到某个显式值，只是按有界默认参与预算计算。
+
+显式 `limit_bytes = 0` 仍是**不做自动淘汰**的 opt-out：缓存不会因为超过上限自动
+trim，可一直增长到用户手动释放；后台 cache loop 对该 profile 不自动淘汰。
+
+## drafts 配额、孤儿隔离与可见性（issue #60）
+
+`drafts/` 也有生命周期边界：
+
+- 默认配额 `min(5 GiB, 2 % 磁盘)`，可用 metadata `draft_quota_bytes` 覆盖（0 表示
+  不报告配额压力）。配额是软边界/诊断，绝不为了配额删除用户内容。
+- 孤儿判定：draft 行为 `dirty=1`、节点 `deleted=1`、**没有任何** `operations` 或
+  `namespace_ops` 行、无 `local_creations`、无打开句柄，且 body mtime 超过 30 天。
+  命中的 body 会被**移动**到 `drafts-quarantine/`（可恢复），而不是删除；
+  `collect_garbage()` 每条清理路径都会执行该判定。未上传、节点仍 live 的 draft
+  永远不进入该路径。
+- `restore_quarantined_drafts()` 把 quarantined body 移回 `drafts/`（不覆盖更新的
+  工作副本），恢复后 draft 行仍可打开。
+- 创建时检测：对已是 tombstone 的节点创建 draft（删除打开中的文件后继续写）会
+  累加 `draft_write_stats().unreferenced_draft_begins`，使这一类孤儿在产生时可见。
+
+`GetCacheSettings.usage` 追加 `drafts_bytes`、`drafts_unreferenced_bytes`（没有
+`operations`/`namespace_ops` 引用的草稿字节，即事故中 1.571 GB 不可见的那一类）、
+`drafts_reclaimable_bytes`、`drafts_protected_bytes`、`draft_quota_bytes`、
+`drafts_over_quota_bytes`；`GetOverview` 追加只读 `storage` 块（低成本字段，
+不含需要扫描 blobs 目录的 cache candidate 统计）。
+
+## 迁移备份轮转（issue #60）
+
+`Store::open` 在 schema 升级前写 `state-before-v<schema>-<uuid>.sqlite`（`VACUUM INTO`），
+现在：
+
+- 每次 writer 打开都轮转：保留最新的 2 份；超过 30 天的备份即使属于最新 2 份也可清理；
+  这些快照此前从不回收（事故 profile 有 10 份 / 2.25 GB）。
+- `VACUUM INTO` 前检查剩余空间 ≥ 3× 预计备份大小（`state.sqlite` + WAL）；不足时
+  拒绝打开并返回明确错误，而不是在没有回滚快照的情况下迁移。
+- `backup_inventory()`/`GetCacheSettings.usage` 的 `backup_bytes`、
+  `backup_reclaimable_bytes`、`backup_protected_bytes` 暴露占用与可清理项；
+  `MigrationBackupInventory.cleanable` 列出文件级明细（仅文件名/大小/年龄）。
+
+## 释放后的残留与 limit_bytes
 
 ## 验证入口
 
 ```sh
 cargo test -p drive-core --lib garbage_collection
-cargo test -p drive-core --test cache_policy release
+cargo test -p drive-core --test cache_policy   # 默认上限 / 类别可见性 / 备份轮转
+cargo test -p drive-core --test drafts         # drafts 配额、孤儿 quarantine、remove 终态回收
 cargo test -p drive-runtime --test release_job
 cargo test -p drive-runtime --lib release_job_tests
 GUI_PYTHON=... bash scripts/test-gui.sh   # 包含 release_gui_tests
