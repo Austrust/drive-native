@@ -605,8 +605,8 @@ fn five_state_protection_plan_is_history_independent_at_100k() {
                 CASE WHEN n % 250 = 0 THEN 'blob'||n ELSE NULL END
          FROM generate;
          INSERT INTO operations(id,node,kind,base,generation,state,blob)
-         SELECT 'live'||n,'n'||n,'upload','v1',1,'pending','live-blob'||n
-         FROM generate WHERE n < 40;
+         WITH RECURSIVE live(n) AS (SELECT 0 UNION ALL SELECT n+1 FROM live WHERE n < 39)
+         SELECT 'live'||n,'n'||n,'upload','v1',1,'pending','live-blob'||n FROM live;
          COMMIT;",
     )
     .unwrap();
