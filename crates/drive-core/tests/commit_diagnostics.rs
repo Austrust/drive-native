@@ -433,3 +433,78 @@ fn namespace_reconcile_attempts_survive_restart_and_match_diagnostics() {
     );
     assert_eq!(namespace_attempts(&s, &operation), 3);
 }
+
+// ---- #9 TB3: scheduler observation must not erase the concrete reason ------
+
+/// The runtime reconcile branches write a concrete diagnosis (e.g. "unexpected
+/// reply during rename reconcile"). The scheduler's generic observation runs in
+/// the same pass and used to overwrite that text; it may only advance the retry
+/// bookkeeping for a row that already carries a concrete reason.
+#[test]
+fn namespace_observation_preserves_the_runtime_reconcile_reason() {
+    let (_dir, mut s) = fixture();
+    s.rename_local("1", "A.doc", "1", "B.doc", false).unwrap();
+    let operation = s.next_rename().unwrap().unwrap().job.operation;
+    s.mark_rename_started(&operation).unwrap();
+    // The runtime reconcile branch writes this concrete reason once the journal
+    // row is already `uncertain`.
+    s.mark_rename_uncertain_diagnosed(
+        &operation,
+        CommitCategory::Protocol,
+        Some("server returned an unexpected reply during rename reconcile"),
+    )
+    .unwrap();
+    s.record_namespace_commit_diagnostic(
+        &operation,
+        CommitCategory::Protocol,
+        Some("server returned an unexpected reply during rename reconcile"),
+        0,
+    )
+    .unwrap();
+
+    assert!(
+        s.observe_namespace_unresolved(&operation, Observation::CommitUnconfirmed)
+            .unwrap()
+    );
+
+    let diagnostic = diagnostics(&s)
+        .into_iter()
+        .find(|d| d.scope == "namespace" && d.operation == operation)
+        .expect("namespace diagnostic");
+    assert_eq!(diagnostic.outcome, CommitOutcome::UnknownRetryable);
+    assert_eq!(diagnostic.category, CommitCategory::Protocol);
+    assert_eq!(
+        diagnostic.last_error.as_deref(),
+        Some("server returned an unexpected reply during rename reconcile"),
+        "the scheduler observation must keep the concrete reconcile reason"
+    );
+    assert!(diagnostic.attempts > 0);
+    assert!(diagnostic.next_retry_at > 0);
+}
+
+/// A restart backfills `uncertain` rows with the placeholder
+/// `interrupted` category. The first scheduler observation still owns that
+/// row and must replace the placeholder with the observed category/reason.
+#[test]
+fn namespace_observation_refines_interrupted_backfill() {
+    let (_dir, mut s) = fixture();
+    s.rename_local("1", "A.doc", "1", "B.doc", false).unwrap();
+    let operation = s.next_rename().unwrap().unwrap().job.operation;
+    s.mark_rename_started(&operation).unwrap();
+    s.mark_rename_uncertain(&operation).unwrap();
+
+    assert!(
+        s.observe_namespace_unresolved(&operation, Observation::CommitUnconfirmed)
+            .unwrap()
+    );
+
+    let diagnostic = diagnostics(&s)
+        .into_iter()
+        .find(|d| d.scope == "namespace" && d.operation == operation)
+        .expect("namespace diagnostic");
+    assert_eq!(diagnostic.category, CommitCategory::Protocol);
+    assert_eq!(
+        diagnostic.last_error.as_deref(),
+        Some("namespace commit outcome unconfirmed; reconciling without replay")
+    );
+}
