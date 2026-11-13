@@ -897,7 +897,7 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
     // Extracted from the big literal below: the macro expands the nested object
     // one level per key, and the overview is already close to the recursion cap.
     let recovery_actions = serde_json::json!({"recheck_issues":true,"abandon_upload":true,
-        "bound_directory_recovery":true});
+        "bound_directory_recovery":true,"abandon_remove":true});
     // Issue #9 TB2: additive, read-only diagnosis list. `items` may contain
     // terminal abandoned rows; `open_unknown`/`needs_attention` exclude them.
     let commit_diagnostics = commit_diagnostics_json(open_unknown, needs_attention, &commit_items);
@@ -1623,6 +1623,20 @@ pub fn keep_directory_remote(service: &Service, id: &str, token: &str) -> io::Re
     Ok(serde_json::json!({"schema":1,"directory_id":id,"path":path,
         "kept_remote":true,"deleted_local":false}).to_string())
 }
+/// Issue #6 residual ② (additive): abandon the local delete intent of a native
+/// remove that ended in `conflict` and keep the remote content. The intent becomes
+/// terminal `confirmed/local_abandoned`; the remote side is never modified, so the
+/// reply always reports `server_changed: false`. Repeating the call is an
+/// idempotent no-op.
+pub fn abandon_remove_conflict(service: &Service, id: &str, token: &str) -> io::Result<String> {
+    let (node, path) =
+        service
+            .bridge
+            .abandon_remove_conflict(&service.profile.scope.file_id, id, token)?;
+    Ok(serde_json::json!({"schema":1,"abandoned":true,"id":node.id,"path":path,
+        "kept_remote":true,"deleted_local":false,"server_changed":false,
+        "summary":"已放弃本地删除意图并恢复远端内容；未向服务器发送删除"}).to_string())
+}
 /// Abandon one unconfirmed local creation: the operation moves to the persistent
 /// `abandoned` terminal state and the local-only file is retired. The remote
 /// side is never touched, so the reply always reports `server_changed: false`.
@@ -1804,6 +1818,15 @@ impl Desktop {
     async fn keep_directory_remote(&self, id: String, token: String) -> zbus::fdo::Result<String> {
         let s = self.0.clone();
         local(move || keep_directory_remote(&s, &id, &token)).await
+    }
+    /// Additive issue-center action (issue #6): abandon the local delete intent
+    /// of a native remove that ended in `conflict`, keeping the remote content.
+    /// Advertised by `GetOverview.recovery_actions.abandon_remove`; older
+    /// backends lack the method and the GUI keeps offering recheck instead.
+    /// Never sends a delete/modify RPC.
+    async fn abandon_remove_conflict(&self, id: String, token: String) -> zbus::fdo::Result<String> {
+        let s = self.0.clone();
+        local(move || abandon_remove_conflict(&s, &id, &token)).await
     }
     /// Additive issue-center action advertised by
     /// `GetOverview.recovery_actions.abandon_upload`. It only retires a local

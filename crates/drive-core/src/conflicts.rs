@@ -23,6 +23,11 @@ pub struct SyncIssue {
     /// True when accepting the remote deletion of that bound directory would
     /// not lose any surviving local-only content.
     pub can_keep_remote: bool,
+    /// Additive (issue #6 residual ②): the node is a tombstone whose native
+    /// remove ended in `conflict`, and the only safe recovery is to abandon the
+    /// local delete intent and keep the remote content. The action never sends
+    /// a delete/modify RPC. See [`Store::abandon_remove_conflict`].
+    pub can_abandon_remove: bool,
 }
 #[derive(Debug, Serialize)]
 pub struct IssuePage {
@@ -258,6 +263,53 @@ impl Store {
             } else {
                 None
             };
+        // Issue #6 residual ②: a native remove that ended in `conflict` leaves a
+        // tombstone with no executable action (all can_*_below are false). Its
+        // only safe recovery is "abandon the local delete intent, keep the
+        // remote content"; the returned operation id is the CAS fingerprint.
+        let conflict_remove: Option<String> = {
+            let mut q = self.db.prepare(
+                "SELECT id FROM namespace_ops WHERE node=?1 AND kind='remove' AND state='conflict' ORDER BY seq",
+            )?;
+            let ids: Vec<String> = q
+                .query_map([id], |r| r.get(0))?
+                .collect::<std::result::Result<_, _>>()?;
+            match ids.as_slice() {
+                [operation] => Some(operation.clone()),
+                _ => None,
+            }
+        };
+        let other_unfinished_namespace: bool = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM namespace_ops WHERE node=?1
+                 AND state NOT IN ('committed','superseded')
+                 AND NOT (kind='remove' AND state='conflict'))",
+            [id],
+            |r| r.get(0),
+        )?;
+        let unfinished_operations: bool = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM operations WHERE node=?1 AND state NOT IN ('committed','superseded'))",
+            [id],
+            |r| r.get(0),
+        )?;
+        let surviving_children: bool = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM nodes WHERE parent=?1 AND deleted=0)",
+            [id],
+            |r| r.get(0),
+        )?;
+        // Strict safety gate: only an untouched, still-tombstoned remote-bound
+        // node whose sole unfinished intent is this conflicted remove.
+        let can_abandon_remove = deleted
+            && !local_creation
+            && node.version != CREATE_VERSION
+            && parent_live
+            && !busy
+            && dirty.is_none()
+            && draft.is_none()
+            && conflict_remove.is_some()
+            && !other_unfinished_namespace
+            && !unfinished_operations
+            && !surviving_children
+            && self.locally_unlinked(id)?;
         let reason = if uncertain {
             "commit_uncertain"
         } else if directory_plan.is_some() {
@@ -323,6 +375,7 @@ impl Store {
             can_keep_local,
             can_keep_remote,
         ))?);
+        token_input.extend(serde_json::to_vec(&(&conflict_remove, can_abandon_remove))?);
         let token = crate::sha256(&token_input);
         Ok(Some(SyncIssue {
             id: id.into(),
@@ -339,6 +392,7 @@ impl Store {
             can_abandon_upload,
             can_keep_local,
             can_keep_remote,
+            can_abandon_remove,
             token,
         }))
     }
@@ -658,6 +712,129 @@ impl Store {
             copy,
             path,
         })
+    }
+
+    /// Issue #6 residual ②: abandon the local delete intent of a native remove
+    /// that ended in `conflict`, keeping the remote content.
+    ///
+    /// This is the only safe recovery for the field shape (tombstoned node,
+    /// `last_error="remote changed before the remove was confirmed"`, all
+    /// `can_*` flags false). It is **local-only**: the node is restored
+    /// (`deleted`/`conflict` cleared), the hidden working copy is left for the
+    /// normal read path (re-downloaded on demand if it was already reclaimed),
+    /// and the journal intent becomes terminal `confirmed/local_abandoned`. No
+    /// delete/modify RPC is ever sent.
+    ///
+    /// `expected` is the CAS token returned by GetIssues. Repeating the call
+    /// after a successful abandonment is an idempotent no-op that returns the
+    /// restored node.
+    pub fn abandon_remove_conflict(
+        &mut self,
+        root: &str,
+        id: &str,
+        expected: &str,
+    ) -> Result<(Node, String)> {
+        let Some(issue) = self.sync_issue(root, id)? else {
+            return self.abandoned_remove_restored(id);
+        };
+        if issue.token != expected || !issue.can_abandon_remove {
+            return Err(Error::State("recovery entry is stale".into()));
+        }
+        let operation: String = self.db.query_row(
+            "SELECT id FROM namespace_ops WHERE node=?1 AND kind='remove' AND state='conflict' ORDER BY seq LIMIT 1",
+            [id],
+            |r| r.get(0),
+        )?;
+        let tx = self.db.transaction()?;
+        // Re-check the strict preconditions inside the transaction: the issue
+        // list may come from a read-only snapshot taken before this call.
+        let (deleted, conflict): (bool, bool) = tx.query_row(
+            "SELECT deleted,conflict FROM nodes WHERE id=?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        let clean: bool = tx.query_row(
+            "SELECT dirty_blob IS NULL
+                    AND NOT EXISTS(SELECT 1 FROM drafts WHERE node=?1)
+                    AND NOT EXISTS(SELECT 1 FROM operations WHERE node=?1 AND state NOT IN ('committed','superseded'))
+                    AND NOT EXISTS(SELECT 1 FROM namespace_ops WHERE node=?1 AND state NOT IN ('committed','superseded') AND NOT (kind='remove' AND state='conflict'))
+                    AND NOT EXISTS(SELECT 1 FROM nodes WHERE parent=?1 AND deleted=0)
+                    AND EXISTS(SELECT 1 FROM local_unlinks WHERE node=?1)
+              FROM nodes WHERE id=?1",
+            [id],
+            |r| r.get(0),
+        )?;
+        if !deleted || !conflict || !clean {
+            return Err(Error::State(
+                "remove conflict is not safely recoverable".into(),
+            ));
+        }
+        let changed = tx.execute(
+            "UPDATE namespace_ops SET state='superseded', outcome='confirmed',
+                    outcome_category='local_abandoned',
+                    last_error='local remove abandoned; remote content kept',
+                    next_retry_at=0, updated_at=unixepoch()
+              WHERE id=?1 AND node=?2 AND kind='remove' AND state='conflict'",
+            params![operation, id],
+        )?;
+        if changed != 1 {
+            return Err(Error::State(
+                "remove conflict changed before recovery".into(),
+            ));
+        }
+        crate::commit_diagnostics::record(
+            &tx,
+            "namespace_ops",
+            &operation,
+            &crate::commit_outcome::CommitDiagnostic::confirmed_with_category(
+                crate::commit_outcome::CommitCategory::LocalAbandoned,
+                Some("local remove abandoned; remote content kept".into()),
+            ),
+        )?;
+        tx.execute("DELETE FROM local_unlinks WHERE node=?1", [id])?;
+        tx.execute("DELETE FROM namespace_overlay WHERE node=?1", [id])?;
+        if tx.execute(
+            "UPDATE nodes SET deleted=0, conflict=0 WHERE id=?1 AND deleted=1",
+            [id],
+        )? != 1
+        {
+            return Err(Error::State(
+                "remove conflict node changed before recovery".into(),
+            ));
+        }
+        // The node was a tombstone: its inode/records must be projected again.
+        crate::filesystem::mark_inode_map_incomplete(&tx)?;
+        tx.commit()?;
+        let node = self.issue_node(id)?;
+        Ok((node, issue.path))
+    }
+
+    /// Idempotent tail of [`Store::abandon_remove_conflict`]: after a successful
+    /// abandonment the node is live and no remove intent remains, so a repeated
+    /// call must not fail nor weaken any state.
+    fn abandoned_remove_restored(&self, id: &str) -> Result<(Node, String)> {
+        let state: Option<(bool, bool)> = self
+            .db
+            .query_row(
+                "SELECT deleted, conflict FROM nodes WHERE id=?1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        let Some((deleted, conflict)) = state else {
+            return Err(Error::State("recovery entry is stale".into()));
+        };
+        let unfinished_remove: bool = self.db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM namespace_ops WHERE node=?1 AND kind='remove' AND state NOT IN ('committed','superseded'))",
+            [id],
+            |r| r.get(0),
+        )?;
+        if deleted || conflict || unfinished_remove {
+            return Err(Error::State("recovery entry is stale".into()));
+        }
+        let node = self.issue_node(id)?;
+        let path = crate::namespace::node_path(&self.db, id)?;
+        Ok((node, path))
     }
 }
 

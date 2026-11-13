@@ -1973,6 +1973,46 @@ impl Bridge {
         self.signal_upload();
         Ok(path)
     }
+
+    /// Issue #6 residual ②: abandon the local delete intent of a native remove
+    /// that ended in `conflict` and keep the remote content. This is a
+    /// local-only recovery: no delete/modify RPC is ever sent. A repeated call
+    /// after a successful abandonment is an idempotent no-op.
+    pub fn abandon_remove_conflict(
+        &self,
+        root: &str,
+        id: &str,
+        token: &str,
+    ) -> io::Result<(drive_core::Node, String)> {
+        let mut store = self.store.lock().unwrap();
+        if let Some(issue) = store.sync_issue(root, id).map_err(io::Error::other)? {
+            if issue.token != token || !issue.can_abandon_remove {
+                return Err(io::Error::other(
+                    "recovery unavailable; reload the issue center",
+                ));
+            }
+        }
+        let (node, path) = store
+            .abandon_remove_conflict(root, id, token)
+            .map_err(io::Error::other)?;
+        // The node was a tombstone; after restoration readers must refresh both
+        // the node inode and the parent entry.
+        if let Ok(record) = store.record(id) {
+            self.enqueue_invalidation(Invalidation::Inode(record.ino));
+            if let Some(parent) = record.node.parent.as_deref() {
+                if let Ok(parent) = store.record(parent) {
+                    self.enqueue_invalidation(Invalidation::Entry(
+                        parent.ino,
+                        record.node.name.clone(),
+                    ));
+                    self.enqueue_invalidation(Invalidation::Inode(parent.ino));
+                }
+            }
+        }
+        drop(store);
+        self.signal_upload();
+        Ok((node, path))
+    }
     /// Abandon one unconfirmed local creation (user action from the issue
     /// center). The token is the same CAS token returned by GetIssues, so a
     /// stale dialog can never retire a newer issue. Only the local-only file is

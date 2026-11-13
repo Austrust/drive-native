@@ -1763,3 +1763,75 @@ fn conflicted_remove_recovery_is_advertised_additively() {
     assert_eq!(entry["can_keep_both"], serde_json::json!(false));
     assert!(entry["token"].is_string());
 }
+
+/// Issue #6 residual ② GREEN: the additive keep-remote recovery round-trips
+/// through the desktop API, restores the node, leaves no queued delete work and
+/// makes no RPC. The fixture points the worker at `/nonexistent-worker`, so any
+/// attempted RPC would fail; the call returning `Ok` and leaving empty queues is
+/// the local-only proof.
+#[test]
+fn abandon_remove_conflict_round_trips_through_ipc_without_rpc() {
+    let (_d, service) = fixture();
+    {
+        let mut store = service.bridge.store.lock().unwrap();
+        drive_core::write_permissions::set_local_policy(
+            &store,
+            "root",
+            drive_core::write_permissions::LocalPolicy::FollowRemote,
+        )
+        .unwrap();
+        store.unlink_local("folder", "one", "one", false).unwrap();
+        let queued = store.next_remove().unwrap().unwrap();
+        store.mark_remove_started(&queued.job.operation).unwrap();
+        store.conflict_remove(&queued.job.operation).unwrap();
+    }
+    let issues: serde_json::Value =
+        serde_json::from_str(&desktop::issues(&service, "").unwrap()).unwrap();
+    let entry = issues["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["id"] == serde_json::json!("one"))
+        .expect("conflicted remove must be listed")
+        .clone();
+    assert_eq!(entry["can_abandon_remove"], serde_json::json!(true));
+    let token = entry["token"].as_str().unwrap().to_owned();
+    // A stale/incorrect token must be refused before any state change.
+    assert!(desktop::abandon_remove_conflict(&service, "one", "stale-token").is_err());
+
+    let reply: serde_json::Value =
+        serde_json::from_str(&desktop::abandon_remove_conflict(&service, "one", &token).unwrap())
+            .unwrap();
+    assert_eq!(reply["schema"], 1);
+    assert_eq!(reply["abandoned"], serde_json::json!(true));
+    assert_eq!(reply["kept_remote"], serde_json::json!(true));
+    assert_eq!(reply["deleted_local"], serde_json::json!(false));
+    assert_eq!(reply["server_changed"], serde_json::json!(false));
+    assert_eq!(reply["id"], serde_json::json!("one"));
+    assert_eq!(reply["path"], "folder/one");
+    {
+        let store = service.bridge.store.lock().unwrap();
+        assert!(store.lookup("folder", "one").is_ok(), "node must be visible again");
+        assert_eq!(store.pending_operations().unwrap(), 0);
+        assert_eq!(store.pending_namespace_operations().unwrap(), 0);
+        assert!(store.next_namespace_operation().unwrap().is_none());
+        assert!(store.next_remove().unwrap().is_none());
+    }
+    assert!(
+        service.bridge.transfer_entries().is_empty(),
+        "a local-only recovery must not queue any transfer"
+    );
+    let issues: serde_json::Value =
+        serde_json::from_str(&desktop::issues(&service, "").unwrap()).unwrap();
+    assert!(issues["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|entry| entry["id"] != serde_json::json!("one")));
+    // Repeating the (now stale) token is an idempotent no-op at the core API.
+    let again: serde_json::Value =
+        serde_json::from_str(&desktop::abandon_remove_conflict(&service, "one", &token).unwrap())
+            .unwrap();
+    assert_eq!(again["abandoned"], serde_json::json!(true));
+    assert_eq!(again["server_changed"], serde_json::json!(false));
+}
