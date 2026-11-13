@@ -361,3 +361,75 @@ fn snapshot_install_marks_unresolved_inflight_upload_as_interrupted() {
         .contains("snapshot replaced"));
     assert!(commit_diagnostics::open_unknown(&s).unwrap() >= 1);
 }
+
+// ---- #57: namespace reconcile attempts must be durable ---------------------
+
+use drive_core::namespace_schedule::NamespaceRecoveryObservation as Observation;
+
+fn namespace_attempts(s: &Store, operation: &str) -> i64 {
+    let record = commit_diagnostics::list(s, 200)
+        .unwrap()
+        .into_iter()
+        .find(|record| record.scope == "namespace" && record.operation == operation)
+        .expect("namespace diagnostic");
+    i64::from(record.attempts)
+}
+
+fn journal_attempts(dir: &tempfile::TempDir, operation: &str) -> i64 {
+    let db = rusqlite::Connection::open(dir.path().join("state.sqlite")).unwrap();
+    db.query_row(
+        "SELECT attempts FROM namespace_ops WHERE id=?1",
+        [operation],
+        |row| row.get(0),
+    )
+    .unwrap()
+}
+
+/// Acceptance criterion: `namespace_ops.attempts` is written by
+/// `commit_diagnostics::record()`, survives a restart and matches the
+/// diagnostics view (`GetIssues`/CLI read the same projection). The in-process
+/// `NamespaceRuntime.recovery` counter may reset, the durable column may not.
+#[test]
+fn namespace_reconcile_attempts_survive_restart_and_match_diagnostics() {
+    let (dir, mut s) = fixture();
+    s.rename_local("1", "A.doc", "1", "B.doc", false).unwrap();
+    let queued = s.next_rename().unwrap().unwrap();
+    let operation = queued.job.operation.clone();
+    s.mark_rename_started(&operation).unwrap();
+    s.mark_rename_uncertain_diagnosed(&operation, CommitCategory::Protocol, Some("lost reply"))
+        .unwrap();
+
+    for expected in 1..=2i64 {
+        assert!(
+            s.observe_namespace_unresolved(&operation, Observation::CommitUnconfirmed)
+                .unwrap()
+        );
+        assert_eq!(
+            journal_attempts(&dir, &operation),
+            expected,
+            "record() must persist namespace_ops.attempts"
+        );
+        assert_eq!(namespace_attempts(&s, &operation), expected);
+    }
+    // The process-local observation map is the only in-memory copy: a restart
+    // must keep the durable attempts and continue the counter from the journal.
+    drop(s);
+    let mut s = Store::open(dir.path()).unwrap();
+    assert_eq!(journal_attempts(&dir, &operation), 2);
+    assert_eq!(namespace_attempts(&s, &operation), 2);
+    assert_eq!(
+        s.queue_health().unwrap().recovery_attempts_observed,
+        0,
+        "in-process counter resets on restart by design"
+    );
+    assert!(
+        s.observe_namespace_unresolved(&operation, Observation::CommitUnconfirmed)
+            .unwrap()
+    );
+    assert_eq!(
+        journal_attempts(&dir, &operation),
+        3,
+        "the durable counter must continue instead of restarting at 1"
+    );
+    assert_eq!(namespace_attempts(&s, &operation), 3);
+}
