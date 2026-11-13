@@ -304,7 +304,21 @@ pub fn states(service: &Service, paths: Vec<String>) -> io::Result<String> {
     if paths.len() > 256 {
         return Err(io::Error::other("at most 256 paths per batch"));
     }
-    let active = service.bridge.active_downloads().into_iter().collect();
+    let active: HashSet<String> = service.bridge.active_downloads().into_iter().collect();
+    // Issue #67 R2: with no committed projection this call pays the O(#nodes)
+    // authoritative read. Overlapping identical batches join the one in-flight
+    // read instead of each repeating it; a different batch never waits.
+    if service.status_projection().is_none() {
+        let key = crate::service::ColdStatesKey::new(
+            &paths,
+            &active,
+            service.bridge.store.change_state(),
+        );
+        return service.join_cold_states(key, || {
+            let ro = read_only(service);
+            states_with(service, paths, &active, ro.as_deref())
+        });
+    }
     let ro = read_only(service);
     states_with(service, paths, &active, ro.as_deref())
 }
@@ -3615,6 +3629,177 @@ mod readpath_tests {
         assert_eq!(serializations, calls, "serialization count changed");
         assert_eq!(hits + builds, calls, "not every warm call used the committed render");
         assert!(opens < calls, "{calls} calls opened {opens} connections");
+        service.shutdown();
+        tasks.join();
+    }
+
+    /// A cold batch large enough that the authoritative root read is measurable;
+    /// the R2 gate must make overlapping identical batches share one read.
+    fn cold_fixture() -> (tempfile::TempDir, Arc<Service>) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(dir.path()).unwrap();
+        let mut nodes = vec![node("root", None, true)];
+        for folder in 0..32 {
+            let folder_id = format!("d{folder:03}");
+            nodes.push(node(&folder_id, Some("root"), true));
+            for file in 0..64 {
+                nodes.push(node(
+                    &format!("f{folder:03}-{file:03}"),
+                    Some(&folder_id),
+                    false,
+                ));
+            }
+        }
+        store
+            .install_remote_snapshot(&nodes, "1", "server")
+            .unwrap();
+        store.ensure_fs_root("root").unwrap();
+        (
+            dir,
+            Service::new(profile(), store, PathBuf::from("/nonexistent-worker")).unwrap(),
+        )
+    }
+
+    /// Issue #67 R2: no projection means the batch pays the O(#nodes)
+    /// authoritative read. Overlapping identical batches must join the one
+    /// in-flight read and reuse its response instead of each reading the store.
+    #[test]
+    fn cold_states_joins_overlapping_identical_batches() {
+        let (_dir, service) = cold_fixture();
+        service.set_cold_states_delay_ms(120);
+        let paths = vec![".".to_string()];
+        let baseline = states(&service, paths.clone()).unwrap();
+        service.reset_cold_states_stats();
+        let threads = 16usize;
+        let barrier = Arc::new(std::sync::Barrier::new(threads));
+        let mut handles = Vec::with_capacity(threads);
+        for _ in 0..threads {
+            let barrier = barrier.clone();
+            let service = service.clone();
+            let paths = paths.clone();
+            handles.push(std::thread::spawn(move || {
+                barrier.wait();
+                states(&service, paths).unwrap()
+            }));
+        }
+        for handle in handles {
+            assert_eq!(
+                handle.join().unwrap(),
+                baseline,
+                "joined cold batch changed"
+            );
+        }
+        assert_eq!(
+            service.cold_states_computations(),
+            1,
+            "one overlapping cold batch must run the authoritative read once"
+        );
+        assert!(
+            service.cold_states_joins() >= threads - 2,
+            "overlapping cold batches did not join: {} rejoined",
+            service.cold_states_joins()
+        );
+    }
+
+    /// A different batch key (paths/active set/committed state) must not be
+    /// served by an unrelated in-flight gate.
+    #[test]
+    fn cold_states_keeps_distinct_batches_apart() {
+        let (_dir, service) = cold_fixture();
+        let root_paths = vec![".".to_string()];
+        let folder_paths = vec!["d001".to_string()];
+        let root_baseline = states(&service, root_paths.clone()).unwrap();
+        let folder_baseline = states(&service, folder_paths.clone()).unwrap();
+        service.set_cold_states_delay_ms(150);
+        service.reset_cold_states_stats();
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let root_service = service.clone();
+        let root_barrier = barrier.clone();
+        let root_thread = std::thread::spawn(move || {
+            root_barrier.wait();
+            states(&root_service, root_paths).unwrap()
+        });
+        let folder_service = service.clone();
+        let folder_barrier = barrier.clone();
+        let folder_thread = std::thread::spawn(move || {
+            folder_barrier.wait();
+            states(&folder_service, folder_paths).unwrap()
+        });
+        assert_eq!(root_thread.join().unwrap(), root_baseline);
+        assert_eq!(folder_thread.join().unwrap(), folder_baseline);
+        assert_eq!(
+            service.cold_states_computations(),
+            2,
+            "distinct cold batches must both be computed"
+        );
+    }
+
+    /// The leader's error must reach every joined caller and the gate must be
+    /// cleared so a following request can retry and succeed.
+    #[test]
+    fn cold_states_propagates_leader_error_and_recovers() {
+        let (_dir, service) = cold_fixture();
+        service.set_cold_states_delay_ms(80);
+        service.set_cold_states_fail_next(true);
+        service.reset_cold_states_stats();
+        let paths = vec![".".to_string()];
+        let threads = 8usize;
+        let barrier = Arc::new(std::sync::Barrier::new(threads));
+        let mut handles = Vec::with_capacity(threads);
+        for _ in 0..threads {
+            let barrier = barrier.clone();
+            let service = service.clone();
+            let paths = paths.clone();
+            handles.push(std::thread::spawn(move || {
+                barrier.wait();
+                states(&service, paths)
+            }));
+        }
+        for handle in handles {
+            let error = handle
+                .join()
+                .unwrap()
+                .expect_err("every joined caller must see the leader error");
+            assert!(
+                error.to_string().contains("injected cold-states failure"),
+                "leader error was not propagated: {error}"
+            );
+        }
+        assert_eq!(
+            service.cold_states_computations(),
+            0,
+            "the injected failure must replace the authoritative read"
+        );
+        // The gate is cleared: the next request retries and succeeds.
+        let recovered = states(&service, vec![".".to_string()]).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&recovered).unwrap();
+        assert_eq!(value["schema"], 1);
+    }
+
+    /// With a ready projection the cold gate must be completely bypassed.
+    #[test]
+    fn cold_states_gate_is_bypassed_when_the_projection_is_ready() {
+        let (_dir, service) = cold_fixture();
+        let tasks = service.clone().start();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while service.status_projection().is_none() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "status projection did not become ready within 10s"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        service.reset_cold_states_stats();
+        let paths = vec![".".to_string()];
+        let baseline = states(&service, paths.clone()).unwrap();
+        for _ in 0..8 {
+            assert_eq!(states(&service, paths.clone()).unwrap(), baseline);
+        }
+        assert_eq!(
+            service.cold_states_computations(),
+            0,
+            "the warm projection path must not enter the cold gate"
+        );
         service.shutdown();
         tasks.join();
     }

@@ -418,6 +418,98 @@ impl Drop for ReadOnlyHandle {
         }
     }
 }
+/// Issue #67 R2: identity of one cold (no committed projection) `GetStates`
+/// batch. Paths and the active-download set are order-insensitive, and the
+/// committed store state keeps a gate from ever bridging a commit.
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct ColdStatesKey {
+    paths: Vec<String>,
+    active: Vec<String>,
+    commit: drive_core::shared_store::CommitState,
+}
+impl ColdStatesKey {
+    pub(crate) fn new(
+        paths: &[String],
+        active: &std::collections::HashSet<String>,
+        commit: drive_core::shared_store::CommitState,
+    ) -> Self {
+        let mut paths = paths.to_vec();
+        paths.sort_unstable();
+        let mut active: Vec<String> = active.iter().cloned().collect();
+        active.sort_unstable();
+        Self {
+            paths,
+            active,
+            commit,
+        }
+    }
+}
+/// Leader outcome kept for joiners. `io::Error` is not `Clone`, so the kind and
+/// message are stored and each joiner rebuilds an equivalent error.
+type ColdStatesOutcome = std::result::Result<String, (std::io::ErrorKind, String)>;
+struct ColdStatesEntry {
+    key: ColdStatesKey,
+    outcome: Option<ColdStatesOutcome>,
+    followers: usize,
+}
+fn rebuild_cold_states_outcome(outcome: &ColdStatesOutcome) -> std::io::Result<String> {
+    match outcome {
+        Ok(body) => Ok(body.clone()),
+        Err((kind, message)) => Err(std::io::Error::new(*kind, message.clone())),
+    }
+}
+/// RAII registration of the in-flight cold batch: a panicking leader clears its
+/// gate instead of wedging every later waiter.
+struct ColdStatesLeader<'a> {
+    service: &'a Service,
+    key: ColdStatesKey,
+    published: bool,
+}
+impl ColdStatesLeader<'_> {
+    fn finish(mut self, result: &std::io::Result<String>) {
+        self.published = true;
+        let mut gate = self
+            .service
+            .cold_states
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut clear = false;
+        if let Some(entry) = gate.as_mut() {
+            if entry.key == self.key {
+                entry.outcome = Some(match result {
+                    Ok(body) => Ok(body.clone()),
+                    Err(error) => Err((error.kind(), error.to_string())),
+                });
+                // The last waiting caller clears the gate after copying it, so
+                // nothing is cached once the overlap ends.
+                clear = entry.followers == 0;
+            }
+        }
+        if clear {
+            *gate = None;
+        }
+        self.service.cold_states_changed.notify_all();
+    }
+}
+impl Drop for ColdStatesLeader<'_> {
+    fn drop(&mut self) {
+        if self.published {
+            return;
+        }
+        let mut gate = self
+            .service
+            .cold_states
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if gate
+            .as_ref()
+            .is_some_and(|entry| entry.key == self.key && entry.outcome.is_none())
+        {
+            *gate = None;
+        }
+        self.service.cold_states_changed.notify_all();
+    }
+}
 /// Nanosecond resolution for the test-only read-path breakdown.
 #[cfg(test)]
 fn elapsed_ns(started: Instant) -> u64 {
@@ -459,6 +551,22 @@ pub struct Service {
     cache_trim_runs: AtomicUsize,
     /// Issue #67 R1: bounded idle pool of private read-only connections.
     read_only_pool: Arc<ReadOnlyPool>,
+    /// Issue #67 R2: the in-flight cold (no projection) `GetStates` batch.
+    /// Overlapping identical batches join it and reuse its JSON; it is cleared
+    /// as soon as the overlap ends, so nothing is cached across requests.
+    cold_states: Mutex<Option<ColdStatesEntry>>,
+    cold_states_changed: Condvar,
+    /// Issue #67 R2 test hooks: count the actual cold authoritative
+    /// computations, slow one down so overlapping batches are deterministic,
+    /// and inject one leader failure to test propagation/recovery.
+    #[cfg(test)]
+    cold_states_computations: AtomicUsize,
+    #[cfg(test)]
+    cold_states_joins: AtomicUsize,
+    #[cfg(test)]
+    cold_states_delay_ms: AtomicU64,
+    #[cfg(test)]
+    cold_states_fail_next: AtomicBool,
     pub mounted: AtomicBool,
     /// Issue #61: structured startup pause decision, exposed additively in
     /// `GetOverview.startup_pause`. `None` for a store that could not be read.
@@ -606,6 +714,16 @@ impl Service {
             #[cfg(test)]
             cache_trim_runs: AtomicUsize::new(0),
             read_only_pool,
+            cold_states: Mutex::new(None),
+            cold_states_changed: Condvar::new(),
+            #[cfg(test)]
+            cold_states_computations: AtomicUsize::new(0),
+            #[cfg(test)]
+            cold_states_joins: AtomicUsize::new(0),
+            #[cfg(test)]
+            cold_states_delay_ms: AtomicU64::new(0),
+            #[cfg(test)]
+            cold_states_fail_next: AtomicBool::new(false),
             mounted: AtomicBool::new(false),
             shutdown_diagnostics: crate::shutdown::Diagnostics::default(),
             worker_image,
@@ -770,6 +888,145 @@ impl Service {
     #[cfg(test)]
     pub(crate) fn reset_read_only_open_stats(&self) {
         self.read_only_pool.reset_open_stats();
+    }
+    #[cfg(test)]
+    pub(crate) fn count_cold_states_computation(&self) {
+        self.cold_states_computations.fetch_add(1, Ordering::Relaxed);
+    }
+    #[cfg(test)]
+    pub(crate) fn cold_states_computations(&self) -> usize {
+        self.cold_states_computations.load(Ordering::Relaxed)
+    }
+    #[cfg(test)]
+    pub(crate) fn cold_states_joins(&self) -> usize {
+        self.cold_states_joins.load(Ordering::Relaxed)
+    }
+    #[cfg(test)]
+    pub(crate) fn reset_cold_states_stats(&self) {
+        self.cold_states_computations.store(0, Ordering::Relaxed);
+        self.cold_states_joins.store(0, Ordering::Relaxed);
+    }
+    #[cfg(test)]
+    pub(crate) fn set_cold_states_delay_ms(&self, ms: u64) {
+        self.cold_states_delay_ms.store(ms, Ordering::Relaxed);
+    }
+    #[cfg(test)]
+    pub(crate) fn cold_states_test_delay(&self) {
+        let ms = self.cold_states_delay_ms.load(Ordering::Relaxed);
+        if ms > 0 {
+            std::thread::sleep(Duration::from_millis(ms));
+        }
+    }
+    #[cfg(test)]
+    pub(crate) fn set_cold_states_fail_next(&self, fail: bool) {
+        self.cold_states_fail_next.store(fail, Ordering::Release);
+    }
+    #[cfg(test)]
+    pub(crate) fn take_cold_states_test_failure(&self) -> bool {
+        self.cold_states_fail_next.swap(false, Ordering::AcqRel)
+    }
+    /// Issue #67 R2: run one cold authoritative `GetStates` computation, or
+    /// join the identical batch already in flight.
+    ///
+    /// This is request coalescing only: the leader publishes its response to the
+    /// callers that are already waiting, the last of them clears the gate, and a
+    /// different key or a later request always computes again. A panicking
+    /// leader clears the gate through [`ColdStatesLeader`]'s drop guard.
+    pub(crate) fn join_cold_states<F>(&self, key: ColdStatesKey, work: F) -> std::io::Result<String>
+    where
+        F: FnOnce() -> std::io::Result<String>,
+    {
+        let mut waited = false;
+        {
+            let mut gate = self
+                .cold_states
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            loop {
+                let outcome = {
+                    let Some(entry) = gate.as_mut() else { break };
+                    if entry.key != key {
+                        break;
+                    }
+                    match &entry.outcome {
+                        Some(outcome) => Some(rebuild_cold_states_outcome(outcome)),
+                        None => {
+                            if !waited {
+                                waited = true;
+                                entry.followers += 1;
+                            }
+                            None
+                        }
+                    }
+                };
+                match outcome {
+                    Some(result) => {
+                        if waited {
+                            if let Some(entry) = gate.as_mut() {
+                                entry.followers -= 1;
+                                if entry.followers == 0 {
+                                    *gate = None;
+                                }
+                            }
+                            self.cold_states_changed.notify_all();
+                        }
+                        #[cfg(test)]
+                        self.cold_states_joins.fetch_add(1, Ordering::Relaxed);
+                        return result;
+                    }
+                    None => {
+                        gate = self
+                            .cold_states_changed
+                            .wait(gate)
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    }
+                }
+            }
+        }
+        // Publish only when no unrelated batch owns the gate; otherwise run the
+        // authoritative read without coalescing so unrelated requests never wait.
+        let publish = {
+            let mut gate = self
+                .cold_states
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if gate.is_none() {
+                *gate = Some(ColdStatesEntry {
+                    key: key.clone(),
+                    outcome: None,
+                    followers: 0,
+                });
+                true
+            } else {
+                false
+            }
+        };
+        if !publish {
+            return work();
+        }
+        #[cfg(test)]
+        self.cold_states_test_delay();
+        #[cfg(test)]
+        if self.take_cold_states_test_failure() {
+            let failure = Err(std::io::Error::other("injected cold-states failure"));
+            ColdStatesLeader {
+                service: self,
+                key,
+                published: false,
+            }
+            .finish(&failure);
+            return failure;
+        }
+        let result = work();
+        #[cfg(test)]
+        self.count_cold_states_computation();
+        ColdStatesLeader {
+            service: self,
+            key,
+            published: false,
+        }
+        .finish(&result);
+        result
     }
     /// Latest committed desktop status projection, if the cache is ready.
     ///
