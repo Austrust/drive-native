@@ -193,9 +193,10 @@ impl Views {
         }
         // A held old-generation block remains charged until the reclaimer has
         // actually released it. Charge conservatively even when Arc is shared.
-        let bytes = std::mem::size_of::<DirBlock>()
-            .saturating_add(block.entries.capacity() * std::mem::size_of::<drive_core::namespace_index::DirEntryLite>())
-            .saturating_add(block.entries.iter().map(|e| e.name.len()).sum::<usize>());
+        // The estimate is precomputed by the index builder (issue #23
+        // residual), so a hot open only reads one field while holding the
+        // handles mutex and the projection lease.
+        let bytes = block.estimated_bytes;
         if bytes > MAX_BYTES.saturating_sub(self.charged.load(Ordering::Acquire))
             || self.allocated.load(Ordering::Acquire) >= MAX_HANDLES {
             return Some(Err(libc::ENOMEM));
@@ -1240,13 +1241,73 @@ mod bench_tests;
 mod index_tests {
     use super::*;
     fn block() -> Arc<DirBlock> {
-        Arc::new(DirBlock { ino: 1, version: 0, built_at_gen: 3, entries: vec![
+        let entries = vec![
             drive_core::namespace_index::DirEntryLite { ino: 1, name: Arc::from("."), kind: FileKind::Directory },
             drive_core::namespace_index::DirEntryLite { ino: 1, name: Arc::from(".."), kind: FileKind::Directory },
             drive_core::namespace_index::DirEntryLite { ino: 2, name: Arc::from("file"), kind: FileKind::File },
-        ] })
+        ];
+        let estimated_bytes = expected_bytes(&entries);
+        Arc::new(DirBlock { ino: 1, version: 0, built_at_gen: 3, entries, estimated_bytes })
     }
     fn token() -> CommitState { CommitState { revision: 4, verified: true } }
+    /// The byte estimate charged per index view. Issue #23 residual moved the
+    /// O(N) name-walk from every hot open into the block builder; keep the
+    /// documented formula (struct + Vec capacity + name bytes) as the oracle.
+    fn expected_bytes(entries: &Vec<drive_core::namespace_index::DirEntryLite>) -> usize {
+        std::mem::size_of::<DirBlock>()
+            .saturating_add(entries.capacity() * std::mem::size_of::<drive_core::namespace_index::DirEntryLite>())
+            .saturating_add(entries.iter().map(|entry| entry.name.len()).sum::<usize>())
+    }
+    /// Issue #23 residual: a hot index open must be O(1) in the directory size.
+    /// The red state was a per-open full name walk (H x N visits) inside the
+    /// handles mutex and the projection lease. The test asserts the precomputed
+    /// contract directly: the builder's `estimated_bytes` equals the documented
+    /// old formula, and every hot open charges exactly that amount without
+    /// changing it (so no re-derivation can silently disagree with it).
+    #[test]
+    fn hot_index_opens_do_not_rescan_every_entry_name() {
+        let _serial = test_hooks::serial();
+        test_hooks::reset();
+        const CHILDREN: usize = 10_000;
+        const OPENS: usize = 100;
+        let entries = {
+            let mut entries = Vec::with_capacity(CHILDREN + 2);
+            entries.push(drive_core::namespace_index::DirEntryLite { ino: 1, name: Arc::from(".."), kind: FileKind::Directory });
+            entries.push(drive_core::namespace_index::DirEntryLite { ino: 1, name: Arc::from("."), kind: FileKind::Directory });
+            entries.extend((0..CHILDREN).map(|i| drive_core::namespace_index::DirEntryLite {
+                ino: 2 + i as u64,
+                name: Arc::from(format!("file-{i:05}")),
+                kind: FileKind::File,
+            }));
+            entries
+        };
+        let expected = expected_bytes(&entries);
+        let big = Arc::new(DirBlock {
+            ino: 1,
+            version: 0,
+            built_at_gen: 3,
+            estimated_bytes: expected,
+            entries,
+        });
+        let views = Views::default();
+        // Keep every handle open so the charge is deterministic: the reclaimer
+        // returns capacity asynchronously on release and is not part of this
+        // accounting assertion.
+        for _ in 0..OPENS {
+            views.open_index(big.clone(), token()).unwrap().unwrap();
+        }
+        // Conservative per-View accounting is unchanged: one charge per open,
+        // each equal to the precomputed estimate.
+        assert_eq!(
+            views.charged.load(Ordering::Acquire),
+            expected.saturating_mul(OPENS),
+            "hot index opens no longer charge exactly the precomputed estimate"
+        );
+        assert_eq!(
+            big.estimated_bytes, expected,
+            "the builder's estimate drifted from the documented byte formula"
+        );
+    }
     #[test]
     fn index_views_share_the_original_byte_and_handle_budget() {
         let views = Views::default();
