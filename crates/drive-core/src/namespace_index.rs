@@ -52,6 +52,12 @@ pub struct DirBlock {
     pub entries: Vec<DirEntryLite>,
     pub version: u64,
     pub built_at_gen: u64,
+    /// Conservative per-view memory account: this struct, the `Vec` capacity
+    /// and the total name bytes. Precomputed once at build so a hot index
+    /// `opendir` only reads it instead of walking every entry (issue #23
+    /// residual). The shared-`Arc`/per-view accounting policy is unchanged:
+    /// each holder charges this same amount.
+    pub estimated_bytes: usize,
 }
 
 /// Attributes the index serves for one node. They are validated with exactly
@@ -429,8 +435,15 @@ fn load(store: &Store, epoch: u64, budget: Budget) -> Result<Snapshot> {
             transaction.commit()?;
             return Ok(Snapshot::empty(revision, epoch, Some(watermark.clone())));
         }
+        // Sorted order, capacity and the two dot entries are final here. Derive
+        // the per-view memory estimate once, in the builder, instead of on
+        // every index-hit opendir (issue #23 residual). Saturating arithmetic
+        // keeps the account conservative on absurd directories.
+        let estimated_bytes = std::mem::size_of::<DirBlock>()
+            .saturating_add(entries.capacity() * std::mem::size_of::<DirEntryLite>())
+            .saturating_add(entries.iter().map(|entry| entry.name.len()).sum::<usize>());
         snapshot.dirs.insert(ino, Arc::new(DirBlock {
-            ino, entries, version: epoch, built_at_gen: revision,
+            ino, entries, version: epoch, built_at_gen: revision, estimated_bytes,
         }));
     }
     transaction.commit()?;
