@@ -515,6 +515,10 @@ pub(crate) struct StatusCache {
     publish_delta_entries: AtomicU64,
     base_shares: AtomicU64,
     config: CacheConfig,
+    /// Test-only capture of the structured lifecycle lines the product writes to
+    /// stderr; lets tests assert the same events without hijacking stderr.
+    #[cfg(test)]
+    health_events: Mutex<Vec<String>>,
 }
 
 impl StatusCache {
@@ -580,6 +584,8 @@ impl StatusCache {
             publish_delta_entries: AtomicU64::new(0),
             base_shares: AtomicU64::new(0),
             config,
+            #[cfg(test)]
+            health_events: Mutex::new(Vec::new()),
         });
         let worker = cache.clone();
         let task = std::thread::spawn(move || worker.run(service));
@@ -605,12 +611,79 @@ impl StatusCache {
             .clone()
     }
 
+    /// Product-facing health view: lifecycle state, degradation reason/backoff and
+    /// the cost counters. Lifecycle logging reads it on every transition, and a
+    /// future diagnostics/IPC surface can expose it without changing any JSON or
+    /// D-Bus contract today.
+    pub(crate) fn health_snapshot(&self) -> StatusCacheMetrics {
+        self.metrics()
+    }
+
+    /// Test-only view of the lifecycle lines the worker emitted, in order.
+    #[cfg(test)]
+    pub(crate) fn health_events(&self) -> Vec<String> {
+        self.health_events
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Writes one structured lifecycle line to the product diagnostic channel:
+    /// stderr, which the daemon's systemd unit collects in the journal (the same
+    /// convention as `bridge.rs`/`shutdown.rs`). Every line carries the full
+    /// health snapshot so a degraded cache can be diagnosed from logs alone; the
+    /// unit tests capture the identical lines in-process instead of hijacking
+    /// the global stderr stream.
+    fn emit_health(&self, level: &str, event: &str, extra: &str) {
+        let health = self.health_snapshot();
+        let mut line = format!(
+            "drive-native status cache: level={level} event={event} \
+             state={:?} degraded_reason={:?} degraded_ms={} recovery_attempts={} \
+             next_retry_in_ms={:?} degraded_events={} recovered_events={} \
+             generation={} rows={} pages={} lock_holds={} lock_hold_p99_us={} \
+             lock_hold_max_us={} lock_budget_us={} lock_budget_violations={} \
+             backlog_yields={} read_errors={} publishes={} rebuilds={} \
+             acl_refreshes={} compactions={} publish_delta_entries={} base_shares={}",
+            health.state,
+            health.degraded_reason,
+            health.degraded_ms,
+            health.recovery_attempts,
+            health.next_retry_in_ms,
+            health.degraded_events,
+            health.recovered_events,
+            health.generation,
+            health.rows,
+            health.pages,
+            health.lock_holds,
+            health.lock_hold_p99_us,
+            health.lock_hold_max_us,
+            health.lock_budget_us,
+            health.lock_budget_violations,
+            health.backlog_yields,
+            health.read_errors,
+            health.publishes,
+            health.rebuilds,
+            health.acl_refreshes,
+            health.compactions,
+            health.publish_delta_entries,
+            health.base_shares,
+        );
+        if !extra.is_empty() {
+            line.push(' ');
+            line.push_str(extra);
+        }
+        #[cfg(test)]
+        self.health_events
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(line.clone());
+        eprintln!("{line}");
+    }
+
     /// Observable lifecycle and cost counters. A snapshot keeps being served
     /// while `state == Degraded`; the reason and retry countdown explain why.
-    ///
-    /// The cache itself never reads these counters; they exist for callers that
-    /// surface status/health (and for the issue #25 regression tests).
-    #[allow(dead_code)]
+    /// The lifecycle log reads this on every state transition; tests are the
+    /// other consumer.
     pub(crate) fn metrics(&self) -> StatusCacheMetrics {
         let current = self
             .current
@@ -686,7 +759,19 @@ impl StatusCache {
             }
         }
         if elapsed > self.config.lock_budget {
-            self.lock_budget_violations.fetch_add(1, Ordering::Relaxed);
+            let violations = self.lock_budget_violations.fetch_add(1, Ordering::Relaxed) + 1;
+            // Log the first overrun and then geometric milestones: a regression is
+            // visible without letting a pathological hold flood the journal.
+            if violations.is_power_of_two() {
+                self.emit_health(
+                    "warn",
+                    "lock_budget_exceeded",
+                    &format!(
+                        "hold_us={micros} budget_us={} violations={violations}",
+                        self.config.lock_budget.as_micros()
+                    ),
+                );
+            }
         }
     }
 
@@ -718,26 +803,48 @@ impl StatusCache {
     }
 
     fn mark_running(&self) {
-        let mut status = self
-            .status
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if status.state == CacheState::Degraded {
-            self.recovered_events.fetch_add(1, Ordering::Relaxed);
+        let (first_ready, recovered, downtime_ms) = {
+            let mut status = self
+                .status
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let first_ready = status.state == CacheState::Starting;
+            let recovered = status.state == CacheState::Degraded;
+            let downtime_ms = if recovered {
+                status
+                    .since
+                    .map(|since| since.elapsed().as_millis().min(u128::from(u64::MAX)) as u64)
+                    .unwrap_or(0)
+            } else {
+                0
+            };
+            if recovered {
+                self.recovered_events.fetch_add(1, Ordering::Relaxed);
+            }
+            status.state = CacheState::Running;
+            status.reason = None;
+            status.since = None;
+            status.attempts = 0;
+            status.next_retry = None;
+            (first_ready, recovered, downtime_ms)
+        };
+        if recovered {
+            self.emit_health("info", "recovered", &format!("downtime_ms={downtime_ms}"));
+        } else if first_ready {
+            self.emit_health("info", "ready", "");
         }
-        status.state = CacheState::Running;
-        status.reason = None;
-        status.since = None;
-        status.attempts = 0;
-        status.next_retry = None;
     }
 
-    fn degrade(&self, reason: DegradeReason) {
+    /// Enters the degraded state. Returns whether this transition is newly
+    /// observable (first degradation or a changed reason) and the attempt count.
+    fn degrade(&self, reason: DegradeReason) -> (bool, u32) {
         let mut status = self
             .status
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if status.state != CacheState::Degraded {
+        let transitioned = status.state != CacheState::Degraded;
+        let reason_changed = status.reason != Some(reason);
+        if transitioned {
             self.degraded_events.fetch_add(1, Ordering::Relaxed);
             status.since = Some(Instant::now());
         }
@@ -745,12 +852,13 @@ impl StatusCache {
         status.reason = Some(reason);
         status.attempts = status.attempts.saturating_add(1);
         status.next_retry = None;
+        (transitioned || reason_changed, status.attempts)
     }
 
     /// Enters the degraded state and waits before the next recovery attempt.
     /// Returns false when the service is stopping.
     fn degrade_and_wait(&self, reason: DegradeReason, stop: &AtomicBool) -> bool {
-        self.degrade(reason);
+        let (transition, attempts) = self.degrade(reason);
         let wait = {
             let mut status = self
                 .status
@@ -765,6 +873,28 @@ impl StatusCache {
             status.next_retry = Some(Instant::now() + wait);
             wait
         };
+        // The first degradation (and each reason change) is a warn event; retries
+        // are recorded at debug level on geometric attempt counts, so an outage
+        // cannot flood the product journal.
+        if transition {
+            self.emit_health(
+                "warn",
+                "degraded",
+                &format!(
+                    "reason={reason:?} attempts={attempts} next_retry_in_ms={}",
+                    wait.as_millis()
+                ),
+            );
+        } else if attempts.is_power_of_two() {
+            self.emit_health(
+                "debug",
+                "degraded_retry",
+                &format!(
+                    "reason={reason:?} attempts={attempts} next_retry_in_ms={}",
+                    wait.as_millis()
+                ),
+            );
+        }
         sleep_stop_aware(wait, stop)
     }
 

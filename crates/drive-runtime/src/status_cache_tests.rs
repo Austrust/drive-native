@@ -1110,6 +1110,28 @@ fn wait_recovered(cache: &StatusCache) -> StatusCacheMetrics {
     }
 }
 
+/// Polls the product health channel for one line containing `needle`. Production
+/// writes these lines to stderr (systemd journal); tests capture the same event
+/// in-process so the content can be asserted without hijacking global stderr.
+fn wait_health_event(cache: &StatusCache, needle: &str) -> String {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if let Some(line) = cache
+            .health_events()
+            .into_iter()
+            .find(|line| line.contains(needle))
+        {
+            return line;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "no health event containing {needle:?}; captured {:?}",
+            cache.health_events()
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
 /// Issue #25: the first three permanent-disable paths (subscription, read-only
 /// open, bootstrap) now surface a reason and retry to a full recovery without
 /// restarting the service.
@@ -1359,4 +1381,92 @@ fn wide_deltas_compact_once_instead_of_cloning_every_publish() {
     stop_and_join(&service, task);
 }
 
+/// Issue #25 residual: a degraded cache must be visible on the product side, not
+/// only in crate-internal counters. The worker writes a structured health line
+/// for the degradation (reason, attempt, scheduled retry) and for the recovery,
+/// and `health_snapshot()` exposes the same state to callers.
+#[test]
+fn degradation_and_recovery_are_product_visible() {
+    let (_dir, service) = fixture();
+    let faults = no_faults();
+    faults
+        .counter(FaultKind::TakeNotifications)
+        .store(1, Ordering::Relaxed);
+    let (cache, task) = StatusCache::start_with_config(
+        service.clone(),
+        issue25_config(faults, MAX_CACHED_NODES, super::BACKLOG_LIMIT),
+    );
+    // The worker retries after a first backoff, so catch the degraded window.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut health = None;
+    while Instant::now() < deadline {
+        let snapshot = cache.health_snapshot();
+        if snapshot.state == CacheState::Degraded
+            && snapshot.degraded_reason == Some(DegradeReason::NotificationsUnavailable)
+        {
+            health = Some(snapshot);
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let health = health.expect("health snapshot never exposed the degraded state");
+    assert_eq!(
+        health.degraded_reason,
+        Some(DegradeReason::NotificationsUnavailable)
+    );
+    assert!(health.degraded_events >= 1, "degradation must be counted");
+    assert!(
+        health.recovery_attempts >= 1,
+        "the retry attempt must be visible in the health snapshot"
+    );
 
+    let degraded = wait_health_event(&cache, "event=degraded");
+    assert!(degraded.contains("level=warn"), "degraded line: {degraded}");
+    assert!(
+        degraded.contains("reason=NotificationsUnavailable"),
+        "degraded line: {degraded}"
+    );
+    assert!(
+        degraded.contains("attempts=1") && degraded.contains("next_retry_in_ms="),
+        "degraded line: {degraded}"
+    );
+
+    wait_recovered(&cache);
+    let recovered = wait_health_event(&cache, "event=recovered");
+    assert!(
+        recovered.contains("level=info"),
+        "recovery line: {recovered}"
+    );
+    assert!(
+        recovered.contains("downtime_ms="),
+        "recovery line: {recovered}"
+    );
+    let health = cache.health_snapshot();
+    assert_eq!(health.state, CacheState::Running);
+    assert_eq!(health.degraded_reason, None);
+    assert!(health.recovered_events >= 1);
+    assert!(health.next_retry_in_ms.is_none());
+    wait_matches(&service, &cache, "health-visible recovery", 0);
+    stop_and_join(&service, task);
+}
+
+/// Issue #25 residual: writer-guard holdings over budget are a regression; the
+/// product health channel must report them and the counter must stay readable.
+#[test]
+fn lock_budget_overruns_are_reported_on_the_product_health_channel() {
+    let (_dir, service) = fixture();
+    let (cache, task) = start(&service, MAX_CACHED_NODES);
+    wait_ready(&cache);
+    let budget = super::LOCK_BUDGET;
+    cache.record_lock_hold(budget + Duration::from_millis(5));
+    let line = wait_health_event(&cache, "event=lock_budget_exceeded");
+    assert!(line.contains("level=warn"), "budget line: {line}");
+    assert!(
+        line.contains("hold_us=") && line.contains(&format!("budget_us={}", budget.as_micros())),
+        "budget line: {line}"
+    );
+    let health = cache.health_snapshot();
+    assert!(health.lock_budget_violations >= 1);
+    assert!(health.lock_holds >= 1);
+    stop_and_join(&service, task);
+}
