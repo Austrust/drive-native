@@ -222,6 +222,15 @@ class MainWindow(QMainWindow):
         # Directory page accumulator: a GetDirectory reply may arrive before
         # received_overview creates it for the first time.
         self.page_rows = []
+        # Issue #93: the last completed listing snapshot.  "加载更多" may append
+        # the next page only while path, view generation, owner/task and the
+        # backend's listing cookie all still describe the same listing; any
+        # change discards the snapshot and rereads the shown range from offset 0.
+        self.page_snapshot = None
+        self.page_chain_cookie = None
+        self.page_view_token = None
+        self._directory_sequence = 0
+        self._directory_inflight = None
         # #29 counters: asserted by tests and reported as evidence.
         self.overview_queries = 0
         self.directory_queries = 0
@@ -1054,6 +1063,10 @@ class MainWindow(QMainWindow):
                     page_rows.append(row)
                     patched += 1
             self.page_rows = page_rows
+            if self.page_snapshot is not None:
+                # Keep the append cursor's row list in sync with status patches
+                # so a later page does not resurrect pre-patch rows.
+                self.page_snapshot["rows"] = self.page_rows
             self.status_patched_rows += patched
             self.status_dropped_rows += dropped
             if patched or dropped:
@@ -1286,19 +1299,57 @@ class MainWindow(QMainWindow):
         elif error:
             self.show_error(error)
 
-    def request_page(self, path, generation, offset):
+    def request_page(self, path, generation, offset, *, append=False):
         self.directory_queries += 1
         self._directory_loading = True
+        self._directory_sequence += 1
+        self._directory_inflight = self._directory_sequence
+        profile = self.profile or {}
+        identity = {
+            "sequence": self._directory_sequence,
+            "path": path,
+            "generation": generation,
+            "owner": self.bus.owner,
+            "owner_generation": getattr(self.bus, "generation", None),
+            "task": profile.get("task_id"),
+            "append": append,
+        }
         self.bus.call(
             "GetDirectory",
             [path, offset],
-            lambda data, error: self.received_directory(path, generation, data, error),
+            lambda data, error: self.received_directory(path, generation, data, error, identity),
         )
 
-    def received_directory(self, path, generation, data, error):
+    def _page_identity_matches(self, identity):
+        """True while a page reply still belongs to the visible mount generation."""
+        if identity["path"] != self.folder or identity["generation"] != self.view_generation:
+            return False
+        if identity["owner"] != self.bus.owner:
+            return False
+        if identity["owner_generation"] != getattr(self.bus, "generation", None):
+            return False
+        return identity["task"] == (self.profile or {}).get("task_id")
+
+    def received_directory(self, path, generation, data, error, identity=None):
         # This callback closes one page; a multi-page traversal re-arms the
         # flag in request_page. While it is set, received_overview must not
         # start a duplicate offset-0 request (issue #29).
+        append = False
+        if identity is not None:
+            if identity["sequence"] != self._directory_inflight:
+                # A superseded page (late or out-of-order reply) must not clear
+                # the newer request's loading flag nor splice its rows in.
+                return
+            self._directory_inflight = None
+            if not self._page_identity_matches(identity):
+                # The owner/task/view generation changed after the request was
+                # sent: this reply belongs to the previous generation.
+                self._directory_loading = False
+                self.loading = False
+                self.page_snapshot = None
+                self.schedule_refresh()
+                return
+            append = identity["append"]
         self._directory_loading = False
         if not self.isVisible() or not self.files_button.isChecked():
             self.loading = False
@@ -1306,6 +1357,7 @@ class MainWindow(QMainWindow):
             return
         if path != self.folder or generation != self.view_generation:
             self.loading = False
+            self.page_snapshot = None
             self.schedule_refresh()
             return
         if error:
@@ -1319,6 +1371,8 @@ class MainWindow(QMainWindow):
             self.loading = False
             self.page_rows = []
             self.rows = []
+            self.page_snapshot = None
+            self.page_chain_cookie = None
             self.render_rows()
             self.more.hide()
             self.detail.setText("该目录暂时没有访问权限。" if data.get("directory_state") == "denied"
@@ -1329,24 +1383,29 @@ class MainWindow(QMainWindow):
             self.ready.emit()
             self.followup_refresh()
             return
-        token = (data.get("preview_only") is True, data.get("preview_generation"))
+        page_token = (data.get("preview_only") is True, data.get("preview_generation"))
+        cookie = data.get("listing_cookie")
+        cookie = cookie if isinstance(cookie, str) and cookie else None
+        if append:
+            self._receive_appended_page(path, generation, data, page_token, cookie)
+            return
         if data["offset"] == 0:
             # Offset 0 starts a new listing: replace the accumulator here
             # rather than in received_overview, so a reply that races an
             # overview refresh cannot append the same first page twice.
-            self.page_view_token = token
+            self.page_view_token = page_token
+            self.page_chain_cookie = cookie
             self.page_rows = list(data["entries"])
-        elif token != getattr(self, "page_view_token", None):
-            self.loading = False
-            self.page_rows = []
-            self.rows = []
-            self.render_rows()
-            self.more.hide()
-            self.detail.setText("目录内容已变化，等待下一次状态刷新。")
-            if not self.cache_from_backend:
-                self.availability_value.setText("尚未确认")
-            self.ready.emit()
-            self.followup_refresh()
+            self.page_snapshot = None
+        elif page_token != self.page_view_token:
+            # Preview mode/generation changed mid-traversal; the rows are no
+            # longer verifiable, so never present them as a complete listing.
+            self._drop_listing("目录内容已变化，等待下一次状态刷新。")
+            return
+        elif cookie is not None and self.page_chain_cookie is not None and cookie != self.page_chain_cookie:
+            # The backend reported a different listing version between two
+            # pages of one traversal: mixing them could skip or duplicate rows.
+            self._drop_listing("目录内容已变化，等待下一次状态刷新。")
             return
         else:
             self.page_rows.extend(data["entries"])
@@ -1354,6 +1413,31 @@ class MainWindow(QMainWindow):
         if data["entries"] and next_offset < min(self.display_limit, data["total"]):
             self.request_page(path, generation, next_offset)
             return
+        self._finish_listing(data, next_offset, page_token, cookie)
+
+    def _receive_appended_page(self, path, generation, data, page_token, cookie):
+        snapshot = self._valid_page_snapshot()
+        if (snapshot is None
+                or data.get("offset") != snapshot["next_offset"]
+                or cookie is None or cookie != snapshot["cookie"]
+                or page_token != snapshot["page_identity"]):
+            # The listing changed (or the reply is from another generation)
+            # while the next page was in flight: never splice two versions.
+            self._reload_listing()
+            return
+        self.page_rows.extend(data["entries"])
+        next_offset = data["offset"] + len(data["entries"])
+        # The snapshot follows every appended page, including a short page that
+        # needs a second request to reach the newly displayed range.
+        snapshot["next_offset"] = next_offset
+        snapshot["rows"] = self.page_rows
+        snapshot["total"] = data["total"]
+        if data["entries"] and next_offset < min(self.display_limit, data["total"]):
+            self.request_page(path, generation, next_offset, append=True)
+            return
+        self._finish_listing(data, next_offset, page_token, cookie)
+
+    def _finish_listing(self, data, next_offset, page_token, cookie):
         self.loading = False
         self.rows = list({row.get("id", row["path"]): row for row in self.page_rows}.values())
         self.render_rows()
@@ -1368,8 +1452,67 @@ class MainWindow(QMainWindow):
             self.availability_value.setText(
                 f"{sum(bool(r.get('offline_available')) for r in self.rows)} / {len(self.rows)}"
             )
+        self._store_page_snapshot(next_offset, data["total"], page_token, cookie)
         self.breadcrumb.setText(self.files_title.text() + ("/" + self.folder if self.folder else ""))
         self.up.setEnabled(bool(self.folder))
+        self.ready.emit()
+        self.followup_refresh()
+
+    def _store_page_snapshot(self, next_offset, total, page_token, cookie):
+        """Remember the append cursor; without a cookie the next click rereads."""
+        if cookie is None:
+            # An old backend has no listing version, so an append could mix
+            # membership generations.  Keep the conservative full-reread path.
+            self.page_snapshot = None
+            return
+        profile = self.profile or {}
+        self.page_snapshot = {
+            "path": self.folder,
+            "generation": self.view_generation,
+            "owner": self.bus.owner,
+            "owner_generation": getattr(self.bus, "generation", None),
+            "task": profile.get("task_id"),
+            "cookie": cookie,
+            "page_identity": page_token,
+            "next_offset": next_offset,
+            "total": total,
+            "rows": self.page_rows,
+        }
+
+    def _valid_page_snapshot(self):
+        snapshot = self.page_snapshot
+        if not isinstance(snapshot, dict):
+            return None
+        profile = self.profile or {}
+        if (snapshot["path"] != self.folder
+                or snapshot["generation"] != self.view_generation
+                or snapshot["owner"] != self.bus.owner
+                or snapshot["owner_generation"] != getattr(self.bus, "generation", None)
+                or snapshot["task"] != profile.get("task_id")
+                or not isinstance(snapshot.get("cookie"), str)
+                or not snapshot["cookie"]):
+            return None
+        return snapshot
+
+    def _reload_listing(self):
+        """Discard the append snapshot and reread the shown range from offset 0."""
+        self.page_snapshot = None
+        self.page_chain_cookie = None
+        self.page_rows = []
+        self._directory_loading = False
+        self.request_page(self.folder, self.view_generation, 0)
+
+    def _drop_listing(self, message):
+        self.loading = False
+        self.page_rows = []
+        self.rows = []
+        self.page_snapshot = None
+        self.page_chain_cookie = None
+        self.render_rows()
+        self.more.hide()
+        self.detail.setText(message)
+        if not self.cache_from_backend:
+            self.availability_value.setText("尚未确认")
         self.ready.emit()
         self.followup_refresh()
 
@@ -1464,14 +1607,39 @@ class MainWindow(QMainWindow):
         self.folder = path
         self.display_limit = 256
         self.view_generation += 1
+        # A different directory (or a new visit to this one) has a new
+        # listing identity; the old append cursor must never be reused.
+        self.page_snapshot = None
+        self.page_chain_cookie = None
         self.schedule_refresh()
 
     def parent_folder(self):
         self.navigate(self.folder.rsplit("/", 1)[0] if "/" in self.folder else "")
 
     def load_more(self):
+        """Append the next directory page to the current listing snapshot (#93).
+
+        A click never re-reads the pages already on screen: it requests exactly
+        the next offset of the same listing.  Without a valid snapshot (old
+        backend without ``listing_cookie``, or path/owner/task/view generation/
+        listing version changed) the window keeps the conservative behaviour:
+        raise the display limit and reread the shown range from offset 0.
+        """
+        snapshot = self._valid_page_snapshot()
+        if snapshot is None:
+            self.display_limit += 256
+            self.schedule_refresh()
+            return
+        if self._directory_loading or self.loading:
+            # One page is already in flight; remember the extra screen and let
+            # the running traversal append it once the current reply lands.
+            self.display_limit += 256
+            return
+        if snapshot["next_offset"] >= snapshot["total"]:
+            return
         self.display_limit += 256
-        self.schedule_refresh()
+        self.request_page(self.folder, self.view_generation,
+                          snapshot["next_offset"], append=True)
 
     def activate(self, item, _column):
         row = item.data(0, Qt.UserRole)

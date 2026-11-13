@@ -1,9 +1,11 @@
 """Synthetic multi-task navigation and closure, never launches a mount or NAS."""
+import heapq
 import os
 import tempfile
 import json
 import time
 import unittest
+from collections import Counter
 from pathlib import Path
 from unittest.mock import patch
 from PySide6.QtCore import QObject, Signal, QCoreApplication, QEvent, Qt
@@ -838,6 +840,438 @@ class UnifiedTests(unittest.TestCase):
         QTest.qWait(700)
         self.assertLessEqual(window.overview_queries - baseline, 2,
                              'a signal burst must not issue more than one overview per second')
+
+
+class _SimClock:
+    """Monotonic clock driven by the simulated event queue (issue #92 model)."""
+    def __init__(self):
+        self.now = 0.0
+
+    def monotonic(self):
+        return self.now
+
+
+class _SimSignal:
+    """Stand-in for a Qt signal: only connect/emit are used by MountManager."""
+    def __init__(self):
+        self.slots = []
+
+    def connect(self, callback):
+        self.slots.append(callback)
+
+    def emit(self, *args):
+        for callback in list(self.slots):
+            callback(*args)
+
+
+class _SimEventQueue:
+    """Time-ordered replacement for the Qt event loop and the D-Bus queue.
+
+    Every GetTransfers reply and every single-shot timer callback is pushed here
+    with a simulated timestamp, so a request trajectory depends only on the
+    injected clock -- no real sleeps, wall clock or Qt event loop.
+    """
+    def __init__(self, clock, limit=5000):
+        self.clock = clock
+        self.limit = limit
+        self._heap = []
+        self._sequence = 0
+        self.requests = []   # (sent_at, slot) per GetTransfers
+        self.replies = []    # (sent_at, reply_at, slot) per GetTransfers
+
+    def at(self, delay, callback):
+        self._sequence += 1
+        heapq.heappush(self._heap, (self.clock.now + delay, self._sequence, callback))
+
+    def _next_before(self, when):
+        while self._heap and self._heap[0][0] <= when:
+            moment, _order, callback = heapq.heappop(self._heap)
+            self.clock.now = max(self.clock.now, moment)
+            callback()
+            yield moment
+
+    def run_until(self, when):
+        for _ in self._next_before(when):
+            pass
+        self.clock.now = max(self.clock.now, when)
+
+    def run(self):
+        processed = 0
+        while self._heap:
+            moment, _order, callback = heapq.heappop(self._heap)
+            self.clock.now = max(self.clock.now, moment)
+            callback()
+            processed += 1
+            if processed >= self.limit:
+                raise AssertionError(
+                    'simulated event queue did not drain after %d events; last t=%.3fs'
+                    % (self.limit, self.clock.now))
+        return processed
+
+    def pending(self):
+        return bool(self._heap)
+
+
+class _SimTimer:
+    """Minimal QTimer surface used by MountManager, backed by _SimEventQueue.
+
+    Periodic timers only track isActive(); the tests play the external poll tick
+    by calling ``refresh_transfers`` at simulated times.  Single-shot timers
+    (the per-slot coalesced follow-up) feed the same queue as bus replies.
+    """
+    queue = None
+
+    def __init__(self, parent=None):
+        self._interval = 0
+        self._single_shot = False
+        self._active = False
+        self.timeout = _SimSignal()
+
+    def setInterval(self, milliseconds):
+        self._interval = int(milliseconds)
+
+    def interval(self):
+        return self._interval
+
+    def setSingleShot(self, enabled):
+        self._single_shot = bool(enabled)
+
+    def start(self, milliseconds=None):
+        if milliseconds is not None:
+            self._interval = int(milliseconds)
+        self._active = True
+        if self._single_shot:
+            _SimTimer.queue.at(self._interval / 1000.0, self._fire)
+
+    def _fire(self):
+        self._active = False
+        self.timeout.emit()
+
+    def stop(self):
+        self._active = False
+
+    def isActive(self):
+        return self._active
+
+    @staticmethod
+    def singleShot(milliseconds, context, callback=None):
+        if callback is None:
+            callback, context = context, None
+        _SimTimer.queue.at(milliseconds / 1000.0, callback)
+
+
+class _SimBus(QObject):
+    """In-memory ClientBus: replies arrive after the mount's configured delay."""
+    changed = Signal()
+    changed2 = Signal(object)
+    progress_changed = Signal()
+    availability = Signal(bool)
+
+    def __init__(self, queue, slot, delay, parent=None):
+        super().__init__(parent)
+        self.queue = queue
+        self.slot = slot
+        self.delay = delay
+        self.owner = ':1.synthetic'
+        self.generation = 0
+        self.calls = []
+        self.held = []       # callbacks for replies delivered manually (delay None)
+        self.response = lambda: (
+            {'schema': 1, 'task_id': 'task-' + slot, 'entries': []}, None)
+
+    def call(self, method, args=(), callback=None):
+        self.calls.append(method)
+        if method != 'GetTransfers':
+            return
+        self.queue.requests.append((self.queue.clock.now, self.slot))
+        if self.delay is None:
+            self.held.append(callback)
+            return
+        data, error = self.response()
+        sent_at = self.queue.clock.now
+        self.queue.replies.append((sent_at, sent_at + self.delay, self.slot))
+        self.queue.at(self.delay,
+                      lambda data=data, error=error: callback(data, error) if callback else None)
+
+
+class ManagerTransferPollingTests(unittest.TestCase):
+    """Issue #92: a reply may schedule one follow-up for its own slot only.
+
+    The issue's reproduction: two mounts A (2.1s) and B (2.2s), only two
+    external refreshes at t=0 and t=2, then advance the queued replies and
+    follow-ups.  Baseline issued 47 GetTransfers requests, 24/23 split, last at
+    t=48.4s.  The fixed scheduler must keep the trajectory bounded (at most one
+    in-flight request plus one merged follow-up per slot), bind replies to the
+    bus/task/owner generation they were sent for, and drain with no new demand.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.env = patch.dict(os.environ, {'XDG_CONFIG_HOME': self.tmp.name,
+                                           'DRIVE_NATIVE_INSTANCE': B})
+        self.env.start()
+        self.clock = _SimClock()
+        self.queue = _SimEventQueue(self.clock)
+        self.sim_buses = {}
+        self.records = [(slot, {'schema': 1, 'task_id': 'task-' + slot,
+                                'mount': self.tmp.name + '/' + slot,
+                                'scope': {'path': '/'}, 'host': 'fixture',
+                                'username': 'synthetic'})
+                        for slot in (A, B)]
+
+        def client_bus(parent=None, instance=None, **kwargs):
+            bus = _SimBus(self.queue, instance,
+                          2.1 if instance == A else 2.2, parent)
+            self.sim_buses[instance] = bus
+            return bus
+
+        _SimTimer.queue = self.queue
+        self.patches = [
+            patch('drive_native_gui.manager.profile_records', lambda: list(self.records)),
+            patch('drive_native_gui.manager.ClientBus', client_bus),
+            patch('drive_native_gui.manager.QTimer', _SimTimer),
+            patch('drive_native_gui.manager.time', self.clock),
+        ]
+        for item in self.patches:
+            item.start()
+        self.window = MountManager()
+        self.window.show()
+        APP.processEvents()
+        self.window.transfer_timer.stop()
+        self.queue.run()   # no init-time events are expected; fail loudly if any appear
+        self.queue.requests.clear()
+        self.queue.replies.clear()
+        for bus in self.sim_buses.values():
+            bus.calls.clear()
+            bus.held.clear()
+
+    def tearDown(self):
+        self.window.tray.icon.hide()
+        self.window.hide()
+        self.window.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        for item in reversed(self.patches):
+            item.stop()
+        self.env.stop()
+        self.tmp.cleanup()
+
+    # --- model helpers -------------------------------------------------
+    def refresh_at(self, when):
+        """Play one external poll tick at simulated time ``when``."""
+        self.queue.run_until(when)
+        self.clock.now = max(self.clock.now, when)
+        self.window.refresh_transfers()
+
+    def request_times(self, slot=None):
+        return [when for when, name in self.queue.requests
+                if slot is None or name == slot]
+
+    def max_in_flight(self):
+        """Peak concurrent GetTransfers per slot from the simulated send/reply times."""
+        peak = {}
+        for slot in {name for _when, name in self.queue.requests}:
+            sends = sorted(when for when, name in self.queue.requests if name == slot)
+            done = sorted(reply_at for _sent, reply_at, name in self.queue.replies
+                          if name == slot)
+            active = 0
+            for when in sends:
+                active = sum(1 for sent in sends if sent <= when)
+                active -= sum(1 for reply in done if reply <= when)
+                peak[slot] = max(peak.get(slot, 0), active)
+        return peak
+
+    # --- the issue #92 trajectory --------------------------------------
+    def test_two_mount_external_ticks_do_not_amplify_requests(self):
+        self.refresh_at(0.0)
+        self.assertEqual([slot for _when, slot in self.queue.requests], [A, B])
+        self.refresh_at(2.0)   # both replies still in flight: merge, do not re-arm
+        self.assertEqual(len(self.queue.requests), 2)
+        self.queue.run()
+        requests = self.queue.requests
+        self.assertLessEqual(
+            len(requests), 4,
+            'cross-slot re-arming amplified polling: %d requests %r'
+            % (len(requests), requests[:8]))
+        self.assertEqual(Counter(slot for _when, slot in requests), {A: 2, B: 2})
+        self.assertLessEqual(requests[-1][0], 2.5,
+                             'no request may be driven by another slot\'s reply: %r'
+                             % (requests,))
+        self.assertLessEqual(self.clock.now, 6.0,
+                             'trajectory did not drain promptly: end t=%.2fs' % self.clock.now)
+        self.assertFalse(self.queue.pending())
+        for slot in (A, B):
+            self.assertLessEqual(self.max_in_flight().get(slot, 0), 1,
+                                 'slot %r issued overlapping requests' % slot)
+        # Evidence counters, reported in notes/r5/desktop-gui.md.
+        self.assertEqual(self.window.transfer_requests, len(requests))
+        self.assertEqual(self.window.transfer_updates, 4,
+                         'one GUI update per applied reply, not per request burst')
+
+    def test_replies_shorter_than_tick_do_not_rearm_each_other(self):
+        for bus in self.sim_buses.values():
+            bus.delay = 0.3
+        self.refresh_at(0.0)
+        self.refresh_at(2.0)
+        self.queue.run()
+        self.assertEqual(Counter(slot for _when, slot in self.queue.requests), {A: 2, B: 2})
+        self.assertFalse(self.queue.pending())
+
+    def test_equal_and_interleaved_delays_stay_bounded(self):
+        self.sim_buses[A].delay = 2.1
+        self.sim_buses[B].delay = 2.1   # equal delays: replies arrive together
+        self.refresh_at(0.0)
+        self.refresh_at(2.0)
+        self.queue.run()
+        self.assertEqual(Counter(slot for _when, slot in self.queue.requests), {A: 2, B: 2})
+        self.sim_buses[A].delay = 1.0
+        self.sim_buses[B].delay = 3.1   # staggered: one reply lands before the tick
+        self.queue.requests.clear()
+        self.queue.replies.clear()
+        self.refresh_at(4.0)
+        self.refresh_at(6.0)
+        self.queue.run()
+        self.assertEqual(Counter(slot for _when, slot in self.queue.requests), {A: 2, B: 2})
+        for slot in (A, B):
+            self.assertLessEqual(self.max_in_flight().get(slot, 0), 1)
+
+    def test_minimum_interval_coalesces_tick_bursts(self):
+        for bus in self.sim_buses.values():
+            bus.delay = 0.1
+        self.refresh_at(0.0)
+        for when in (0.2, 0.4, 0.6):
+            self.refresh_at(when)   # in flight or not yet due: one merged demand
+        self.queue.run()
+        requests = self.queue.requests
+        self.assertEqual(Counter(slot for _when, slot in requests), {A: 2, B: 2})
+        for slot in (A, B):
+            times = self.request_times(slot)
+            self.assertGreaterEqual(
+                times[1] - times[0], 1.0 - 1e-9,
+                'slot %r ignored the per-mount minimum query interval: %r' % (slot, times))
+
+    def test_error_reply_keeps_last_good_rows(self):
+        bus = self.sim_buses[A]
+        bus.response = lambda: (
+            {'schema': 1, 'task_id': 'task-' + A,
+             'entries': [{'path': 'keep.bin'}]}, None)
+        self.refresh_at(0.0)
+        self.queue.run()
+        self.assertEqual([row['path'] for row in self.window.transfer_cache[A]['entries']],
+                         ['keep.bin'])
+        self.assertFalse(self.window.transfer_cache[A]['error'])
+        bus.response = lambda: (None, 'org.freedesktop.DBus.Error.NoReply')
+        bus.delay = 0.5
+        self.refresh_at(2.0)
+        self.queue.run()
+        cached = self.window.transfer_cache[A]
+        self.assertTrue(cached['error'])
+        self.assertEqual([row['path'] for row in cached['entries']], ['keep.bin'],
+                         'an error reply must not drop the last confirmed rows')
+        self.assertLessEqual(len(self.request_times(A)), 2)
+
+    def test_delayed_reply_cannot_use_stale_owner_generation(self):
+        bus = self.sim_buses[A]
+        bus.delay = None      # hold the first reply, then deliver it by hand
+        bus.response = lambda: (
+            {'schema': 1, 'task_id': 'task-' + A,
+             'entries': [{'path': 'OLD.bin'}]}, None)
+        self.refresh_at(0.0)
+        self.assertEqual(len(bus.held), 1)
+        old_callback = bus.held.pop(0)
+        bus.owner = ':1.replacement'
+        bus.generation += 1
+        self.clock.now = max(self.clock.now, 1.0)
+        old_callback(*bus.response())   # reply from the replaced owner
+        self.assertNotEqual(
+            [row['path'] for row in (self.window.transfer_cache.get(A) or {}).get('entries', [])],
+            ['OLD.bin'], 'a reply from the previous owner must not be displayed')
+        self.assertNotIn(A, self.window.transfer_pending)
+        self.refresh_at(2.0)   # the periodic tick retries under the new owner
+        self.assertEqual(len(bus.held), 1)
+        bus.held.pop(0)({'schema': 1, 'task_id': 'task-' + A,
+                         'entries': [{'path': 'NEW.bin'}]}, None)
+        self.assertEqual([row['path'] for row in self.window.transfer_cache[A]['entries']],
+                         ['NEW.bin'])
+        self.assertEqual(len(self.request_times(A)), 2, 'no request amplification on owner change')
+
+    def test_replaced_task_old_reply_cannot_clear_new_pending(self):
+        old_bus = self.sim_buses[A]
+        old_bus.delay = None
+        self.refresh_at(0.0)
+        old_callback = old_bus.held.pop(0)
+        self.assertIn(A, self.window.transfer_pending)
+        self.records[0] = (A, dict(self.records[0][1], task_id='task-A2'))
+        self.window.refresh_catalog()
+        new_bus = self.window.buses[A]
+        self.assertIsNot(new_bus, old_bus)
+        new_bus.delay = None
+        new_bus.response = lambda: (
+            {'schema': 1, 'task_id': 'task-A2', 'entries': [{'path': 'NEW.bin'}]}, None)
+        self.refresh_at(1.0)
+        self.assertEqual(len(new_bus.held), 1)
+        self.assertIn(A, self.window.transfer_pending)
+        old_callback({'schema': 1, 'task_id': 'task-' + A,
+                      'entries': [{'path': 'OLD.bin'}]}, None)
+        self.assertIn(A, self.window.transfer_pending,
+                      'the old task reply cleared the new generation in-flight marker')
+        self.assertNotIn(A, self.window.transfer_again,
+                         'the old task reply scheduled a follow-up for the replacement slot')
+        new_bus.held.pop(0)(*new_bus.response())
+        self.assertNotIn(A, self.window.transfer_pending)
+        self.assertEqual([row['path'] for row in self.window.transfer_cache[A]['entries']],
+                         ['NEW.bin'])
+
+    def test_slow_mount_does_not_starve_fast_mount(self):
+        self.sim_buses[A].delay = 10.0
+        self.sim_buses[B].delay = 0.1
+        for when in (0.0, 2.0, 4.0, 6.0, 8.0, 10.0):
+            self.refresh_at(when)
+        self.queue.run()
+        counts = Counter(slot for _when, slot in self.queue.requests)
+        self.assertEqual(counts[B], 6,
+                         'the fast mount missed a poll because of the slow one: %r' % counts)
+        self.assertLessEqual(counts[A], 3,
+                             'the slow mount generated request amplification: %r' % counts)
+        for slot in (A, B):
+            self.assertLessEqual(self.max_in_flight().get(slot, 0), 1)
+
+    def test_removed_slot_old_reply_does_not_schedule_followup(self):
+        bus = self.sim_buses[B]
+        bus.delay = None
+        self.refresh_at(0.0)
+        old_callback = bus.held.pop(0)
+        self.records = [record for record in self.records if record[0] != B]
+        self.window.refresh_catalog()
+        self.assertNotIn(B, self.window.records)
+        old_callback({'schema': 1, 'task_id': 'task-' + B,
+                      'entries': [{'path': 'gone.bin'}]}, None)
+        self.queue.run()
+        self.assertEqual(len(self.request_times(B)), 1,
+                         'a reply for a removed slot scheduled a new request')
+        self.assertNotIn(B, self.window.transfer_cache)
+        self.assertNotIn(B, self.window.transfer_pending)
+
+    def test_hidden_window_keeps_tray_updates(self):
+        self.window.hide()
+        refreshes = []
+        original = self.window.tray.refresh
+
+        def counting_refresh():
+            refreshes.append(self.clock.now)
+            original()
+
+        self.window.tray.refresh = counting_refresh
+        self.sim_buses[A].delay = 0.5
+        self.sim_buses[B].delay = 0.5
+        self.sim_buses[A].response = lambda: (
+            {'schema': 1, 'task_id': 'task-' + A,
+             'entries': [{'path': 'hidden.bin'}]}, None)
+        self.refresh_at(0.0)
+        self.queue.run()
+        self.assertEqual([row['path'] for row in self.window.transfer_cache[A]['entries']],
+                         ['hidden.bin'], 'a hidden window must keep the last transfer state')
+        self.assertGreaterEqual(len(refreshes), 2,
+                                'the tray was not refreshed for the hidden window')
 
 
 if __name__ == '__main__': unittest.main()

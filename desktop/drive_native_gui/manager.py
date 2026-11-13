@@ -29,6 +29,9 @@ STOP_TIMEOUT_SECONDS = STOP_DEADLINE_SECONDS
 SUCCESS_POLL_MS = 30 * 1000
 TRANSFER_POLL_MS = 2000
 TRANSFER_HIDDEN_POLL_MS = 5000
+# Per-mount GetTransfers pacing (issue #92): a reply schedules at most one
+# follow-up for its own mount.  This is the maximum query frequency per mount.
+TRANSFER_MIN_INTERVAL = 1.0
 STATUS_SIGNAL_INTERVAL = 1.0
 TRANSFER_LIMIT = 128
 
@@ -79,6 +82,15 @@ class MountManager(QMainWindow):
         self.transfer_cache = {}
         self.transfer_pending = set()
         self.transfer_again = set()
+        # Issue #92: keep one request identity per mount and pace retries per
+        # mount.  A reply may only schedule its own follow-up; an old-generation
+        # reply is discarded without touching the replacement mount's state.
+        self.transfer_inflight = {}
+        self.transfer_next_at = {}
+        self.transfer_timers = {}
+        self.transfer_sequence = 0
+        self.transfer_requests = 0
+        self.transfer_updates = 0
         root = QWidget(); self.setCentralWidget(root)
         shell = QVBoxLayout(root)
         navigation = QHBoxLayout()
@@ -324,7 +336,7 @@ class MountManager(QMainWindow):
                 self.status2_seen.pop(slot, None); self.status_epoch.pop(slot, None)
                 self.status_revision.pop(slot, None)
                 self.progress_pending.discard(slot); self.progress_again.discard(slot)
-                self.transfer_pending.discard(slot); self.transfer_again.discard(slot)
+                self._drop_transfer(slot)
                 self.transfer_cache.pop(slot, None)
                 self.stop_pending.pop(slot, None)
                 if hasattr(self, "notifications"): self.notifications.forget(slot)
@@ -483,25 +495,108 @@ class MountManager(QMainWindow):
         item.setToolTip(3, "打开同步问题可查看诊断和恢复操作。" if issues else "当前没有待处理的同步问题。")
 
     def refresh_transfers(self):
-        """Poll in-flight transfers per mount; the cache keeps the last good rows."""
+        """Poll this mount's in-flight transfers on a per-mount schedule.
+
+        Issue #92: this periodic pass only decides which mounts are due.  A
+        mount whose reply is still in flight records one merged follow-up
+        demand; it never re-arms the other mounts.  Replies therefore cannot
+        chain into a cross-mount feedback loop and a slow mount cannot delay a
+        fast one.  ``transfer_cache`` keeps the last confirmed rows.
+        """
         if not self.records: return
-        for slot, profile in list(self.records.items()):
-            bus = self.buses.get(slot)
-            if bus is None: continue
+        now = time.monotonic()
+        for slot in list(self.records):
+            if slot not in self.buses: continue
             if slot in self.transfer_pending:
                 self.transfer_again.add(slot); continue
-            self.transfer_pending.add(slot)
-            expected = profile["task_id"]
-            def received(data, error, slot=slot, expected=expected, bus=bus):
-                self.transfer_pending.discard(slot)
-                if self.buses.get(slot) is not bus or self.records.get(slot, {}).get("task_id") != expected:
-                    self.transfer_again.discard(slot)
-                    return
-                self.transfer_received(slot, data, error)
-                if slot in self.transfer_again:
-                    self.transfer_again.discard(slot)
-                    QTimer.singleShot(0, self, self.refresh_transfers)
-            bus.call("GetTransfers", callback=received)
+            if now < self.transfer_next_at.get(slot, 0.0):
+                # Respect the per-mount minimum interval; one timer delivers
+                # the merged demand as soon as this mount may be queried again.
+                self.transfer_again.add(slot)
+                self._schedule_transfer(slot)
+                continue
+            self.transfer_again.discard(slot)
+            self._send_transfer(slot, now)
+
+    def _send_transfer(self, slot, now):
+        """Start one GetTransfers for this mount and bind its reply identity."""
+        profile = self.records.get(slot)
+        bus = self.buses.get(slot)
+        if profile is None or bus is None:
+            self._drop_transfer(slot)
+            return False
+        if slot in self.transfer_pending:
+            self.transfer_again.add(slot)
+            return False
+        self.transfer_next_at[slot] = now + TRANSFER_MIN_INTERVAL
+        self.transfer_pending.add(slot)
+        self.transfer_sequence += 1
+        token = (self.transfer_sequence, bus, profile["task_id"],
+                 getattr(bus, "generation", None))
+        self.transfer_inflight[slot] = token
+        self.transfer_requests += 1
+
+        def received(data, error, slot=slot, token=token):
+            self._transfer_reply(slot, token, data, error)
+
+        bus.call("GetTransfers", callback=received)
+        return True
+
+    def _transfer_reply(self, slot, token, data, error):
+        """Apply a reply only while it is still this mount's current request."""
+        if self.transfer_inflight.get(slot) is not token:
+            # The mount, task or request was replaced while this reply was in
+            # flight: it must not clear the current in-flight marker, overwrite
+            # the replacement mount's rows or schedule its follow-up.
+            return
+        self.transfer_inflight.pop(slot, None)
+        self.transfer_pending.discard(slot)
+        _sequence, bus, task, generation = token
+        if self.buses.get(slot) is not bus: return
+        if self.records.get(slot, {}).get("task_id") != task: return
+        if getattr(bus, "generation", None) != generation:
+            # The D-Bus owner changed after this request was sent; the payload
+            # belongs to the previous generation.  Drop it and let the next
+            # tick retry against the new owner.
+            return
+        self.transfer_received(slot, data, error)
+        if slot in self.transfer_again:
+            self.transfer_again.discard(slot)
+            self._schedule_transfer(slot)
+
+    def _schedule_transfer(self, slot):
+        """Arm at most one follow-up request timer for this mount."""
+        timer = self.transfer_timers.get(slot)
+        if timer is None:
+            timer = QTimer(self); timer.setSingleShot(True)
+            timer.timeout.connect(lambda key=slot: self._transfer_due(key))
+            self.transfer_timers[slot] = timer
+        if timer.isActive(): return
+        delay = max(0.0, self.transfer_next_at.get(slot, 0.0) - time.monotonic())
+        timer.start(int(delay * 1000) + 1)
+
+    def _transfer_due(self, slot):
+        timer = self.transfer_timers.get(slot)
+        if timer is not None: timer.stop()
+        if slot not in self.records or slot not in self.buses:
+            self._drop_transfer(slot); return
+        now = time.monotonic()
+        if now < self.transfer_next_at.get(slot, 0.0):
+            self._schedule_transfer(slot); return
+        if slot in self.transfer_pending:
+            self.transfer_again.add(slot); return
+        self.transfer_again.discard(slot)
+        self._send_transfer(slot, now)
+
+    def _drop_transfer(self, slot):
+        """Forget a replaced or removed mount's transfer polling state."""
+        self.transfer_pending.discard(slot)
+        self.transfer_again.discard(slot)
+        self.transfer_inflight.pop(slot, None)
+        self.transfer_next_at.pop(slot, None)
+        timer = self.transfer_timers.pop(slot, None)
+        if timer is not None:
+            timer.stop(); timer.deleteLater()
 
     def transfer_received(self, slot, data, error):
         task = self.records.get(slot, {}).get("task_id")
@@ -514,6 +609,7 @@ class MountManager(QMainWindow):
             state["entries"] = list(raw)[:TRANSFER_LIMIT] if isinstance(raw, list) else []
             state["error"] = bool(data.get("error"))
         self.transfer_cache[slot] = state
+        self.transfer_updates += 1
         self.render_transfers()
         self.update_activity(slot)
         if hasattr(self, "tray"): self.tray.refresh()
