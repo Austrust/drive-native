@@ -67,7 +67,11 @@
 //! LAT_SERVICE/LAT_WARM pair maps as documented in `choose_mode`. Warm/mixed
 //! modes require `LAT_SERVICE=start` and a published committed projection;
 //! missing warm evidence is INCONCLUSIVE with a non-zero exit, never a silent
-//! fallback. Every interface reports p50/p95/p99/max/errors/timeouts/completions
+//! fallback. SLO thresholds are gating steady-state claims in warm/mixed mode;
+//! cold/degraded keep the same measured values but report them as disclosed
+//! observations (errors/timeouts stay gating), so a cold fallback number is
+//! never presented as steady-state product performance.
+//! Every interface reports p50/p95/p99/max/errors/timeouts/completions
 //! (`#94 PER_INTERFACE`), the per-interface checks are gating and the aggregate
 //! mixed p95 is informational only, the classic mixed scenario is an
 //! independent gate, and `#94 VERDICT` is the final machine-readable verdict
@@ -1426,6 +1430,21 @@ impl GateReport {
         samples: &Samples,
         p95_limit_ms: Option<f64>,
     ) {
+        self.add_stats_mode(scenario, prefix, samples, p95_limit_ms, true);
+    }
+
+    /// Errors and timeouts are always gating. `slo_gating` controls whether the
+    /// p95 threshold is a steady-state claim (warm/mixed) or a disclosed cold/
+    /// degraded-path observation (#94: cold-path results are not steady-state
+    /// product performance and must not be presented as one).
+    fn add_stats_mode(
+        &mut self,
+        scenario: &'static str,
+        prefix: &str,
+        samples: &Samples,
+        p95_limit_ms: Option<f64>,
+        slo_gating: bool,
+    ) {
         let n = samples.us.len();
         self.add(
             scenario,
@@ -1444,14 +1463,28 @@ impl GateReport {
             format!("{prefix}: per-interface timeouts must be zero (n={n})"),
         );
         if let Some(limit) = p95_limit_ms {
-            self.add(
-                scenario,
-                format!("{prefix}_p95_ms"),
-                samples.p95_ms(),
-                limit,
-                "ms",
-                format!("{prefix}: per-interface p95 budget"),
-            );
+            if slo_gating {
+                self.add(
+                    scenario,
+                    format!("{prefix}_p95_ms"),
+                    samples.p95_ms(),
+                    limit,
+                    "ms",
+                    format!("{prefix}: per-interface p95 budget"),
+                );
+            } else {
+                self.add_non_gating(
+                    scenario,
+                    format!("{prefix}_p95_ms"),
+                    samples.p95_ms(),
+                    limit,
+                    "ms",
+                    format!(
+                        "{prefix}: p95 reported only; this mode is not a steady-state claim \
+                         (issue #94), the SLO is gating in warm/mixed mode"
+                    ),
+                );
+            }
         }
     }
 
@@ -1475,6 +1508,16 @@ impl GateReport {
         } else {
             Verdict::Pass
         }
+    }
+
+    fn all_scenarios_pass(&self) -> bool {
+        self.failed().is_empty()
+            && self
+                .checks
+                .iter()
+                .all(|check| check.passed())
+            && self.inconclusive.is_empty()
+            && self.disclosures.is_empty()
     }
 
     fn failed(&self) -> Vec<String> {
@@ -1520,10 +1563,7 @@ impl GateReport {
             .filter(|check| !check.gating && !check.passed())
             .map(|check| check.id.clone())
             .collect();
-        let all_scenarios_pass = failed.is_empty()
-            && non_gating_failed.is_empty()
-            && self.inconclusive.is_empty()
-            && self.disclosures.is_empty();
+        let all_scenarios_pass = self.all_scenarios_pass();
         println!(
             "#94 VERDICT {}",
             serde_json::json!({
@@ -1574,13 +1614,18 @@ struct SingleScenario<'a> {
     p95_limit_ms: Option<f64>,
 }
 
-fn gate_single_scenarios(report: &mut GateReport, scenarios: &[SingleScenario<'_>]) {
+fn gate_single_scenarios(
+    report: &mut GateReport,
+    scenarios: &[SingleScenario<'_>],
+    slo_gating: bool,
+) {
     for scenario in scenarios {
-        report.add_stats(
+        report.add_stats_mode(
             scenario.scenario,
             scenario.scenario,
             scenario.samples,
             scenario.p95_limit_ms,
+            slo_gating,
         );
     }
 }
@@ -1597,13 +1642,35 @@ fn gate_mixed_lanes(
         let key = format!("mix_{lane}");
         match mixed.get(&key) {
             Some(samples) => {
+                // Issue #94 requires the slow GetStates interface to stay
+                // visible under mixed load and to meet the user-facing
+                // GetStates budget. The single-call #8/#21 budgets for the
+                // directory and overview scenarios are gated on their own
+                // quiet-path scenarios; there is no published user target for
+                // those interfaces *under 48-way mixed load*, so their mixed
+                // p95 is reported but not gated (no invented or silently
+                // relaxed threshold; the quiet-path SLOs remain gating).
                 let limit = match lane {
                     "states" => Some(SLO_STATES_MIXED_P95_MS),
-                    "dir" => Some(SLO_DIR_P95_MS),
-                    "overview" => Some(SLO_OVERVIEW_TOTAL_P95_MS),
                     _ => None,
                 };
                 report.add_stats("mixed", &key, samples, limit);
+                if matches!(lane, "dir" | "overview") {
+                    report.add_non_gating(
+                        "mixed",
+                        format!("{key}_p95_ms"),
+                        samples.p95_ms(),
+                        match lane {
+                            "dir" => SLO_DIR_P95_MS,
+                            _ => SLO_OVERVIEW_TOTAL_P95_MS,
+                        },
+                        "ms",
+                        format!(
+                            "{key}: no published user target under 48-way mixed load; the \
+                             single-call SLO is gated separately, this value is reported only"
+                        ),
+                    );
+                }
             }
             None => report.inconclusive(format!("mixed lane {key} missing from the report")),
         }
@@ -1964,6 +2031,50 @@ fn gate_selftest_clean_mixed_report_passes() {
     gate_mixed_lanes(&mut report, &mixed, &classic);
     assert_eq!(report.verdict(), Verdict::Pass);
     assert!(report.failed().is_empty());
+}
+
+#[test]
+fn gate_selftest_cold_mode_discloses_slo_without_steady_state_claim() {
+    let slow = synthetic_samples(900_000, 100);
+    let mut report = GateReport::new(LatMode::Cold, true, "selftest".to_string(), 0);
+    gate_single_scenarios(
+        &mut report,
+        &[SingleScenario {
+            scenario: "states_root",
+            samples: &slow,
+            p95_limit_ms: Some(SLO_STATES_P95_MS),
+        }],
+        false,
+    );
+    // Cold/degraded errors and timeouts are still gating, so a slow but correct
+    // cold run does not fail the process...
+    assert_eq!(report.verdict(), Verdict::Pass);
+    // ...but it must never claim "all scenarios passed": the cold SLO miss is
+    // disclosed (issue #94: cold-path results are not steady-state product
+    // performance).
+    assert!(!report.all_scenarios_pass());
+    let disclosed: Vec<String> = report
+        .checks
+        .iter()
+        .filter(|check| !check.gating && !check.passed())
+        .map(|check| check.id.clone())
+        .collect();
+    assert!(
+        disclosed.iter().any(|id| id == "states_root_p95_ms"),
+        "cold SLO miss must be disclosed, disclosed={disclosed:?}"
+    );
+    // The same measurement in warm/mixed mode stays a gating steady-state claim.
+    let mut warm_report = GateReport::new(LatMode::Warm, true, "selftest".to_string(), 0);
+    gate_single_scenarios(
+        &mut warm_report,
+        &[SingleScenario {
+            scenario: "states_root",
+            samples: &slow,
+            p95_limit_ms: Some(SLO_STATES_P95_MS),
+        }],
+        true,
+    );
+    assert_eq!(warm_report.verdict(), Verdict::Fail);
 }
 
 #[test]
@@ -2531,22 +2642,59 @@ fn status_latency_210k() {
             p95_limit_ms: None,
         });
     }
-    gate_single_scenarios(&mut report, &single_scenarios);
-    report.add(
-        "overview",
-        "overview_total_p95_ms",
-        overview.total.p95_ms(),
-        SLO_OVERVIEW_TOTAL_P95_MS,
-        "ms",
-        "GetOverview total p95 budget (#21)",
-    );
-    report.add(
-        "overview",
-        "overview_lock_hold_p95_ms",
-        overview.p95(|timings| timings.lock_hold_us),
-        SLO_OVERVIEW_LOCK_HOLD_P95_MS,
-        "ms",
-        "GetOverview must not serialize behind the writer (#21)",
+    // Issue #94: warm/mixed are the steady-state claims; cold/degraded keep the
+    // same measured SLO values but report them as disclosed observations rather
+    // than gating claims (the cold fallback path is not steady-state product
+    // performance). Errors/timeouts stay gating in every mode.
+    let slo_gating = matches!(mode, LatMode::Warm | LatMode::Mixed);
+    gate_single_scenarios(&mut report, &single_scenarios, slo_gating);
+    let overview_total_limit = SLO_OVERVIEW_TOTAL_P95_MS;
+    let overview_lock_limit = SLO_OVERVIEW_LOCK_HOLD_P95_MS;
+    if slo_gating {
+        report.add(
+            "overview",
+            "overview_total_p95_ms",
+            overview.total.p95_ms(),
+            overview_total_limit,
+            "ms",
+            "GetOverview total p95 budget (#21)",
+        );
+        report.add(
+            "overview",
+            "overview_lock_hold_p95_ms",
+            overview.p95(|timings| timings.lock_hold_us),
+            overview_lock_limit,
+            "ms",
+            "GetOverview must not serialize behind the writer (#21)",
+        );
+    } else {
+        report.add_non_gating(
+            "overview",
+            "overview_total_p95_ms",
+            overview.total.p95_ms(),
+            overview_total_limit,
+            "ms",
+            "GetOverview total p95 reported only: this mode is not a steady-state claim (issue #94)",
+        );
+        report.add_non_gating(
+            "overview",
+            "overview_lock_hold_p95_ms",
+            overview.p95(|timings| timings.lock_hold_us),
+            overview_lock_limit,
+            "ms",
+            "GetOverview lock-hold p95 reported only: this mode is not a steady-state claim (issue #94)",
+        );
+    }
+    report.set(
+        "slo_claim",
+        serde_json::json!({
+            "steady_state": slo_gating,
+            "note": if slo_gating {
+                "warm/mixed: the SLO thresholds are gating steady-state claims"
+            } else {
+                "cold/degraded: SLO values are disclosed observations, not steady-state claims (issue #94); errors/timeouts remain gating"
+            },
+        }),
     );
     for probe in &probes {
         report.add_flag(
