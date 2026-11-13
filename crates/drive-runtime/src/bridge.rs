@@ -68,6 +68,7 @@ impl Drop for WorkerProcess {
         self.stop();
     }
 }
+#[derive(Clone, Debug)]
 enum Invalidation {
     Inode(u64),
     Entry(u64, String),
@@ -235,6 +236,11 @@ pub struct Bridge {
     retry_wake: (Mutex<()>, Condvar),
     notify_hub: Arc<Mutex<Option<drive_fs::NotifyHub>>>,
     notifications: std::sync::mpsc::SyncSender<Invalidation>,
+    /// Test-only capture of invalidations handed to the notification path, so a
+    /// regression that stops publishing them cannot hide behind other green
+    /// tests.
+    #[cfg(test)]
+    test_invalidations: Mutex<Vec<Invalidation>>,
     /// Committed invalidations rejected by the bounded notification queue.
     /// Non-zero means the mount suspended cacheable publication for one quiet
     /// lease window and then resumed; it never needs a restart (#27).
@@ -359,6 +365,14 @@ fn store_window_wait(wait: std::time::Instant) -> u64 {
 impl Bridge {
     pub fn transfer_entries(&self) -> Vec<crate::transfers::TransferEntry> {
         self.connection().transfers.entries()
+    }
+    /// Test-only: invalidations handed to the notification path so far.
+    #[cfg(test)]
+    pub(crate) fn test_invalidations(&self) -> Vec<Invalidation> {
+        self.test_invalidations
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .clone()
     }
     /// Test-only: the live transfer registry, so a desktop JSON render can be
     /// exercised without a worker or a real flight.
@@ -718,11 +732,14 @@ impl Bridge {
                 }
                 MaintenancePhase::Usage => {
                     let calibrate = cursor.calibrate_round;
+                    let result = self.maintenance_usage_snapshot(cursor, &mut stats, calibrate)?;
+                    // Progress is read after the release step: a round that only
+                    // evicted cache bodies did make progress and must not enter
+                    // the no-progress backoff.
                     let progress = cursor.removed_bytes
                         + cursor.clean_draft_rows
                         + cursor.draft_files_removed
                         + cursor.released.len() as u64;
-                    let result = self.maintenance_usage_snapshot(cursor, &mut stats, calibrate)?;
                     released_inodes.append(&mut cursor.pending_inodes);
                     maintenance.memo = Some(MaintenanceMemo {
                         revision: result.revision,
@@ -902,6 +919,8 @@ impl Bridge {
             retry_wake: (Mutex::new(()), Condvar::new()),
             notify_hub,
             notifications,
+            #[cfg(test)]
+            test_invalidations: Mutex::new(Vec::new()),
             notification_overflows: AtomicU64::new(0),
             generation_invalidations: AtomicU64::new(0),
             recovery_revision: AtomicU64::new(0),
@@ -928,6 +947,11 @@ impl Bridge {
     /// Every upstream queue failure must suspend cacheable publication, not
     /// silently lose a committed mutation before it reaches the mount's hub.
     fn enqueue_invalidation(&self, invalidation: Invalidation) {
+        #[cfg(test)]
+        self.test_invalidations
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .push(invalidation.clone());
         if !enqueue_invalidation(&self.notifications, &self.notify_hub, invalidation) {
             let overflows = self
                 .notification_overflows
@@ -3841,3 +3865,7 @@ mod notification_queue_tests;
 #[cfg(test)]
 #[path = "catch_up_watchdog_tests.rs"]
 mod catch_up_watchdog_tests;
+
+#[cfg(test)]
+#[path = "cache_invalidation_tests.rs"]
+mod cache_invalidation_tests;
