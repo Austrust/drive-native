@@ -55,7 +55,7 @@ fn profile(mount: PathBuf, patterns: &[&str]) -> Profile {
         writable: false,
         local_policy: None,
         writable_source: None,
-        exclude_patterns: patterns.iter().map(|pattern| (*pattern).to_owned()).collect(),
+        exclude_patterns: patterns.iter().map(|pattern| (*pattern).to_owned()).collect(), exclude_mode: Default::default(),
     }
 }
 
