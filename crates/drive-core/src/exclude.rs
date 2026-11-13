@@ -713,6 +713,10 @@ mod local_only_tests;
 mod purge_tests;
 
 #[cfg(test)]
+#[path = "exclude_purge_dedupe_tests.rs"]
+mod dedupe_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
