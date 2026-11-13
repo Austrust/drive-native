@@ -518,14 +518,20 @@ fn upload_start_stays_bounded_with_a_large_mixed_remove_backlog() {
         rebuilds, 1,
         "reconcile bookkeeping must not rebuild the barrier index"
     );
-    assert!(
-        backlog_median < Duration::from_millis(20),
-        "upload start with a 10k backlog is not bounded: {backlog_median:?}"
-    );
+    // The primary bound is relative to the empty-store control: `cargo test
+    // --workspace` runs test binaries in parallel under shared machine load, so
+    // an absolute millisecond threshold is not a stable product signal (the same
+    // call measured ~4ms isolated and ~20ms under the full-suite load). The RED
+    // lever stays the O(R) rebuild ratio (RED: 6.7) plus `rebuilds == 1` above;
+    // the absolute bound below only catches pathological regressions.
     let ratio = backlog_median.as_secs_f64() / control_median.as_secs_f64().max(1e-9);
     assert!(
-        ratio < 10.0,
-        "backlog upload start must stay within 10x of the empty store: {ratio:.1}"
+        ratio <= 5.0,
+        "backlog upload start must stay within 5x of the empty store: {ratio:.1}"
+    );
+    assert!(
+        backlog_median < Duration::from_millis(200),
+        "upload start with a 10k backlog is pathologically slow: {backlog_median:?}"
     );
     assert!(last_us > 0);
 
