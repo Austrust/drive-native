@@ -3666,7 +3666,9 @@ mod readpath_tests {
     #[test]
     fn cold_states_joins_overlapping_identical_batches() {
         let (_dir, service) = cold_fixture();
-        service.set_cold_states_delay_ms(120);
+        // The leader outlives the joiner's 2 s wait slice: a timeout must not
+        // start a competing O(#nodes) read (the read-lane thundering herd).
+        service.set_cold_states_delay_ms(3_000);
         let paths = vec![".".to_string()];
         let baseline = states(&service, paths.clone()).unwrap();
         service.reset_cold_states_stats();
@@ -3698,6 +3700,11 @@ mod readpath_tests {
             service.cold_states_joins() >= threads - 2,
             "overlapping cold batches did not join: {} rejoined",
             service.cold_states_joins()
+        );
+        assert_eq!(
+            service.cold_states_abandoned(),
+            0,
+            "joiners abandoned a merely slow leader and started competing reads"
         );
     }
 

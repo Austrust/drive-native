@@ -310,10 +310,14 @@ pub(crate) const CACHE_USAGE_MEMO_TTL: std::time::Duration =
 /// and returns it on drop, so sequential polls pay the open once and a
 /// concurrent burst only fills the idle capacity.
 const READ_ONLY_POOL_CAPACITY: usize = 8;
-/// How long a cold-batch joiner waits for the leader before running its own
-/// authoritative read (bounded so a leader waiting for a long writer hold never
-/// wedges unrelated pollers).
-const COLD_STATES_JOIN_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+/// Slice a cold-batch joiner sleeps between gate re-checks. Short slices keep
+/// the wait interruptible; a joiner that sees no response keeps waiting for the
+/// *leader* rather than starting a competing O(#nodes) read.
+const COLD_STATES_JOIN_SLICE: std::time::Duration = std::time::Duration::from_secs(2);
+/// Hard upper bound on joining. Only a leader that is wedged past this (long
+/// writer hold, stuck transport) makes a joiner fall back to its own read, so
+/// the normal path always keeps one computation per overlapping key.
+const COLD_STATES_JOIN_DEADLINE: std::time::Duration = std::time::Duration::from_secs(60);
 
 pub(crate) struct ReadOnlyPool {
     shared: Arc<drive_core::SharedStore>,
@@ -567,6 +571,10 @@ pub struct Service {
     cold_states_computations: AtomicUsize,
     #[cfg(test)]
     cold_states_joins: AtomicUsize,
+    /// Joiners that fell back to their own read after the leader missed the
+    /// hard deadline (must stay zero for a merely slow leader).
+    #[cfg(test)]
+    cold_states_abandoned: AtomicUsize,
     #[cfg(test)]
     cold_states_delay_ms: AtomicU64,
     #[cfg(test)]
@@ -724,6 +732,8 @@ impl Service {
             cold_states_computations: AtomicUsize::new(0),
             #[cfg(test)]
             cold_states_joins: AtomicUsize::new(0),
+            #[cfg(test)]
+            cold_states_abandoned: AtomicUsize::new(0),
             #[cfg(test)]
             cold_states_delay_ms: AtomicU64::new(0),
             #[cfg(test)]
@@ -906,9 +916,14 @@ impl Service {
         self.cold_states_joins.load(Ordering::Relaxed)
     }
     #[cfg(test)]
+    pub(crate) fn cold_states_abandoned(&self) -> usize {
+        self.cold_states_abandoned.load(Ordering::Relaxed)
+    }
+    #[cfg(test)]
     pub(crate) fn reset_cold_states_stats(&self) {
         self.cold_states_computations.store(0, Ordering::Relaxed);
         self.cold_states_joins.store(0, Ordering::Relaxed);
+        self.cold_states_abandoned.store(0, Ordering::Relaxed);
     }
     #[cfg(test)]
     pub(crate) fn set_cold_states_delay_ms(&self, ms: u64) {
@@ -941,6 +956,7 @@ impl Service {
         F: FnOnce() -> std::io::Result<String>,
     {
         let mut waited = false;
+        let joined_at = Instant::now();
         {
             let mut gate = self
                 .cold_states
@@ -981,13 +997,16 @@ impl Service {
                     None => {
                         let (next, timeout) = self
                             .cold_states_changed
-                            .wait_timeout(gate, COLD_STATES_JOIN_WAIT)
+                            .wait_timeout(gate, COLD_STATES_JOIN_SLICE)
                             .unwrap_or_else(std::sync::PoisonError::into_inner);
                         gate = next;
-                        if timeout.timed_out() {
-                            // The leader may be waiting for a long writer hold;
-                            // do not add its latency to every joiner. Leave the
-                            // gate and run the authoritative read locally.
+                        // Re-check the gate after every slice: a timeout is not
+                        // a reason to start a competing O(#nodes) read (that
+                        // thundering herd starves the read lane). Only a leader
+                        // wedged past the hard deadline lets this caller fall
+                        // back to its own read.
+                        if timeout.timed_out() && joined_at.elapsed() >= COLD_STATES_JOIN_DEADLINE
+                        {
                             if waited {
                                 waited = false;
                                 if let Some(entry) = gate.as_mut() {
@@ -998,6 +1017,8 @@ impl Service {
                                 }
                                 self.cold_states_changed.notify_all();
                             }
+                            #[cfg(test)]
+                            self.cold_states_abandoned.fetch_add(1, Ordering::Relaxed);
                             break;
                         }
                     }
