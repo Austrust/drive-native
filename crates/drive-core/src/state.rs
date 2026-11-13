@@ -409,6 +409,14 @@ fn install_commit_diagnostics_view(db: &Connection) -> Result<()> {
 pub(crate) const OPERATIONS_NODE_ACTIVE_INDEX: &str = "CREATE INDEX IF NOT EXISTS operations_node_active ON operations(node) WHERE state IN ('pending','inflight','uncertain','conflict','abandoned')";
 pub(crate) const OPERATIONS_BLOB_ACTIVE_INDEX: &str = "CREATE INDEX IF NOT EXISTS operations_blob_active ON operations(blob) WHERE blob IS NOT NULL AND state IN ('pending','inflight','uncertain','conflict','abandoned')";
 
+/// Issue #88: diagnostics indexes. The overview counts and the top-20 list only
+/// read rows that carry an outcome; `(outcome,next_retry_at,id)` lets each
+/// outcome class be a range scan ordered by the retry clock, so the successful
+/// `confirmed` history no longer has to be scanned or sorted on every overview.
+pub(crate) const OPERATIONS_DIAGNOSTICS_INDEX: &str = "CREATE INDEX IF NOT EXISTS operations_diagnostics ON operations(outcome,next_retry_at,id) WHERE outcome IS NOT NULL";
+pub(crate) const NAMESPACE_OPS_DIAGNOSTICS_INDEX: &str = "CREATE INDEX IF NOT EXISTS namespace_ops_diagnostics ON namespace_ops(outcome,next_retry_at,id) WHERE outcome IS NOT NULL";
+pub(crate) const TRANSFERS_DIAGNOSTICS_INDEX: &str = "CREATE INDEX IF NOT EXISTS transfers_diagnostics ON transfers(outcome,next_retry_at,id) WHERE outcome IS NOT NULL";
+
 /// Reconcile one partial index definition inside the open migration transaction.
 ///
 /// `CREATE INDEX IF NOT EXISTS` alone cannot repair a same-name index created by
@@ -455,6 +463,26 @@ fn install_current_schema_ddl(db: &Connection) -> Result<()> {
         "operations_blob_active",
         "'abandoned'",
         OPERATIONS_BLOB_ACTIVE_INDEX,
+    )?;
+    // Issue #88: per-journal diagnostics indexes (new names, so an old profile
+    // simply gains them here; the definition check keeps re-opens idempotent).
+    reconcile_partial_index(
+        db,
+        "operations_diagnostics",
+        "ON operations(outcome,next_retry_at,id)",
+        OPERATIONS_DIAGNOSTICS_INDEX,
+    )?;
+    reconcile_partial_index(
+        db,
+        "namespace_ops_diagnostics",
+        "ON namespace_ops(outcome,next_retry_at,id)",
+        NAMESPACE_OPS_DIAGNOSTICS_INDEX,
+    )?;
+    reconcile_partial_index(
+        db,
+        "transfers_diagnostics",
+        "ON transfers(outcome,next_retry_at,id)",
+        TRANSFERS_DIAGNOSTICS_INDEX,
     )?;
     Ok(())
 }
@@ -1219,6 +1247,20 @@ impl Store {
             apply_progress: None,
         })
     }
+    /// `PRAGMA data_version` of this connection (issue #88).
+    ///
+    /// SQLite changes this value when *another* connection commits and leaves it
+    /// unchanged for this connection's own commits. A read-only handle opened
+    /// beside the writer therefore observes every writer commit here, which is
+    /// exactly the cache-invalidation signal the desktop overview needs. Callers
+    /// must take cached reads on a read-only connection; the writer's own value
+    /// cannot see its own commits.
+    pub fn data_version(&self) -> Result<i64> {
+        Ok(self
+            .db
+            .query_row("PRAGMA data_version", [], |row| row.get(0))?)
+    }
+
     /// Issue #60: additive migration-backup storage diagnostics. Read-only
     /// handles scan the same profile root and report the same numbers.
     pub fn backup_inventory(&self) -> Result<MigrationBackupInventory> {
