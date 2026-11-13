@@ -148,6 +148,78 @@ const UPLOAD_REFRESH_MAX_INTERVAL: Duration = Duration::from_secs(5);
 /// long-running mount would otherwise keep until the next restart. Pruning
 /// never publishes a semantic journal change, so it cannot wake the UI.
 const STORAGE_PRUNE_INTERVAL: Duration = Duration::from_secs(300);
+
+/// Events applied per Store write-lease acquisition (issue #67 W2). Every chunk
+/// is its own committed transaction, so this trades the longest single write
+/// lease hold against WAL write amplification: 64-event chunks kept the lease
+/// near 20 ms but multiplied physical writes on 1000-event catch-up batches
+/// (~5x base, measured on the #67 harness), while 256-event chunks keep the
+/// longest lease p95 ~76 ms and the extra write amplification close to the
+/// per-event history maintenance itself. Receipts smaller than this stay one
+/// transaction, exactly like `apply_next`.
+const APPLY_CHUNK_EVENTS: usize = 256;
+
+/// Invalidations are cheap point lookups but run under the same Store write
+/// lease; slicing them keeps one large Pull from holding the lease for the scan
+/// alone. This does not affect write amplification.
+const INVALIDATION_SLICE_EVENTS: usize = 64;
+
+/// Invalidations that describe the *pre-apply* namespace (old names and old
+/// parents), collected in bounded slices.
+fn collect_prior_invalidations(
+    store: &drive_core::Store,
+    events: &[drive_core::Event],
+    invalidated_inodes: &mut Vec<u64>,
+    invalidations: &mut Vec<(u64, String)>,
+) {
+    for event in events {
+        let id = match &event.change {
+            Change::Upsert(n) => &n.id,
+            Change::Delete { id } => id,
+        };
+        if let Ok(old) = store.local_identity(id).and_then(|id| store.record(&id)) {
+            // The old name, the changed object's attributes and the old parent
+            // directory's attributes are all possibly cached.
+            invalidated_inodes.push(old.ino);
+            if let Some(p) = old.node.parent.as_deref() {
+                if let Ok(p) = store.local_identity(p).and_then(|p| store.record(&p)) {
+                    invalidated_inodes.push(p.ino);
+                    invalidations.push((p.ino, old.node.name));
+                }
+            }
+        }
+    }
+}
+
+/// Invalidations that describe the *post-apply* namespace, collected in bounded
+/// slices.
+fn collect_applied_invalidations(
+    store: &drive_core::Store,
+    events: &[drive_core::Event],
+    invalidated_inodes: &mut Vec<u64>,
+    invalidations: &mut Vec<(u64, String)>,
+) {
+    for event in events {
+        match &event.change {
+            Change::Upsert(n) => {
+                if let Ok(record) = store.record(&n.id) {
+                    invalidated_inodes.push(record.ino);
+                }
+                if let Some(p) = n.parent.as_deref() {
+                    if let Ok(p) = store.local_identity(p).and_then(|p| store.record(&p)) {
+                        invalidated_inodes.push(p.ino);
+                        invalidations.push((p.ino, n.name.clone()));
+                    }
+                }
+            }
+            Change::Delete { id } => {
+                if let Ok(record) = store.record(id) {
+                    invalidated_inodes.push(record.ino);
+                }
+            }
+        }
+    }
+}
 pub struct Bridge {
     pub store: Arc<drive_core::SharedStore>,
     recovery_gate: std::sync::RwLock<()>,
@@ -722,56 +794,61 @@ impl Bridge {
         let exclusion_state = self.exclusion_state();
         let mut invalidations = Vec::new();
         let mut invalidated_inodes = Vec::new();
-        let mut store = self.store.lock().unwrap();
-        // Drop events that belong to excluded subtrees before they reach the
-        // committed namespace. Parent/child consistency is resolved from the
-        // same batch first (see drive_core::exclude), so a batch that creates
-        // an excluded directory and its children cannot leak the children.
-        if !rules.is_empty() {
-            match store.native_scope_root() {
-                Ok(Some(root)) => {
-                    let dropped = drive_core::exclude::retain_unexcluded_events(
-                        &store,
-                        &root,
-                        &rules,
-                        &mut batch.events,
-                    );
-                    if dropped > 0 {
-                        drive_core::exclude::trace_hit(&format!(
-                            "pull batch ({dropped} events)"
-                        ));
+        // A catch-up Pull can carry ~1000 events. Receive, apply and the
+        // before/after invalidation lookups all need the single Store write
+        // lease, so run them in bounded slices instead of holding it for the
+        // whole batch (issue #67 W2); chunked apply only advances the inbox
+        // receipt and `committed_cursor` on the receipt's final transaction.
+        let mut slice = 0usize;
+        loop {
+            let mut store = self.store.lock().unwrap();
+            // Drop events that belong to excluded subtrees before they reach the
+            // committed namespace. Parent/child consistency is resolved from the
+            // same batch first (see drive_core::exclude), so a batch that creates
+            // an excluded directory and its children cannot leak the children.
+            if slice == 0 && !rules.is_empty() {
+                match store.native_scope_root() {
+                    Ok(Some(root)) => {
+                        let dropped = drive_core::exclude::retain_unexcluded_events(
+                            &store,
+                            &root,
+                            &rules,
+                            &mut batch.events,
+                        );
+                        if dropped > 0 {
+                            drive_core::exclude::trace_hit(&format!(
+                                "pull batch ({dropped} events)"
+                            ));
+                        }
                     }
-                }
-                Ok(None) => {}
-                Err(error) => {
-                    eprintln!("drive-native exclude: cannot filter pull events: {error}");
-                }
-            }
-        }
-        for event in &batch.events {
-            let id = match &event.change {
-                Change::Upsert(n) => &n.id,
-                Change::Delete { id } => id,
-            };
-            if let Ok(old) = store.local_identity(id).and_then(|id| store.record(&id)) {
-                // The old name, the changed object's attributes and the old
-                // parent directory's attributes are all possibly cached.
-                invalidated_inodes.push(old.ino);
-                if let Some(p) = old.node.parent.as_deref() {
-                    if let Ok(p) = store.local_identity(p).and_then(|p| store.record(&p)) {
-                        invalidated_inodes.push(p.ino);
-                        invalidations.push((p.ino, old.node.name));
+                    Ok(None) => {}
+                    Err(error) => {
+                        eprintln!("drive-native exclude: cannot filter pull events: {error}");
                     }
                 }
             }
+            let end = (slice + INVALIDATION_SLICE_EVENTS).min(batch.events.len());
+            collect_prior_invalidations(
+                &store,
+                &batch.events[slice..end],
+                &mut invalidated_inodes,
+                &mut invalidations,
+            );
+            slice = end;
+            drop(store);
+            if slice >= batch.events.len() {
+                break;
+            }
         }
-        match store.receive(&batch) {
+        match {
+            let mut store = self.store.lock().unwrap();
+            store.receive(&batch)
+        } {
             Ok(()) => {}
             Err(error) if error.is_cursor_gap() => {
                 // A gap means the durable snapshot no longer matches the event
                 // journal. Recovery must not publish a partially applied batch:
                 // drop every lock and rebuild from a fresh snapshot (#10).
-                drop(store);
                 drop(receipt);
                 return self.recover(
                     crate::initialization::RecoveryReason::CursorInvalidated,
@@ -780,30 +857,36 @@ impl Bridge {
             }
             Err(error) => return Err(io::Error::other(error)),
         }
-        store.drain().map_err(io::Error::other)?;
-        for event in &batch.events {
-            match &event.change {
-                Change::Upsert(n) => {
-                    if let Ok(record) = store.record(&n.id) {
-                        invalidated_inodes.push(record.ino);
-                    }
-                    if let Some(p) = n.parent.as_deref() {
-                        if let Ok(p) = store.local_identity(p).and_then(|p| store.record(&p)) {
-                            invalidated_inodes.push(p.ino);
-                            invalidations.push((p.ino, n.name.clone()));
-                        }
-                    }
-                }
-                Change::Delete { id } => {
-                    if let Ok(record) = store.record(id) {
-                        invalidated_inodes.push(record.ino);
-                    }
-                }
+        // Apply the receipt in bounded chunks. `apply_chunk` commits between
+        // slices; a crash replays the receipt and `seen` skips the slices that
+        // already committed, so no event can be applied twice.
+        loop {
+            let mut store = self.store.lock().unwrap();
+            let chunk = store
+                .apply_chunk(APPLY_CHUNK_EVENTS)
+                .map_err(io::Error::other)?;
+            drop(store);
+            if matches!(chunk, drive_core::ApplyChunk::Idle) {
+                break;
             }
+        }
+        let mut slice = 0usize;
+        while slice < batch.events.len() {
+            let end = (slice + INVALIDATION_SLICE_EVENTS).min(batch.events.len());
+            let store = self.store.lock().unwrap();
+            collect_applied_invalidations(
+                &store,
+                &batch.events[slice..end],
+                &mut invalidated_inodes,
+                &mut invalidations,
+            );
+            drop(store);
+            slice = end;
         }
         let affects_index = if rules.is_empty() {
             false
         } else {
+            let store = self.store.lock().unwrap();
             match store.native_scope_root() {
                 Ok(Some(root)) => drive_core::exclude::events_may_affect_index(
                     &store,
@@ -815,7 +898,6 @@ impl Bridge {
                 _ => true,
             }
         };
-        drop(store);
         drop(receipt);
         // The committed namespace may have gained or lost excluded paths;
         // rebuild before publishing invalidations so the mount sees ENOENT for

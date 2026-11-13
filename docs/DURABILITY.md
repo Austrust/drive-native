@@ -36,6 +36,9 @@ WSL 合成只读挂载的目录 `os.fsync` 实测返回0，见[内核边界检�
 | D12 | mark_upload_started 的 inflight/upload_paths 事务提交后、网络提交前后 | 未知提交进入核对路径；不因重启自动重复创建或静默覆盖 |
 | D13 | confirm_upload_identity 的本地确认事务提交前后 | 服务器身份/确认版本和本地快照一致，较新草稿不被旧确认清除 |
 | D14 | receive/apply_next 的收件箱、事件应用及 committed_cursor 提交前后 | 原子推进游标、重复事件幂等；不能以光标已更新但目录尚旧的状态恢复 |
+| D14a | apply_chunk 分块应用同一收件箱批次的 chunk 边界 | 每个 chunk 原子提交；批内原子性变为最终一致，重启后整批重放并由 `seen` 幂等跳过已提交前缀；inbox 行与 committed_cursor 仍只在批次最后一个 chunk 的提交中推进 |
+
+分块应用（#67 W2）：`apply_next` 仍是「一个收件箱批次一个事务」，`apply_chunk(max_events)` 只供 catch-up 主路径按 ≤64 个事件切分，把单次 Store 写锁持有从整批缩短到一个 chunk。分块不改变 D14 的恢复规则：inbox 收件行与 `committed_cursor` 只在批次最后一个 chunk 提交时一起推进，chunk 之间崩溃会重放整批，已提交事件由 `seen` 跳过（同 id 同体幂等、同 id 异体报错）。因此批内原子性由「单事务」变为「每个 chunk 原子、整批最终一致」，重放幂等；历史行与其事件仍同 chunk 提交，不会出现「游标已推进但历史缺失」。
 
 主入口见 [state.rs](../crates/drive-core/src/state.rs) 与 [drafts.rs](../crates/drive-core/src/drafts.rs)。目录操作事务、升级迁移/降级拒绝、数据库损坏恢复将在 P2/P3 补专用场景，不能用上述正文点替代。
 
