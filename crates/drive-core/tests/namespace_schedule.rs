@@ -828,3 +828,128 @@ fn frozen_incident_shape_dispatches_pending_tail_at_scale() {
         INCIDENT_SCAN_P95_BUDGET_US
     );
 }
+
+// ---- #57-A: scan-window starvation (residual NV-1) -------------------------
+//
+// The fixed 256-row selector window used to stop scanning at the head of the
+// journal: a prefix of >=256 permanently unfinished intents hid every later
+// independent `pending` intent forever. These tests pin the bounded-pagination
+// contract: within a declared finite number of rounds the suffix must receive a
+// real attempt, and a genuinely dependent suffix must still never be skipped.
+
+/// Prefix sizes around the historical window boundary plus the 1,024-row shape
+/// named by the issue. 255 is the control: the suffix is inside the window and
+/// already passed before the fix.
+const WINDOW_PREFIXES: [usize; 4] = [255, 256, 257, 1024];
+/// Declared bound for "the suffix is eventually attempted": two full passes over
+/// a 1,024-row prefix at one bounded page per round plus headroom.
+const WINDOW_ROUND_BUDGET: usize = 12;
+
+fn window_starvation_store(
+    prefix: usize,
+) -> (
+    tempfile::TempDir,
+    Store,
+    Vec<(String, String)>,
+    Vec<(String, String)>,
+) {
+    let (d, mut s) = synthetic_remove_store(prefix + 100);
+    let half = prefix / 2;
+    let conflicts = insert_removes_bulk(&d, 0, half, "conflict", "c");
+    let uncertain = insert_removes_bulk(&d, half, prefix - half, "uncertain", "u");
+    let pending = insert_removes_bulk(&d, prefix, 100, "pending", "p");
+    // A due read-only reconcile is the worst case for progress: it is always
+    // executable, so a selector that cannot see past the window keeps picking
+    // it and never even observes the independent pending suffix.
+    for (operation, _) in &uncertain {
+        assert!(s
+            .observe_namespace_unresolved(operation, Observation::CommitUnconfirmed)
+            .unwrap());
+    }
+    s.request_namespace_recheck();
+    (d, s, conflicts, pending)
+}
+
+#[test]
+fn pending_suffix_beyond_the_scan_window_is_eventually_attempted() {
+    for prefix in WINDOW_PREFIXES {
+        let (d, mut s, _conflicts, pending) = window_starvation_store(prefix);
+        let suffix: std::collections::HashSet<String> =
+            pending.iter().map(|(operation, _)| operation.clone()).collect();
+        let mut attempted = std::collections::HashSet::new();
+        for _round in 0..WINDOW_ROUND_BUDGET {
+            let Some(selected) = s.next_namespace_operation().unwrap() else {
+                // A selector that only sees the blocked prefix returns `None`;
+                // an executable-pending fix must keep returning candidates.
+                continue;
+            };
+            if selected.state == "pending" && suffix.contains(&selected.operation) {
+                s.mark_remove_started(&selected.operation).unwrap();
+                journal_commit(&d, &selected.operation);
+                attempted.insert(selected.operation);
+            } else if selected.state == "uncertain" {
+                // Model the read-only reconcile that cannot prove the outcome.
+                assert!(s
+                    .observe_namespace_unresolved(
+                        &selected.operation,
+                        Observation::CommitUnconfirmed
+                    )
+                    .unwrap());
+            }
+        }
+        assert!(
+            !attempted.is_empty(),
+            "prefix={prefix}: the 100-row independent pending suffix never got an attempt in \
+             {WINDOW_ROUND_BUDGET} rounds (scan window starvation)"
+        );
+    }
+}
+
+#[test]
+fn dependent_suffix_beyond_the_scan_window_is_never_skipped() {
+    let (d, mut s, conflicts, _pending) = window_starvation_store(256);
+    // Make every suffix intent depend on every prefix intent: same node and
+    // same path as the first prefix conflict. No scheduler change may ever
+    // dispatch across that barrier.
+    let barrier_node = conflicts[0].1.clone();
+    let db = rusqlite::Connection::open(d.path().join("state.sqlite")).unwrap();
+    let mut ids = db
+        .prepare("SELECT id FROM namespace_ops WHERE state='pending' ORDER BY seq")
+        .unwrap()
+        .query_map([], |r| r.get::<_, String>(0))
+        .unwrap()
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .unwrap();
+    drop(db);
+    ids.sort();
+    let db = rusqlite::Connection::open(d.path().join("state.sqlite")).unwrap();
+    for id in &ids {
+        let job = drive_core::removals::RemoveJob {
+            operation: id.clone(),
+            node: n(&barrier_node, Some(SYNTH_ROOT), "f0", false),
+            path: "f0".into(),
+            cursor: "synthetic".into(),
+        };
+        db.execute(
+            "UPDATE namespace_ops SET body=?2 WHERE id=?1",
+            rusqlite::params![id, serde_json::to_string(&job).unwrap()],
+        )
+        .unwrap();
+    }
+    drop(db);
+    let mut leaked = Vec::new();
+    for _ in 0..WINDOW_ROUND_BUDGET {
+        let Some(selected) = s.next_namespace_operation().unwrap() else {
+            continue;
+        };
+        if selected.state == "pending" {
+            leaked.push(selected.operation.clone());
+            s.mark_remove_started(&selected.operation).unwrap();
+            journal_commit(&d, &selected.operation);
+        }
+    }
+    assert!(
+        leaked.is_empty(),
+        "a suffix intent dependent on an earlier blocked intent was dispatched across it: {leaked:?}"
+    );
+}
