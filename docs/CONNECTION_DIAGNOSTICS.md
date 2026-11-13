@@ -10,6 +10,20 @@
 
 本地D-Bus `GetOverview`增加`connection_diagnostics`字段，包括`schema`、`last_transition`、`last_failure`、`load_failed`和`persistence_failed`。查询读取内存快照，不扫描磁盘或访问NAS。诊断IO不持有Store或控制状态锁。记录不包含账号、凭据、目录、游标、报文或原始错误字符串。
 
+## 尝试级业务心跳与 `attempt_lifetime_ms`（issue #58）
+
+`attempt_elapsed_ms` 一直是**整次 worker 在线尝试的寿命**，不是单个 RPC 的阻塞时间；单请求期限另有限制。为避免继续被误读为“某次调用卡了数小时”，新记录同时写入同值的 `attempt_lifetime_ms` 别名，`attempt_elapsed_ms` 保留兼容。旧诊断文件没有该字段时反序列化为0，不影响读取。
+
+监督器为每次尝试维护业务心跳 `last_business_progress_at`（Unix ms）：只有 cursor 推进、实际应用事件、索引单元推进或会话建立/快照安装才刷新；通知 keep-alive 字节和“通知变化但未应用事件”都不算。当尝试已存活超过配置下限**且**业务心跳静默超过配置窗口**且**仍有未完成的追赶/初始化工作时，判定为 `attempt_stalled`：
+
+- `last_failure.cause.kind = "attempt_stalled"`，`stalled_reason = "no_business_progress"`，并携带 `last_business_progress_at`；即使看门狗通过关闭连接触发重建，也不会把原因记成普通传输错误。
+- 重建按 1/2/5 秒有界退避，滚动1小时内最多3次；第4次进入用户可见的 `needs_attention`（`error = "worker_stalled"`）。重建只重连传输，不重置持久化游标、目录或队列。
+- 初始化的 D-Bus 投影同时暴露 `catching_up`、`catch_up_budget_ms`、`budget_remaining_ms`、`last_progress_age_ms`、`last_business_progress_at_unix_ms`、`backlog_estimate` 与最近一次 `no_progress` 事件；追赶预算耗尽后 `catching_up=false`，但缓存读取与增量追赶继续。
+
+超时全部可配置（缺省值见括号）：`DRIVE_NATIVE_CATCHUP_BUDGET_MS`（600000）、`DRIVE_NATIVE_NO_PROGRESS_TIMEOUT_MS`（120000）、`DRIVE_NATIVE_NO_PROGRESS_STREAK`（3）、`DRIVE_NATIVE_ATTEMPT_STALL_MIN_ELAPSED_MS`（1800000）、`DRIVE_NATIVE_ATTEMPT_NO_PROGRESS_TIMEOUT_MS`（600000）。
+
+本地合成验证：短超时事件循环测试覆盖预算耗尽→`catching_up=false`+backlog+结构化 `initialization.no_progress`、缓存可读、增量追赶继续；业务心跳测试覆盖 keep-alive/`changed_without_advance` 不刷新心跳；100k 单调推进（tracker 层模拟 + 真实 store 批次）不触发看门狗。**未做** 24 小时实网运行与真实 NAS 大 backlog 验证。
+
 ## 验证范围
 
 - 完整Rust388项通过、0失败、9项默认忽略；8项FUSE另行显式通过，剩余为文档示例。
