@@ -145,7 +145,11 @@ pub(super) struct Views {
     // receipts and pure inode allocation leave reusable views alone.
     cached: Mutex<HashMap<u64, (CommitState, Weak<View>)>>,
     hot: Mutex<Hot>,
-    builder: Mutex<()>,
+    /// In-flight projection guards, one per directory (issue #23 residual ①).
+    /// Concurrent opens of one directory share the guard and therefore one
+    /// projection; distinct directories never wait for each other. Only active
+    /// projections are kept (`flight`/`release_flight` drop idle entries).
+    building: Mutex<HashMap<u64, Arc<Mutex<()>>>>,
     charged: Arc<AtomicUsize>,
     allocated: Arc<AtomicUsize>,
     reclaimer: Arc<Reclaimer>,
@@ -162,7 +166,7 @@ impl Default for Views {
             }),
             cached: Mutex::new(HashMap::new()),
             hot: Mutex::new(Hot::default()),
-            builder: Mutex::new(()),
+            building: Mutex::new(HashMap::new()),
             charged,
             allocated,
             reclaimer,
@@ -171,9 +175,18 @@ impl Default for Views {
 }
 impl Views {
     /// Shares the original handle/byte/allocation caps and reclamation queue.
-    /// A failed try-lock is a normal SQL-path fallback, never dispatcher wait.
+    /// A failed per-directory try-lock is a normal SQL-path fallback, never
+    /// dispatcher wait: only a projection of the same directory blocks it.
     fn open_index(&self, block: Arc<DirBlock>, token: CommitState) -> Option<Result<u64, i32>> {
-        let Ok(_building) = self.builder.try_lock() else { return None; };
+        let ino = block.ino;
+        let flight = self.flight(ino);
+        let Ok(_building) = flight.try_lock() else { return None; };
+        let result = self.attach_index_view(block, token);
+        drop(_building);
+        self.release_flight(ino, &flight);
+        result
+    }
+    fn attach_index_view(&self, block: Arc<DirBlock>, token: CommitState) -> Option<Result<u64, i32>> {
         let mut table = self.table.lock().unwrap();
         if table.handles.len() >= MAX_HANDLES || table.next == u64::MAX {
             return Some(Err(libc::EMFILE));
@@ -258,6 +271,11 @@ impl Views {
     /// The guard is only observed for a bounded moment so a rename committed by
     /// an in-flight writer is not hidden by a cached view; a held lock without
     /// a commit must not stall the projection (the #23 regression).
+    ///
+    /// Single-flight is per directory (issue #23 residual ①): concurrent opens
+    /// of the *same* directory share one read-only projection, while distinct
+    /// directories project in parallel instead of serializing on a per-mount
+    /// builder mutex.
     fn open(&self, store: &drive_core::SharedStore, ino: u64) -> Result<u64, i32> {
         {
             let table = self.table.lock().unwrap_or_else(|poison| poison.into_inner());
@@ -265,25 +283,25 @@ impl Views {
                 return Err(libc::EMFILE);
             }
         }
-        let token = settle(store);
-        if token.verified {
-            self.trim_hot(Some(&token));
-            let cached = {
-                let cached = self.cached.lock().unwrap_or_else(|poison| poison.into_inner());
-                cached.get(&ino).and_then(|(revision, view)| {
-                    (revision == &token).then(|| view.upgrade()).flatten()
-                })
-            };
-            if let Some(view) = cached {
-                diagnostics::count(diagnostics::Stage::DirectoryCacheHit);
-                self.retain_hot(ino, token, view.clone());
-                return self.attach(view);
-            }
+        if let Some(view) = self.cached_handle(store, ino) {
+            diagnostics::count(diagnostics::Stage::DirectoryCacheHit);
+            return self.attach(view);
         }
         diagnostics::count(diagnostics::Stage::DirectoryCacheMiss);
         let wait = diagnostics::span(diagnostics::Stage::DirectoryBuilderWait);
-        let building = self.builder.lock().unwrap_or_else(|poison| poison.into_inner());
+        let flight = self.flight(ino);
+        let building = flight.lock().unwrap_or_else(|poison| poison.into_inner());
         drop(wait);
+        // A concurrent open of this directory may have published while this
+        // one waited for the flight guard: share that projection instead of
+        // projecting the same directory twice.
+        if let Some(view) = self.cached_handle(store, ino) {
+            diagnostics::count(diagnostics::Stage::DirectoryCacheHit);
+            let handle = self.attach(view);
+            drop(building);
+            self.release_flight(ino, &flight);
+            return handle;
+        }
         let mut attempt = 0;
         loop {
             if self.allocated.load(Ordering::Acquire) >= MAX_HANDLES {
@@ -331,6 +349,7 @@ impl Views {
                     self.publish(ino, after, view.clone());
                     let handle = self.attach(view);
                     drop(building);
+                    self.release_flight(ino, &flight);
                     return handle;
                 }
                 Ok(None) => break,
@@ -348,6 +367,7 @@ impl Views {
             }
         }
         drop(building);
+        self.release_flight(ino, &flight);
         let (handle, view) = self.open_locked(store, ino)?;
         if let Some(view) = view {
             let token = store.change_state();
@@ -356,6 +376,44 @@ impl Views {
             }
         }
         Ok(handle)
+    }
+    /// Cheap-view cache probe for the committed semantic generation. Shared by
+    /// the pre-flight fast path and the post-single-flight re-check so a
+    /// waiter reuses the projection published while it waited.
+    fn cached_handle(&self, store: &drive_core::SharedStore, ino: u64) -> Option<Arc<View>> {
+        let token = settle(store);
+        if !token.verified {
+            return None;
+        }
+        self.trim_hot(Some(&token));
+        let view = {
+            let cached = self.cached.lock().unwrap_or_else(|poison| poison.into_inner());
+            cached.get(&ino).and_then(|(revision, view)| {
+                (revision == &token).then(|| view.upgrade()).flatten()
+            })?
+        };
+        self.retain_hot(ino, token, view.clone());
+        Some(view)
+    }
+    /// In-flight projection guard for one directory. Idle entries are dropped
+    /// as they are observed, so the map tracks active projections rather than
+    /// every directory ever opened.
+    fn flight(&self, ino: u64) -> Arc<Mutex<()>> {
+        let mut building = self.building.lock().unwrap_or_else(|poison| poison.into_inner());
+        building.retain(|_, flight| Arc::strong_count(flight) > 1);
+        if let Some(flight) = building.get(&ino) {
+            return flight.clone();
+        }
+        let flight = Arc::new(Mutex::new(()));
+        building.insert(ino, flight.clone());
+        flight
+    }
+    /// Drop the idle single-flight entry when this caller was its last user.
+    fn release_flight(&self, ino: u64, flight: &Arc<Mutex<()>>) {
+        let mut building = self.building.lock().unwrap_or_else(|poison| poison.into_inner());
+        if Arc::strong_count(flight) == 2 {
+            building.remove(&ino);
+        }
     }
     /// Publishes an authoritative view for reuse. The token is the semantic
     /// generation the projection was built under, not a local `total_changes`
@@ -403,7 +461,8 @@ impl Views {
         ino: u64,
     ) -> Result<(u64, Option<Arc<View>>), i32> {
         let wait = diagnostics::span(diagnostics::Stage::DirectoryBuilderWait);
-        let _building = self.builder.lock().unwrap_or_else(|poison| poison.into_inner());
+        let flight = self.flight(ino);
+        let _building = flight.lock().unwrap_or_else(|poison| poison.into_inner());
         drop(wait);
         let store = store.lock().unwrap_or_else(|poison| poison.into_inner());
         let authority = match store.preview_record_by_inode(ino) {
