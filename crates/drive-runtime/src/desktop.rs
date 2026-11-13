@@ -3893,7 +3893,11 @@ mod readpath_tests {
             overview_fields(&first)["commit_diagnostics"]
         );
         // A non-namespace write does not move the committed Store state, so the
-        // snapshot is still valid and no further diagnostics read happens.
+        // pre-existing derived counters still hit. The diagnostics snapshot is
+        // keyed on the read-only connection's data_version: when drive-core
+        // exposes it, any cross-connection commit conservatively refreshes the
+        // snapshot (settings writes included); without it the commit key keeps
+        // the snapshot. Both are correct, only the caching window differs.
         service
             .bridge
             .store
@@ -3901,9 +3905,21 @@ mod readpath_tests {
             .unwrap()
             .set_cache_limit(64 * 1024 * 1024)
             .unwrap();
-        let (_fourth, fourth_timings) = overview_measured(&service).unwrap();
+        let data_version_known = {
+            let handle = read_only(&service).unwrap();
+            store_data_version(&handle).is_some()
+        };
+        let (fourth, fourth_timings) = overview_measured(&service).unwrap();
         assert!(fourth_timings.derived_cached);
-        assert_eq!(super::counters::diagnostics_reads(), 2);
+        assert_eq!(
+            super::counters::diagnostics_reads(),
+            if data_version_known { 3 } else { 2 },
+            "diagnostics refresh after a non-namespace write (data_version_known={data_version_known})"
+        );
+        assert_eq!(
+            overview_fields(&fourth)["commit_diagnostics"],
+            overview_fields(&first)["commit_diagnostics"]
+        );
     }
 
     /// Issue #67 W1: every warm `GetStates` batch on a ready projection used to
@@ -4509,6 +4525,236 @@ mod readpath_tests {
             "expected the incremental path to serve the small committed changes, \
              got {incremental_total} incremental refresh(es)"
         );
+        service.shutdown();
+        tasks.join();
+    }
+
+    /// Issue #30 scale evidence (heavy, `#[ignore]` by default).
+    ///
+    /// Builds a 210k/294k synthetic namespace, waits for the committed
+    /// projection, then measures warm root `GetStates`:
+    /// 1. same-generation repeated root batches (per-call latency, render hits,
+    ///    zero tree walks),
+    /// 2. one committed leaf change (incremental refresh: recomputed entries,
+    ///    no full render) plus a field-for-field comparison with the
+    ///    authoritative cache-disabled render,
+    /// 3. 1/16/48 concurrent per-request latency and throughput,
+    /// 4. process VmHWM/VmRSS snapshots.
+    ///
+    /// Set `ISSUE30_NODES=210000` (or 294000, the default) to pick the size.
+    /// Run: `cargo test -p drive-runtime --release --all-features --locked
+    /// --lib issue30_scale -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "heavy scale evidence: run on the remote host with --ignored"]
+    fn issue30_scale_projection_render_evidence() {
+        fn percentile(sorted: &[u64], fraction: f64) -> u64 {
+            if sorted.is_empty() {
+                return 0;
+            }
+            let index = ((sorted.len() - 1) as f64 * fraction).round() as usize;
+            sorted[index.min(sorted.len() - 1)]
+        }
+        fn proc_status(field: &str) -> u64 {
+            std::fs::read_to_string("/proc/self/status")
+                .ok()
+                .and_then(|status| {
+                    status.lines().find_map(|line| {
+                        let value = line.strip_prefix(field)?.trim();
+                        value.trim_end_matches(" kB").parse().ok()
+                    })
+                })
+                .unwrap_or(0)
+        }
+        let requested: usize = std::env::var("ISSUE30_NODES")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(294_000);
+        let folders = 147usize.min((requested / 2000).max(1));
+        let files_per_folder = (requested.saturating_sub(folders + 1)) / folders;
+        let mut nodes = vec![node("root", None, true)];
+        for folder in 0..folders {
+            let folder_id = format!("dir{folder:03}");
+            nodes.push(node(&folder_id, Some("root"), true));
+            for file in 0..files_per_folder {
+                nodes.push(node(
+                    &format!("file{folder:03}-{file:04}"),
+                    Some(&folder_id),
+                    false,
+                ));
+            }
+        }
+        let node_count = nodes.len();
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(dir.path()).unwrap();
+        store
+            .install_remote_snapshot(&nodes, "1", "server")
+            .unwrap();
+        store.ensure_fs_root("root").unwrap();
+        let setup_hwm = proc_status("VmHWM:");
+        let service =
+            Service::new(profile(), store, PathBuf::from("/nonexistent-worker")).unwrap();
+        let tasks = service.clone().start();
+        let started = std::time::Instant::now();
+        let deadline = started + std::time::Duration::from_secs(120);
+        while service.status_projection().is_none() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "projection did not become ready for {node_count} nodes"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let projection_ready_ms = started.elapsed().as_millis();
+        let projection_generation = || {
+            service
+                .status_projection()
+                .map(|projection| projection.generation())
+                .unwrap_or(0)
+        };
+        let root = vec![".".to_string()];
+        let top: Vec<String> = (0..folders).map(|f| format!("dir{f:03}")).collect();
+        // Build the committed render once (full O(N) render at the first batch).
+        let cold_started = std::time::Instant::now();
+        let cold_root = states(&service, root.clone()).unwrap();
+        let cold_root_us = cold_started.elapsed().as_micros() as u64;
+        let warm_started = std::time::Instant::now();
+        let _ = states(&service, root.clone()).unwrap();
+        let warm_second_us = warm_started.elapsed().as_micros() as u64;
+        super::counters::reset_entry_cache_counters();
+        super::counters::reset_projection_tree_loads();
+        let sequential = 100usize;
+        let mut same_generation_ns = Vec::with_capacity(sequential);
+        for _ in 0..sequential {
+            let call = std::time::Instant::now();
+            let body = states(&service, root.clone()).unwrap();
+            same_generation_ns.push(call.elapsed().as_nanos() as u64);
+            assert_eq!(body, cold_root, "warm root render changed");
+        }
+        same_generation_ns.sort_unstable();
+        let same_gen_hits = super::counters::entry_cache_hits();
+        let same_gen_builds = super::counters::entry_cache_builds();
+        let same_gen_walks = super::counters::projection_tree_loads();
+        // A per-directory batch (most of the namespace) on the same generation.
+        let page_batches = 10usize;
+        let page_started = std::time::Instant::now();
+        for _ in 0..page_batches {
+            let _ = states(&service, top.clone()).unwrap();
+        }
+        let page_batch_us = page_started.elapsed().as_micros() as u64 / page_batches as u64;
+        // One committed leaf change: the next root batch must refresh only the
+        // changed entry and its ancestor chain.
+        let before_generation = projection_generation();
+        service
+            .bridge
+            .store
+            .lock()
+            .unwrap()
+            .pin("file000-0001", true)
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while projection_generation() <= before_generation {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "projection did not advance after the leaf pin"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        loop {
+            let stable = projection_generation();
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            if projection_generation() == stable {
+                break;
+            }
+        }
+        super::counters::reset_entry_cache_counters();
+        super::counters::reset_projection_tree_loads();
+        let incremental_started = std::time::Instant::now();
+        let incremental_root = states(&service, root.clone()).unwrap();
+        let incremental_us = incremental_started.elapsed().as_micros() as u64;
+        let incremental_refreshes = super::counters::incremental_refreshes();
+        let incremental_nodes = super::counters::incremental_nodes();
+        let incremental_builds = super::counters::entry_cache_builds();
+        let incremental_walks = super::counters::projection_tree_loads();
+        service.set_desktop_entries_cache_enabled(false);
+        let authoritative = states(&service, root.clone()).unwrap();
+        service.set_desktop_entries_cache_enabled(true);
+        let oracle_equal = authoritative == incremental_root;
+        // Concurrency: same committed generation, root batch only.
+        let mut concurrency_lines = Vec::new();
+        for threads in [1usize, 16, 48] {
+            let calls_per_thread = if threads == 1 { 100 } else { 30 };
+            let barrier = Arc::new(std::sync::Barrier::new(threads));
+            let started = std::time::Instant::now();
+            let mut handles = Vec::with_capacity(threads);
+            for _ in 0..threads {
+                let service = service.clone();
+                let root = root.clone();
+                let barrier = barrier.clone();
+                handles.push(std::thread::spawn(move || {
+                    barrier.wait();
+                    let mut latencies = Vec::with_capacity(calls_per_thread);
+                    for _ in 0..calls_per_thread {
+                        let call = std::time::Instant::now();
+                        let body = states(&service, root.clone()).unwrap();
+                        latencies.push(call.elapsed().as_nanos() as u64);
+                        assert!(body.contains("\"entries\""));
+                    }
+                    latencies
+                }));
+            }
+            let mut latencies = Vec::with_capacity(threads * calls_per_thread);
+            for handle in handles {
+                latencies.extend(handle.join().unwrap());
+            }
+            let elapsed = started.elapsed().as_secs_f64().max(0.000_001);
+            latencies.sort_unstable();
+            let calls = latencies.len();
+            concurrency_lines.push(format!(
+                "concurrency={threads} calls={calls} p50_us={:.1} p95_us={:.1} \
+                 p99_us={:.1} max_us={:.1} throughput_per_s={:.1}",
+                percentile(&latencies, 0.50) as f64 / 1000.0,
+                percentile(&latencies, 0.95) as f64 / 1000.0,
+                percentile(&latencies, 0.99) as f64 / 1000.0,
+                *latencies.last().unwrap() as f64 / 1000.0,
+                calls as f64 / elapsed,
+            ));
+        }
+        eprintln!(
+            "ISSUE30_SCALE nodes={node_count} folders={folders} \
+             files_per_folder={files_per_folder} projection_ready_ms={projection_ready_ms} \
+             cold_root_us={cold_root_us} warm_second_us={warm_second_us} \
+             warm_same_generation_p50_us={:.1} p95_us={:.1} p99_us={:.1} \
+             hits={same_gen_hits} builds={same_gen_builds} tree_walks={same_gen_walks} \
+             page_batch_us={page_batch_us} incremental_us={incremental_us} \
+             incremental_refreshes={incremental_refreshes} \
+             incremental_nodes={incremental_nodes} incremental_builds={incremental_builds} \
+             incremental_tree_walks={incremental_walks} oracle_equal={oracle_equal} \
+             setup_hwm_kb={setup_hwm} hwm_kb={} rss_kb={}",
+            percentile(&same_generation_ns, 0.50) as f64 / 1000.0,
+            percentile(&same_generation_ns, 0.95) as f64 / 1000.0,
+            percentile(&same_generation_ns, 0.99) as f64 / 1000.0,
+            proc_status("VmHWM:"),
+            proc_status("VmRSS:"),
+        );
+        for line in &concurrency_lines {
+            eprintln!("ISSUE30_SCALE {line}");
+        }
+        assert_eq!(
+            same_gen_hits, sequential,
+            "warm same-generation root batches must all be render hits"
+        );
+        assert_eq!(same_gen_builds, 0);
+        assert_eq!(same_gen_walks, 0);
+        assert_eq!(
+            incremental_refreshes, 1,
+            "one leaf commit must refresh the render incrementally"
+        );
+        assert_eq!(incremental_builds, 0, "a leaf commit rebuilt the whole render");
+        assert_eq!(incremental_walks, 0);
+        assert!(
+            incremental_nodes <= 8,
+            "a leaf commit recomputed {incremental_nodes} entries"
+        );
+        assert!(oracle_equal, "incremental root render differs from authoritative");
         service.shutdown();
         tasks.join();
     }
