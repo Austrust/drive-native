@@ -949,6 +949,9 @@ fn send_acl_plus(store:&drive_core::SharedStore,notify:&NotifyHub,view:&View,off
     if let ViewOrigin::Preview(stamp)=&view.origin {if let Err(e)=guard.preview_validate_view(stamp){reply.error(errno(&e));return;}}
     let entries:Vec<_>=if let Some((block,_))=view.indexed(){block.entries.iter().map(|e|(e.ino,e.name.as_ref(),kind(e.kind))).collect()}
         else{view.snapshot().entries.iter().map(|e|(e.ino,e.name.as_str(),if e.directory{FileType::Directory}else{FileType::RegularFile})).collect()};
+    // Issue #26 red instrumentation: the whole directory tuple list is built
+    // before the offset/page logic, so every continuation pays O(N) again.
+    diagnostics::record_acl_materialized_reply(entries.len() as u64);
     if offset>entries.len(){reply.error(libc::EINVAL);return;}
     let parent=match guard.posix_record_by_inode(view.ino){Ok(record)=>record.id,Err(error)=>{reply.error(errno(&error));return;}};
     let cache_before=guard.permission_cache_stats();
@@ -959,6 +962,7 @@ fn send_acl_plus(store:&drive_core::SharedStore,notify:&NotifyHub,view:&View,off
         let slots=chunk.iter().map(|(ino,name,directory)|drive_core::filesystem::DirectorySlot{
             ino:*ino,name,directory:*directory==FileType::Directory,
         }).collect::<Vec<_>>();
+        diagnostics::record_acl_batch(slots.len() as u64);
         let page=match guard.directory_posix_page_for_acl(view.ino,&slots){
             Ok(page)=>page,Err(error)=>{reply.error(errno(&error));return;}
         };
