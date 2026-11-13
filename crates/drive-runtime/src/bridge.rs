@@ -256,6 +256,12 @@ pub struct Bridge {
     /// stall forced the connection closed. The supervisor converts it into an
     /// `attempt_stalled` diagnostic plus a bounded rebuild.
     attempt_stalled: AtomicBool,
+    /// #57-B: bounded execution budget for one read-only reconcile RPC attempt.
+    /// A timed-out reconcile releases the single serial lane while the durable
+    /// `uncertain` intent and its unknown outcome are retained, never replayed.
+    namespace_reconcile_budget_ms: AtomicU64,
+    namespace_reconcile_attempts: AtomicU64,
+    namespace_reconcile_timeouts: AtomicU64,
     /// Test-only observation of how many hydration refreshes ran.
     #[cfg(test)]
     refresh_runs: AtomicUsize,
@@ -469,6 +475,9 @@ impl Bridge {
             upload_signal: (Mutex::new(false), Condvar::new()),
             recheck_requested: AtomicBool::new(false),
             attempt_stalled: AtomicBool::new(false),
+            namespace_reconcile_budget_ms: AtomicU64::new(15_000),
+            namespace_reconcile_attempts: AtomicU64::new(0),
+            namespace_reconcile_timeouts: AtomicU64::new(0),
             #[cfg(test)]
             refresh_runs: AtomicUsize::new(0),
             failure: Mutex::new(None),
@@ -504,6 +513,51 @@ impl Bridge {
     /// Observable for root diagnostics; the mount recovers without a restart.
     pub fn notification_overflows(&self) -> u64 {
         self.notification_overflows.load(Ordering::Relaxed)
+    }
+    /// #57-B: declared execution budget for a single read-only reconcile RPC.
+    ///
+    /// Pending-first already decides who starts; this budget bounds the damage
+    /// an already-started reconcile can do to the single serial lane. The
+    /// default (15 s) is far below the mutation RPC timeout so a stalled check
+    /// cannot own the lane for the whole 120 s window.
+    pub fn namespace_reconcile_budget(&self) -> Duration {
+        Duration::from_millis(self.namespace_reconcile_budget_ms.load(Ordering::Relaxed))
+    }
+    /// #57-B: override the reconcile execution budget (tests inject a short
+    /// budget so a stalled read-only reconcile releases the lane
+    /// deterministically without sleeping for the production budget).
+    pub fn set_namespace_reconcile_budget(&self, budget: Duration) {
+        let millis = u64::try_from(budget.as_millis()).unwrap_or(u64::MAX);
+        self.namespace_reconcile_budget_ms
+            .store(millis.clamp(50, 600_000), Ordering::Relaxed);
+    }
+    /// #57-B/C: `(attempts, budget_timeouts, budget_ms)` of the read-only
+    /// reconcile lane. A timeout increments the counter, keeps the durable
+    /// `uncertain` intent and never replays the unknown remote operation.
+    pub fn namespace_reconcile_metrics(&self) -> (u64, u64, u64) {
+        (
+            self.namespace_reconcile_attempts.load(Ordering::Relaxed),
+            self.namespace_reconcile_timeouts.load(Ordering::Relaxed),
+            self.namespace_reconcile_budget_ms.load(Ordering::Relaxed),
+        )
+    }
+    pub(crate) fn note_namespace_reconcile_attempt(&self) {
+        self.namespace_reconcile_attempts
+            .fetch_add(1, Ordering::Relaxed);
+    }
+    /// Rate-limited (first observation then powers of two) so a persistently
+    /// stalled endpoint cannot flood stderr/journald; the counter stays exact.
+    pub(crate) fn note_namespace_reconcile_timeout(&self, operation: &str, kind: &str) {
+        let timeouts = self
+            .namespace_reconcile_timeouts
+            .fetch_add(1, Ordering::Relaxed)
+            .saturating_add(1);
+        if timeouts == 1 || timeouts.is_power_of_two() {
+            eprintln!(
+                "drive-native namespace.reconcile_timeout op={operation} kind={kind} budget_ms={} outcome=unknown replay=false",
+                self.namespace_reconcile_budget_ms.load(Ordering::Relaxed)
+            );
+        }
     }
     /// One non-blocking health snapshot of the notification path (#27 residual).
     /// Pure counter loads: safe from a diagnostic/status path and from tests.

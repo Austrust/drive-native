@@ -953,3 +953,112 @@ fn dependent_suffix_beyond_the_scan_window_is_never_skipped() {
         "a suffix intent dependent on an earlier blocked intent was dispatched across it: {leaked:?}"
     );
 }
+
+// ---- #57-C: bounded bidirectional service quota ---------------------------
+
+/// Continuous pending writes must not starve a due read-only reconcile, and the
+/// aging quota must not turn into reconcile-first starvation of pending work.
+/// The declared budget is 10 s; the test advances the aging clock instead of
+/// sleeping.
+#[test]
+fn continuous_pending_serves_a_due_reconcile_within_the_aging_budget() {
+    let (d, mut s) = synthetic_remove_store(40);
+    insert_removes(&d, 0, 1, "uncertain", "u");
+    insert_removes(&d, 1, 20, "pending", "p");
+    for round in 0..5 {
+        let selected = s
+            .dispatch_namespace_operation()
+            .unwrap()
+            .unwrap_or_else(|| panic!("round {round}: no candidate"));
+        assert_eq!(
+            selected.state, "pending",
+            "round {round}: pending-first must keep the lane while the reconcile is young"
+        );
+        s.mark_remove_started(&selected.operation).unwrap();
+        journal_commit(&d, &selected.operation);
+    }
+    let health = s.queue_health().unwrap();
+    assert_eq!(health.reconcile_attempts, 0);
+    assert_eq!(health.reconcile_aged_overrides, 0);
+    assert_eq!(health.reconcile_aging_budget_ms, 10_000);
+    assert!(
+        health.reconcile_due_age_ms.is_some(),
+        "a due reconcile deferred by pending work must age"
+    );
+    // The declared aging budget elapses (simulated, no real sleep).
+    s.age_namespace_reconcile_deadline(Duration::from_secs(11));
+    let aged = s
+        .dispatch_namespace_operation()
+        .unwrap()
+        .expect("aged reconcile candidate");
+    assert_eq!(
+        aged.state, "uncertain",
+        "the aging quota must give the waiting reconcile the lane"
+    );
+    let health = s.queue_health().unwrap();
+    assert_eq!(health.reconcile_attempts, 1);
+    assert_eq!(health.reconcile_aged_overrides, 1);
+    assert!(
+        health.reconcile_max_wait_ms >= 10_000,
+        "reconcile_max_wait_ms={}",
+        health.reconcile_max_wait_ms
+    );
+    let schedule = health.schedule.expect("schedule snapshot");
+    assert_eq!(schedule.executable_unscheduled, 1);
+    assert_eq!(schedule.reconcile_aged_overrides, 1);
+    // Reverse starvation: the reconcile attempt consumes one slot, then the
+    // pending stream must get the lane back (no reconcile-first FIFO).
+    assert!(s
+        .observe_namespace_unresolved(&aged.operation, Observation::CommitUnconfirmed)
+        .unwrap());
+    let next = s
+        .dispatch_namespace_operation()
+        .unwrap()
+        .expect("pending after the reconcile attempt");
+    assert_eq!(
+        next.state, "pending",
+        "pending must not starve behind the reconcile lane"
+    );
+}
+
+/// With a short aging budget both classes are served in a finite number of
+/// rounds; neither direction may starve the other.
+#[test]
+fn short_aging_budget_alternates_so_neither_class_starves() {
+    let (d, mut s) = synthetic_remove_store(40);
+    insert_removes(&d, 0, 1, "uncertain", "u");
+    insert_removes(&d, 1, 30, "pending", "p");
+    s.set_namespace_reconcile_aging(Duration::ZERO);
+    let (mut pending, mut reconcile) = (0usize, 0usize);
+    for _ in 0..8 {
+        let Some(selected) = s.dispatch_namespace_operation().unwrap() else {
+            continue;
+        };
+        match selected.state.as_str() {
+            "pending" => {
+                pending += 1;
+                s.mark_remove_started(&selected.operation).unwrap();
+                journal_commit(&d, &selected.operation);
+            }
+            "uncertain" => {
+                reconcile += 1;
+                assert!(s
+                    .observe_namespace_unresolved(
+                        &selected.operation,
+                        Observation::CommitUnconfirmed
+                    )
+                    .unwrap());
+            }
+            state => panic!("unexpected selected state {state}"),
+        }
+    }
+    assert!(
+        reconcile >= 1,
+        "the aging quota never served the due reconcile (pending={pending})"
+    );
+    assert!(
+        pending >= 5,
+        "the aging quota reverse-starved pending work: pending={pending} reconcile={reconcile}"
+    );
+    assert!(s.queue_health().unwrap().reconcile_attempts >= 1);
+}

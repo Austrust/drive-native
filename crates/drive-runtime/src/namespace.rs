@@ -30,6 +30,17 @@ impl Bridge {
         }
         Ok(())
     }
+    /// #57-B: a read-only reconciliation gets a bounded execution budget, not
+    /// the mutation RPC timeout. The durable `uncertain` intent is retained and
+    /// the unknown outcome is never replayed; the lane is released sooner so an
+    /// independent pending mutation cannot wait the full mutation window.
+    fn namespace_rpc_timeout(&self, reconcile: bool) -> Duration {
+        if reconcile {
+            self.namespace_reconcile_budget()
+        } else {
+            Duration::from_secs(120)
+        }
+    }
     /// Process the durable sequence. An uncertain head is queried, never resent.
     pub fn rename_pending(&self) -> io::Result<usize> {
         let _mutation = self.recovery_gate.read().unwrap();
@@ -123,12 +134,15 @@ impl Bridge {
             if fresh.job.operation != op {
                 return Err(io::Error::other("rename order changed"));
             }
+            if reconcile {
+                self.note_namespace_reconcile_attempt();
+            }
             let outcome = rpc.call(
                 Command::Rename {
                     job: fresh.job,
                     reconcile,
                 },
-                Duration::from_secs(120),
+                self.namespace_rpc_timeout(reconcile),
             );
             let mut store = self.store.lock().unwrap();
             match outcome {
@@ -184,12 +198,20 @@ impl Bridge {
                         return Ok(done);
                     }
                 },
-                Err(_) => {
+                Err(error) => {
                     if !reconcile {
                         store.mark_rename_uncertain_diagnosed(
                             &op,
                             CommitCategory::Transport,
                             Some("rename transport lost before the commit was observed"),
+                        ).map_err(io::Error::other)?;
+                    } else if error.kind() == io::ErrorKind::TimedOut {
+                        self.note_namespace_reconcile_timeout(&op, "rename");
+                        store.record_namespace_commit_diagnostic(
+                            &op,
+                            CommitCategory::Timeout,
+                            Some("read-only rename reconcile exceeded its execution budget; commit outcome unknown, intent retained and not replayed"),
+                            0,
                         ).map_err(io::Error::other)?;
                     } else {
                         store.record_namespace_commit_diagnostic(
@@ -359,12 +381,15 @@ impl Bridge {
         }
         let permission_targets=drive_core::write_permissions::namespace_targets("remove",&serde_json::to_string(&queued.job)?).map_err(io::Error::other)?;
         let op = queued.job.operation.clone();
+        if reconcile {
+            self.note_namespace_reconcile_attempt();
+        }
         let outcome = rpc.call(
             Command::Remove {
                 job: queued.job,
                 reconcile,
             },
-            Duration::from_secs(120),
+            self.namespace_rpc_timeout(reconcile),
         );
         let mut store = self.store.lock().unwrap();
         match outcome {
@@ -404,12 +429,20 @@ impl Bridge {
                     Ok(0)
                 }
             },
-            Err(_) => {
+            Err(error) => {
                 if !reconcile {
                     store.mark_remove_uncertain_diagnosed(
                         &op,
                         CommitCategory::Transport,
                         Some("remove transport lost before the commit was observed"),
+                    ).map_err(io::Error::other)?;
+                } else if error.kind() == io::ErrorKind::TimedOut {
+                    self.note_namespace_reconcile_timeout(&op, "remove");
+                    store.record_namespace_commit_diagnostic(
+                        &op,
+                        CommitCategory::Timeout,
+                        Some("read-only remove reconcile exceeded its execution budget; commit outcome unknown, intent retained and not replayed"),
+                        0,
                     ).map_err(io::Error::other)?;
                 } else {
                     store.record_namespace_commit_diagnostic(
@@ -588,13 +621,21 @@ impl Bridge {
                     q.job
                 };
                 target_remote = job.target_remote.clone();
+                if reconcile {
+                    self.note_namespace_reconcile_attempt();
+                }
+                let timeout = if reconcile {
+                    self.namespace_reconcile_budget()
+                } else {
+                    Duration::from_secs(1800)
+                };
                 rpc.call_with_descriptor(
                     Command::Replace {
                         job,
                         sha256,
                         reconcile,
                     },
-                    Duration::from_secs(1800),
+                    timeout,
                     Some(file.into()),
                 )
             };
@@ -627,9 +668,15 @@ impl Bridge {
                 }
                 _ => None,
             },
-            Err(_) => {
-                unknown_category = CommitCategory::Transport;
-                unknown_error = "replacement transport lost before the commit was observed";
+            Err(error) => {
+                if reconcile && error.kind() == io::ErrorKind::TimedOut {
+                    self.note_namespace_reconcile_timeout(&op, "replace");
+                    unknown_category = CommitCategory::Timeout;
+                    unknown_error = "read-only replacement reconcile exceeded its execution budget; commit outcome unknown, intent retained and not replayed";
+                } else {
+                    unknown_category = CommitCategory::Transport;
+                    unknown_error = "replacement transport lost before the commit was observed";
+                }
                 None
             }
         };
@@ -702,7 +749,13 @@ impl Bridge {
                 }
             }
         };
-        let outcome = rpc.call(Command::Mkdir { job, reconcile }, Duration::from_secs(120));
+        if reconcile {
+            self.note_namespace_reconcile_attempt();
+        }
+        let outcome = rpc.call(
+            Command::Mkdir { job, reconcile },
+            self.namespace_rpc_timeout(reconcile),
+        );
         let mut s = self.store.lock().unwrap();
         let mut unknown_category = CommitCategory::Protocol;
         let mut unknown_error = "server returned an unexpected directory reply";
@@ -730,9 +783,15 @@ impl Bridge {
                 }
                 _ => {}
             },
-            Err(_) => {
-                unknown_category = CommitCategory::Transport;
-                unknown_error = "directory transport lost before the commit was observed";
+            Err(error) => {
+                if reconcile && error.kind() == io::ErrorKind::TimedOut {
+                    self.note_namespace_reconcile_timeout(&op, "mkdir");
+                    unknown_category = CommitCategory::Timeout;
+                    unknown_error = "read-only directory reconcile exceeded its execution budget; commit outcome unknown, intent retained and not replayed";
+                } else {
+                    unknown_category = CommitCategory::Transport;
+                    unknown_error = "directory transport lost before the commit was observed";
+                }
             }
         }
         if !reconcile {
