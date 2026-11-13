@@ -828,3 +828,521 @@ fn frozen_incident_shape_dispatches_pending_tail_at_scale() {
         INCIDENT_SCAN_P95_BUDGET_US
     );
 }
+
+// ---- #57-A: scan-window starvation (residual NV-1) -------------------------
+//
+// The fixed 256-row selector window used to stop scanning at the head of the
+// journal: a prefix of >=256 permanently unfinished intents hid every later
+// independent `pending` intent forever. These tests pin the bounded-pagination
+// contract: within a declared finite number of rounds the suffix must receive a
+// real attempt, and a genuinely dependent suffix must still never be skipped.
+
+/// Prefix sizes around the historical window boundary plus the 1,024-row shape
+/// named by the issue. 255 is the control: the suffix is inside the window and
+/// already passed before the fix.
+const WINDOW_PREFIXES: [usize; 4] = [255, 256, 257, 1024];
+/// Declared bound for "the suffix is eventually attempted": two full passes over
+/// a 1,024-row prefix at one bounded page per round plus headroom.
+const WINDOW_ROUND_BUDGET: usize = 12;
+
+fn window_starvation_store(
+    prefix: usize,
+) -> (
+    tempfile::TempDir,
+    Store,
+    Vec<(String, String)>,
+    Vec<(String, String)>,
+) {
+    let (d, mut s) = synthetic_remove_store(prefix + 100);
+    let half = prefix / 2;
+    let conflicts = insert_removes_bulk(&d, 0, half, "conflict", "c");
+    let uncertain = insert_removes_bulk(&d, half, prefix - half, "uncertain", "u");
+    let pending = insert_removes_bulk(&d, prefix, 100, "pending", "p");
+    // A due read-only reconcile is the worst case for progress: it is always
+    // executable, so a selector that cannot see past the window keeps picking
+    // it and never even observes the independent pending suffix.
+    for (operation, _) in &uncertain {
+        assert!(s
+            .observe_namespace_unresolved(operation, Observation::CommitUnconfirmed)
+            .unwrap());
+    }
+    s.request_namespace_recheck();
+    (d, s, conflicts, pending)
+}
+
+#[test]
+fn pending_suffix_beyond_the_scan_window_is_eventually_attempted() {
+    for prefix in WINDOW_PREFIXES {
+        let (d, mut s, _conflicts, pending) = window_starvation_store(prefix);
+        let suffix: std::collections::HashSet<String> =
+            pending.iter().map(|(operation, _)| operation.clone()).collect();
+        let mut attempted = std::collections::HashSet::new();
+        let mut first_attempt_round = None;
+        let started = std::time::Instant::now();
+        for round in 0..WINDOW_ROUND_BUDGET {
+            let Some(selected) = s.next_namespace_operation().unwrap() else {
+                // A selector that only sees the blocked prefix returns `None`;
+                // an executable-pending fix must keep returning candidates.
+                continue;
+            };
+            if selected.state == "pending" && suffix.contains(&selected.operation) {
+                s.mark_remove_started(&selected.operation).unwrap();
+                journal_commit(&d, &selected.operation);
+                attempted.insert(selected.operation);
+                first_attempt_round.get_or_insert(round);
+            } else if selected.state == "uncertain" {
+                // Model the read-only reconcile that cannot prove the outcome.
+                assert!(s
+                    .observe_namespace_unresolved(
+                        &selected.operation,
+                        Observation::CommitUnconfirmed
+                    )
+                    .unwrap());
+            }
+        }
+        let scan = s.queue_health().unwrap().schedule.expect("schedule snapshot");
+        println!(
+            "#57A prefix={prefix} first_suffix_attempt_round={:?} attempts={} rounds_elapsed_ms={} scan_cursor={} scan_cycles={} truncated={} truncation_reason={:?}",
+            first_attempt_round,
+            attempted.len(),
+            started.elapsed().as_millis(),
+            scan.scan_cursor,
+            scan.scan_cycles,
+            scan.truncated,
+            scan.truncation_reason,
+        );
+        assert!(
+            !attempted.is_empty(),
+            "prefix={prefix}: the 100-row independent pending suffix never got an attempt in \
+             {WINDOW_ROUND_BUDGET} rounds (scan window starvation)"
+        );
+    }
+}
+
+#[test]
+fn dependent_suffix_beyond_the_scan_window_is_never_skipped() {
+    let (d, mut s, conflicts, _pending) = window_starvation_store(256);
+    // Make every suffix intent depend on every prefix intent: same node and
+    // same path as the first prefix conflict. No scheduler change may ever
+    // dispatch across that barrier.
+    let barrier_node = conflicts[0].1.clone();
+    let db = rusqlite::Connection::open(d.path().join("state.sqlite")).unwrap();
+    let mut ids = db
+        .prepare("SELECT id FROM namespace_ops WHERE state='pending' ORDER BY seq")
+        .unwrap()
+        .query_map([], |r| r.get::<_, String>(0))
+        .unwrap()
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .unwrap();
+    drop(db);
+    ids.sort();
+    let db = rusqlite::Connection::open(d.path().join("state.sqlite")).unwrap();
+    for id in &ids {
+        let job = drive_core::removals::RemoveJob {
+            operation: id.clone(),
+            node: n(&barrier_node, Some(SYNTH_ROOT), "f0", false),
+            path: "f0".into(),
+            cursor: "synthetic".into(),
+        };
+        db.execute(
+            "UPDATE namespace_ops SET body=?2 WHERE id=?1",
+            rusqlite::params![id, serde_json::to_string(&job).unwrap()],
+        )
+        .unwrap();
+    }
+    drop(db);
+    let mut leaked = Vec::new();
+    for _ in 0..WINDOW_ROUND_BUDGET {
+        let Some(selected) = s.next_namespace_operation().unwrap() else {
+            continue;
+        };
+        if selected.state == "pending" {
+            leaked.push(selected.operation.clone());
+            s.mark_remove_started(&selected.operation).unwrap();
+            journal_commit(&d, &selected.operation);
+        }
+    }
+    assert!(
+        leaked.is_empty(),
+        "a suffix intent dependent on an earlier blocked intent was dispatched across it: {leaked:?}"
+    );
+}
+
+// ---- #57-C: bounded bidirectional service quota ---------------------------
+
+/// Continuous pending writes must not starve a due read-only reconcile, and the
+/// aging quota must not turn into reconcile-first starvation of pending work.
+/// The declared budget is 10 s; the test advances the aging clock instead of
+/// sleeping.
+#[test]
+fn continuous_pending_serves_a_due_reconcile_within_the_aging_budget() {
+    let (d, mut s) = synthetic_remove_store(40);
+    insert_removes(&d, 0, 1, "uncertain", "u");
+    insert_removes(&d, 1, 20, "pending", "p");
+    for round in 0..5 {
+        let selected = s
+            .dispatch_namespace_operation()
+            .unwrap()
+            .unwrap_or_else(|| panic!("round {round}: no candidate"));
+        assert_eq!(
+            selected.state, "pending",
+            "round {round}: pending-first must keep the lane while the reconcile is young"
+        );
+        s.mark_remove_started(&selected.operation).unwrap();
+        journal_commit(&d, &selected.operation);
+    }
+    let health = s.queue_health().unwrap();
+    assert_eq!(health.reconcile_attempts, 0);
+    assert_eq!(health.reconcile_aged_overrides, 0);
+    assert_eq!(health.reconcile_aging_budget_ms, 10_000);
+    assert!(
+        health.reconcile_due_age_ms.is_some(),
+        "a due reconcile deferred by pending work must age"
+    );
+    // The declared aging budget elapses (simulated, no real sleep).
+    s.age_namespace_reconcile_deadline(Duration::from_secs(11));
+    let aged = s
+        .dispatch_namespace_operation()
+        .unwrap()
+        .expect("aged reconcile candidate");
+    assert_eq!(
+        aged.state, "uncertain",
+        "the aging quota must give the waiting reconcile the lane"
+    );
+    let health = s.queue_health().unwrap();
+    assert_eq!(health.reconcile_attempts, 1);
+    assert_eq!(health.reconcile_aged_overrides, 1);
+    assert!(
+        health.reconcile_max_wait_ms >= 10_000,
+        "reconcile_max_wait_ms={}",
+        health.reconcile_max_wait_ms
+    );
+    println!(
+        "#57C reconcile_aged max_wait_ms={} due_age_ms={:?} attempts={} overrides={} pending_before_aged={pending_before}",
+        health.reconcile_max_wait_ms,
+        health.reconcile_due_age_ms,
+        health.reconcile_attempts,
+        health.reconcile_aged_overrides,
+        pending_before = 5,
+    );
+    let schedule = health.schedule.expect("schedule snapshot");
+    assert_eq!(schedule.executable_unscheduled, 1);
+    assert_eq!(schedule.reconcile_aged_overrides, 1);
+    // Reverse starvation: the reconcile attempt consumes one slot, then the
+    // pending stream must get the lane back (no reconcile-first FIFO).
+    assert!(s
+        .observe_namespace_unresolved(&aged.operation, Observation::CommitUnconfirmed)
+        .unwrap());
+    let next = s
+        .dispatch_namespace_operation()
+        .unwrap()
+        .expect("pending after the reconcile attempt");
+    assert_eq!(
+        next.state, "pending",
+        "pending must not starve behind the reconcile lane"
+    );
+}
+
+/// With a short aging budget both classes are served in a finite number of
+/// rounds; neither direction may starve the other.
+#[test]
+fn short_aging_budget_alternates_so_neither_class_starves() {
+    let (d, mut s) = synthetic_remove_store(40);
+    insert_removes(&d, 0, 1, "uncertain", "u");
+    insert_removes(&d, 1, 30, "pending", "p");
+    s.set_namespace_reconcile_aging(Duration::ZERO);
+    let (mut pending, mut reconcile) = (0usize, 0usize);
+    for _ in 0..8 {
+        let Some(selected) = s.dispatch_namespace_operation().unwrap() else {
+            continue;
+        };
+        match selected.state.as_str() {
+            "pending" => {
+                pending += 1;
+                s.mark_remove_started(&selected.operation).unwrap();
+                journal_commit(&d, &selected.operation);
+            }
+            "uncertain" => {
+                reconcile += 1;
+                assert!(s
+                    .observe_namespace_unresolved(
+                        &selected.operation,
+                        Observation::CommitUnconfirmed
+                    )
+                    .unwrap());
+            }
+            state => panic!("unexpected selected state {state}"),
+        }
+    }
+    assert!(
+        reconcile >= 1,
+        "the aging quota never served the due reconcile (pending={pending})"
+    );
+    assert!(
+        pending >= 5,
+        "the aging quota reverse-starved pending work: pending={pending} reconcile={reconcile}"
+    );
+    assert!(s.queue_health().unwrap().reconcile_attempts >= 1);
+}
+
+// ---- #57-A: dependency semantics across the paged scan ---------------------
+
+/// The paged continuation must never dispatch a suffix intent across an earlier
+/// barrier. Cover every dependency source the selector reasons about: same
+/// node (remove), ancestry of the destination parent (rename, replace),
+/// ancestor directory (remove child), and an independent control that proves
+/// the scan actually reached the un-scanned suffix.
+#[test]
+fn dependent_suffix_of_every_kind_is_not_skipped_across_the_window() {
+    let d = tempfile::tempdir().unwrap();
+    let mut s = Store::open(d.path()).unwrap();
+    // A 40-deep directory chain exercises the ancestor barrier across pages.
+    let mut nodes = vec![n("1", None, "root", true)];
+    let mut previous = "1".to_string();
+    for depth in 1..=40 {
+        let id = format!("d{depth}");
+        nodes.push(n(&id, Some(&previous), &id, true));
+        previous = id;
+    }
+    let deep = (1..=40)
+        .map(|depth| format!("d{depth}"))
+        .collect::<Vec<_>>()
+        .join("/");
+    let d40 = nodes[40].clone();
+    nodes.push(n("c", Some("d40"), "c", false));
+    nodes.push(n("c2", Some("d40"), "c2", false));
+    nodes.push(n("c3", Some("d40"), "c3", false));
+    nodes.push(n("t", Some("1"), "t", false));
+    for i in 0..301 {
+        nodes.push(n(&format!("f{i}"), Some("1"), &format!("f{i}"), false));
+    }
+    s.install_remote_snapshot(&nodes, "1", "server").unwrap();
+    s.ensure_fs_root("1").unwrap();
+    let db = rusqlite::Connection::open(d.path().join("state.sqlite")).unwrap();
+    let insert_remove = |id: &str, node: &Node, path: &str| {
+        let job = drive_core::removals::RemoveJob {
+            operation: id.into(),
+            node: node.clone(),
+            path: path.into(),
+            cursor: "synthetic".into(),
+        };
+        db.execute(
+            "INSERT INTO namespace_ops(id,node,body,state,kind) VALUES(?1,?2,?3,'conflict','remove')",
+            rusqlite::params![id, node.id, serde_json::to_string(&job).unwrap()],
+        )
+        .unwrap();
+    };
+    // 256 earlier conflicts: one owns the top of the deep chain, the rest are
+    // independent file removes.
+    insert_remove("c-ancestor", &nodes[1], "d1");
+    for i in 0..255 {
+        insert_remove(&format!("c-{i}"), &n(&format!("f{i}"), Some("1"), &format!("f{i}"), false), &format!("f{i}"));
+    }
+    let suffix = std::collections::HashSet::from([
+        "s-remove-child".to_string(),
+        "s-rename".to_string(),
+        "s-replace".to_string(),
+    ]);
+    let control = "s-control".to_string();
+    // Suffix 1: removing a child of the deepest directory reads the whole
+    // ancestor chain, including the deep directory the earlier conflict owns.
+    insert_remove("s-remove-child", &nodes[41], &format!("{deep}/c"));
+    // Suffix 2: renaming a child of the deepest directory reads d40..d1 through
+    // its destination parent chain.
+    let rename = drive_core::namespace::RenameJob {
+        operation: "s-rename".into(),
+        node: nodes[42].clone(),
+        source: format!("{deep}/c2"),
+        destination: format!("{deep}/c2x"),
+        parent: "d40".into(),
+        parent_node: d40.clone(),
+        name: "c2x".into(),
+        cursor: "synthetic".into(),
+    };
+    db.execute(
+        "INSERT INTO namespace_ops(id,node,body,state,kind) VALUES(?1,?2,?3,'pending','rename')",
+        rusqlite::params!["s-rename", rename.node.id, serde_json::to_string(&rename).unwrap()],
+    )
+    .unwrap();
+    // Suffix 3: replacing a child of D reads D through the source parent chain.
+    let replace = drive_core::replacements::ReplaceJob {
+        mtime: None,
+        creation_origin: None,
+        operation: "s-replace".into(),
+        source: nodes[43].clone(),
+        target: nodes[44].clone(),
+        source_remote: None,
+        target_remote: None,
+        source_path: format!("{deep}/c3"),
+        destination: "t".into(),
+        cursor: "synthetic".into(),
+        blob: "blob".into(),
+        generation: 1,
+        cleanup_node: None,
+    };
+    db.execute(
+        "INSERT INTO namespace_ops(id,node,body,state,kind) VALUES(?1,?2,?3,'pending','replace')",
+        rusqlite::params!["s-replace", replace.source.id, serde_json::to_string(&replace).unwrap()],
+    )
+    .unwrap();
+    // Independent control after every dependent suffix intent: it proves the
+    // paged scan reached and served the far end of the journal.
+    insert_remove("s-control", &n("f300", Some("1"), "f300", false), "f300");
+    db.execute(
+        "INSERT OR REPLACE INTO local_unlinks(node,confirmed) VALUES('f300',0)",
+        [],
+    )
+    .unwrap();
+    for dependent in ["s-remove-child", "s-rename", "s-replace", "s-control"] {
+        db.execute(
+            "UPDATE namespace_ops SET state='pending' WHERE id=?1",
+            [dependent],
+        )
+        .unwrap();
+    }
+    {
+        let check = rusqlite::Connection::open(d.path().join("state.sqlite")).unwrap();
+        let mut q = check.prepare("SELECT id,state,kind FROM namespace_ops ORDER BY seq").unwrap();
+        let rows = q.query_map([], |r| Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?, r.get::<_,String>(2)?)))
+            .unwrap().collect::<std::result::Result<Vec<_>,_>>().unwrap();
+        eprintln!("#57A KINDS rows={:?}", &rows[rows.len().saturating_sub(6)..]);
+    }
+    drop(insert_remove);
+    drop(db);
+    let mut leaked = Vec::new();
+    let mut control_attempted = false;
+    let mut dependency_blocked = 0u64;
+    for round in 0..WINDOW_ROUND_BUDGET {
+        let selected = s.dispatch_namespace_operation().unwrap();
+        eprintln!(
+            "#57A KINDS round={round} selected={:?} schedule={:?}",
+            selected.as_ref().map(|q| (q.operation.as_str(), q.state.as_str())),
+            s.queue_health().unwrap().schedule
+        );
+        dependency_blocked = dependency_blocked.max(
+            s.queue_health()
+                .unwrap()
+                .schedule
+                .map_or(0, |schedule| schedule.dependency_blocked),
+        );
+        let Some(selected) = selected else {
+            continue;
+        };
+        if selected.state == "pending" {
+            if suffix.contains(&selected.operation) {
+                leaked.push(selected.operation.clone());
+            }
+            if selected.operation == control {
+                control_attempted = true;
+            }
+            s.mark_remove_started(&selected.operation).unwrap_or_else(|error| {
+                panic!("pending {} submission failed: {error}", selected.operation)
+            });
+            journal_commit(&d, &selected.operation);
+        }
+    }
+    assert!(
+        leaked.is_empty(),
+        "dependent suffix intents were dispatched across the window barrier: {leaked:?}"
+    );
+    assert!(
+        control_attempted,
+        "the independent suffix control was never served: the paged scan did not reach the journal tail"
+    );
+    assert!(
+        dependency_blocked >= 1,
+        "diagnostics must report legal dependency blocking (got {dependency_blocked})"
+    );
+}
+
+/// A round body budget is resumable: oversized-total pages stop with an
+/// explicit `body_budget` reason, advance the cursor and still reach the tail
+/// instead of starving it forever.
+#[test]
+fn body_budget_truncation_resumes_and_still_serves_the_suffix() {
+    let (d, mut s) = synthetic_remove_store(400);
+    let db = rusqlite::Connection::open(d.path().join("state.sqlite")).unwrap();
+    let padding = format!("p{}", "a".repeat(16_300));
+    for i in 0..300 {
+        let id = format!("big-{i}");
+        let node = n(&format!("f{i}"), Some("1"), &format!("f{i}"), false);
+        let job = drive_core::removals::RemoveJob {
+            operation: id.clone(),
+            node: node.clone(),
+            path: padding.clone(),
+            cursor: "synthetic".into(),
+        };
+        db.execute(
+            "INSERT INTO namespace_ops(id,node,body,state,kind) VALUES(?1,?2,?3,'conflict','remove')",
+            rusqlite::params![id, node.id, serde_json::to_string(&job).unwrap()],
+        )
+        .unwrap();
+    }
+    drop(db);
+    insert_removes(&d, 300, 4, "pending", "tail");
+    let mut attempts = 0usize;
+    let mut saw_body_budget = false;
+    for _round in 0..WINDOW_ROUND_BUDGET {
+        if let Some(schedule) = s.queue_health().unwrap().schedule {
+            saw_body_budget |= schedule.truncation_reason.as_deref() == Some("body_budget");
+        }
+        let Some(selected) = s.dispatch_namespace_operation().unwrap() else {
+            continue;
+        };
+        if selected.state == "pending" {
+            attempts += 1;
+            s.mark_remove_started(&selected.operation).unwrap();
+            journal_commit(&d, &selected.operation);
+        }
+    }
+    assert!(
+        attempts >= 1,
+        "body-budget paging never reached the pending suffix (attempts={attempts})"
+    );
+    assert!(
+        saw_body_budget,
+        "the round body budget was never reported as the truncation reason"
+    );
+}
+
+/// Restart keeps the bounded pagination contract: the in-memory cursor is gone
+/// after a restart but the scan must still reach a suffix hidden behind a
+/// 1,024-row prefix within the declared round budget.
+#[test]
+fn scan_progress_is_rebuilt_after_a_restart_and_still_reaches_the_suffix() {
+    let (d, armed, _conflicts, pending) = window_starvation_store(1024);
+    drop(armed);
+    let suffix: std::collections::HashSet<String> =
+        pending.iter().map(|(operation, _)| operation.clone()).collect();
+    let mut s = Store::open(d.path()).unwrap();
+    let mut attempted = std::collections::HashSet::new();
+    for round in 0..WINDOW_ROUND_BUDGET {
+        let Some(selected) = s.dispatch_namespace_operation().unwrap() else {
+            continue;
+        };
+        match selected.state.as_str() {
+            "pending" => {
+                s.mark_remove_started(&selected.operation).unwrap();
+                journal_commit(&d, &selected.operation);
+                if suffix.contains(&selected.operation) {
+                    attempted.insert((round, selected.operation));
+                }
+            }
+            "uncertain" => {
+                assert!(s
+                    .observe_namespace_unresolved(
+                        &selected.operation,
+                        Observation::CommitUnconfirmed
+                    )
+                    .unwrap());
+            }
+            state => panic!("unexpected selected state {state}"),
+        }
+    }
+    assert!(
+        !attempted.is_empty(),
+        "after restart the 100-row suffix behind a 1,024-row prefix never got an attempt in \
+         {WINDOW_ROUND_BUDGET} rounds"
+    );
+    println!("#57A restart first_suffix_attempts={attempted:?}");
+}

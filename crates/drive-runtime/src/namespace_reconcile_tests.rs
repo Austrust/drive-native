@@ -705,3 +705,144 @@ fn mkdir_inflight_handoff_is_yielded_without_diagnostic() {
     bridge.disconnect();
     drop(server);
 }
+
+// ---- #57-B: bounded read-only reconcile execution budget ------------------
+
+/// A read-only reconcile that never answers must release the single serial lane
+/// within its declared execution budget. The unknown commit is retained as
+/// `uncertain` with a timeout diagnostic and is never replayed; an independent
+/// pending mutation submitted while the lane was busy is served right after and
+/// its wait stays within the declared budget.
+#[test]
+fn slow_read_only_reconcile_releases_the_serial_lane_within_its_budget() {
+    let (a, mut b) = UnixStream::pair().unwrap();
+    b.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    let (reconcile_seen, reconcile_rx) = std::sync::mpsc::channel::<()>();
+    let (finish, finish_rx) = std::sync::mpsc::channel::<()>();
+    let server = std::thread::spawn(move || {
+        handshake(&mut b);
+        let (request, fd) = crate::transport::receive::<Envelope<Command>>(&mut b).unwrap();
+        assert!(fd.is_none());
+        let request_id = request.id;
+        let Command::Mkdir { reconcile, .. } = request.body else {
+            panic!("expected the unknown mkdir to be reconciled first");
+        };
+        assert!(reconcile, "the unknown mkdir must be reconciled, not replayed");
+        reconcile_seen.send(()).unwrap();
+        // The client must cancel the timed-out reconciliation, then send the
+        // independent pending rename. A replay of the mkdir is a failure.
+        let (cancel, _) = crate::transport::receive::<Envelope<Command>>(&mut b).unwrap();
+        assert!(
+            matches!(cancel.body, Command::Cancel { request } if request == request_id),
+            "a timed-out reconcile must be cancelled before the lane is reused"
+        );
+        let (pending, _) = crate::transport::receive::<Envelope<Command>>(&mut b).unwrap();
+        let Command::Rename {
+            mut job,
+            reconcile,
+        } = pending.body
+        else {
+            panic!("expected the independent pending rename after the reconcile");
+        };
+        assert!(!reconcile);
+        job.node.name = "renamed".into();
+        job.node.version = "v2".into();
+        crate::transport::send(
+            &mut b,
+            &Envelope {
+                version: VERSION,
+                id: pending.id,
+                body: Response::Renamed {
+                    node: job.node,
+                    same_content: true,
+                },
+            },
+            None,
+        )
+        .unwrap();
+        // The lane is idle now: any extra request (a blind reconcile replay)
+        // would arrive here and fail the test instead of being ignored.
+        b.set_read_timeout(Some(Duration::from_millis(400))).unwrap();
+        let replay = crate::transport::receive::<Envelope<Command>>(&mut b);
+        assert!(
+            replay.is_err(),
+            "an unexpected request (reconcile replay?) arrived after the reconcile"
+        );
+        finish_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    });
+    let (_d, store, bridge) = fixture(a);
+    let op = {
+        let mut s = store.lock().unwrap();
+        s.ensure_fs_root("1").unwrap();
+        let _dir = s.create_local_directory("1", ".Trash-1000", 0o700).unwrap();
+        let op = s.next_directory().unwrap().unwrap().job.operation;
+        s.mark_directory_started(&op).unwrap();
+        s.prepare_directory(
+            &op,
+            drive_core::directories::DirectoryOrigin {
+                cursor: "native-v1:12".into(),
+                committer: "a".repeat(64),
+                restore: "fixture".into(),
+            },
+        )
+        .unwrap();
+        s.mark_directory_started(&op).unwrap();
+        s.mark_directory_uncertain(&op).unwrap();
+        op
+    };
+    bridge.set_namespace_reconcile_budget(Duration::from_millis(300));
+    let bridge = Arc::new(bridge);
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let lane = {
+        let bridge = bridge.clone();
+        std::thread::spawn(move || {
+            let _ = done_tx.send(bridge.namespace_pending());
+        })
+    };
+    // The reconcile is already in flight (and will never answer) when the
+    // independent pending mutation arrives.
+    reconcile_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    {
+        let mut s = store.lock().unwrap();
+        s.rename_local("1", "A.doc", "1", "renamed", false).unwrap();
+    }
+    let arrival = Instant::now();
+    let result = done_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("namespace_pending did not finish");
+    let waited = arrival.elapsed();
+    result.unwrap();
+    assert!(
+        waited < Duration::from_millis(1_500),
+        "independent pending waited {waited:?} for a stalled reconcile \
+         (declared bound: 300 ms reconcile budget + one dispatch pass)"
+    );
+    let (attempts, timeouts, budget_ms) = bridge.namespace_reconcile_metrics();
+    assert_eq!((attempts, timeouts, budget_ms), (1, 1, 300));
+    let diagnostics = drive_core::commit_diagnostics::list(&store.lock().unwrap(), 16).unwrap();
+    let row = diagnostics
+        .iter()
+        .find(|record| record.operation == op)
+        .expect("timed-out reconcile must leave a durable diagnostic row");
+    assert_eq!(row.state, "uncertain", "the unknown commit must stay uncertain");
+    assert_eq!(row.category, CommitCategory::Timeout);
+    assert!(
+        row.last_error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("execution budget"),
+        "last_error={:?}",
+        row.last_error
+    );
+    assert!(
+        row.next_retry_at > 0,
+        "a timed-out reconcile needs the durable retry gate, not an immediate replay"
+    );
+    // No blind replay: the timed-out reconcile is in backoff and must not be
+    // resent by the next pass.
+    let second = bridge.namespace_pending();
+    assert!(second.is_ok(), "idle pass must not fail: {second:?}");
+    finish.send(()).unwrap();
+    lane.join().unwrap();
+    server.join().unwrap();
+}

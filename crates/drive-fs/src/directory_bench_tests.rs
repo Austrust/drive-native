@@ -69,6 +69,63 @@ fn bench_line(name: &str, samples: &[f64]) -> String {
     )
 }
 
+/// Issue #23 residual: a hot index open must cost the same for a small and a
+/// large directory. The ignored test is the reproducible before/after probe; it
+/// prints the precomputed estimate next to the p50/p95 open cost, so a
+/// per-entry regression in the open path is visible even when the absolute
+/// times are small.
+#[test]
+#[ignore = "benchmark: hot index open cost vs directory size (#23)"]
+fn hot_index_open_cost_is_independent_of_directory_size() {
+    let _serial = test_hooks::serial();
+    for (children, label) in [(1_000usize, "1k"), (10_000, "10k"), (50_000, "50k")] {
+        let entries = {
+            let mut entries = Vec::with_capacity(children + 2);
+            entries.push(drive_core::namespace_index::DirEntryLite {
+                ino: 1, name: Arc::from(".."), kind: FileKind::Directory,
+            });
+            entries.push(drive_core::namespace_index::DirEntryLite {
+                ino: 1, name: Arc::from("."), kind: FileKind::Directory,
+            });
+            entries.extend((0..children).map(|index| drive_core::namespace_index::DirEntryLite {
+                ino: 2 + index as u64,
+                name: Arc::from(format!("file-{index:05}")),
+                kind: FileKind::File,
+            }));
+            entries
+        };
+        let estimated_bytes = std::mem::size_of::<DirBlock>()
+            .saturating_add(entries.capacity() * std::mem::size_of::<drive_core::namespace_index::DirEntryLite>())
+            .saturating_add(entries.iter().map(|entry| entry.name.len()).sum::<usize>());
+        let block = Arc::new(DirBlock { ino: 1, version: 0, built_at_gen: 3, entries, estimated_bytes });
+        let views = Views::default();
+        let token = CommitState { revision: 4, verified: true };
+        let mut samples = Vec::with_capacity(100);
+        for _ in 0..100 {
+            let started = Instant::now();
+            let handle = views.open_index(block.clone(), token).unwrap().unwrap();
+            samples.push(started.elapsed().as_secs_f64() * 1_000_000.0);
+            views.release(1, handle).unwrap();
+        }
+        let p50 = percentile(samples.clone(), 0.50);
+        let p95 = percentile(samples.clone(), 0.95);
+        let max = samples.iter().copied().fold(0.0_f64, f64::max);
+        println!(
+            "#23 BENCH {}",
+            serde_json::json!({
+                "name": "hot_index_open",
+                "children": children,
+                "label": label,
+                "opens": 100,
+                "estimated_bytes": block.estimated_bytes,
+                "p50_us": p50,
+                "p95_us": p95,
+                "max_us": max,
+            })
+        );
+    }
+}
+
 /// `opendir` must not hold the writer lock while it projects: a metadata
 /// caller (`GetStates` and friends, modelled by `SharedStore::lock()`) that
 /// arrives mid-projection must only wait for the commit boundary, not for the

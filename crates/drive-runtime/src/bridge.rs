@@ -221,6 +221,151 @@ fn collect_applied_invalidations(
         }
     }
 }
+/// #59: maximum number of concurrent hydration worker RPCs. The worker can run
+/// several jobs at once; bounding the mount side keeps a burst of cache misses
+/// from creating unbounded "reply already claimed but RPC still running" work.
+const MAX_CONCURRENT_HYDRATIONS: usize = 8;
+/// #59: upper bound on admission queueing. A request whose reply is already
+/// gone abandons earlier via its [`drive_fs::ReadCancellation`] token; this is
+/// the last-resort bound for unbounded tokens (background hydration).
+const HYDRATION_QUEUE_BUDGET: Duration = Duration::from_secs(30);
+
+/// #59: pull-based hydration isolation counters. Pure atomic/mutex reads, safe
+/// from a status or test path; no per-request logging is emitted here, so a
+/// sustained storm cannot flood stderr/journald.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HydrateMetrics {
+    /// Worker RPCs admitted and possibly still running.
+    pub inflight: usize,
+    /// Requests waiting for an admission slot (bounded, cancel-aware).
+    pub waiting: usize,
+    /// High-water mark of `inflight` since the bridge was created.
+    pub peak: usize,
+    /// Configured concurrency bound.
+    pub max: usize,
+    /// Total admissions granted.
+    pub admitted: u64,
+    /// Requests that abandoned while waiting for a slot (reply already gone).
+    pub abandoned_waiting: u64,
+    /// Requests whose reply was claimed / token cancelled while the RPC ran.
+    pub abandoned_inflight: u64,
+    /// Requests rejected before any expensive work because the reply deadline
+    /// had already passed (queue/deadline check at the hydration entry point).
+    pub expired_skips: u64,
+    /// Cumulative admission wait (microseconds) and its maximum.
+    pub queue_wait_us: u64,
+    pub queue_wait_max_us: u64,
+}
+
+#[derive(Default)]
+struct HydrationGateState {
+    active: usize,
+    waiting: usize,
+    peak: usize,
+}
+
+/// #59: bounded, cancel-aware admission gate around hydration worker RPCs.
+struct HydrationGate {
+    state: Mutex<HydrationGateState>,
+    changed: Condvar,
+    max: AtomicUsize,
+    admitted: AtomicU64,
+    abandoned_waiting: AtomicU64,
+    abandoned_inflight: AtomicU64,
+    expired_skips: AtomicU64,
+    queue_wait_us: AtomicU64,
+    queue_wait_max_us: AtomicU64,
+}
+impl HydrationGate {
+    fn new() -> Self {
+        Self {
+            state: Mutex::new(HydrationGateState::default()),
+            changed: Condvar::new(),
+            max: AtomicUsize::new(MAX_CONCURRENT_HYDRATIONS),
+            admitted: AtomicU64::new(0),
+            abandoned_waiting: AtomicU64::new(0),
+            abandoned_inflight: AtomicU64::new(0),
+            expired_skips: AtomicU64::new(0),
+            queue_wait_us: AtomicU64::new(0),
+            queue_wait_max_us: AtomicU64::new(0),
+        }
+    }
+    fn bound(&self) -> usize {
+        self.max.load(Ordering::Relaxed)
+    }
+    fn set_bound(&self, max: usize) {
+        let max = max.clamp(1, 64);
+        self.max.store(max, Ordering::Relaxed);
+        self.changed.notify_all();
+    }
+    fn note_expired_skip(&self) {
+        self.expired_skips.fetch_add(1, Ordering::Relaxed);
+    }
+    fn note_abandoned_waiting(&self) {
+        self.abandoned_waiting.fetch_add(1, Ordering::Relaxed);
+    }
+    fn note_abandoned_inflight(&self) {
+        self.abandoned_inflight.fetch_add(1, Ordering::Relaxed);
+    }
+    fn note_admitted(&self, waited: Duration) {
+        self.admitted.fetch_add(1, Ordering::Relaxed);
+        let micros = u64::try_from(waited.as_micros()).unwrap_or(u64::MAX);
+        self.queue_wait_us.fetch_add(micros, Ordering::Relaxed);
+        self.queue_wait_max_us
+            .fetch_max(micros, Ordering::Relaxed);
+    }
+    fn try_acquire(&self) -> bool {
+        let mut state = self.state.lock().unwrap();
+        if state.active >= self.bound() {
+            return false;
+        }
+        state.active += 1;
+        state.peak = state.peak.max(state.active);
+        true
+    }
+    fn release(&self) {
+        let mut state = self.state.lock().unwrap();
+        state.active = state.active.saturating_sub(1);
+        drop(state);
+        self.changed.notify_one();
+    }
+    fn wait_slice(&self) {
+        let mut state = self.state.lock().unwrap();
+        state.waiting += 1;
+        let (state, _) = self
+            .changed
+            .wait_timeout(state, Duration::from_millis(25))
+            .unwrap();
+        let mut state = state;
+        state.waiting = state.waiting.saturating_sub(1);
+    }
+    fn metrics(&self) -> HydrateMetrics {
+        let state = self.state.lock().unwrap();
+        HydrateMetrics {
+            inflight: state.active,
+            waiting: state.waiting,
+            peak: state.peak,
+            max: self.bound(),
+            admitted: self.admitted.load(Ordering::Relaxed),
+            abandoned_waiting: self.abandoned_waiting.load(Ordering::Relaxed),
+            abandoned_inflight: self.abandoned_inflight.load(Ordering::Relaxed),
+            expired_skips: self.expired_skips.load(Ordering::Relaxed),
+            queue_wait_us: self.queue_wait_us.load(Ordering::Relaxed),
+            queue_wait_max_us: self.queue_wait_max_us.load(Ordering::Relaxed),
+        }
+    }
+}
+/// #59: RAII admission slot released when the worker RPC returns (including
+/// on cancellation), so an abandoned request can never pin a slot.
+struct HydrationPermit<'a> {
+    gate: &'a HydrationGate,
+}
+impl Drop for HydrationPermit<'_> {
+    fn drop(&mut self) {
+        self.gate.release();
+    }
+}
+
 pub struct Bridge {
     pub store: Arc<drive_core::SharedStore>,
     recovery_gate: std::sync::RwLock<()>,
@@ -262,6 +407,14 @@ pub struct Bridge {
     /// stall forced the connection closed. The supervisor converts it into an
     /// `attempt_stalled` diagnostic plus a bounded rebuild.
     attempt_stalled: AtomicBool,
+    /// #57-B: bounded execution budget for one read-only reconcile RPC attempt.
+    /// A timed-out reconcile releases the single serial lane while the durable
+    /// `uncertain` intent and its unknown outcome are retained, never replayed.
+    namespace_reconcile_budget_ms: AtomicU64,
+    namespace_reconcile_attempts: AtomicU64,
+    namespace_reconcile_timeouts: AtomicU64,
+    /// #59: bounded and accounted hydration worker admission (read/RPC lane).
+    hydration_gate: HydrationGate,
     /// Test-only observation of how many hydration refreshes ran.
     #[cfg(test)]
     refresh_runs: AtomicUsize,
@@ -930,6 +1083,10 @@ impl Bridge {
             upload_signal: (Mutex::new(false), Condvar::new()),
             recheck_requested: AtomicBool::new(false),
             attempt_stalled: AtomicBool::new(false),
+            namespace_reconcile_budget_ms: AtomicU64::new(15_000),
+            namespace_reconcile_attempts: AtomicU64::new(0),
+            namespace_reconcile_timeouts: AtomicU64::new(0),
+            hydration_gate: HydrationGate::new(),
             #[cfg(test)]
             refresh_runs: AtomicUsize::new(0),
             failure: Mutex::new(None),
@@ -971,6 +1128,92 @@ impl Bridge {
     /// Observable for root diagnostics; the mount recovers without a restart.
     pub fn notification_overflows(&self) -> u64 {
         self.notification_overflows.load(Ordering::Relaxed)
+    }
+    /// #57-B: declared execution budget for a single read-only reconcile RPC.
+    ///
+    /// Pending-first already decides who starts; this budget bounds the damage
+    /// an already-started reconcile can do to the single serial lane. The
+    /// default (15 s) is far below the mutation RPC timeout so a stalled check
+    /// cannot own the lane for the whole 120 s window.
+    pub fn namespace_reconcile_budget(&self) -> Duration {
+        Duration::from_millis(self.namespace_reconcile_budget_ms.load(Ordering::Relaxed))
+    }
+    /// #57-B: override the reconcile execution budget (tests inject a short
+    /// budget so a stalled read-only reconcile releases the lane
+    /// deterministically without sleeping for the production budget).
+    pub fn set_namespace_reconcile_budget(&self, budget: Duration) {
+        let millis = u64::try_from(budget.as_millis()).unwrap_or(u64::MAX);
+        self.namespace_reconcile_budget_ms
+            .store(millis.clamp(50, 600_000), Ordering::Relaxed);
+    }
+    /// #57-B/C: `(attempts, budget_timeouts, budget_ms)` of the read-only
+    /// reconcile lane. A timeout increments the counter, keeps the durable
+    /// `uncertain` intent and never replays the unknown remote operation.
+    pub fn namespace_reconcile_metrics(&self) -> (u64, u64, u64) {
+        (
+            self.namespace_reconcile_attempts.load(Ordering::Relaxed),
+            self.namespace_reconcile_timeouts.load(Ordering::Relaxed),
+            self.namespace_reconcile_budget_ms.load(Ordering::Relaxed),
+        )
+    }
+    /// #59: bounded hydration isolation snapshot (in-flight / waiting / peak /
+    /// abandoned / expired skips / admission wait).
+    pub fn hydrate_metrics(&self) -> HydrateMetrics {
+        self.hydration_gate.metrics()
+    }
+    /// #59: override the hydration RPC concurrency bound (tests inject a small
+    /// bound so the admission queue and abandonment paths are exercisable
+    /// deterministically).
+    pub fn set_hydration_concurrency(&self, max: usize) {
+        self.hydration_gate.set_bound(max);
+    }
+    /// #59: cancel/deadline-aware admission for one hydration worker RPC.
+    ///
+    /// The request must have live demand (`download_abandoned` false). A waiter
+    /// re-checks abandonment every 25 ms, so a read whose reply was already
+    /// claimed by the drive-fs deadline watchdog never starts expensive work.
+    fn acquire_hydration_slot(
+        &self,
+        node: &Node,
+        flight: &Flight,
+    ) -> Result<HydrationPermit<'_>, (i32, DownloadFailureKind, Option<u32>)> {
+        let started = Instant::now();
+        loop {
+            if self.download_abandoned(node, flight) {
+                self.hydration_gate.note_abandoned_waiting();
+                return Err((libc::EINTR, DownloadFailureKind::Transport, None));
+            }
+            if started.elapsed() >= HYDRATION_QUEUE_BUDGET {
+                // Last-resort bound for an unbounded (background) token: report
+                // a retryable failure instead of queueing without bound.
+                return Err((libc::EAGAIN, DownloadFailureKind::Transport, None));
+            }
+            if self.hydration_gate.try_acquire() {
+                self.hydration_gate.note_admitted(started.elapsed());
+                return Ok(HydrationPermit {
+                    gate: &self.hydration_gate,
+                });
+            }
+            self.hydration_gate.wait_slice();
+        }
+    }
+    pub(crate) fn note_namespace_reconcile_attempt(&self) {
+        self.namespace_reconcile_attempts
+            .fetch_add(1, Ordering::Relaxed);
+    }
+    /// Rate-limited (first observation then powers of two) so a persistently
+    /// stalled endpoint cannot flood stderr/journald; the counter stays exact.
+    pub(crate) fn note_namespace_reconcile_timeout(&self, operation: &str, kind: &str) {
+        let timeouts = self
+            .namespace_reconcile_timeouts
+            .fetch_add(1, Ordering::Relaxed)
+            .saturating_add(1);
+        if timeouts == 1 || timeouts.is_power_of_two() {
+            eprintln!(
+                "drive-native namespace.reconcile_timeout op={operation} kind={kind} budget_ms={} outcome=unknown replay=false",
+                self.namespace_reconcile_budget_ms.load(Ordering::Relaxed)
+            );
+        }
     }
     /// One non-blocking health snapshot of the notification path (#27 residual).
     /// Pure counter loads: safe from a diagnostic/status path and from tests.
@@ -1919,6 +2162,19 @@ impl Bridge {
         flight: &Flight,
     ) -> Result<(), (i32, DownloadFailureKind, Option<u32>)> {
         use DownloadFailureKind::*;
+        // #59: worker-start checks. The reply may already be claimed by the fs
+        // deadline watchdog or the reader may be gone; do not start an RPC.
+        if self.download_abandoned(node, flight) {
+            self.hydration_gate.note_abandoned_inflight();
+            return Err((libc::EINTR, Transport, None));
+        }
+        let _permit = self.acquire_hydration_slot(node, flight)?;
+        // Re-check after admission: waiting for a slot may itself have outlived
+        // the request's reply deadline.
+        if self.download_abandoned(node, flight) {
+            self.hydration_gate.note_abandoned_inflight();
+            return Err((libc::EINTR, Transport, None));
+        }
         self.downloads.fetch_add(1, Ordering::Relaxed);
         let rpc = self.connection();
         let response = rpc
@@ -1938,6 +2194,13 @@ impl Bridge {
                     None,
                 )
             })?;
+        // #59: the fs watchdog may have answered while the RPC ran; the late
+        // result is discarded here and counted, never published as a second
+        // reply (drive-fs owns the single-reply claim).
+        if self.download_abandoned(node, flight) {
+            self.hydration_gate.note_abandoned_inflight();
+            return Err((libc::EINTR, Transport, None));
+        }
         if let Response::PermissionDenied{node:refused,action:drive_core::write_permissions::Action::Read}=&response.body {
             if refused!=&node.id || response.descriptor.is_some(){return Err((libc::EIO,InvalidContent,None));}
             return Err((libc::EACCES,ServerRejected,None));
@@ -2088,7 +2351,10 @@ impl Bridge {
     /// cannot join a transfer once its cancellation has been decided.
     fn download_abandoned(&self, node: &Node, flight: &Flight) -> bool {
         let mut demand = flight.demand.lock().unwrap();
-        if demand.keep || demand.readers.iter().any(|r| !r.is_cancelled()) {
+        // #59: a reader whose reply deadline passed is no longer demand even
+        // though its token was not explicitly cancelled; the fs watchdog has
+        // already answered it and would discard a late result.
+        if demand.keep || demand.readers.iter().any(|r| !r.should_abandon()) {
             return false;
         }
         let store = self.store.lock().unwrap();
@@ -2239,8 +2505,9 @@ impl Bridge {
         foreground: bool,
         cancel: Option<&drive_fs::ReadCancellation>,
     ) -> Result<(), i32> {
-        if cancel.is_some_and(|c| c.is_cancelled()) {
-            return Err(libc::EINTR);
+        if let Some(cancel) = cancel.filter(|c| c.should_abandon()) {
+            self.hydration_gate.note_expired_skip();
+            return Err(cancel.abandoned_error().unwrap_or(libc::EINTR));
         }
         {
             let store = self.store.lock().unwrap();
@@ -2277,7 +2544,7 @@ impl Bridge {
             let mut demand = flight.demand.lock().unwrap();
             if !demand.closed {
                 demand.foreground |= foreground;
-                demand.readers.retain(|reader| !reader.is_cancelled());
+                demand.readers.retain(|reader| !reader.should_abandon());
                 if let Some(cancel) = cancel {
                     demand.readers.push(cancel.clone());
                 } else {
@@ -2295,8 +2562,9 @@ impl Bridge {
                 .changed
                 .wait_timeout(done, Duration::from_millis(25))
                 .unwrap();
-            if cancel.is_some_and(|c| c.is_cancelled()) {
-                return Err(libc::EINTR);
+            if let Some(cancel) = cancel.filter(|c| c.should_abandon()) {
+                self.hydration_gate.note_expired_skip();
+                return Err(cancel.abandoned_error().unwrap_or(libc::EINTR));
             }
         };
         if owner {
@@ -2327,16 +2595,18 @@ impl Bridge {
                 // Wake only after releasing the old flight's deduplication key.
                 self.signal_upload();
             }
-            if cancel.is_some_and(|c| c.is_cancelled()) {
-                Err(libc::EINTR)
+            if let Some(cancel) = cancel.filter(|c| c.should_abandon()) {
+                self.hydration_gate.note_abandoned_inflight();
+                Err(cancel.abandoned_error().unwrap_or(libc::EINTR))
             } else {
                 result
             }
         } else {
             let mut done = flight.done.lock().unwrap();
             while done.is_none() {
-                if cancel.is_some_and(|c| c.is_cancelled()) {
-                    return Err(libc::EINTR);
+                if let Some(cancel) = cancel.filter(|c| c.should_abandon()) {
+                    self.hydration_gate.note_abandoned_waiting();
+                    return Err(cancel.abandoned_error().unwrap_or(libc::EINTR));
                 }
                 done = flight
                     .changed
@@ -2344,8 +2614,8 @@ impl Bridge {
                     .unwrap()
                     .0
             }
-            if cancel.is_some_and(|c| c.is_cancelled()) {
-                Err(libc::EINTR)
+            if let Some(cancel) = cancel.filter(|c| c.should_abandon()) {
+                Err(cancel.abandoned_error().unwrap_or(libc::EINTR))
             } else {
                 done.unwrap()
             }
@@ -2372,13 +2642,21 @@ impl drive_fs::Hydrator for Bridge {
         node: &Node,
         cancel: &drive_fs::ReadCancellation,
     ) -> Result<Arc<ReadHandle>, i32> {
-        // Issue #50: a defense-in-depth check; the FUSE open path already hides
-        // excluded inodes, but a stale handle must not start a download.
+        // #59: if the drive-fs reply deadline already claimed the one reply (or
+        // the reader was cancelled), do not start expensive hydration work for
+        // a result nobody can receive.
+        if cancel.should_abandon() {
+            self.hydration_gate.note_expired_skip();
+            return Err(cancel.abandoned_error().unwrap_or(libc::EINTR));
+        }
+        self.hydrate_cancellable_admitted(node, cancel)
+    }
+    fn hydrate(&self, node: &Node) -> Result<Arc<ReadHandle>, i32> {
         if self.node_excluded(&node.id) {
             drive_core::exclude::trace_hit("download");
             return Err(libc::ENOENT);
         }
-        self.ensure_cancellable(node, Some(cancel))?;
+        self.ensure(node)?;
         let h = self
             .store
             .lock()
@@ -2390,12 +2668,21 @@ impl drive_fs::Hydrator for Bridge {
         }
         Ok(Arc::new(h))
     }
-    fn hydrate(&self, node: &Node) -> Result<Arc<ReadHandle>, i32> {
+}
+
+impl Bridge {
+    fn hydrate_cancellable_admitted(
+        &self,
+        node: &Node,
+        cancel: &drive_fs::ReadCancellation,
+    ) -> Result<Arc<ReadHandle>, i32> {
+        // Issue #50: a defense-in-depth check; the FUSE open path already hides
+        // excluded inodes, but a stale handle must not start a download.
         if self.node_excluded(&node.id) {
             drive_core::exclude::trace_hit("download");
             return Err(libc::ENOENT);
         }
-        self.ensure(node)?;
+        self.ensure_cancellable(node, Some(cancel))?;
         let h = self
             .store
             .lock()
