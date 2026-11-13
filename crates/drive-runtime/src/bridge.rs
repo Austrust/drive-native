@@ -276,6 +276,12 @@ impl Bridge {
     pub fn transfer_entries(&self) -> Vec<crate::transfers::TransferEntry> {
         self.connection().transfers.entries()
     }
+    /// Test-only: the live transfer registry, so a desktop JSON render can be
+    /// exercised without a worker or a real flight.
+    #[cfg(test)]
+    pub(crate) fn test_transfer_registry(&self) -> Arc<crate::transfers::TransferRegistry> {
+        self.connection().transfers.clone()
+    }
     pub fn transfer_revision(&self) -> u64 {
         self.connection().transfers.revision()
     }

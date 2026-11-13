@@ -397,3 +397,78 @@ fn previous_schema_upgrades_to_the_current_version_with_backup_and_indexes() {
     drop(db);
     drop(store);
 }
+
+/// Issue #67 W2 follow-up (`notes/W2_INDEX_ANALYSIS.md`): three `sync_history`
+/// indexes are maintained by every append/eviction but no runtime query can use
+/// them — the paging query's `? IS NULL OR column=?` form defeats filtered
+/// index use, the name filter is an `instr()` substring, and nothing filters
+/// mount/result by completion time. They must not be installed on a fresh store.
+#[test]
+fn unused_sync_history_indexes_are_not_installed() {
+    let d = tempfile::tempdir().unwrap();
+    let store = Store::open(d.path()).unwrap();
+    let db = Connection::open(database(d.path())).unwrap();
+    for name in [
+        "sync_history_name",
+        "sync_history_mount_time",
+        "sync_history_result",
+    ] {
+        assert!(
+            index_sql(&db, name).is_none(),
+            "{name} is not used by any runtime query and must not be installed"
+        );
+    }
+    // The age-eviction index and the two candidate indexes the #32 plan tests
+    // rely on stay installed.
+    for name in [
+        "sync_history_time",
+        "sync_history_mount_seq",
+        "sync_history_result_seq",
+    ] {
+        assert!(
+            index_sql(&db, name).is_some(),
+            "missing required index {name}"
+        );
+    }
+    drop(db);
+    drop(store);
+}
+
+/// An existing store may still carry the three unused indexes from an older
+/// binary. Opening it with this build drops them; index removal is
+/// data-neutral, so the retained history rows must be untouched.
+#[test]
+fn store_upgrade_drops_legacy_unused_sync_history_indexes_and_keeps_rows() {
+    let d = tempfile::tempdir().unwrap();
+    drop(Store::open(d.path()).unwrap());
+    let db = Connection::open(database(d.path())).unwrap();
+    db.execute_batch(
+        "INSERT INTO sync_history(seq,mount,name,path_at_event,action,result,completed_at,operation_key)
+         VALUES (1,'server','a','p/a','remote_change','ok',unixepoch(),'remote:e1'),
+                (2,'server','b','p/b','remote_change','ok',unixepoch(),'remote:e2');
+         CREATE INDEX IF NOT EXISTS sync_history_mount_time ON sync_history(mount,completed_at DESC);
+         CREATE INDEX IF NOT EXISTS sync_history_name ON sync_history(name COLLATE NOCASE);
+         CREATE INDEX IF NOT EXISTS sync_history_result ON sync_history(result,completed_at DESC);",
+    )
+    .unwrap();
+    drop(db);
+
+    let store = Store::open(d.path()).unwrap();
+    let db = Connection::open(database(d.path())).unwrap();
+    for name in [
+        "sync_history_name",
+        "sync_history_mount_time",
+        "sync_history_result",
+    ] {
+        assert!(
+            index_sql(&db, name).is_none(),
+            "legacy index {name} must be dropped when the store is opened"
+        );
+    }
+    let rows: i64 = db
+        .query_row("SELECT COUNT(*) FROM sync_history", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(rows, 2, "dropping indexes must not lose retained history rows");
+    drop(db);
+    drop(store);
+}

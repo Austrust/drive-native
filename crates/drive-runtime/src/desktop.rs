@@ -284,8 +284,15 @@ fn entry(
 /// writer's handle map and scheduler observations, so derived fields keep the
 /// writer's meaning. `None` keeps the historical serialized path available as a
 /// fail-safe.
-fn read_only(service: &Service) -> Option<Store> {
-    service.bridge.store.read_only().ok()
+fn read_only(service: &Service) -> Option<crate::service::ReadOnlyHandle> {
+    // Issue #67 R1: borrow a pooled connection instead of opening one per
+    // request; the handle returns it on drop.
+    service.read_only_handle()
+}
+/// Nanosecond resolution for the test-only read-path breakdown.
+#[cfg(test)]
+fn elapsed_ns(started: Instant) -> u64 {
+    u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX)
 }
 fn unix_now() -> u64 {
     std::time::SystemTime::now()
@@ -297,9 +304,23 @@ pub fn states(service: &Service, paths: Vec<String>) -> io::Result<String> {
     if paths.len() > 256 {
         return Err(io::Error::other("at most 256 paths per batch"));
     }
-    let active = service.bridge.active_downloads().into_iter().collect();
+    let active: HashSet<String> = service.bridge.active_downloads().into_iter().collect();
+    // Issue #67 R2: with no committed projection this call pays the O(#nodes)
+    // authoritative read. Overlapping identical batches join the one in-flight
+    // read instead of each repeating it; a different batch never waits.
+    if service.status_projection().is_none() {
+        let key = crate::service::ColdStatesKey::new(
+            &paths,
+            &active,
+            service.bridge.store.change_state(),
+        );
+        return service.join_cold_states(key, || {
+            let ro = read_only(service);
+            states_with(service, paths, &active, ro.as_deref())
+        });
+    }
     let ro = read_only(service);
-    states_with(service, paths, &active, ro.as_ref())
+    states_with(service, paths, &active, ro.as_deref())
 }
 fn states_with(
     service: &Service,
@@ -425,6 +446,8 @@ mod counters {
         static RESOLVE_CALLS: Cell<usize> = Cell::new(0);
         static JSON_SERIALIZATIONS: Cell<usize> = Cell::new(0);
         static JSON_PARSES: Cell<usize> = Cell::new(0);
+        /// Time spent assembling the GetStates JSON on this thread.
+        static SERIALIZE_NS: Cell<u64> = Cell::new(0);
         /// Issue #67 W1: completed full-projection tree loads/renders on this
         /// thread. A warm batch must reuse the committed render, so this only
         /// grows on a projection-generation miss (or the historical fallback).
@@ -441,6 +464,7 @@ mod counters {
         RESOLVE_CALLS.with(|value| value.set(0));
         JSON_SERIALIZATIONS.with(|value| value.set(0));
         JSON_PARSES.with(|value| value.set(0));
+        SERIALIZE_NS.with(|value| value.set(0));
     }
     pub(super) fn count_projection_tree_load() {
         PROJECTION_TREE_LOADS.with(|value| value.set(value.get() + 1));
@@ -481,6 +505,15 @@ mod counters {
     }
     pub(super) fn count_serialize() {
         bump(&JSON_SERIALIZATIONS);
+    }
+    pub(super) fn bump_serialize_ns(ns: u64) {
+        SERIALIZE_NS.with(|value| value.set(value.get() + ns));
+    }
+    pub(super) fn serialize_ns() -> u64 {
+        SERIALIZE_NS.with(Cell::get)
+    }
+    pub(super) fn reset_serialize_ns() {
+        SERIALIZE_NS.with(|value| value.set(0));
     }
     pub(super) fn count_parse() {
         bump(&JSON_PARSES);
@@ -838,11 +871,12 @@ fn entries_with_fallback(
     resolved: Vec<(String, io::Result<Node>)>,
     active: &HashSet<String>,
 ) -> io::Result<Vec<PathState>> {
-    let Some(store) = read_only(service) else {
+    let ro = read_only(service);
+    let Some(store) = ro.as_deref() else {
         return entries_locked(service, resolved, active);
     };
     let paths: Vec<String> = resolved.iter().map(|(path, _)| path.clone()).collect();
-    match entries_off_lock(&store, service, resolved, active) {
+    match entries_off_lock(store, service, resolved, active) {
         Ok(entries) => Ok(entries),
         // The private snapshot could not describe the page (stale projection,
         // missing identity). Re-resolve under the writer lock so the fallback
@@ -878,8 +912,14 @@ fn entries_locked_paths(
 }
 fn states_document(entries: Vec<PathState>) -> String {
     #[cfg(test)]
-    counters::count_serialize();
-    serde_json::json!({"schema":1,"entries":entries}).to_string()
+    let started = Instant::now();
+    let document = serde_json::json!({"schema":1,"entries":entries}).to_string();
+    #[cfg(test)]
+    {
+        counters::count_serialize();
+        counters::bump_serialize_ns(elapsed_ns(started));
+    }
+    document
 }
 fn render_states(
     resolved: Vec<(String, io::Result<Node>)>,
@@ -891,11 +931,28 @@ fn render_states(
 }
 pub fn transfers(service: &Service) -> io::Result<String> {
     let entries = service.bridge.transfer_entries();
-    let store = service.bridge.store.lock().unwrap();
+    // Issue #67 R1: resolve display paths on the private read-only handle (the
+    // global writer mutex must not stall a poll). A handle that cannot open
+    // keeps the historical serialized read as the fail-safe.
+    let ro = read_only(service);
+    let paths: Vec<Option<String>> = match ro.as_deref() {
+        Some(store) => entries
+            .iter()
+            .map(|entry| store.transfer_path(&entry.node).ok())
+            .collect(),
+        None => {
+            let store = service.bridge.store.lock().unwrap();
+            entries
+                .iter()
+                .map(|entry| store.transfer_path(&entry.node).ok())
+                .collect()
+        }
+    };
+    // JSON assembly happens off every lock.
     let entries = entries
         .into_iter()
-        .map(|entry| {
-            let path = store.transfer_path(&entry.node).ok();
+        .zip(paths)
+        .map(|(entry, path)| {
             let mut value = serde_json::to_value(entry).unwrap();
             value["path"] = path.into();
             value
@@ -1092,7 +1149,7 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
     let ro = read_only(service);
     let mut query_us = 0;
     let mut snapshot = None;
-    if let Some(store) = ro.as_ref() {
+    if let Some(store) = ro.as_deref() {
         let query = Instant::now();
         if let Ok(found) = overview_store(service, store, cached) {
             query_us = elapsed_us(query);
@@ -1823,7 +1880,7 @@ pub fn retry_downloads(service: &Service, path: &str) -> io::Result<String> {
 }
 pub fn issues(service: &Service, after: &str) -> io::Result<String> {
     let ro = read_only(service);
-    issues_with(service, after, ro.as_ref())
+    issues_with(service, after, ro.as_deref())
 }
 fn issues_with(service: &Service, after: &str, read_only: Option<&Store>) -> io::Result<String> {
     // `sync_issues` is the slowest desktop query on large stores. Run the page
@@ -1952,7 +2009,7 @@ pub fn set_trust_settings(service: &Service, body: &str) -> io::Result<String> {
 }
 pub fn cache_settings(service: &Service) -> io::Result<String> {
     let ro = read_only(service);
-    cache_settings_with(service, ro.as_ref())
+    cache_settings_with(service, ro.as_deref())
 }
 fn cache_settings_with(service: &Service, read_only: Option<&Store>) -> io::Result<String> {
     // Usage accounting may scan every cached candidate; keep that read off the
@@ -3361,6 +3418,395 @@ mod readpath_tests {
         }
         wait_generation(before);
         compare("after dirty draft");
+        service.shutdown();
+        tasks.join();
+    }
+
+    /// Issue #67 R1: every desktop poll used to open a fresh private SQLite
+    /// connection. On a 294k store that dominated 16-way `GetStates`
+    /// concurrency even though the warm render itself was O(#paths). The pool
+    /// must answer sequential warm calls without opening at all and keep a
+    /// concurrent burst well below one open per call, with identical documents.
+    #[test]
+    fn read_only_connections_are_reused_across_requests() {
+        let (_dir, service) = fixture();
+        let paths = vec![".".to_string()];
+        let baseline = states(&service, paths.clone()).unwrap();
+        // Sequential warm requests must reuse the pooled connection.
+        service.reset_read_only_open_stats();
+        for _ in 0..8 {
+            assert_eq!(states(&service, paths.clone()).unwrap(), baseline);
+        }
+        let (opens, open_ns) = service.read_only_open_stats();
+        assert_eq!(
+            opens, 0,
+            "8 warm GetStates calls opened {opens} read-only connection(s) ({open_ns} ns)"
+        );
+        // A concurrent burst may need a few connections, never one per call.
+        service.reset_read_only_open_stats();
+        let threads = 16usize;
+        let calls_per_thread = 8usize;
+        let barrier = Arc::new(std::sync::Barrier::new(threads));
+        let mut handles = Vec::with_capacity(threads);
+        for _ in 0..threads {
+            let barrier = barrier.clone();
+            let service = service.clone();
+            let paths = paths.clone();
+            handles.push(std::thread::spawn(move || {
+                barrier.wait();
+                let mut bodies = Vec::with_capacity(calls_per_thread);
+                for _ in 0..calls_per_thread {
+                    bodies.push(states(&service, paths.clone()).unwrap());
+                }
+                bodies
+            }));
+        }
+        let calls = threads * calls_per_thread;
+        for handle in handles {
+            for body in handle.join().unwrap() {
+                assert_eq!(body, baseline, "concurrent warm render changed");
+            }
+        }
+        let (opens, open_ns) = service.read_only_open_stats();
+        assert!(
+            opens < calls,
+            "{calls} concurrent warm calls opened {opens} read-only connection(s) ({open_ns} ns)"
+        );
+        eprintln!("READPATH_POOL calls={calls} opens={opens} open_ns={open_ns}");
+        service.shutdown();
+    }
+
+    /// Issue #67 R1: `GetTransfers` used to hold the global Store mutex while it
+    /// rendered JSON, so one writer (FUSE/commit) stalled the poll. It must now
+    /// answer from the private read-only handle while the writer lock is held,
+    /// and the off-lock document must equal the historical locked document.
+    #[test]
+    fn transfers_answers_while_the_writer_lock_is_held() {
+        let (_dir, service) = fixture();
+        service
+            .bridge
+            .test_transfer_registry()
+            .register(
+                7,
+                &crate::wire::Command::Download {
+                    node: node("one", Some("folder"), false),
+                },
+            );
+        // Historical locked render: lock + transfer_path + JSON assembly.
+        let expected = {
+            let entries = service.bridge.transfer_entries();
+            let store = service.bridge.store.lock().unwrap();
+            let entries: Vec<serde_json::Value> = entries
+                .into_iter()
+                .map(|entry| {
+                    let path = store.transfer_path(&entry.node).ok();
+                    let mut value = serde_json::to_value(entry).unwrap();
+                    value["path"] = path.into();
+                    value
+                })
+                .collect();
+            serde_json::json!({"schema":1,"task_id":service.profile.task_id,"entries":entries})
+                .to_string()
+        };
+        // `elapsed_ms` advances between two renders, so compare the document
+        // with that volatile field removed.
+        fn normalized(body: &str) -> serde_json::Value {
+            let mut value: serde_json::Value = serde_json::from_str(body).unwrap();
+            if let Some(entries) = value["entries"].as_array_mut() {
+                for entry in entries {
+                    entry.as_object_mut().unwrap().remove("elapsed_ms");
+                }
+            }
+            value
+        }
+        let baseline = transfers(&service).unwrap();
+        assert_eq!(
+            normalized(&baseline),
+            normalized(&expected),
+            "off-lock transfer document changed"
+        );
+        let value: serde_json::Value = serde_json::from_str(&baseline).unwrap();
+        assert!(
+            value["entries"][0]["path"].is_string(),
+            "the read-only handle must resolve the transfer path: {baseline}"
+        );
+        // A held writer lock must not stall the transfer poll.
+        let held = service.bridge.store.lock().unwrap();
+        let probe = service.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            let _ = tx.send(transfers(&probe));
+        });
+        let response = rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("GetTransfers waited on the global Store lock");
+        drop(held);
+        thread.join().unwrap();
+        assert_eq!(
+            normalized(&response.unwrap()),
+            normalized(&baseline),
+            "GetTransfers answered differently while the writer lock was held"
+        );
+    }
+
+    /// Issue #67 R1 diagnosis: decompose the warm poll cost under 16-way
+    /// concurrency (connection opens, render-cache hits/builds, path resolves,
+    /// JSON assembly) and print one `READPATH_BREAKDOWN` line. Run with
+    /// `--nocapture` to see where a shared resource inflates per-call cost.
+    #[test]
+    fn concurrent_warm_poll_cost_breakdown() {
+        let (_dir, service) = fixture();
+        let tasks = service.clone().start();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while service.status_projection().is_none() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "status projection did not become ready within 10s"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let paths = vec![".".to_string()];
+        let baseline = states(&service, paths.clone()).unwrap();
+        let threads = 16usize;
+        let calls_per_thread = 32usize;
+        service.reset_read_only_open_stats();
+        let barrier = Arc::new(std::sync::Barrier::new(threads));
+        let mut handles = Vec::with_capacity(threads);
+        for _ in 0..threads {
+            let barrier = barrier.clone();
+            let service = service.clone();
+            let paths = paths.clone();
+            let baseline = baseline.clone();
+            handles.push(std::thread::spawn(move || {
+                barrier.wait();
+                let mut sum_ns = 0u64;
+                let mut max_ns = 0u64;
+                for _ in 0..calls_per_thread {
+                    let started = std::time::Instant::now();
+                    let body = states(&service, paths.clone()).unwrap();
+                    let us = started.elapsed().as_nanos() as u64;
+                    sum_ns += us;
+                    max_ns = max_ns.max(us);
+                    assert_eq!(body, baseline, "concurrent warm render changed");
+                }
+                (
+                    sum_ns,
+                    max_ns,
+                    super::counters::resolve_calls(),
+                    super::counters::serializations(),
+                    super::counters::serialize_ns(),
+                    super::counters::entry_cache_hits(),
+                    super::counters::entry_cache_builds(),
+                )
+            }));
+        }
+        let mut sum_ns = 0u64;
+        let mut max_ns = 0u64;
+        let (mut resolves, mut serializations, mut serialize_ns) = (0usize, 0usize, 0u64);
+        let (mut hits, mut builds) = (0usize, 0usize);
+        for handle in handles {
+            let (sum, max, r, s, sn, h, b) = handle.join().unwrap();
+            sum_ns += sum;
+            max_ns = max_ns.max(max);
+            resolves += r;
+            serializations += s;
+            serialize_ns += sn;
+            hits += h;
+            builds += b;
+        }
+        let calls = threads * calls_per_thread;
+        let (opens, open_ns) = service.read_only_open_stats();
+        eprintln!(
+            "READPATH_BREAKDOWN threads={threads} calls={calls} avg_us={:.2} max_us={:.2} \
+             opens={opens} open_ns={open_ns} hits={hits} builds={builds} \
+             resolves={resolves} serializations={serializations} serialize_ns={serialize_ns}",
+            sum_ns as f64 / calls as f64 / 1000.0,
+            max_ns as f64 / 1000.0,
+        );
+        // Every call still resolves once, serializes once and is answered by the
+        // committed render; nothing may fall back to a per-call tree walk.
+        assert_eq!(resolves, calls, "path resolution count changed");
+        assert_eq!(serializations, calls, "serialization count changed");
+        assert_eq!(hits + builds, calls, "not every warm call used the committed render");
+        assert!(opens < calls, "{calls} calls opened {opens} connections");
+        service.shutdown();
+        tasks.join();
+    }
+
+    /// A cold batch large enough that the authoritative root read is measurable;
+    /// the R2 gate must make overlapping identical batches share one read.
+    fn cold_fixture() -> (tempfile::TempDir, Arc<Service>) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(dir.path()).unwrap();
+        let mut nodes = vec![node("root", None, true)];
+        for folder in 0..32 {
+            let folder_id = format!("d{folder:03}");
+            nodes.push(node(&folder_id, Some("root"), true));
+            for file in 0..64 {
+                nodes.push(node(
+                    &format!("f{folder:03}-{file:03}"),
+                    Some(&folder_id),
+                    false,
+                ));
+            }
+        }
+        store
+            .install_remote_snapshot(&nodes, "1", "server")
+            .unwrap();
+        store.ensure_fs_root("root").unwrap();
+        (
+            dir,
+            Service::new(profile(), store, PathBuf::from("/nonexistent-worker")).unwrap(),
+        )
+    }
+
+    /// Issue #67 R2: no projection means the batch pays the O(#nodes)
+    /// authoritative read. Overlapping identical batches must join the one
+    /// in-flight read and reuse its response instead of each reading the store.
+    #[test]
+    fn cold_states_joins_overlapping_identical_batches() {
+        let (_dir, service) = cold_fixture();
+        // The leader outlives the joiner's 2 s wait slice: a timeout must not
+        // start a competing O(#nodes) read (the read-lane thundering herd).
+        service.set_cold_states_delay_ms(3_000);
+        let paths = vec![".".to_string()];
+        let baseline = states(&service, paths.clone()).unwrap();
+        service.reset_cold_states_stats();
+        let threads = 16usize;
+        let barrier = Arc::new(std::sync::Barrier::new(threads));
+        let mut handles = Vec::with_capacity(threads);
+        for _ in 0..threads {
+            let barrier = barrier.clone();
+            let service = service.clone();
+            let paths = paths.clone();
+            handles.push(std::thread::spawn(move || {
+                barrier.wait();
+                states(&service, paths).unwrap()
+            }));
+        }
+        for handle in handles {
+            assert_eq!(
+                handle.join().unwrap(),
+                baseline,
+                "joined cold batch changed"
+            );
+        }
+        assert_eq!(
+            service.cold_states_computations(),
+            1,
+            "one overlapping cold batch must run the authoritative read once"
+        );
+        assert!(
+            service.cold_states_joins() >= threads - 2,
+            "overlapping cold batches did not join: {} rejoined",
+            service.cold_states_joins()
+        );
+        assert_eq!(
+            service.cold_states_abandoned(),
+            0,
+            "joiners abandoned a merely slow leader and started competing reads"
+        );
+    }
+
+    /// A different batch key (paths/active set/committed state) must not be
+    /// served by an unrelated in-flight gate.
+    #[test]
+    fn cold_states_keeps_distinct_batches_apart() {
+        let (_dir, service) = cold_fixture();
+        let root_paths = vec![".".to_string()];
+        let folder_paths = vec!["d001".to_string()];
+        let root_baseline = states(&service, root_paths.clone()).unwrap();
+        let folder_baseline = states(&service, folder_paths.clone()).unwrap();
+        service.set_cold_states_delay_ms(150);
+        service.reset_cold_states_stats();
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let root_service = service.clone();
+        let root_barrier = barrier.clone();
+        let root_thread = std::thread::spawn(move || {
+            root_barrier.wait();
+            states(&root_service, root_paths).unwrap()
+        });
+        let folder_service = service.clone();
+        let folder_barrier = barrier.clone();
+        let folder_thread = std::thread::spawn(move || {
+            folder_barrier.wait();
+            states(&folder_service, folder_paths).unwrap()
+        });
+        assert_eq!(root_thread.join().unwrap(), root_baseline);
+        assert_eq!(folder_thread.join().unwrap(), folder_baseline);
+        assert_eq!(
+            service.cold_states_computations(),
+            2,
+            "distinct cold batches must both be computed"
+        );
+    }
+
+    /// The leader's error must reach every joined caller and the gate must be
+    /// cleared so a following request can retry and succeed.
+    #[test]
+    fn cold_states_propagates_leader_error_and_recovers() {
+        let (_dir, service) = cold_fixture();
+        service.set_cold_states_delay_ms(80);
+        service.set_cold_states_fail_next(true);
+        service.reset_cold_states_stats();
+        let paths = vec![".".to_string()];
+        let threads = 8usize;
+        let barrier = Arc::new(std::sync::Barrier::new(threads));
+        let mut handles = Vec::with_capacity(threads);
+        for _ in 0..threads {
+            let barrier = barrier.clone();
+            let service = service.clone();
+            let paths = paths.clone();
+            handles.push(std::thread::spawn(move || {
+                barrier.wait();
+                states(&service, paths)
+            }));
+        }
+        for handle in handles {
+            let error = handle
+                .join()
+                .unwrap()
+                .expect_err("every joined caller must see the leader error");
+            assert!(
+                error.to_string().contains("injected cold-states failure"),
+                "leader error was not propagated: {error}"
+            );
+        }
+        assert_eq!(
+            service.cold_states_computations(),
+            0,
+            "the injected failure must replace the authoritative read"
+        );
+        // The gate is cleared: the next request retries and succeeds.
+        let recovered = states(&service, vec![".".to_string()]).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&recovered).unwrap();
+        assert_eq!(value["schema"], 1);
+    }
+
+    /// With a ready projection the cold gate must be completely bypassed.
+    #[test]
+    fn cold_states_gate_is_bypassed_when_the_projection_is_ready() {
+        let (_dir, service) = cold_fixture();
+        let tasks = service.clone().start();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while service.status_projection().is_none() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "status projection did not become ready within 10s"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        service.reset_cold_states_stats();
+        let paths = vec![".".to_string()];
+        let baseline = states(&service, paths.clone()).unwrap();
+        for _ in 0..8 {
+            assert_eq!(states(&service, paths.clone()).unwrap(), baseline);
+        }
+        assert_eq!(
+            service.cold_states_computations(),
+            0,
+            "the warm projection path must not enter the cold gate"
+        );
         service.shutdown();
         tasks.join();
     }
