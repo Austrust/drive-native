@@ -609,3 +609,175 @@ fn bound_deleted_directory_without_surviving_content_stays_hidden() {
     assert!(s.sync_issue("root", &directory.id).unwrap().is_none());
     assert_eq!(s.sync_issue_count("root").unwrap(), 0);
 }
+
+/// Issue #6 residual ②: a native remove that ended in `conflict` (the field
+/// shape: `last_error="remote changed before the remove was confirmed"`) is a
+/// tombstoned node with no executable action today — `can_keep_both`,
+/// `can_keep_directory`, `can_keep_local` and `can_keep_remote` are all false.
+/// The only safe recovery is "abandon the local delete intent, keep the remote
+/// content" (never send a delete/modify RPC). RED: GetIssues does not export
+/// `can_abandon_remove` yet, so the issue center cannot offer it.
+fn conflicted_remove(s: &mut Store) -> String {
+    s.unlink_local("root", "A.doc", "a", false).unwrap();
+    let queued = s.next_remove().unwrap().unwrap();
+    s.mark_remove_started(&queued.job.operation).unwrap();
+    s.conflict_remove(&queued.job.operation).unwrap();
+    queued.job.operation
+}
+
+#[test]
+fn conflicted_remove_exposes_additive_keep_remote_recovery() {
+    let (_d, mut s) = fixture();
+    let operation = conflicted_remove(&mut s);
+    let issue = s.sync_issue("root", "a").unwrap().unwrap();
+    assert_eq!(issue.reason, "namespace_conflict");
+    // None of the existing recovery actions applies to a conflicted remove.
+    assert!(!issue.can_keep_both);
+    assert!(!issue.can_keep_directory);
+    assert!(!issue.can_keep_local);
+    assert!(!issue.can_keep_remote);
+    assert!(!issue.can_abandon_upload);
+    let entry = serde_json::to_value(&issue).unwrap();
+    assert_eq!(
+        entry["can_abandon_remove"],
+        serde_json::json!(true),
+        "conflicted remove {operation} must offer additive keep-remote recovery"
+    );
+}
+
+/// Issue #6 residual ② GREEN: the additively advertised keep-remote recovery
+/// restores the tombstoned node, terminalizes the conflict intent, writes the
+/// durable diagnosis and never queues a delete/modify operation.
+#[test]
+fn abandon_conflicted_remove_keeps_remote_without_server_mutation() {
+    let (_d, mut s) = fixture();
+    let operation = conflicted_remove(&mut s);
+    let issue = s.sync_issue("root", "a").unwrap().unwrap();
+    assert!(issue.can_abandon_remove);
+    assert!(!issue.can_keep_both && !issue.can_keep_directory);
+    let (node, path) = s
+        .abandon_remove_conflict("root", "a", &issue.token)
+        .unwrap();
+    assert_eq!(node.id, "a");
+    assert_eq!(path, "A.doc");
+    // The node is visible and readable again; the blob may be re-downloaded on
+    // demand if it had been reclaimed, but this fixture still has it.
+    assert!(s.lookup("root", "A.doc").is_ok());
+    assert_ne!(s.status("a").unwrap(), Status::Deleted);
+    assert_eq!(bytes(&s, "a"), b"old");
+    assert!(s.sync_issue("root", "a").unwrap().is_none());
+    assert!(s.sync_issues("root", "").unwrap().entries.is_empty());
+    // Local-only terminal state: no queued namespace/upload work (a queued
+    // remove here would be the only way a delete could ever reach the server).
+    assert!(s.next_remove().unwrap().is_none());
+    assert!(s.next_namespace_operation().unwrap().is_none());
+    assert_eq!(s.pending_namespace_operations().unwrap(), 0);
+    assert_eq!(s.pending_operations().unwrap(), 0);
+    assert!(s.upload_operations("pending").unwrap().is_empty());
+    // Durable diagnosis: terminal confirmed/local_abandoned on the removed intent.
+    let diagnostics = drive_core::commit_diagnostics::list(&s, 10).unwrap();
+    let row = diagnostics
+        .iter()
+        .find(|row| row.operation == operation)
+        .expect("the abandoned remove must keep a durable diagnostic row");
+    assert_eq!(row.scope, "namespace");
+    assert_eq!(row.outcome.as_str(), "confirmed");
+    assert_eq!(row.category.as_str(), "local_abandoned");
+    assert!(row
+        .last_error
+        .as_deref()
+        .is_some_and(|error| error.contains("remote content kept")));
+    // History records the local delete as cancelled rather than failed.
+    let page = s
+        .sync_history(&drive_core::sync_history::HistoryQuery::default())
+        .unwrap();
+    let history = page
+        .records
+        .iter()
+        .find(|record| record.node.as_deref() == Some("a") && record.action == "delete")
+        .expect("the remove intent must keep a history row");
+    assert_eq!(history.result, "cancelled");
+}
+
+/// The recovery is strictly gated: a stale token, a pending remove (no conflict
+/// yet), an uncertain remove and a rename conflict must all be refused.
+#[test]
+fn abandon_conflicted_remove_rejects_stale_token_and_unsafe_states() {
+    let (_d, mut s) = fixture();
+    conflicted_remove(&mut s);
+    let issue = s.sync_issue("root", "a").unwrap().unwrap();
+    assert!(issue.can_abandon_remove);
+    assert!(s
+        .abandon_remove_conflict("root", "a", "not-the-token")
+        .is_err());
+    assert!(s.sync_issue("root", "a").unwrap().is_some(), "rejection must not mutate");
+
+    // A remove that merely waits is not a conflict: nothing was reconciled, so
+    // the safe recovery does not exist yet.
+    let (_pending_dir, mut pending) = fixture();
+    pending
+        .unlink_local("root", "A.doc", "a", false)
+        .unwrap();
+    assert!(pending.sync_issue("root", "a").unwrap().is_none());
+    assert!(pending
+        .abandon_remove_conflict("root", "a", "any-token")
+        .is_err());
+
+    // An uncertain remove has its own reconcile path; abandoning is not offered.
+    let (_uncertain_dir, mut uncertain) = fixture();
+    uncertain
+        .unlink_local("root", "A.doc", "a", false)
+        .unwrap();
+    let queued = uncertain.next_remove().unwrap().unwrap();
+    uncertain
+        .mark_remove_started(&queued.job.operation)
+        .unwrap();
+    uncertain
+        .mark_remove_uncertain(&queued.job.operation)
+        .unwrap();
+    let issue = uncertain.sync_issue("root", "a").unwrap().unwrap();
+    assert!(!issue.can_abandon_remove);
+    assert!(uncertain
+        .abandon_remove_conflict("root", "a", &issue.token)
+        .is_err());
+}
+
+/// A repeated call after a successful abandonment is a strict no-op: same node,
+/// same path, no new history/diagnostic rows, still no pending work.
+#[test]
+fn abandon_conflicted_remove_is_idempotent_and_terminal() {
+    let (_d, mut s) = fixture();
+    let operation = conflicted_remove(&mut s);
+    let issue = s.sync_issue("root", "a").unwrap().unwrap();
+    let token = issue.token;
+    let (first, first_path) = s.abandon_remove_conflict("root", "a", &token).unwrap();
+    let history_rows = s
+        .sync_history(&drive_core::sync_history::HistoryQuery::default())
+        .unwrap()
+        .records
+        .len();
+    let diagnostics = drive_core::commit_diagnostics::list(&s, 10).unwrap().len();
+    let (second, second_path) = s.abandon_remove_conflict("root", "a", &token).unwrap();
+    assert_eq!(second.id, first.id);
+    assert_eq!(second_path, first_path);
+    assert_eq!(
+        s.sync_history(&drive_core::sync_history::HistoryQuery::default())
+            .unwrap()
+            .records
+            .len(),
+        history_rows
+    );
+    assert_eq!(
+        drive_core::commit_diagnostics::list(&s, 10).unwrap().len(),
+        diagnostics
+    );
+    assert_eq!(s.pending_namespace_operations().unwrap(), 0);
+    let diagnostics = drive_core::commit_diagnostics::list(&s, 10).unwrap();
+    assert_eq!(
+        diagnostics
+            .iter()
+            .filter(|row| row.operation == operation)
+            .count(),
+        1
+    );
+}
