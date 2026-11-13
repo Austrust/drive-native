@@ -1753,47 +1753,30 @@ impl Store {
         }
         #[cfg(unix)]
         File::open(parent)?.sync_all()?;
-        // Closed clean drafts duplicate a confirmed immutable version. Dirty or
-        // open drafts retain their own files, including unlinked old handles.
-        let open_drafts: std::collections::HashSet<String> = self
-            .handles
-            .lock()
-            .unwrap()
-            .keys()
-            .filter_map(|k| k.strip_prefix("draft:").map(str::to_owned))
-            .collect();
-        let rows = {
-            let mut q = self.db.prepare("SELECT token,dirty FROM drafts")?;
-            q.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?)))?
-                .collect::<std::result::Result<Vec<_>, _>>()?
-        };
-        let mut retained = open_drafts.clone();
-        for (token, dirty) in rows {
-            if dirty || open_drafts.contains(&token) {
-                retained.insert(token);
-            } else {
-                self.db
-                    .execute("DELETE FROM drafts WHERE token=?1 AND dirty=0", [&token])?;
+        // Issue #90-B: clean closed draft rows are removed in bounded
+        // transactions (one commit per batch instead of one per row); the draft
+        // file is unlinked only after its row transaction committed, so a crash
+        // can leave a recoverable orphan file but never a row without its body.
+        loop {
+            let pruned = self.prune_clean_drafts(usize::MAX)?;
+            removed = removed.saturating_add(pruned.file_bytes);
+            if pruned.rows == 0 {
+                break;
+            }
+        }
+        // Files left behind by rows removed in an earlier pass (or by a crash
+        // between the row commit and the unlink) are reclaimed here against the
+        // current row and open-handle sets.
+        loop {
+            let pruned = self.prune_unreferenced_draft_files(usize::MAX)?;
+            removed = removed.saturating_add(pruned.bytes);
+            if pruned.exhausted {
+                break;
             }
         }
         let draft_dir = self.root.join("drafts");
         match fs::read_dir(&draft_dir) {
-            Ok(entries) => {
-                for entry in entries {
-                    let entry = entry?;
-                    let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
-                        continue;
-                    };
-                    if retained.contains(&name)
-                        || uuid::Uuid::parse_str(&name).is_err()
-                        || !entry.file_type()?.is_file()
-                    {
-                        continue;
-                    }
-                    let size = entry.metadata()?.len();
-                    fs::remove_file(entry.path())?;
-                    removed += size;
-                }
+            Ok(_) => {
                 #[cfg(unix)]
                 File::open(draft_dir)?.sync_all()?;
             }
@@ -1805,6 +1788,128 @@ impl Store {
         // so they are deliberately not counted as `removed`.
         self.collect_orphan_drafts(unix_seconds())?;
         Ok(removed)
+    }
+
+    // #90-B metering/batch types live in `cache_policy` (the cache-policy
+    // module owns the maintenance budgets and exposes them to the runtime GC
+    // loop); the deletion logic stays next to `collect_garbage`.
+
+    /// Open draft handles, keyed by the draft token recorded in `handles`.
+    fn open_draft_handle_tokens(&self) -> std::collections::HashSet<String> {
+        self.handles
+            .lock()
+            .unwrap()
+            .keys()
+            .filter_map(|k| k.strip_prefix("draft:").map(str::to_owned))
+            .collect()
+    }
+
+    /// Unlink one draft body. Returns the bytes reclaimed. A missing file is a
+    /// no-op (another pass or the writer already removed it); anything that is
+    /// not a regular UUID-named file is left alone.
+    fn remove_draft_file(&self, token: &str) -> Result<u64> {
+        if uuid::Uuid::parse_str(token).is_err() {
+            return Ok(0);
+        }
+        let path = self.root.join("drafts").join(token);
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.is_file() => {
+                fs::remove_file(&path)?;
+                Ok(metadata.len())
+            }
+            Ok(_) => Ok(0),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(0),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Delete at most `max_rows` closed (`dirty=0`, no open handle) draft rows.
+    ///
+    /// Draft writes and [`Store::open_draft`] need the Store lock, so the
+    /// caller's `&mut self` already excludes a state change during the pass; the
+    /// `dirty=0` predicate is nevertheless re-checked inside each batch
+    /// transaction so a stale row snapshot can never delete a dirty draft.
+    pub(crate) fn prune_clean_drafts(
+        &mut self,
+        max_rows: usize,
+    ) -> Result<crate::cache_policy::CleanDraftPrune> {
+        let max_rows = max_rows.max(1);
+        let open = self.open_draft_handle_tokens();
+        let rows = {
+            let mut q = self.db.prepare("SELECT token,dirty FROM drafts ORDER BY token")?;
+            q.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?)))?
+                .collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        let mut clean: Vec<String> = rows
+            .into_iter()
+            .filter_map(|(token, dirty)| (!dirty && !open.contains(&token)).then_some(token))
+            .collect();
+        clean.truncate(max_rows);
+        let mut out = crate::cache_policy::CleanDraftPrune::default();
+        // RED baseline (#90-B): one autocommit per deleted row, exactly like the
+        // pre-#90 loop this method replaces.
+        for token in clean {
+            let deleted = self
+                .db
+                .execute("DELETE FROM drafts WHERE token=?1 AND dirty=0", [&token])?;
+            if deleted == 1 {
+                out.rows += 1;
+                out.commits += 1;
+                out.file_bytes = out.file_bytes.saturating_add(self.remove_draft_file(&token)?);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Delete at most `max_files` draft bodies that have no `drafts` row and no
+    /// open handle. Used for files whose row was removed by an earlier pass or
+    /// by a crash between the row commit and the unlink.
+    pub(crate) fn prune_unreferenced_draft_files(
+        &mut self,
+        max_files: usize,
+    ) -> Result<crate::cache_policy::DraftFilePrune> {
+        let mut out = crate::cache_policy::DraftFilePrune {
+            exhausted: true,
+            ..crate::cache_policy::DraftFilePrune::default()
+        };
+        if max_files == 0 {
+            out.exhausted = false;
+            return Ok(out);
+        }
+        let rows: std::collections::HashSet<String> = {
+            let mut q = self.db.prepare("SELECT token FROM drafts")?;
+            q.query_map([], |r| r.get::<_, String>(0))?
+                .collect::<std::result::Result<_, _>>()?
+        };
+        let open = self.open_draft_handle_tokens();
+        let draft_dir = self.root.join("drafts");
+        let entries = match fs::read_dir(&draft_dir) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
+            Err(e) => return Err(e.into()),
+        };
+        for entry in entries {
+            let entry = entry?;
+            let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            if rows.contains(&name)
+                || open.contains(&name)
+                || uuid::Uuid::parse_str(&name).is_err()
+                || !entry.file_type()?.is_file()
+            {
+                continue;
+            }
+            let size = entry.metadata()?.len();
+            fs::remove_file(entry.path())?;
+            out.files += 1;
+            out.bytes = out.bytes.saturating_add(size);
+            if out.files as usize >= max_files {
+                out.exhausted = false;
+                break;
+            }
+        }
+        Ok(out)
     }
 
     /// Issue #50 (phase 4): hide a rule-excluded subtree locally and drop its

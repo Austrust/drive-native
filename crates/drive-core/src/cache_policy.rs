@@ -180,6 +180,34 @@ pub struct CacheTrim {
     pub released: Vec<String>,
     pub reclaimed_bytes: u64,
 }
+/// Issue #90-B: clean-draft rows deleted per transaction.
+///
+/// The pre-#90 loop issued one `DELETE` per row, so with WAL and
+/// `synchronous=FULL` every clean closed draft paid its own commit while the
+/// caller held the Store/flights locks. A batch transaction amortizes the WAL
+/// sync without relaxing durability. Exposed so the runtime maintenance loop and
+/// its red/green measurement use the same budget as the core deletion pass.
+pub const GC_CLEAN_DRAFT_BATCH_SIZE: usize = 128;
+
+/// One bounded clean-draft pruning pass. `commits` counts the transactions this
+/// pass performed; deliberately metered separately from the other GC writes so
+/// #90-B's write amplification is observable on its own.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct CleanDraftPrune {
+    pub rows: u64,
+    pub commits: u64,
+    pub file_bytes: u64,
+}
+
+/// One bounded unreferenced-draft-file sweep.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct DraftFilePrune {
+    pub files: u64,
+    pub bytes: u64,
+    /// `false` when the pass stopped at its file budget and the directory still
+    /// needs another pass.
+    pub exhausted: bool,
+}
 impl Store {
     pub fn downloads_paused(&self) -> Result<bool> {
         let value: Option<String> = self.db.query_row(
@@ -540,3 +568,7 @@ impl Drop for Store {
 #[cfg(test)]
 #[path = "cache_policy_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "gc_batch_tests.rs"]
+mod gc_batch_tests;
