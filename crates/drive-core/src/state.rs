@@ -5,7 +5,7 @@ use sha2::{Digest, Sha256};
 #[path = "sync_history.rs"]
 pub mod sync_history;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs::{self, File},
     io::{Read, Write},
     path::{Path, PathBuf},
@@ -775,6 +775,114 @@ fn check_migration_backup_space(root: &Path) -> Result<()> {
     let estimate = migration_backup_estimate_bytes(root);
     let required = estimate.saturating_mul(MIGRATION_BACKUP_SPACE_FACTOR);
     backup_headroom_check(required, filesystem_available_bytes(root))
+}
+
+/// Issue #87: prepare/absorb state for the durable `excluded_purged` id list.
+///
+/// Preparation happens before the purge transaction (reading and parsing the
+/// previous list plus its membership set), so the write transaction only does
+/// the per-node SQL and an O(K) merge. The stable serialization order stays
+/// `previous ++ new ids in purge order`; a duplicate already present in
+/// `previous` is kept exactly as the former `Vec::contains` merge kept it.
+pub(crate) struct ExcludedPurgedMerge {
+    /// Raw metadata value preparation read; the transaction validates it before
+    /// publishing the merged list.
+    raw: Option<String>,
+    previous: Vec<String>,
+    /// Membership set built once during preparation: expected O(1) per purged
+    /// id instead of the former `Vec::contains` linear scan.
+    seen: HashSet<String>,
+}
+
+/// Membership probes performed by the merge (issue #87 red/green evidence).
+/// The former implementation counted one probe per compared `Vec` element
+/// (K(K-1)/2 for K unique ids); the prepared hash set performs one probe per
+/// absorbed id.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct ExcludedPurgeProfile {
+    pub probes: u64,
+    pub prepare_ns: u64,
+    pub absorb_ns: u64,
+    pub transaction_ns: u64,
+}
+
+#[cfg(test)]
+thread_local! {
+    static EXCLUDED_PURGE_PROFILE: std::cell::Cell<ExcludedPurgeProfile> =
+        const { std::cell::Cell::new(ExcludedPurgeProfile {
+            probes: 0,
+            prepare_ns: 0,
+            absorb_ns: 0,
+            transaction_ns: 0,
+        }) };
+}
+
+#[cfg(test)]
+fn record_excluded_purge(cell: impl FnOnce(&mut ExcludedPurgeProfile)) {
+    EXCLUDED_PURGE_PROFILE.with(|profile| {
+        let mut value = profile.get();
+        cell(&mut value);
+        profile.set(value);
+    });
+}
+
+#[cfg(test)]
+pub(crate) fn reset_excluded_purge_profile() {
+    EXCLUDED_PURGE_PROFILE.with(|profile| profile.set(ExcludedPurgeProfile::default()));
+}
+
+#[cfg(test)]
+pub(crate) fn excluded_purge_profile() -> ExcludedPurgeProfile {
+    EXCLUDED_PURGE_PROFILE.with(std::cell::Cell::get)
+}
+
+/// Read the durable list of ids a previous exclusion purge hid.
+fn excluded_purged_raw(conn: &Connection) -> Result<Option<String>> {
+    Ok(conn
+        .query_row(
+            "SELECT value FROM metadata WHERE key='excluded_purged'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?)
+}
+
+impl ExcludedPurgedMerge {
+    /// Parse the previous list once and build the set the merge probes. This is
+    /// the O(P) part, deliberately performed before the purge transaction.
+    pub(crate) fn prepare(raw: Option<String>) -> Self {
+        let previous: Vec<String> = raw.as_deref().and_then(excluded_purged_ids).unwrap_or_default();
+        let mut seen = HashSet::with_capacity(previous.len());
+        for id in &previous {
+            seen.insert(id.clone());
+        }
+        Self { raw, previous, seen }
+    }
+
+    pub(crate) fn raw(&self) -> Option<&str> {
+        self.raw.as_deref()
+    }
+
+    /// Absorb the ids this purge actually hid into the stable serialized order.
+    /// The `seen` set already contains the previous ids, so a membership test is
+    /// one hash probe and the whole merge is expected O(K) after preparation.
+    pub(crate) fn absorb(mut self, persisted: Vec<String>) -> Vec<String> {
+        let mut merged = std::mem::take(&mut self.previous);
+        for id in persisted {
+            #[cfg(test)]
+            record_excluded_purge(|profile| profile.probes += 1);
+            if self.seen.insert(id.clone()) {
+                merged.push(id);
+            }
+        }
+        merged
+    }
+}
+
+/// Parse the `excluded_purged` metadata JSON array.
+fn excluded_purged_ids(raw: &str) -> Option<Vec<String>> {
+    serde_json::from_str(raw).ok()
 }
 
 impl Store {
@@ -1821,6 +1929,21 @@ impl Store {
         if ids.is_empty() {
             return Ok(0);
         }
+        // Issue #87: prepare the previous id list (JSON parse + membership
+        // structure) before the write transaction. The transaction re-reads the
+        // raw value and falls back to a fresh preparation if it moved; a second
+        // writer cannot race here (one writer per profile), so this is only a
+        // defensive snapshot check.
+        #[cfg(test)]
+        let prepare_started = std::time::Instant::now();
+        let merge = ExcludedPurgedMerge::prepare(excluded_purged_raw(&self.db)?);
+        let prepared_raw = merge.raw().map(str::to_owned);
+        #[cfg(test)]
+        record_excluded_purge(|profile| {
+            profile.prepare_ns += u64::try_from(prepare_started.elapsed().as_nanos()).unwrap_or(u64::MAX)
+        });
+        #[cfg(test)]
+        let transaction_started = std::time::Instant::now();
         let tx = self.db.transaction()?;
         let mut purged = 0u64;
         let mut persisted: Vec<String> = Vec::new();
@@ -1866,21 +1989,19 @@ impl Store {
             persisted.push(id.clone());
         }
         if purged > 0 {
-            let previous: Vec<String> = tx
-                .query_row(
-                    "SELECT value FROM metadata WHERE key='excluded_purged'",
-                    [],
-                    |r| r.get::<_, String>(0),
-                )
-                .optional()?
-                .and_then(|raw| serde_json::from_str(&raw).ok())
-                .unwrap_or_default();
-            let mut merged = previous;
-            for id in persisted {
-                if !merged.contains(&id) {
-                    merged.push(id);
-                }
-            }
+            let current_raw = excluded_purged_raw(&tx)?;
+            let merge = if current_raw == prepared_raw {
+                merge
+            } else {
+                ExcludedPurgedMerge::prepare(current_raw)
+            };
+            #[cfg(test)]
+            let absorb_started = std::time::Instant::now();
+            let merged = merge.absorb(persisted);
+            #[cfg(test)]
+            record_excluded_purge(|profile| {
+                profile.absorb_ns += u64::try_from(absorb_started.elapsed().as_nanos()).unwrap_or(u64::MAX)
+            });
             tx.execute(
                 "INSERT OR REPLACE INTO metadata(key,value) VALUES('excluded_purged',?1)",
                 [serde_json::to_string(&merged)?],
@@ -1889,6 +2010,10 @@ impl Store {
             tx.execute("DELETE FROM metadata WHERE key='fs_inodes_complete'", [])?;
         }
         tx.commit()?;
+        #[cfg(test)]
+        record_excluded_purge(|profile| {
+            profile.transaction_ns += u64::try_from(transaction_started.elapsed().as_nanos()).unwrap_or(u64::MAX)
+        });
         Ok(purged)
     }
 
