@@ -790,10 +790,20 @@ fn commit_diagnostics_json(
 pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimings)> {
     let started = Instant::now();
     let mut timings = OverviewTimings::default();
-    let (state, error, revision) = {
+    let (state, error, revision, paused, paused_by) = {
         let c = service.control.lock().unwrap();
-        (c.state, c.error, c.revision)
+        (
+            c.state,
+            c.error,
+            c.revision,
+            c.paused,
+            c.pause_origin.as_str(),
+        )
     };
+    // Issue #61: additive structured startup-pause diagnosis. `paused_by`
+    // distinguishes a user pause from a startup handover intent, and records a
+    // persisted-flag auto-resume for the rest of this session.
+    let startup_pause = service.startup_pause_recovery();
     let active_transfers = service.bridge.transfer_entries().len();
     let initialization = service.bridge.initialization.snapshot();
     let key = service.bridge.store.change_state();
@@ -899,7 +909,8 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
     let recovery = service.bridge.recovery_status();
     let serialize = Instant::now();
     let body = serde_json::json!({"schema":1,"task_id":service.profile.task_id,"mount":service.profile.mount,
-        "connection":state,"error":error,"background_error":background_error,
+        "connection":state,"error":error,"paused":paused,"paused_by":paused_by,
+        "startup_pause":startup_pause,"background_error":background_error,
         "background_error_kind":background_error_kind,
         "background_error_since_ms":background_error_since_ms,
         "upload_block":*service.bridge.upload_block.lock().unwrap(),

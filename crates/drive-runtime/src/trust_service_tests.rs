@@ -19,7 +19,9 @@ fn profile() -> Profile {
             path: "/test".into(),
         },
         mount: PathBuf::from("/tmp/trust-fault-test-unused"),
-        writable: false, local_policy: None, writable_source: None,
+        writable: false,
+        local_policy: None,
+        writable_source: None,
         exclude_patterns: Vec::new(),
     }
 }
@@ -130,7 +132,10 @@ fn issue_recheck_never_bypasses_trust_durability_or_restarts_a_stopping_mount() 
         c.error = Some("trust_settings_not_durable");
         c.state = ConnectionState::NeedsAttention;
     }
-    assert_eq!(s.recheck_issues().unwrap().message_code, "settings_required");
+    assert_eq!(
+        s.recheck_issues().unwrap().message_code,
+        "settings_required"
+    );
     assert!(s.control.lock().unwrap().trust_pending_durability);
     s.shutdown();
     assert_eq!(s.recheck_issues().unwrap().message_code, "stopping");
@@ -158,7 +163,8 @@ fn issue_recheck_queues_without_store_lock_and_reconnects_without_clearing_state
     assert_eq!(s.control.lock().unwrap().state, ConnectionState::Connecting);
     assert!(!s.bridge.store.lock().unwrap().sync_paused().unwrap());
     assert_cached(&s);
-    let overview: serde_json::Value = serde_json::from_str(&crate::desktop::overview(&s).unwrap()).unwrap();
+    let overview: serde_json::Value =
+        serde_json::from_str(&crate::desktop::overview(&s).unwrap()).unwrap();
     assert_eq!(overview["recovery_actions"]["recheck_issues"], true);
 }
 #[test]
@@ -371,17 +377,64 @@ fn live_transfer_setting_acknowledgement_is_required_without_losing_saved_policy
     }
 }
 
+/// Issue #61: pause is a session control. A stop/crash while paused must not
+/// silently pause the next process (that is a persisted-only pause and is
+/// auto-resumed), while the one-shot `startup-pause-v1.json` handover intent
+/// still keeps the new owner paused until the user resumes.
 #[test]
-fn durable_pause_controls_handover_and_unlock() {
+fn startup_intent_controls_handover_and_unlock() {
     let (d, service) = fixture();
     service.pause().unwrap();
     let profile = service.profile.clone();
     drop(service);
-    let store = Store::open(d.path()).unwrap();
-    let service = Service::new(profile, store, PathBuf::from("/unused-worker")).unwrap();
-    assert_eq!(service.control.lock().unwrap().state, ConnectionState::Paused);
+
+    // No fresh handover intent: the persisted pause is auto-resumed.
+    let resumed = Service::new(
+        profile.clone(),
+        Store::open(d.path()).unwrap(),
+        PathBuf::from("/unused-worker"),
+    )
+    .unwrap();
+    assert!(!resumed.control.lock().unwrap().paused);
+    assert_eq!(
+        resumed.control.lock().unwrap().state,
+        ConnectionState::Locked
+    );
+    assert!(!resumed.bridge.store.lock().unwrap().sync_paused().unwrap());
+    assert_eq!(
+        resumed
+            .startup_pause_recovery()
+            .expect("startup decision")
+            .auto_resumed,
+        true
+    );
+    drop(resumed);
+
+    // A fresh one-shot intent (what the GUI publishes for a handover) keeps the
+    // new owner paused and is consumed exactly once.
+    let intent = d.path().join("startup-pause-v1.json");
+    std::fs::write(
+        &intent,
+        serde_json::json!({"schema":1,"task_id":profile.task_id}).to_string(),
+    )
+    .unwrap();
+    std::fs::set_permissions(&intent, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let service = Service::new(
+        profile,
+        Store::open(d.path()).unwrap(),
+        PathBuf::from("/unused-worker"),
+    )
+    .unwrap();
+    assert!(!intent.exists(), "the handover intent is one-shot");
+    assert_eq!(
+        service.control.lock().unwrap().state,
+        ConnectionState::Paused
+    );
     service.unlock("synthetic-unused".into()).unwrap();
-    assert_eq!(service.control.lock().unwrap().state, ConnectionState::Paused);
+    assert_eq!(
+        service.control.lock().unwrap().state,
+        ConnectionState::Paused
+    );
     service.resume().unwrap();
     assert!(!service.control.lock().unwrap().paused);
     assert!(!service.bridge.store.lock().unwrap().sync_paused().unwrap());
@@ -400,15 +453,26 @@ fn installed_worker_replacement_keeps_old_executable_inode() {
     fs::rename(replacement, worker).unwrap();
     let pinned = service.worker_executable().unwrap();
     let original = fs::metadata(&pinned).unwrap();
-    assert!(std::process::Command::new(&pinned).status().unwrap().success());
+    assert!(
+        std::process::Command::new(&pinned)
+            .status()
+            .unwrap()
+            .success()
+    );
     drop(service);
-    assert!(fs::metadata(pinned).map_or(true, |m| m.ino() != original.ino() || m.dev() != original.dev()));
+    assert!(
+        fs::metadata(pinned).map_or(true, |m| m.ino() != original.ino()
+            || m.dev() != original.dev())
+    );
 }
 
 #[test]
 fn missing_worker_image_cannot_fall_back_to_replaced_path() {
     let (_d, service) = fixture();
-    assert_eq!(service.worker_executable().unwrap_err().kind(), io::ErrorKind::InvalidInput);
+    assert_eq!(
+        service.worker_executable().unwrap_err().kind(),
+        io::ErrorKind::InvalidInput
+    );
 }
 
 #[test]
@@ -427,7 +491,9 @@ fn issue_recheck_reports_busy_without_waiting_for_control_or_store() {
     drop(store);
     drop(control);
     thread.join().unwrap();
-    let result = result.expect("recovery must answer while Control and Store are busy").unwrap();
+    let result = result
+        .expect("recovery must answer while Control and Store are busy")
+        .unwrap();
     assert!(!result.accepted);
     assert_eq!(result.message_code, "busy");
     assert!(result.paused_preserved);
