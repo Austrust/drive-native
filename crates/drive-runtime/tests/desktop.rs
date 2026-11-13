@@ -1717,3 +1717,49 @@ fn recovery_states_are_visible_and_additive_on_overview_and_issues() {
     assert_eq!(issues["recovery"]["state"], "needs_attention");
     assert_eq!(issues["recovery"]["recovery_exhausted"], true);
 }
+/// Issue #6 residual ②: the issue center must advertise and expose the additive
+/// "abandon local remove, keep remote content" recovery for a conflicted native
+/// remove. See `desktop::abandon_remove_conflict`.
+#[test]
+fn conflicted_remove_recovery_is_advertised_additively() {
+    let (_d, service) = fixture();
+    {
+        let mut store = service.bridge.store.lock().unwrap();
+        // The desktop fixture boots read-only by default; a remove intent only
+        // becomes dispatchable under an explicit writable policy.
+        drive_core::write_permissions::set_local_policy(
+            &store,
+            "root",
+            drive_core::write_permissions::LocalPolicy::FollowRemote,
+        )
+        .unwrap();
+        store.unlink_local("folder", "one", "one", false).unwrap();
+        let queued = store.next_remove().unwrap().unwrap();
+        store.mark_remove_started(&queued.job.operation).unwrap();
+        store.conflict_remove(&queued.job.operation).unwrap();
+    }
+    let overview: serde_json::Value =
+        serde_json::from_str(&desktop::overview(&service).unwrap()).unwrap();
+    assert_eq!(
+        overview["recovery_actions"]["abandon_remove"],
+        serde_json::json!(true),
+        "additive keep-remote recovery must be advertised for old-client-safe discovery"
+    );
+    let issues: serde_json::Value =
+        serde_json::from_str(&desktop::issues(&service, "").unwrap()).unwrap();
+    let entry = issues["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["id"] == serde_json::json!("one"))
+        .expect("conflicted remove must stay listed in the issue center")
+        .clone();
+    assert_eq!(entry["reason"], "namespace_conflict");
+    assert_eq!(
+        entry["can_abandon_remove"],
+        serde_json::json!(true),
+        "conflicted remove must expose the additive recovery flag and token"
+    );
+    assert_eq!(entry["can_keep_both"], serde_json::json!(false));
+    assert!(entry["token"].is_string());
+}

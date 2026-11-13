@@ -609,3 +609,38 @@ fn bound_deleted_directory_without_surviving_content_stays_hidden() {
     assert!(s.sync_issue("root", &directory.id).unwrap().is_none());
     assert_eq!(s.sync_issue_count("root").unwrap(), 0);
 }
+
+/// Issue #6 residual ②: a native remove that ended in `conflict` (the field
+/// shape: `last_error="remote changed before the remove was confirmed"`) is a
+/// tombstoned node with no executable action today — `can_keep_both`,
+/// `can_keep_directory`, `can_keep_local` and `can_keep_remote` are all false.
+/// The only safe recovery is "abandon the local delete intent, keep the remote
+/// content" (never send a delete/modify RPC). RED: GetIssues does not export
+/// `can_abandon_remove` yet, so the issue center cannot offer it.
+fn conflicted_remove(s: &mut Store) -> String {
+    s.unlink_local("root", "A.doc", "a", false).unwrap();
+    let queued = s.next_remove().unwrap().unwrap();
+    s.mark_remove_started(&queued.job.operation).unwrap();
+    s.conflict_remove(&queued.job.operation).unwrap();
+    queued.job.operation
+}
+
+#[test]
+fn conflicted_remove_exposes_additive_keep_remote_recovery() {
+    let (_d, mut s) = fixture();
+    let operation = conflicted_remove(&mut s);
+    let issue = s.sync_issue("root", "a").unwrap().unwrap();
+    assert_eq!(issue.reason, "namespace_conflict");
+    // None of the existing recovery actions applies to a conflicted remove.
+    assert!(!issue.can_keep_both);
+    assert!(!issue.can_keep_directory);
+    assert!(!issue.can_keep_local);
+    assert!(!issue.can_keep_remote);
+    assert!(!issue.can_abandon_upload);
+    let entry = serde_json::to_value(&issue).unwrap();
+    assert_eq!(
+        entry["can_abandon_remove"],
+        serde_json::json!(true),
+        "conflicted remove {operation} must offer additive keep-remote recovery"
+    );
+}
