@@ -1,4 +1,19 @@
 use super::*;
+use std::sync::OnceLock;
+
+/// #9 TB3: the journal ordering/dependency gates below can be hit on every
+/// dispatch pass while a backlog waits behind an unresolved commit (the field
+/// incident shape had 3,114 pending removes behind a blocked head). One stderr
+/// line per pass would flood journald for the lifetime of the blockage, so the
+/// trace is opt-in through the same additive env convention as
+/// `DRIVE_NATIVE_FS_DIAGNOSTICS`. No runtime behavior depends on this flag.
+fn namespace_diagnostics_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var_os("DRIVE_NATIVE_NAMESPACE_DIAGNOSTICS").is_some_and(|value| value == "1")
+    })
+}
+
 impl Bridge {
     /// Namespace failures describe unresolved durable intents. They are cleared
     /// only when this journal drains; an upload success cannot clear them.
@@ -62,17 +77,39 @@ impl Bridge {
             let reconcile = match queued.state.as_str() {
                 "pending" => false,
                 "uncertain" => true,
-                _ => return Ok(done),
+                // #9 TB3 / F1: `namespace_selection` legitimately returns the
+                // serial-lane handoff states (`inflight`/`cleanup_inflight`) and
+                // replace cleanup states. Yielding the pass here is the owner's
+                // contract, not a swallowed commit failure: no RPC is sent and
+                // no diagnostic may be written.
+                "inflight" | "cleanup_inflight" | "cleanup_pending" | "cleanup_uncertain" => {
+                    return Ok(done);
+                }
+                state => {
+                    // Outside the selector's seven-state filter this arm is
+                    // unreachable; keep it a loud defensive invariant failure.
+                    debug_assert!(false, "unexpected namespace journal state: {state}");
+                    return Err(io::Error::other(format!(
+                        "unexpected namespace journal state: {state}"
+                    )));
+                }
             };
-            if !reconcile
-                && self
+            if !reconcile {
+                if let Err(error) = self
                     .store
                     .lock()
                     .unwrap()
                     .mark_rename_started(&queued.job.operation)
-                    .is_err()
-            {
-                return Ok(done);
+                {
+                    // Local ordering/dependency gate (not a commit failure): the
+                    // intent stays queued and a later pass retries it. Keep the
+                    // bounded skip; the opt-in env-gated trace replaces a fully
+                    // silent return.
+                    if namespace_diagnostics_enabled() {
+                        eprintln!("drive-native namespace: rename submission deferred: {error}");
+                    }
+                    return Ok(done);
+                }
             }
             let permission_targets=drive_core::write_permissions::namespace_targets("rename",&serde_json::to_string(&queued.job)?).map_err(io::Error::other)?;
             let op = queued.job.operation.clone();
@@ -292,17 +329,33 @@ impl Bridge {
         let reconcile = match queued.state.as_str() {
             "pending" => false,
             "uncertain" => true,
-            _ => return Ok(0),
+            // Explicit yield of the selector's serial-lane handoff / cleanup
+            // states (F1); see the rename path for the contract.
+            "inflight" | "cleanup_inflight" | "cleanup_pending" | "cleanup_uncertain" => {
+                return Ok(0);
+            }
+            state => {
+                // Unreachable defensive invariant (see the rename path).
+                debug_assert!(false, "unexpected namespace journal state: {state}");
+                return Err(io::Error::other(format!(
+                    "unexpected namespace journal state: {state}"
+                )));
+            }
         };
-        if !reconcile
-            && self
+        if !reconcile {
+            if let Err(error) = self
                 .store
                 .lock()
                 .unwrap()
                 .mark_remove_started(&queued.job.operation)
-                .is_err()
-        {
-            return Ok(0);
+            {
+                // Local ordering/dependency gate (not a commit failure): the
+                // delete intent stays queued. Trace, then retry next pass.
+                if namespace_diagnostics_enabled() {
+                    eprintln!("drive-native namespace: remove submission deferred: {error}");
+                }
+                return Ok(0);
+            }
         }
         let permission_targets=drive_core::write_permissions::namespace_targets("remove",&serde_json::to_string(&queued.job)?).map_err(io::Error::other)?;
         let op = queued.job.operation.clone();
@@ -409,6 +462,10 @@ impl Bridge {
             "cleanup_pending" | "cleanup_uncertain"
         );
         let reconcile = matches!(queued.state.as_str(), "uncertain" | "cleanup_uncertain");
+        // #9 TB3 / F1: `cleanup_pending`/`cleanup_uncertain` are this handler's
+        // real cleanup lane and continue below; an `inflight`/`cleanup_inflight`
+        // row selected for the serial-lane handoff is yielded here. Neither is a
+        // swallowed commit failure.
         if !matches!(
             queued.state.as_str(),
             "pending" | "uncertain" | "cleanup_pending" | "cleanup_uncertain"
@@ -494,13 +551,32 @@ impl Bridge {
                                 .map_err(io::Error::other)?;
                             return Ok(0);
                         }
-                        _ => return Ok(0),
+                        _ => {
+                            // #9 TB3: an unexpected preparation reply is a
+                            // contract violation, not an empty successful pass.
+                            // Nothing was submitted and the journal row stays
+                            // `pending`, so this is reported as a visible
+                            // background failure (and retried next cycle); it is
+                            // deliberately NOT recorded as an unknown commit.
+                            return Err(io::Error::other(
+                                "server returned an unexpected reply to replacement preparation; no replace submitted",
+                            ));
+                        }
                     }
                 }
                 let job = {
                     let mut s = self.store.lock().unwrap();
-                    if !reconcile && s.mark_replace_started(&op).is_err() {
-                        return Ok(0);
+                    if !reconcile {
+                        if let Err(error) = s.mark_replace_started(&op) {
+                            // Local ordering/dependency gate (not a commit
+                            // failure): the replacement intent stays queued.
+                            if namespace_diagnostics_enabled() {
+                                eprintln!(
+                                    "drive-native namespace: replacement submission deferred: {error}"
+                                );
+                            }
+                            return Ok(0);
+                        }
                     }
                     let q = s
                         .scheduled_replace()
@@ -596,7 +672,18 @@ impl Bridge {
         let reconcile = match q.state.as_str() {
             "pending" => false,
             "uncertain" => true,
-            _ => return Ok(0),
+            // Explicit yield of the selector's serial-lane handoff / cleanup
+            // states (F1); see the rename path for the contract.
+            "inflight" | "cleanup_inflight" | "cleanup_pending" | "cleanup_uncertain" => {
+                return Ok(0);
+            }
+            state => {
+                // Unreachable defensive invariant (see the rename path).
+                debug_assert!(false, "unexpected namespace journal state: {state}");
+                return Err(io::Error::other(format!(
+                    "unexpected namespace journal state: {state}"
+                )));
+            }
         };
         let permission_targets=drive_core::write_permissions::namespace_targets("mkdir",&serde_json::to_string(&q.job)?).map_err(io::Error::other)?;
         let op = q.job.operation.clone();
@@ -605,7 +692,14 @@ impl Bridge {
         } else {
             match self.store.lock().unwrap().mark_directory_started(&op) {
                 Ok(job) => job,
-                Err(_) => return Ok(0),
+                Err(error) => {
+                    // Local ordering/dependency gate (not a commit failure): the
+                    // mkdir intent stays queued. Trace, then retry next pass.
+                    if namespace_diagnostics_enabled() {
+                        eprintln!("drive-native namespace: mkdir submission deferred: {error}");
+                    }
+                    return Ok(0);
+                }
             }
         };
         let outcome = rpc.call(Command::Mkdir { job, reconcile }, Duration::from_secs(120));

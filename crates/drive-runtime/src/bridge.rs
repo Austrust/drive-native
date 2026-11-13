@@ -2564,6 +2564,10 @@ impl Bridge {
 mod upload_tests;
 
 #[cfg(test)]
+#[path = "namespace_reconcile_tests.rs"]
+mod namespace_reconcile_tests;
+
+#[cfg(test)]
 #[path = "background_error_tests.rs"]
 mod background_error_tests;
 

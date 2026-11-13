@@ -1,7 +1,7 @@
 //! Bounded, serial namespace scheduling. Unknown commits keep their intents;
 //! only operations proved independent of every earlier unfinished intent pass.
 use crate::{Error, Result, Store};
-use rusqlite::OptionalExtension;
+use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
 use std::{
     collections::{HashMap, HashSet},
@@ -537,17 +537,37 @@ impl Store {
                 "namespace commit outcome unconfirmed; reconciling without replay",
             ),
         };
-        crate::commit_diagnostics::record(
-            &self.db,
-            "namespace_ops",
-            operation,
-            &crate::commit_outcome::CommitDiagnostic::unknown_retryable(
-                category,
-                Some(last_error.into()),
-                u32::try_from(attempts).unwrap_or(u32::MAX),
-                crate::commit_diagnostics::unix_now() + i64::try_from(delay).unwrap_or(i64::MAX),
-            ),
+        // #9 TB3: this observation runs in the same pass as the concrete
+        // reconcile diagnosis written by the runtime branch ("unexpected reply
+        // during rename reconcile", "transport lost during reconcile", ...).
+        // Only fill in the generic reason when the row has no concrete one yet
+        // (fresh row, or the `interrupted` placeholder written by the restart
+        // backfill). The retry bookkeeping always advances.
+        let next_retry_at =
+            crate::commit_diagnostics::unix_now() + i64::try_from(delay).unwrap_or(i64::MAX);
+        let changed = self.db.execute(
+            "UPDATE namespace_ops SET outcome='unknown_retryable',
+                    outcome_category=CASE
+                        WHEN outcome IS NULL OR outcome_category='interrupted'
+                        THEN ?2 ELSE outcome_category END,
+                    last_error=CASE
+                        WHEN outcome IS NULL OR outcome_category='interrupted'
+                        THEN ?3 ELSE last_error END,
+                    attempts=MAX(attempts,?4), next_retry_at=?5, updated_at=unixepoch()
+              WHERE id=?1",
+            params![
+                operation,
+                category.as_str(),
+                last_error,
+                i64::try_from(attempts).unwrap_or(i64::MAX),
+                next_retry_at
+            ],
         )?;
+        if changed != 1 {
+            return Err(Error::State(format!(
+                "commit diagnostic target {operation} is missing from namespace_ops"
+            )));
+        }
         Ok(true)
     }
     pub fn clear_namespace_observation(&mut self, operation: &str) {
