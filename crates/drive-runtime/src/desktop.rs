@@ -2,7 +2,7 @@
 //! querying an icon never opens a FUSE file or performs a NAS request.
 use crate::service::Service;
 use crate::status_cache::StatusProjection;
-use drive_core::{Node, Status, Store};
+use drive_core::{Node, Status, Store, download_jobs::DownloadFailure};
 #[path = "desktop_preview.rs"]
 mod preview;
 #[path = "desktop_tree.rs"]
@@ -133,18 +133,169 @@ fn status_name(status: &Status) -> &'static str {
         Status::Deleted => "deleted",
     }
 }
-fn entry(
+/// One node's rendered facts (issue #30).
+///
+/// The committed render used to be a pure per-request walk of the whole
+/// subtree. Keeping the aggregation primitives next to the rendered fields lets
+/// a later journal publication recompute a node from its own row status, its
+/// inherited flags and its already-cached children, without re-reading the
+/// subtree.
+#[derive(Clone)]
+struct CachedEntry {
+    directory: bool,
+    /// Own row status before inherited flags and directory aggregation.
+    own: Status,
+    /// The seed asks for an authoritative detail read.
+    detailed: bool,
+    /// Inherited pin/overlay flags from the ancestor chain.
+    pinned: bool,
+    overlay: bool,
+    /// Detail-derived fields, only meaningful for detailed files.
+    captured_offline: bool,
+    failure: Option<Box<DownloadFailure>>,
+    /// Active-download membership at render time (files only).
+    active: bool,
+    /// Fields reported to clients.
+    status: &'static str,
+    offline_available: bool,
+    sync_error: Option<Box<DownloadFailure>>,
+}
+impl CachedEntry {
+    fn state(&self, id: &str) -> EntryState {
+        EntryState {
+            id: id.to_owned(),
+            directory: self.directory,
+            status: self.status,
+            pinned: self.pinned,
+            offline_available: self.offline_available,
+            sync_error: self.sync_error.as_deref().cloned(),
+        }
+    }
+}
+/// Own row status implied by inherited flags for a non-detailed seed.
+fn own_status(inherited: (bool, bool)) -> Status {
+    if inherited.1 {
+        Status::PendingUpload
+    } else if inherited.0 {
+        Status::Pinning
+    } else {
+        Status::OnlineOnly
+    }
+}
+/// Derive a file entry from its row facts (the historical formulas).
+fn derive_file(
+    own: &Status,
+    detailed: bool,
+    captured_offline: bool,
+    failure: Option<&DownloadFailure>,
+    active: bool,
+) -> (&'static str, bool, Option<Box<DownloadFailure>>) {
+    let offline = captured_offline;
+    let mut status = status_name(own);
+    let mut sync_error = None;
+    if detailed && !matches!(own, Status::Conflict | Status::PendingUpload) {
+        sync_error = failure.cloned().map(Box::new);
+        if let Some(failure) = sync_error.as_deref() {
+            status = match (offline, failure.retry_at.is_some()) {
+                (true, true) => "update_retry",
+                (true, false) => "update_failed",
+                (false, true) => "download_retry",
+                (false, false) => "download_failed",
+            };
+        }
+    }
+    if active && !matches!(own, Status::Conflict | Status::PendingUpload) {
+        status = if offline { "updating" } else { "downloading" };
+    }
+    (status, offline, sync_error)
+}
+/// Derive a directory entry by folding its already-rendered children.
+fn derive_directory(
+    own: &Status,
+    pinned: bool,
+    children: &[&CachedEntry],
+) -> (&'static str, bool, Option<Box<DownloadFailure>>) {
+    let offline = children.iter().all(|state| state.offline_available);
+    let sync_error = children
+        .iter()
+        .filter_map(|state| state.sync_error.as_deref())
+        .max_by_key(|failure| failure.attempts)
+        .cloned()
+        .map(Box::new);
+    let has = |label: &str| children.iter().any(|state| state.status == label);
+    let status = if *own == Status::Conflict || has("conflict") {
+        "conflict"
+    } else if *own == Status::PendingUpload || has("pending_upload") {
+        "pending_upload"
+    } else if has("download_failed") || has("update_failed") {
+        if offline {
+            "update_failed"
+        } else {
+            "download_failed"
+        }
+    } else if has("download_retry") || has("update_retry") {
+        if offline {
+            "update_retry"
+        } else {
+            "download_retry"
+        }
+    } else if has("updating") {
+        "updating"
+    } else if has("downloading") {
+        "downloading"
+    } else if has("pinning") || pinned && !offline {
+        "pinning"
+    } else if offline {
+        if pinned {
+            "pinned_complete"
+        } else {
+            "local_complete"
+        }
+    } else if children
+        .iter()
+        .any(|state| state.offline_available || state.status == "mixed")
+    {
+        "mixed"
+    } else {
+        "online_only"
+    };
+    (status, offline, sync_error)
+}
+/// Compute the inherited pin/overlay flags of `id` from the committed
+/// projection's ancestor chain.
+fn inherited_flags(
+    projection: &StatusProjection,
+    id: &str,
+    memo: &mut HashMap<String, (bool, bool)>,
+    hops: usize,
+) -> Option<(bool, bool)> {
+    if let Some(value) = memo.get(id) {
+        return Some(*value);
+    }
+    if hops > 128 {
+        return None;
+    }
+    let seed = projection.seed(id)?;
+    let inherited = match &seed.parent {
+        Some(parent) => inherited_flags(projection, parent, memo, hops + 1)?,
+        None => (false, false),
+    };
+    let value = (seed.pinned || inherited.0, seed.overlay || inherited.1);
+    memo.insert(id.to_owned(), value);
+    Some(value)
+}
+fn entry_facts(
     store: Option<&Store>,
     id: &str,
     directory: bool,
     active: &HashSet<String>,
-    memo: &mut HashMap<String, EntryState>,
+    memo: &mut HashMap<String, CachedEntry>,
     visiting: &mut HashSet<String>,
     tree: &mut Option<status_tree::StatusTree<'_>>,
     depth: usize,
-) -> io::Result<EntryState> {
-    if let Some(state) = memo.get(id) {
-        return Ok(state.clone());
+) -> io::Result<CachedEntry> {
+    if let Some(facts) = memo.get(id) {
+        return Ok(facts.clone());
     }
     if depth > 128 || !visiting.insert(id.to_owned()) {
         return Err(other());
@@ -173,110 +324,69 @@ fn entry(
     } else {
         Status::OnlineOnly
     };
-    let mut status = status_name(&own);
-    let offline;
-    let mut sync_error = None;
-    if directory {
-        let children = tree.as_ref().unwrap().children(id);
-        let states: Vec<_> = children
-            .iter()
-            .map(|(id, directory)| {
-                entry(
-                    store,
-                    id,
-                    *directory,
-                    active,
-                    memo,
-                    visiting,
-                    tree,
-                    depth + 1,
-                )
-            })
-            .collect::<io::Result<_>>()?;
-        offline = states.iter().all(|s| s.offline_available);
-        sync_error = states
-            .iter()
-            .filter_map(|s| s.sync_error.clone())
-            .max_by_key(|f| f.attempts);
-        let has = |label: &str| states.iter().any(|s| s.status == label);
-        status = if own == Status::Conflict || has("conflict") {
-            "conflict"
-        } else if own == Status::PendingUpload || has("pending_upload") {
-            "pending_upload"
-        } else if has("download_failed") || has("update_failed") {
-            if offline {
-                "update_failed"
-            } else {
-                "download_failed"
-            }
-        } else if has("download_retry") || has("update_retry") {
-            if offline {
-                "update_retry"
-            } else {
-                "download_retry"
-            }
-        } else if has("updating") {
-            "updating"
-        } else if has("downloading") {
-            "downloading"
-        } else if has("pinning") || pinned && !offline {
-            "pinning"
-        } else if offline {
-            if pinned {
-                "pinned_complete"
-            } else {
-                "local_complete"
-            }
-        } else if states
-            .iter()
-            .any(|s| s.offline_available || s.status == "mixed")
-        {
-            "mixed"
+    let active_here = active.contains(id);
+    let (captured_offline, failure) = if directory {
+        (false, None)
+    } else if let Some((_, offline, failure)) = &captured {
+        (*offline, failure.clone())
+    } else if detailed {
+        let offline = store
+            .unwrap()
+            .open_dirty_draft(id)
+            .map_err(|_| other())?
+            .is_some()
+            || store.unwrap().open_cached(id).is_ok();
+        let failure = if matches!(own, Status::Conflict | Status::PendingUpload) {
+            None
         } else {
-            "online_only"
+            store.unwrap().download_failure(id).map_err(|_| other())?
         };
+        (offline, failure)
     } else {
-        offline = if let Some((_, offline, _)) = &captured {
-            *offline
-        } else {
-            detailed
-                && (store
-                    .unwrap()
-                    .open_dirty_draft(id)
-                    .map_err(|_| other())?
-                    .is_some()
-                    || store.unwrap().open_cached(id).is_ok())
-        };
-        if detailed && !matches!(own, Status::Conflict | Status::PendingUpload) {
-            sync_error = if let Some((_, _, failure)) = &captured {
-                failure.clone()
-            } else {
-                store.unwrap().download_failure(id).map_err(|_| other())?
-            };
-            if let Some(failure) = &sync_error {
-                status = match (offline, failure.retry_at.is_some()) {
-                    (true, true) => "update_retry",
-                    (true, false) => "update_failed",
-                    (false, true) => "download_retry",
-                    (false, false) => "download_failed",
-                };
-            }
+        (false, None)
+    };
+    let (status, offline_available, sync_error) = if directory {
+        let children = tree.as_ref().unwrap().children(id);
+        let mut child_facts: Vec<CachedEntry> = Vec::with_capacity(children.len());
+        for (child, child_directory) in children {
+            child_facts.push(entry_facts(
+                store,
+                &child,
+                child_directory,
+                active,
+                memo,
+                visiting,
+                tree,
+                depth + 1,
+            )?);
         }
-        if active.contains(id) && !matches!(own, Status::Conflict | Status::PendingUpload) {
-            status = if offline { "updating" } else { "downloading" };
-        }
-    }
+        let refs: Vec<&CachedEntry> = child_facts.iter().collect();
+        derive_directory(&own, pinned, &refs)
+    } else {
+        derive_file(
+            &own,
+            detailed,
+            captured_offline,
+            failure.as_ref(),
+            active_here,
+        )
+    };
     visiting.remove(id);
-    let state = EntryState {
-        id: id.to_owned(),
-        directory: directory,
-        status,
+    let facts = CachedEntry {
+        directory,
+        own,
+        detailed,
         pinned,
-        offline_available: offline,
+        overlay,
+        captured_offline,
+        failure: failure.map(Box::new),
+        active: active_here,
+        status,
+        offline_available,
         sync_error,
     };
-    memo.insert(id.to_owned(), state.clone());
-    Ok(state)
+    memo.insert(id.to_owned(), facts.clone());
+    Ok(facts)
 }
 /// Private read-only handle for desktop projections. Opening it neither takes
 /// the global `SharedStore` mutex nor `writer.lock`, so a long read (or the
@@ -456,6 +566,15 @@ mod counters {
         static ENTRY_CACHE_HITS: Cell<usize> = Cell::new(0);
         /// Issue #67 W1: full committed renders published to the cache.
         static ENTRY_CACHE_BUILDS: Cell<usize> = Cell::new(0);
+        /// Issue #30: warm batches that attempted an incremental refresh.
+        static INCREMENTAL_ATTEMPTS: Cell<usize> = Cell::new(0);
+        /// Issue #30: incremental refreshes that replaced the cached render.
+        static INCREMENTAL_REFRESHES: Cell<usize> = Cell::new(0);
+        /// Issue #30: node entries recomputed by incremental refreshes.
+        static INCREMENTAL_NODES: Cell<usize> = Cell::new(0);
+        /// Issue #88: commit-diagnostics reads (the historical three queries)
+        /// executed by GetOverview on this thread.
+        static DIAGNOSTICS_READS: Cell<usize> = Cell::new(0);
     }
     pub(super) fn bump(counter: &'static std::thread::LocalKey<Cell<usize>>) {
         counter.with(|value| value.set(value.get() + 1));
@@ -487,9 +606,39 @@ mod counters {
     pub(super) fn entry_cache_builds() -> usize {
         ENTRY_CACHE_BUILDS.with(Cell::get)
     }
+    pub(super) fn count_diagnostics_read() {
+        DIAGNOSTICS_READS.with(|value| value.set(value.get() + 1));
+    }
+    pub(super) fn diagnostics_reads() -> usize {
+        DIAGNOSTICS_READS.with(Cell::get)
+    }
+    pub(super) fn reset_diagnostics_reads() {
+        DIAGNOSTICS_READS.with(|value| value.set(0));
+    }
+    pub(super) fn count_incremental_attempt() {
+        INCREMENTAL_ATTEMPTS.with(|value| value.set(value.get() + 1));
+    }
+    pub(super) fn count_incremental_refresh() {
+        INCREMENTAL_REFRESHES.with(|value| value.set(value.get() + 1));
+    }
+    pub(super) fn add_incremental_nodes(count: usize) {
+        INCREMENTAL_NODES.with(|value| value.set(value.get() + count));
+    }
+    pub(super) fn incremental_attempts() -> usize {
+        INCREMENTAL_ATTEMPTS.with(Cell::get)
+    }
+    pub(super) fn incremental_refreshes() -> usize {
+        INCREMENTAL_REFRESHES.with(Cell::get)
+    }
+    pub(super) fn incremental_nodes() -> usize {
+        INCREMENTAL_NODES.with(Cell::get)
+    }
     pub(super) fn reset_entry_cache_counters() {
         ENTRY_CACHE_HITS.with(|value| value.set(0));
         ENTRY_CACHE_BUILDS.with(|value| value.set(0));
+        INCREMENTAL_ATTEMPTS.with(|value| value.set(0));
+        INCREMENTAL_REFRESHES.with(|value| value.set(0));
+        INCREMENTAL_NODES.with(|value| value.set(0));
     }
     pub(super) fn resolve_calls() -> usize {
         RESOLVE_CALLS.with(Cell::get)
@@ -553,7 +702,8 @@ fn render_entries(
     let mut out = Vec::new();
     for (path, node) in resolved {
         let result = node.and_then(|node| {
-            entry(
+            let id = node.id.clone();
+            entry_facts(
                 store,
                 &node.id,
                 node.directory,
@@ -563,6 +713,7 @@ fn render_entries(
                 tree,
                 0,
             )
+            .map(|facts| facts.state(&id))
         });
         out.push(match result {
             Ok(entry) => PathState {
@@ -578,17 +729,6 @@ fn render_entries(
         });
     }
     out
-}
-/// Issue #67 W1: one rendered entry, kept without the id string the map key
-/// already owns. `sync_error` is boxed so the common `None` stays small; the
-/// committed render is retained for every visible node.
-#[derive(Clone)]
-struct CachedEntry {
-    directory: bool,
-    status: &'static str,
-    pinned: bool,
-    offline_available: bool,
-    sync_error: Option<Box<drive_core::download_jobs::DownloadFailure>>,
 }
 /// Everything a warm batch render depends on: the committed projection
 /// generation, the committed Store state its seeds/details were read from, and
@@ -608,25 +748,6 @@ struct EntriesCacheKey {
 pub(crate) struct CachedProjectionEntries {
     key: EntriesCacheKey,
     entries: Option<HashMap<String, CachedEntry>>,
-}
-fn cached_from_entry(entry: EntryState) -> CachedEntry {
-    CachedEntry {
-        directory: entry.directory,
-        status: entry.status,
-        pinned: entry.pinned,
-        offline_available: entry.offline_available,
-        sync_error: entry.sync_error.map(Box::new),
-    }
-}
-fn render_cached_entry(id: &str, entry: &CachedEntry) -> EntryState {
-    EntryState {
-        id: id.to_owned(),
-        directory: entry.directory,
-        status: entry.status,
-        pinned: entry.pinned,
-        offline_available: entry.offline_available,
-        sync_error: entry.sync_error.as_deref().cloned(),
-    }
 }
 /// Render a batch from a committed entry map. `None` means the map cannot
 /// describe the batch (a resolved node is absent because the projection cannot
@@ -648,7 +769,7 @@ fn render_cached_batch(
                 }
                 out.push(PathState {
                     path: path.clone(),
-                    entry: Some(render_cached_entry(&node.id, entry)),
+                    entry: Some(entry.state(&node.id)),
                     error: None,
                 });
             }
@@ -716,7 +837,7 @@ fn build_projection_entries(
     let mut memo = HashMap::new();
     // A failed aggregation is reported to the caller, but every completed
     // subtree still stays in `memo` and is reusable.
-    let complete = entry(
+    let complete = entry_facts(
         Some(store),
         root_id,
         true,
@@ -728,19 +849,228 @@ fn build_projection_entries(
     )
     .is_ok();
     Some(BuiltProjectionRender {
-        entries: memo
-            .into_iter()
-            .map(|(id, entry)| (id, cached_from_entry(entry)))
-            .collect(),
+        entries: memo,
         complete,
     })
 }
+/// Upper bound on the rows one incremental refresh may touch. A wider delta is
+/// cheaper to rebuild than to chase through the render graph.
+const MAX_INCREMENTAL_ENTRIES: usize = 8_192;
+
+/// Refresh the committed render from the invalidation one publication carries
+/// (issue #30). `None` means the caller must fall back to a full render: delta
+/// too wide, rebuild publication, projection not caught up with the current
+/// commit, or a fact the incremental path cannot resolve.
+fn incremental_refresh(
+    store: &Store,
+    projection: &StatusProjection,
+    active: &HashSet<String>,
+    cached: &mut CachedProjectionEntries,
+    current_commit: drive_core::shared_store::CommitState,
+) -> Option<HashMap<String, CachedEntry>> {
+    // The invalidation only covers every change since the cached generation when
+    // the projection has caught up with the committed Store state.
+    if projection.commit() != current_commit {
+        return None;
+    }
+    let generation = projection.generation();
+    let previous_generation = cached.key.generation;
+    if generation < previous_generation || generation - previous_generation > 1 {
+        return None;
+    }
+    if generation == previous_generation {
+        // The projection is unchanged: only a different active-download set can
+        // differ, and the cached key must not hide an unapplied commit.
+        if cached.key.commit != current_commit || cached.key.active == *active {
+            return None;
+        }
+    }
+    let mut rows: HashSet<String> = HashSet::new();
+    let mut derived: HashSet<String> = HashSet::new();
+    if generation > previous_generation {
+        let invalidation = projection.invalidation()?;
+        if invalidation.entries() > MAX_INCREMENTAL_ENTRIES {
+            return None;
+        }
+        rows.extend(invalidation.rows.iter().cloned());
+        derived.extend(invalidation.parents.iter().cloned());
+        // A pin/overlay/parent change moves the inherited flags of the whole
+        // visible subtree, which is usually small; a wide one is a rebuild.
+        if !invalidation.inherited_roots.is_empty() {
+            let mut seen: HashSet<String> = HashSet::new();
+            let mut stack: Vec<String> = invalidation.inherited_roots.iter().cloned().collect();
+            while let Some(id) = stack.pop() {
+                if !seen.insert(id.clone()) {
+                    continue;
+                }
+                if seen.len() > MAX_INCREMENTAL_ENTRIES {
+                    return None;
+                }
+                for (child, _) in projection.children(&id) {
+                    stack.push(child);
+                }
+            }
+            derived.extend(seen);
+        }
+    }
+    // A changed active-download set only moves the file status labels, but the
+    // ancestor aggregates fold them, so the affected files and ancestors refresh.
+    if cached.key.active != *active {
+        for id in cached.key.active.symmetric_difference(active) {
+            if projection.seed(id).is_some() {
+                derived.insert(id.clone());
+            }
+        }
+    }
+    // Rows removed since the cached generation disappear from the render; the
+    // publication already reports their parents through the child-edge delta.
+    let mut removed: HashSet<String> = HashSet::new();
+    rows.retain(|id| {
+        if projection.seed(id).is_none() {
+            removed.insert(id.clone());
+            false
+        } else {
+            true
+        }
+    });
+    derived.retain(|id| !rows.contains(id) && !removed.contains(id));
+    // Every affected node's ancestor chain must refresh its directory aggregate.
+    let mut recompute: HashSet<String> = rows.clone();
+    recompute.extend(derived.iter().cloned());
+    {
+        let mut stack: Vec<String> = recompute.iter().cloned().collect();
+        while let Some(id) = stack.pop() {
+            let Some(parent) = projection.seed(&id).and_then(|seed| seed.parent.clone()) else {
+                continue;
+            };
+            if recompute.insert(parent.clone()) {
+                if recompute.len() > MAX_INCREMENTAL_ENTRIES {
+                    return None;
+                }
+                stack.push(parent);
+            }
+        }
+    }
+    let mut entries = cached.entries.take()?;
+    for id in &removed {
+        entries.remove(id);
+    }
+    // One batched detail read for the detailed rows that changed since the
+    // cached render. Non-detailed rows derive their own status from inherited
+    // flags and need no SQL.
+    let detailed: Vec<(String, bool)> = rows
+        .iter()
+        .filter_map(|id| {
+            let seed = projection.seed(id)?;
+            seed.detailed.then(|| (id.clone(), seed.directory))
+        })
+        .collect();
+    let mut details: HashMap<String, (Status, bool, Option<DownloadFailure>)> = HashMap::new();
+    if !detailed.is_empty() {
+        let batch = drive_core::desktop_status::desktop_status_details(store, &detailed).ok()?;
+        for (id, detail) in batch {
+            details.insert(id, (detail.status, detail.offline, detail.failure));
+        }
+    }
+    // Deepest nodes first: a parent's aggregate folds the refreshed children.
+    let mut order: Vec<String> = recompute.iter().cloned().collect();
+    let mut depth: HashMap<String, usize> = HashMap::new();
+    for id in &order {
+        let mut value = 0usize;
+        let mut cursor = Some(id.clone());
+        while let Some(current) = cursor {
+            if let Some(known) = depth.get(&current) {
+                value += known;
+                break;
+            }
+            value += 1;
+            if value > 128 {
+                return None;
+            }
+            cursor = projection.seed(&current).and_then(|seed| seed.parent.clone());
+        }
+        depth.insert(id.clone(), value);
+    }
+    order.sort_by_key(|id| std::cmp::Reverse(depth.get(id).copied().unwrap_or(0)));
+    let mut inherited_memo: HashMap<String, (bool, bool)> = HashMap::new();
+    for id in order {
+        let seed = projection.seed(&id)?;
+        let inherited = inherited_flags(projection, &id, &mut inherited_memo, 0)?;
+        let changed = rows.contains(&id);
+        let (own, detailed, captured_offline, failure) = if changed {
+            if seed.detailed {
+                let (own, offline, failure) = details.get(&id)?.clone();
+                (own, true, offline, failure)
+            } else {
+                (own_status(inherited), false, false, None)
+            }
+        } else {
+            let previous = entries.get(&id)?;
+            let own = if seed.detailed {
+                previous.own.clone()
+            } else {
+                own_status(inherited)
+            };
+            (
+                own,
+                seed.detailed,
+                previous.captured_offline,
+                previous.failure.as_deref().cloned(),
+            )
+        };
+        let active_here = active.contains(&id);
+        let facts = if seed.directory {
+            let children = projection.children(&id);
+            let mut refs: Vec<&CachedEntry> = Vec::with_capacity(children.len());
+            for (child, _) in &children {
+                refs.push(entries.get(child)?);
+            }
+            let (status, offline_available, sync_error) =
+                derive_directory(&own, inherited.0, &refs);
+            CachedEntry {
+                directory: true,
+                own,
+                detailed,
+                pinned: inherited.0,
+                overlay: inherited.1,
+                captured_offline,
+                failure: failure.map(Box::new),
+                active: active_here,
+                status,
+                offline_available,
+                sync_error,
+            }
+        } else {
+            let (status, offline_available, sync_error) =
+                derive_file(&own, detailed, captured_offline, failure.as_ref(), active_here);
+            CachedEntry {
+                directory: false,
+                own,
+                detailed,
+                pinned: inherited.0,
+                overlay: inherited.1,
+                captured_offline,
+                failure: failure.map(Box::new),
+                active: active_here,
+                status,
+                offline_available,
+                sync_error,
+            }
+        };
+        entries.insert(id, facts);
+        #[cfg(test)]
+        counters::add_incremental_nodes(1);
+    }
+    Some(entries)
+}
+
 /// Answer a warm batch from the committed render cache (issue #67 W1).
 ///
-/// The cache is only an accelerator: every miss, projection inconsistency,
-/// state movement or unrepresentable path returns `None` so the caller runs the
-/// historical projection-or-scoped path unchanged. A hit renders only the
-/// requested rows, which is O(#paths) instead of O(#nodes).
+/// The cache is a pure accelerator: every miss, projection inconsistency or
+/// unrepresentable path returns `None` so the caller runs the historical
+/// projection-or-scoped path unchanged. A hit renders only the requested rows
+/// (O(#paths)); a small committed change refreshes only the affected entries
+/// and their ancestor chain instead of re-walking the namespace (issue #30).
 fn cached_projection_entries(
     store: &Store,
     service: &Service,
@@ -755,31 +1085,79 @@ fn cached_projection_entries(
     if tree_roots(resolved).is_none() {
         return None;
     }
+    let current_commit = service.bridge.store.change_state();
     let key = EntriesCacheKey {
         generation: projection.generation(),
-        commit: service.bridge.store.change_state(),
+        commit: current_commit,
         active: active.clone(),
     };
-    // Single flight: a miss holds this mutex across the one full render, so
+    // Single flight: the mutex is held across the one (possibly full) render, so
     // concurrent warm batches wait for it instead of repeating the O(#nodes)
     // walk. A key match is terminal for the cache (hit, or the historical path
     // when this generation cannot be rendered).
-    let mut cache = service.desktop_entries_cache();
-    if cache.as_ref().is_some_and(|cache| cache.key == key) {
-        let hit = cache
-            .as_ref()
-            .and_then(|cache| cache.entries.as_ref())
-            .and_then(|entries| render_cached_batch(entries, resolved));
-        if hit.is_some() {
-            #[cfg(test)]
-            counters::count_entry_cache_hit();
+    let mut guard = service.desktop_entries_cache();
+    let mut cached = guard.take();
+    if let Some(entry) = cached.as_ref() {
+        if entry.key == key {
+            let hit = entry
+                .entries
+                .as_ref()
+                .and_then(|entries| render_cached_batch(entries, resolved));
+            if hit.is_some() {
+                #[cfg(test)]
+                counters::count_entry_cache_hit();
+                *guard = cached;
+                return hit;
+            }
+            if entry.entries.is_none() {
+                // This generation cannot be rendered; keep the historical path
+                // instead of retrying the O(#nodes) render on every request.
+                *guard = cached;
+                return None;
+            }
         }
-        return hit;
+    }
+    // Issue #30: a single publication moves only the affected rows and their
+    // ancestor chain. Refresh the committed render incrementally before paying
+    // for another whole-namespace walk.
+    let mut refreshed = None;
+    if let Some(previous) = cached.as_mut() {
+        if previous.entries.is_some() {
+            #[cfg(test)]
+            counters::count_incremental_attempt();
+            if let Some(entries) =
+                incremental_refresh(store, projection, active, previous, current_commit)
+            {
+                if let Some(rendered) = render_cached_batch(&entries, resolved) {
+                    // Publish only when nothing moved while the entries were
+                    // refreshed: a mixed-generation render is never cached.
+                    let publishable = service.bridge.store.change_state() == current_commit
+                        && service
+                            .status_projection()
+                            .is_some_and(|current| current.generation() == key.generation);
+                    refreshed = Some((entries, rendered, publishable));
+                }
+            }
+        }
+    }
+    if let Some((entries, rendered, publishable)) = refreshed {
+        if publishable {
+            #[cfg(test)]
+            counters::count_incremental_refresh();
+            *guard = Some(CachedProjectionEntries {
+                key,
+                entries: Some(entries),
+            });
+        } else {
+            *guard = None;
+        }
+        return Some(rendered);
     }
     // A projection that cannot describe a root is what the historical path
     // detects and repairs with its scoped fallback; do not pay for a render
     // first.
     if !projection_covers(projection, resolved) {
+        *guard = cached;
         return None;
     }
     let built = build_projection_entries(store, projection, &service.profile.scope.file_id, active);
@@ -793,7 +1171,9 @@ fn cached_projection_entries(
         Some(built) => built,
         None => {
             if publishable {
-                *cache = Some(CachedProjectionEntries { key, entries: None });
+                *guard = Some(CachedProjectionEntries { key, entries: None });
+            } else {
+                *guard = cached;
             }
             return None;
         }
@@ -804,12 +1184,13 @@ fn cached_projection_entries(
     }
     let rendered = render_cached_batch(&built.entries, resolved);
     if publishable {
-        *cache = Some(CachedProjectionEntries {
+        *guard = Some(CachedProjectionEntries {
             key,
             entries: built.complete.then_some(built.entries),
         });
         return rendered;
     }
+    *guard = cached;
     // A commit landed while the render was built: serve this batch from it (the
     // same committed projection the historical path would have used) but never
     // publish it.
@@ -1034,9 +1415,8 @@ struct StoreOverview {
     skipped_symlinks: u64,
     inaccessible: i64,
     download_errors: u64,
-    open_unknown: i64,
-    needs_attention: i64,
-    commit_items: Vec<drive_core::commit_diagnostics::CommitDiagnosticRecord>,
+    /// Issue #88: one consistent commit-diagnostics snapshot.
+    diagnostics: OverviewDiagnostics,
     /// Issue #60: cheap drafts/migration-snapshot storage accounting, additive
     /// to the existing cache_availability block.
     storage: drive_core::state::StorageSummary,
@@ -1044,12 +1424,104 @@ struct StoreOverview {
 fn elapsed_us(start: Instant) -> u64 {
     u64::try_from(start.elapsed().as_micros()).unwrap_or(u64::MAX)
 }
+/// Issue #88: one read of the commit-diagnostics surface GetOverview reports.
+///
+/// The historical poll ran three queries (`open_unknown`, `needs_attention` and
+/// the top-20 record list). drive-core's `commit_diagnostics::snapshot(&Store)`
+/// returns the same numbers in one consistent read together with the read-only
+/// connection's `PRAGMA data_version` and a `consistent` flag; this type is the
+/// desktop-side mirror of that contract.
+#[derive(Clone, Debug)]
+struct OverviewDiagnostics {
+    open_unknown: i64,
+    needs_attention: i64,
+    items: Vec<drive_core::commit_diagnostics::CommitDiagnosticRecord>,
+    /// `PRAGMA data_version` of the read-only connection the snapshot was read
+    /// at; `None` only when the pragma read failed (the cache then falls back
+    /// to the committed Store state alone).
+    data_version: Option<i64>,
+    /// False when a cross-connection commit raced the read: the values are
+    /// usable but must not be cached.
+    consistent: bool,
+}
+/// Issue #88: key of one commit-diagnostics snapshot.
+///
+/// `(committed Store state, data_version)` is the contract key. The store root
+/// and journal epoch make the in-process cache safe across independent
+/// `Service` instances and writer restarts (tests use several in one process).
+#[derive(Clone, PartialEq, Eq)]
+struct DiagnosticsCacheKey {
+    /// Identity tag of the `Service` instance (its stable heap address, never
+    /// dereferenced). The read-only connection cannot read the TEMP journal
+    /// epoch, so this keeps two services in one process from sharing a snapshot.
+    instance: usize,
+    root: std::path::PathBuf,
+    commit: drive_core::shared_store::CommitState,
+    data_version: Option<i64>,
+}
+/// Bounded single-process snapshot cache. GetOverview is the only producer and
+/// consumer; the bound keeps parallel test services from evicting each other's
+/// slot while production keeps exactly one.
+const DIAGNOSTICS_CACHE_SLOTS: usize = 16;
+static OVERVIEW_DIAGNOSTICS: std::sync::Mutex<Vec<(DiagnosticsCacheKey, OverviewDiagnostics)>> =
+    std::sync::Mutex::new(Vec::new());
+
+fn cached_overview_diagnostics(key: &DiagnosticsCacheKey) -> Option<OverviewDiagnostics> {
+    OVERVIEW_DIAGNOSTICS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .find(|(cached, _)| cached == key)
+        .map(|(_, snapshot)| snapshot.clone())
+}
+
+fn remember_overview_diagnostics(key: DiagnosticsCacheKey, snapshot: OverviewDiagnostics) {
+    let mut slots = OVERVIEW_DIAGNOSTICS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    slots.retain(|(cached, _)| cached != &key);
+    slots.push((key, snapshot));
+    if slots.len() > DIAGNOSTICS_CACHE_SLOTS {
+        slots.remove(0);
+    }
+}
+
+/// Issue #88: one commit-diagnostics read for GetOverview.
+///
+/// Until drive-core exposes `commit_diagnostics::snapshot` this shim runs the
+/// historical three queries and reports `data_version: None`, so the snapshot
+/// cache is keyed on the committed Store state and writer epoch (the same
+/// invalidation window GetOverview had before).
+fn overview_diagnostics(store: &Store) -> io::Result<OverviewDiagnostics> {
+    #[cfg(test)]
+    counters::count_diagnostics_read();
+    // One consistent read: the two counters and the record list come from the
+    // same read transaction, together with the read-only connection's
+    // `PRAGMA data_version` and the `consistent` flag that says whether a
+    // crossing commit raced the read (a non-consistent snapshot is usable but
+    // must not be cached).
+    let snapshot = drive_core::commit_diagnostics::snapshot(store).map_err(|_| other())?;
+    Ok(OverviewDiagnostics {
+        open_unknown: snapshot.open_unknown(),
+        needs_attention: snapshot.needs_attention(),
+        items: snapshot.records,
+        data_version: Some(snapshot.data_version),
+        consistent: snapshot.consistent,
+    })
+}
+/// Issue #88: `PRAGMA data_version` of the read-only connection. It is the
+/// cross-connection commit version used beside the committed Store state as the
+/// diagnostics-snapshot cache key.
+fn store_data_version(store: &Store) -> Option<i64> {
+    store.data_version().ok()
+}
 /// Small metadata snapshot. Every read is a plain SELECT; on the private
 /// read-only connection it never touches the serialized writer.
 fn overview_store(
     service: &Service,
     store: &Store,
     derived: Option<OverviewDerived>,
+    cached_diagnostics: Option<OverviewDiagnostics>,
 ) -> io::Result<StoreOverview> {
     let root = &service.profile.scope.file_id;
     let pending = store.pending_operations().map_err(|_| other())?
@@ -1067,6 +1539,12 @@ fn overview_store(
             store.cache_availability().map_err(|_| other())?,
         ),
     };
+    // Issue #88: reuse the diagnostics snapshot of this committed generation
+    // instead of re-running its three historical queries on every poll.
+    let diagnostics = match cached_diagnostics {
+        Some(snapshot) => snapshot,
+        None => overview_diagnostics(store)?,
+    };
     Ok(StoreOverview {
         pending,
         paused_uploads,
@@ -1079,10 +1557,7 @@ fn overview_store(
         skipped_symlinks: store.skipped_symlink_count().map_err(|_| other())?,
         inaccessible: store.inaccessible_count().map_err(|_| other())?,
         download_errors: store.download_failure_count().map_err(|_| other())?,
-        open_unknown: drive_core::commit_diagnostics::open_unknown(store).map_err(|_| other())?,
-        needs_attention: drive_core::commit_diagnostics::needs_attention(store)
-            .map_err(|_| other())?,
-        commit_items: drive_core::commit_diagnostics::list(store, 20).map_err(|_| other())?,
+        diagnostics,
         storage: store.storage_summary().map_err(|_| other())?,
     })
 }
@@ -1147,11 +1622,30 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
     let key = service.bridge.store.change_state();
     let cached = service.overview_derived(key);
     let ro = read_only(service);
+    // Issue #31/#88: the status journal epoch lets a GUI tell a same-daemon
+    // delta from a restarted writer; it also scopes the diagnostics snapshot
+    // cache so two Service instances in one process never share a snapshot.
+    let status_epoch = ro
+        .as_deref()
+        .and_then(|store| store.status_change_watermark().ok())
+        .map(|watermark| watermark.cursor.epoch)
+        .unwrap_or_default();
+    // Issue #88: diagnostics snapshot keyed by (committed Store state,
+    // read-only `data_version`), scoped by store identity and journal epoch.
+    let data_version = ro.as_deref().and_then(store_data_version);
+    let diagnostics_key = DiagnosticsCacheKey {
+        instance: service as *const Service as usize,
+        root: service.bridge.store.root(),
+        commit: key,
+        data_version,
+    };
+    let cached_diagnostics = cached_overview_diagnostics(&diagnostics_key);
+    let reused_diagnostics = cached_diagnostics.is_some();
     let mut query_us = 0;
     let mut snapshot = None;
     if let Some(store) = ro.as_deref() {
         let query = Instant::now();
-        if let Ok(found) = overview_store(service, store, cached) {
+        if let Ok(found) = overview_store(service, store, cached, cached_diagnostics) {
             query_us = elapsed_us(query);
             timings.read_only = true;
             snapshot = Some(found);
@@ -1165,7 +1659,7 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
             let guard = service.bridge.store.lock().unwrap();
             timings.lock_wait_us = elapsed_us(wait);
             let hold = Instant::now();
-            let found = overview_store(service, &guard, None)?;
+            let found = overview_store(service, &guard, None, None)?;
             let local_revision = guard.local_revision();
             timings.lock_hold_us = elapsed_us(hold);
             drop(guard);
@@ -1181,8 +1675,25 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
             service.cache_overview_derived(OverviewDerived {
                 key: after,
                 issue_count: store_overview.issue_count,
-                cache: store_overview.cache,
+                cache: store_overview.cache.clone(),
             });
+        }
+    }
+    // Issue #88: publish the diagnostics snapshot under the same generation
+    // rule, and only for a consistent read. It is keyed on the state observed
+    // after the queries so a commit that raced the read is never cached.
+    if timings.read_only && !reused_diagnostics && store_overview.diagnostics.consistent {
+        let after = service.bridge.store.change_state();
+        if after == key {
+            remember_overview_diagnostics(
+                DiagnosticsCacheKey {
+                    instance: service as *const Service as usize,
+                    root: service.bridge.store.root(),
+                    commit: after,
+                    data_version: store_overview.diagnostics.data_version,
+                },
+                store_overview.diagnostics.clone(),
+            );
         }
     }
     let StoreOverview {
@@ -1197,9 +1708,7 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
         skipped_symlinks,
         inaccessible,
         download_errors,
-        open_unknown,
-        needs_attention,
-        commit_items,
+        diagnostics,
         storage,
     } = store_overview;
     let uncertain = queue_health.namespace_uncertain + queue_health.upload_uncertain;
@@ -1217,7 +1726,7 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
         "checking"
     } else if pending > 0 || uncertain > 0 {
         "pending"
-    } else if paused_uploads > 0 || needs_attention > 0 {
+    } else if paused_uploads > 0 || diagnostics.needs_attention > 0 {
         // Upload commitments that exhausted the read-only reconciliation budget
         // are no longer counted as pending work, but the user still needs a
         // visible, explainable reason to open the issue center. Conflicting or
@@ -1236,14 +1745,11 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
         "bound_directory_recovery":true,"abandon_remove":true});
     // Issue #9 TB2: additive, read-only diagnosis list. `items` may contain
     // terminal abandoned rows; `open_unknown`/`needs_attention` exclude them.
-    let commit_diagnostics = commit_diagnostics_json(open_unknown, needs_attention, &commit_items);
-    // Issue #31: the status journal epoch lets a GUI tell a same-daemon delta
-    // from a restarted writer (its cursor epoch differs after a restart).
-    let status_epoch = ro
-        .as_ref()
-        .and_then(|store| store.status_change_watermark().ok())
-        .map(|watermark| watermark.cursor.epoch)
-        .unwrap_or_default();
+    let commit_diagnostics = commit_diagnostics_json(
+        diagnostics.open_unknown,
+        diagnostics.needs_attention,
+        &diagnostics.items,
+    );
     let recovery = service.bridge.recovery_status();
     // Issue #59: additive FUSE data-plane observability. Configured/effective
     // kernel queue tuning, per-opcode latency buckets, timeout counters and the
@@ -1776,10 +2282,32 @@ pub fn cancel_release(service: &Service, job_id: &str) -> io::Result<String> {
     Ok(value.to_string())
 }
 
+/// Issue #93: opaque `listing_cookie` for authoritative directory pages.
+///
+/// The value is the committed namespace semantic version: the writer boundary
+/// publishes a `CommitState` derived from the namespace watermark (the status
+/// journal cursor plus the attribute-only counter), so any commit that can
+/// change directory membership, order or visibility — insert/delete, rename,
+/// move, visibility/ACL overlays, pins, drafts, local precedence — moves it.
+/// Non-namespace writes (settings, LRU/recency, receipts, TEMP maintenance) do
+/// not, so an idle listing keeps a stable cookie.
+///
+/// Reading it is one lock-free atomic load, not a new SQLite query or scan.
+/// Callers must capture it under the same Store guard that reads the page so
+/// the page and its cookie cannot straddle a commit.
+fn listing_cookie(service: &Service) -> String {
+    let commit = service.bridge.store.projection_state();
+    format!(
+        "ns1:{:016x}:{}",
+        commit.revision,
+        u8::from(!commit.verified)
+    )
+}
+
 /// Read-only browser pages from local metadata, including before network unlock.
 pub fn directory(service: &Service, path: &str, offset: u32) -> io::Result<String> {
     let rules = exclusion_rules(service);
-    let (children, total) = {
+    let (children, total, listing_cookie) = {
         let store = service.bridge.store.lock().unwrap();
         if preview::active(&store, &service.profile.scope.file_id)? {
             return preview::directory(
@@ -1822,7 +2350,11 @@ pub fn directory(service: &Service, path: &str, offset: u32) -> io::Result<Strin
                 )
             });
         }
-        (children, total)
+        // Issue #93: capture the committed namespace version under the same
+        // guard that produced the page, so the page snapshot and its cookie are
+        // always from one committed state.
+        let cookie = listing_cookie(service);
+        (children, total, cookie)
     };
     // The page snapshot already carries every child id, so only the requested
     // directory path is resolved; the status batch reuses these nodes instead of
@@ -1844,6 +2376,10 @@ pub fn directory(service: &Service, path: &str, offset: u32) -> io::Result<Strin
         "total": total,
         "offset": offset,
         "path": path,
+        // Issue #93: additive opaque version token for client-side pagination;
+        // older clients ignore it and newer clients conservatively re-read when
+        // it is missing or changes.
+        "listing_cookie": listing_cookie,
     })
     .to_string())
 }
@@ -2736,6 +3272,155 @@ mod readpath_tests {
         assert_eq!(page["entries"], expected["entries"]);
     }
 
+    fn directory_json(service: &Service, path: &str, offset: u32) -> serde_json::Value {
+        serde_json::from_str(&directory(service, path, offset).expect("directory page"))
+            .expect("directory json")
+    }
+
+    /// Issue #93: every GetDirectory page carries an opaque `listing_cookie`
+    /// taken from the committed namespace version, so a client can append the
+    /// next page while the listing is unchanged. The field is additive: the
+    /// existing page fields keep their shape.
+    #[test]
+    fn directory_reports_a_stable_listing_cookie_for_an_unchanged_namespace() {
+        let (_dir, service) = fixture();
+        let first = directory_json(&service, "folder", 0);
+        let cookie = first["listing_cookie"]
+            .as_str()
+            .expect("GetDirectory must report listing_cookie")
+            .to_owned();
+        assert!(!cookie.is_empty(), "listing_cookie must be opaque but nonempty");
+        // Retrying the same page of an unchanged namespace reports the same
+        // cookie; otherwise a client could never append.
+        for _ in 0..4 {
+            let again = directory_json(&service, "folder", 0);
+            assert_eq!(again["listing_cookie"], cookie.as_str());
+            assert_eq!(again["entries"], first["entries"]);
+            assert_eq!(again["total"], first["total"]);
+        }
+        // The cookie is a namespace version, not a Store write counter: an
+        // unrelated settings commit must not invalidate a directory listing.
+        service
+            .bridge
+            .store
+            .lock()
+            .unwrap()
+            .set_cache_limit(64 * 1024 * 1024)
+            .unwrap();
+        let after_settings = directory_json(&service, "folder", 0);
+        assert_eq!(after_settings["listing_cookie"], cookie.as_str());
+        // Pages of one committed listing share the cookie, including a page
+        // past the end (offset > total keeps the historical empty page).
+        let past_the_end = directory_json(&service, "folder", 99);
+        assert_eq!(past_the_end["total"], 1);
+        assert_eq!(past_the_end["offset"], 99);
+        assert!(past_the_end["entries"].as_array().unwrap().is_empty());
+        assert_eq!(past_the_end["listing_cookie"], cookie.as_str());
+    }
+
+    /// Issue #93: any committed namespace change invalidates the cookie. Pins
+    /// live on `nodes`, so this is a committed namespace write whose page
+    /// membership is unchanged; the conservative contract still changes it.
+    #[test]
+    fn directory_listing_cookie_changes_with_the_committed_namespace_version() {
+        let (_dir, service) = fixture();
+        let first = directory_json(&service, "folder", 0);
+        let cookie = first["listing_cookie"]
+            .as_str()
+            .expect("listing_cookie")
+            .to_owned();
+        service.bridge.store.lock().unwrap().pin("one", true).unwrap();
+        let pinned = directory_json(&service, "folder", 0);
+        assert_ne!(pinned["listing_cookie"].as_str(), Some(cookie.as_str()));
+        assert_eq!(pinned["total"], 1);
+        assert_eq!(pinned["entries"][0]["path"], "folder/one");
+        // Cookies never repeat: a second commit moves the version again.
+        service
+            .bridge
+            .store
+            .lock()
+            .unwrap()
+            .pin("one", false)
+            .unwrap();
+        let unpinned = directory_json(&service, "folder", 0);
+        assert_ne!(
+            unpinned["listing_cookie"].as_str(),
+            pinned["listing_cookie"].as_str()
+        );
+        assert_ne!(unpinned["listing_cookie"].as_str(), Some(cookie.as_str()));
+    }
+
+    /// Issue #93 acceptance: insertion/rename/visibility changes must change the
+    /// cookie. A locally created child changes the page's membership and total.
+    #[test]
+    fn directory_listing_cookie_tracks_membership_changes() {
+        let (_dir, service) = fixture();
+        let before = directory_json(&service, "folder", 0);
+        let cookie = before["listing_cookie"]
+            .as_str()
+            .expect("listing_cookie")
+            .to_owned();
+        assert_eq!(before["total"], 1);
+        let created = service
+            .bridge
+            .store
+            .lock()
+            .unwrap()
+            .create_local_file("folder", "two", 0o644)
+            .expect("local creation");
+        assert_eq!(created.parent.as_deref(), Some("folder"));
+        let grown = directory_json(&service, "folder", 0);
+        assert_eq!(grown["total"], 2);
+        assert_ne!(grown["listing_cookie"].as_str(), Some(cookie.as_str()));
+        let paths: Vec<&str> = grown["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["path"].as_str().unwrap())
+            .collect();
+        assert_eq!(paths, ["folder/one", "folder/two"]);
+    }
+
+    /// Issue #93: the cookie must follow visibility/permission changes, not just
+    /// membership edits. Both cases below are committed journal sources:
+    /// `access_denied` (subtree scope, ACL revoke) and `drafts` (dirty/draft
+    /// visibility). The writer boundary republishes the namespace watermark
+    /// (`SharedStore::projection_state`) whenever either table changes.
+    #[test]
+    fn directory_listing_cookie_tracks_visibility_and_permission_changes() {
+        let (_dir, service) = fixture();
+        let first = directory_json(&service, "", 0);
+        let cookie = first["listing_cookie"]
+            .as_str()
+            .expect("listing_cookie")
+            .to_owned();
+        // ACL revoke: the access-denied set is a subtree-scope namespace source.
+        service
+            .bridge
+            .store
+            .lock()
+            .unwrap()
+            .set_access_denied(&["folder".to_string()])
+            .expect("access denial commit");
+        let denied = directory_json(&service, "", 0);
+        assert_ne!(denied["listing_cookie"].as_str(), Some(cookie.as_str()));
+        // Draft visibility: a dirty draft is a namespace journal source even
+        // though the directory membership does not change.
+        service
+            .bridge
+            .store
+            .lock()
+            .unwrap()
+            .save_local("one", b"draft")
+            .expect("draft commit");
+        let drafted = directory_json(&service, "", 0);
+        assert_ne!(
+            drafted["listing_cookie"].as_str(),
+            denied["listing_cookie"].as_str()
+        );
+        assert_ne!(drafted["listing_cookie"].as_str(), Some(cookie.as_str()));
+    }
+
     fn service_with_excludes(
         patterns: &[&str],
         nodes: &[Node],
@@ -3094,7 +3779,7 @@ mod readpath_tests {
         let (_dir, service) = fixture();
         let locked = {
             let guard = service.bridge.store.lock().unwrap();
-            overview_store(&service, &guard, None).unwrap()
+            overview_store(&service, &guard, None, None).unwrap()
         };
         let (body, timings) = overview_measured(&service).unwrap();
         assert!(timings.read_only, "expected the read-only path");
@@ -3167,6 +3852,122 @@ mod readpath_tests {
             service.bridge.store.local_revision()
         );
         assert!(service.bridge.store.local_revision() > before_revision);
+    }
+
+    /// Issue #88: GetOverview must not repeat the three historical commit
+    /// diagnostics queries on every poll. A committed-generation keyed snapshot
+    /// serves them instead; a committed write drops the snapshot.
+    #[test]
+    fn overview_reuses_commit_diagnostics_for_an_unchanged_generation() {
+        let (_dir, service) = fixture();
+        super::counters::reset_diagnostics_reads();
+        let (first, first_timings) = overview_measured(&service).unwrap();
+        assert!(first_timings.read_only);
+        assert_eq!(
+            super::counters::diagnostics_reads(),
+            1,
+            "the first overview must read the commit diagnostics once"
+        );
+        let (second, second_timings) = overview_measured(&service).unwrap();
+        assert!(second_timings.derived_cached);
+        assert_eq!(
+            super::counters::diagnostics_reads(),
+            1,
+            "an unchanged generation re-read the commit diagnostics"
+        );
+        assert_eq!(
+            overview_fields(&first)["commit_diagnostics"],
+            overview_fields(&second)["commit_diagnostics"]
+        );
+        // A committed write drops the cached snapshot and the next poll reads
+        // its own generation.
+        service
+            .bridge
+            .store
+            .lock()
+            .unwrap()
+            .pin("one", true)
+            .unwrap();
+        let (third, third_timings) = overview_measured(&service).unwrap();
+        assert!(!third_timings.derived_cached);
+        assert_eq!(super::counters::diagnostics_reads(), 2);
+        assert_eq!(
+            overview_fields(&third)["commit_diagnostics"],
+            overview_fields(&first)["commit_diagnostics"]
+        );
+        // A non-namespace write does not move the committed Store state, so the
+        // pre-existing derived counters still hit. The diagnostics snapshot is
+        // keyed on the read-only connection's data_version: when drive-core
+        // exposes it, any cross-connection commit conservatively refreshes the
+        // snapshot (settings writes included); without it the commit key keeps
+        // the snapshot. Both are correct, only the caching window differs.
+        service
+            .bridge
+            .store
+            .lock()
+            .unwrap()
+            .set_cache_limit(64 * 1024 * 1024)
+            .unwrap();
+        let data_version_known = {
+            let handle = read_only(&service).unwrap();
+            store_data_version(&handle).is_some()
+        };
+        let (fourth, fourth_timings) = overview_measured(&service).unwrap();
+        assert!(fourth_timings.derived_cached);
+        assert_eq!(
+            super::counters::diagnostics_reads(),
+            if data_version_known { 3 } else { 2 },
+            "diagnostics refresh after a non-namespace write (data_version_known={data_version_known})"
+        );
+        assert_eq!(
+            overview_fields(&fourth)["commit_diagnostics"],
+            overview_fields(&first)["commit_diagnostics"]
+        );
+    }
+
+    /// Issue #89: GetOverview reuses the published storage summary (no
+    /// draft-directory enumeration on the hot path) and exposes the additive
+    /// freshness fields. The values are only a cached derived projection: the
+    /// existing `GetCacheSettings` scan semantics are unchanged.
+    #[test]
+    fn overview_reuses_the_cached_storage_summary() {
+        let (_dir, service) = fixture();
+        {
+            let mut store = service.bridge.store.lock().unwrap();
+            for index in 0..64 {
+                let node = store
+                    .create_local_file("folder", &format!("draft{index:03}"), 0o644)
+                    .unwrap();
+                store.save_local(&node.id, b"draft body").unwrap();
+            }
+        }
+        let stats = || {
+            let handle = read_only(&service).unwrap();
+            handle.storage_summary_stats()
+        };
+        let before = stats();
+        let (first_body, _) = overview_measured(&service).unwrap();
+        let after_first = stats();
+        assert!(
+            after_first.refreshes > before.refreshes,
+            "the first overview must collect a storage summary"
+        );
+        let (second_body, _) = overview_measured(&service).unwrap();
+        let after_second = stats();
+        assert_eq!(
+            after_second.directory_enumerations, after_first.directory_enumerations,
+            "the warm overview re-enumerated the drafts directory"
+        );
+        assert!(
+            after_second.hits > after_first.hits,
+            "the warm overview must report a storage-summary cache hit"
+        );
+        let first: serde_json::Value = serde_json::from_str(&first_body).unwrap();
+        let second: serde_json::Value = serde_json::from_str(&second_body).unwrap();
+        assert_eq!(first["storage"], second["storage"]);
+        assert!(second["storage"]["collected_at"].is_u64());
+        assert_eq!(second["storage"]["stale"], false);
+        assert!(second["storage"]["drafts_bytes"].is_u64());
     }
 
     /// Issue #67 W1: every warm `GetStates` batch on a ready projection used to
@@ -3336,6 +4137,7 @@ mod readpath_tests {
                 }
                 let builds = super::counters::entry_cache_builds();
                 let hits = super::counters::entry_cache_hits();
+                let incremental = super::counters::incremental_refreshes();
                 service.set_desktop_entries_cache_enabled(false);
                 let uncached: Vec<String> = batches
                     .iter()
@@ -3362,9 +4164,14 @@ mod readpath_tests {
                         "{label}: batch {index} warm hit differs from the historical render"
                     );
                 }
+                // One refresh must serve every batch of the generation: either a
+                // full committed render, or the #30 incremental refresh from the
+                // publication's invalidation set.
                 assert_eq!(
-                    builds, 1,
-                    "{label}: one committed render must serve every batch of the generation"
+                    builds + incremental,
+                    1,
+                    "{label}: exactly one render refresh must serve the generation \
+                     (builds={builds}, incremental={incremental})"
                 );
                 assert_eq!(
                     hits,
@@ -3418,6 +4225,631 @@ mod readpath_tests {
         }
         wait_generation(before);
         compare("after dirty draft");
+        service.shutdown();
+        tasks.join();
+    }
+
+    /// Start a service whose committed status projection is ready. Shared by
+    /// the issue #30 incremental-render tests.
+    fn started_service(
+        nodes: &[Node],
+    ) -> (tempfile::TempDir, Arc<Service>, crate::service::Tasks) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(dir.path()).unwrap();
+        store.install_remote_snapshot(nodes, "1", "server").unwrap();
+        store.ensure_fs_root("root").unwrap();
+        let service =
+            Service::new(profile(), store, PathBuf::from("/nonexistent-worker")).unwrap();
+        let tasks = service.clone().start();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while service.status_projection().is_none() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "status projection did not become ready within 10s"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        (dir, service, tasks)
+    }
+
+    /// Wait until a publication moves the committed projection past
+    /// `after_generation`, then let the worker settle so a test compares one
+    /// stable committed generation.
+    fn wait_projection_generation(service: &Arc<Service>, after_generation: u64, label: &str) {
+        let generation = || {
+            service
+                .status_projection()
+                .map(|projection| projection.generation())
+                .unwrap_or(0)
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while generation() <= after_generation {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "{label}: status projection did not advance past generation {after_generation}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        loop {
+            let stable = generation();
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            if generation() == stable {
+                break;
+            }
+        }
+    }
+
+    /// Issue #30 acceptance: one committed leaf change must refresh only the
+    /// changed entry plus its ancestor chain. The evidence is the number of
+    /// entries the incremental refresh recomputed and the absence of any
+    /// whole-namespace render/walk, while the reply stays field-for-field equal
+    /// to the authoritative one.
+    #[test]
+    fn single_node_change_recomputes_only_the_ancestor_chain() {
+        let mut nodes = vec![node("root", None, true)];
+        for folder in 0..16 {
+            let folder_id = format!("d{folder:02}");
+            nodes.push(node(&folder_id, Some("root"), true));
+            for file in 0..200 {
+                nodes.push(node(
+                    &format!("f{folder:02}-{file:03}"),
+                    Some(&folder_id),
+                    false,
+                ));
+            }
+        }
+        let (_dir, service, tasks) = started_service(&nodes);
+        let root_paths = vec![".".to_string()];
+        // Build the committed render once, then prove the next call is a hit.
+        let baseline = states(&service, root_paths.clone()).unwrap();
+        assert_eq!(states(&service, root_paths.clone()).unwrap(), baseline);
+        let before = service.status_projection().unwrap().generation();
+        service
+            .bridge
+            .store
+            .lock()
+            .unwrap()
+            .pin("f00-001", true)
+            .unwrap();
+        wait_projection_generation(&service, before, "leaf pin");
+        super::counters::reset_entry_cache_counters();
+        super::counters::reset_projection_tree_loads();
+        let warm = states(&service, root_paths.clone()).unwrap();
+        let incremental = super::counters::incremental_refreshes();
+        let touched = super::counters::incremental_nodes();
+        let builds = super::counters::entry_cache_builds();
+        let rewalked = super::counters::projection_tree_loads();
+        let value: serde_json::Value = serde_json::from_str(&warm).unwrap();
+        assert_eq!(value["entries"][0]["status"], "pinning");
+        assert_eq!(
+            incremental, 1,
+            "a single committed leaf change must refresh the render incrementally"
+        );
+        assert_eq!(builds, 0, "a single leaf change rebuilt the whole render");
+        assert_eq!(
+            rewalked, 0,
+            "an incremental refresh must not walk the committed projection"
+        );
+        assert!(
+            touched <= 8,
+            "one leaf change recomputed {touched} entries; \
+             only the changed row and its ancestor chain may be touched"
+        );
+        // The next warm call is a plain committed-render hit.
+        super::counters::reset_entry_cache_counters();
+        assert_eq!(states(&service, root_paths.clone()).unwrap(), warm);
+        assert_eq!(super::counters::entry_cache_hits(), 1);
+        // Field-for-field equality with the authoritative render.
+        service.set_desktop_entries_cache_enabled(false);
+        let authoritative = states(&service, root_paths).unwrap();
+        service.set_desktop_entries_cache_enabled(true);
+        assert_eq!(warm, authoritative);
+        service.shutdown();
+        tasks.join();
+    }
+
+    /// Issue #30 acceptance: the incremental render must stay field-for-field
+    /// identical to the authoritative render across the semantic scenarios the
+    /// issue names: leaf and inherited-directory pin, ACL revoke, dirty draft,
+    /// download failure, move, delete, local creation and a content publication.
+    /// Changes wider than one publication keep the full-render fallback; every
+    /// round refreshes exactly once and matches the historical path.
+    #[test]
+    fn incremental_refresh_matches_the_authoritative_render_across_state_changes() {
+        use drive_core::DownloadTicket;
+        use drive_core::download_jobs::DownloadFailureKind;
+        let nodes = vec![
+            node("root", None, true),
+            node("folder", Some("root"), true),
+            node("sub", Some("folder"), true),
+            node("one", Some("sub"), false),
+            node("two", Some("folder"), false),
+            node("other", Some("root"), true),
+            node("file", Some("other"), false),
+            node("gone", Some("other"), false),
+        ];
+        let (_dir, service, tasks) = started_service(&nodes);
+        let generation = || {
+            service
+                .status_projection()
+                .map(|projection| projection.generation())
+                .unwrap_or(0)
+        };
+        let batches = vec![
+            vec![".".to_string()],
+            vec!["folder".to_string(), "sub".to_string()],
+            vec![
+                "one".to_string(),
+                "two".to_string(),
+                "file".to_string(),
+                "missing".to_string(),
+            ],
+            vec!["other".to_string()],
+        ];
+        let mut incremental_total = 0usize;
+        let mut compare = |label: &str| {
+            for _ in 0..3 {
+                let before_generation = generation();
+                let before_commit = service.bridge.store.change_state();
+                super::counters::reset_entry_cache_counters();
+                let mut warm = Vec::with_capacity(batches.len());
+                for paths in &batches {
+                    warm.push(states(&service, paths.clone()).unwrap());
+                }
+                let builds = super::counters::entry_cache_builds();
+                let incremental = super::counters::incremental_refreshes();
+                service.set_desktop_entries_cache_enabled(false);
+                let authoritative: Vec<String> = batches
+                    .iter()
+                    .map(|paths| states(&service, paths.clone()).unwrap())
+                    .collect();
+                service.set_desktop_entries_cache_enabled(true);
+                if generation() != before_generation
+                    || service.bridge.store.change_state() != before_commit
+                {
+                    continue;
+                }
+                for (index, (warm, legacy)) in warm.iter().zip(authoritative.iter()).enumerate() {
+                    assert_eq!(
+                        warm, legacy,
+                        "{label}: batch {index} incremental render differs from the \
+                         authoritative render"
+                    );
+                }
+                assert_eq!(
+                    builds + incremental,
+                    1,
+                    "{label}: exactly one render refresh must serve the generation \
+                     (builds={builds}, incremental={incremental})"
+                );
+                incremental_total += incremental;
+                return;
+            }
+            panic!("{label}: the committed projection kept moving during the comparison");
+        };
+        // Inherited-directory pin: pinned/subtree flags must refresh the whole
+        // visible subtree and its ancestors.
+        let before = generation();
+        service
+            .bridge
+            .store
+            .lock()
+            .unwrap()
+            .pin("sub", true)
+            .unwrap();
+        wait_projection_generation(&service, before, "directory pin");
+        compare("directory pin");
+        // Leaf pin.
+        let before = generation();
+        service
+            .bridge
+            .store
+            .lock()
+            .unwrap()
+            .pin("two", true)
+            .unwrap();
+        wait_projection_generation(&service, before, "leaf pin");
+        compare("leaf pin");
+        // Content publication flips a file from online-only to local-complete.
+        let before = generation();
+        {
+            let body = b"content";
+            service
+                .bridge
+                .store
+                .lock()
+                .unwrap()
+                .publish_download(
+                    &DownloadTicket {
+                        id: "one".into(),
+                        version: "v1".into(),
+                    },
+                    body,
+                    &drive_core::sha256(body),
+                )
+                .unwrap();
+        }
+        wait_projection_generation(&service, before, "content publication");
+        compare("content publication");
+        // Dirty draft on another file.
+        let before = generation();
+        {
+            let mut store = service.bridge.store.lock().unwrap();
+            let draft = store.begin_draft("file", "v1", None).unwrap();
+            store.draft_write(&draft, 0, b"pending", false).unwrap();
+        }
+        wait_projection_generation(&service, before, "dirty draft");
+        compare("dirty draft");
+        // Download failure: a transfer row change plus the file detail.
+        let before = generation();
+        service
+            .bridge
+            .store
+            .lock()
+            .unwrap()
+            .fail_download(
+                &DownloadTicket {
+                    id: "two".into(),
+                    version: "v1".into(),
+                },
+                DownloadFailureKind::Transport,
+                Some(503),
+                1_000,
+            )
+            .unwrap();
+        wait_projection_generation(&service, before, "download failure");
+        compare("download failure");
+        // Move a file to another directory: the row, both parents and the moved
+        // subtree's inherited flags.
+        let before = generation();
+        service
+            .bridge
+            .store
+            .lock()
+            .unwrap()
+            .rename_local("sub", "one", "other", "moved", true)
+            .unwrap();
+        wait_projection_generation(&service, before, "move");
+        compare("move");
+        // Local delete: the row leaves the projection and its parent aggregate
+        // changes.
+        let before = generation();
+        service
+            .bridge
+            .store
+            .lock()
+            .unwrap()
+            .unlink_local("other", "gone", "gone", false)
+            .unwrap();
+        wait_projection_generation(&service, before, "delete");
+        compare("delete");
+        // Local creation: a new row and a new parent edge.
+        let before = generation();
+        service
+            .bridge
+            .store
+            .lock()
+            .unwrap()
+            .create_local_file("folder", "three", 0o644)
+            .unwrap();
+        wait_projection_generation(&service, before, "local creation");
+        compare("local creation");
+        // ACL revoke: the visibility closure rows and their ancestors. This runs
+        // last because a denied subtree is invisible to the node reads the other
+        // scenarios use.
+        let before = generation();
+        service
+            .bridge
+            .store
+            .lock()
+            .unwrap()
+            .set_access_denied(&["folder".to_string()])
+            .unwrap();
+        wait_projection_generation(&service, before, "acl revoke");
+        compare("acl revoke");
+        // A full snapshot replacement cannot be described incrementally: the
+        // publication carries no invalidation and the render falls back to one
+        // full rebuild, still matching the authoritative render.
+        let before = generation();
+        let replacement = vec![
+            node("root", None, true),
+            node("folder", Some("root"), true),
+            node("sub", Some("folder"), true),
+            node("moved", Some("other"), false),
+            node("other", Some("root"), true),
+            node("file", Some("other"), false),
+        ];
+        service
+            .bridge
+            .store
+            .lock()
+            .unwrap()
+            .install_remote_snapshot(&replacement, "2", "server")
+            .unwrap();
+        wait_projection_generation(&service, before, "snapshot replacement");
+        compare("snapshot replacement");
+        assert!(
+            incremental_total >= 6,
+            "expected the incremental path to serve the small committed changes, \
+             got {incremental_total} incremental refresh(es)"
+        );
+        service.shutdown();
+        tasks.join();
+    }
+
+    /// Issue #30 scale evidence (heavy, `#[ignore]` by default).
+    ///
+    /// Builds a 210k/294k synthetic namespace, waits for the committed
+    /// projection, then measures warm root `GetStates`:
+    /// 1. same-generation repeated root batches (per-call latency, render hits,
+    ///    zero tree walks),
+    /// 2. one committed leaf change (incremental refresh: recomputed entries,
+    ///    no full render) plus a field-for-field comparison with the
+    ///    authoritative cache-disabled render,
+    /// 3. 1/16/48 concurrent per-request latency and throughput,
+    /// 4. process VmHWM/VmRSS snapshots.
+    ///
+    /// Set `ISSUE30_NODES=210000` (or 294000, the default) to pick the size.
+    /// Run: `cargo test -p drive-runtime --release --all-features --locked
+    /// --lib issue30_scale -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "heavy scale evidence: run on the remote host with --ignored"]
+    fn issue30_scale_projection_render_evidence() {
+        fn percentile(sorted: &[u64], fraction: f64) -> u64 {
+            if sorted.is_empty() {
+                return 0;
+            }
+            let index = ((sorted.len() - 1) as f64 * fraction).round() as usize;
+            sorted[index.min(sorted.len() - 1)]
+        }
+        fn proc_status(field: &str) -> u64 {
+            std::fs::read_to_string("/proc/self/status")
+                .ok()
+                .and_then(|status| {
+                    status.lines().find_map(|line| {
+                        let value = line.strip_prefix(field)?.trim();
+                        value.trim_end_matches(" kB").parse().ok()
+                    })
+                })
+                .unwrap_or(0)
+        }
+        let requested: usize = std::env::var("ISSUE30_NODES")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(294_000);
+        let folders = 147usize.min((requested / 2000).max(1));
+        let files_per_folder = (requested.saturating_sub(folders + 1)) / folders;
+        let mut nodes = vec![node("root", None, true)];
+        for folder in 0..folders {
+            let folder_id = format!("dir{folder:03}");
+            nodes.push(node(&folder_id, Some("root"), true));
+            for file in 0..files_per_folder {
+                nodes.push(node(
+                    &format!("file{folder:03}-{file:04}"),
+                    Some(&folder_id),
+                    false,
+                ));
+            }
+        }
+        let node_count = nodes.len();
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::open(dir.path()).unwrap();
+        store
+            .install_remote_snapshot(&nodes, "1", "server")
+            .unwrap();
+        store.ensure_fs_root("root").unwrap();
+        let setup_hwm = proc_status("VmHWM:");
+        let service =
+            Service::new(profile(), store, PathBuf::from("/nonexistent-worker")).unwrap();
+        let tasks = service.clone().start();
+        let started = std::time::Instant::now();
+        let deadline = started + std::time::Duration::from_secs(120);
+        while service.status_projection().is_none() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "projection did not become ready for {node_count} nodes"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let projection_ready_ms = started.elapsed().as_millis();
+        let projection_generation = || {
+            service
+                .status_projection()
+                .map(|projection| projection.generation())
+                .unwrap_or(0)
+        };
+        let root = vec![".".to_string()];
+        let top: Vec<String> = (0..folders).map(|f| format!("dir{f:03}")).collect();
+        // Build the committed render once (full O(N) render at the first batch).
+        let cold_started = std::time::Instant::now();
+        let cold_root = states(&service, root.clone()).unwrap();
+        let cold_root_us = cold_started.elapsed().as_micros() as u64;
+        let warm_started = std::time::Instant::now();
+        let _ = states(&service, root.clone()).unwrap();
+        let warm_second_us = warm_started.elapsed().as_micros() as u64;
+        super::counters::reset_entry_cache_counters();
+        super::counters::reset_projection_tree_loads();
+        let sequential = 100usize;
+        let mut same_generation_ns = Vec::with_capacity(sequential);
+        for _ in 0..sequential {
+            let call = std::time::Instant::now();
+            let body = states(&service, root.clone()).unwrap();
+            same_generation_ns.push(call.elapsed().as_nanos() as u64);
+            assert_eq!(body, cold_root, "warm root render changed");
+        }
+        same_generation_ns.sort_unstable();
+        let same_gen_hits = super::counters::entry_cache_hits();
+        let same_gen_builds = super::counters::entry_cache_builds();
+        let same_gen_walks = super::counters::projection_tree_loads();
+        // A per-directory batch (most of the namespace) on the same generation.
+        let page_batches = 10usize;
+        let page_started = std::time::Instant::now();
+        for _ in 0..page_batches {
+            let _ = states(&service, top.clone()).unwrap();
+        }
+        let page_batch_us = page_started.elapsed().as_micros() as u64 / page_batches as u64;
+        // One committed leaf change: the next root batch must refresh only the
+        // changed entry and its ancestor chain.
+        let before_generation = projection_generation();
+        service
+            .bridge
+            .store
+            .lock()
+            .unwrap()
+            .pin("file000-0001", true)
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while projection_generation() <= before_generation {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "projection did not advance after the leaf pin"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        loop {
+            let stable = projection_generation();
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            if projection_generation() == stable {
+                break;
+            }
+        }
+        super::counters::reset_entry_cache_counters();
+        super::counters::reset_projection_tree_loads();
+        let incremental_started = std::time::Instant::now();
+        let incremental_root = states(&service, root.clone()).unwrap();
+        let incremental_us = incremental_started.elapsed().as_micros() as u64;
+        let incremental_refreshes = super::counters::incremental_refreshes();
+        let incremental_nodes = super::counters::incremental_nodes();
+        let incremental_builds = super::counters::entry_cache_builds();
+        let incremental_walks = super::counters::projection_tree_loads();
+        service.set_desktop_entries_cache_enabled(false);
+        let authoritative = states(&service, root.clone()).unwrap();
+        service.set_desktop_entries_cache_enabled(true);
+        let oracle_equal = authoritative == incremental_root;
+        // Same-tree A/B for the per-request work: the cache-disabled path is the
+        // historical "authoritative render per request" behaviour (one scoped
+        // read plus one whole-subtree aggregation per call). Measured on this
+        // exact tree so warm numbers above have a directly comparable baseline.
+        service.set_desktop_entries_cache_enabled(false);
+        let authoritative_calls = 3usize;
+        let mut authoritative_ns = Vec::with_capacity(authoritative_calls);
+        for _ in 0..authoritative_calls {
+            let call = std::time::Instant::now();
+            let _ = states(&service, root.clone()).unwrap();
+            authoritative_ns.push(call.elapsed().as_nanos() as u64);
+        }
+        authoritative_ns.sort_unstable();
+        let authoritative_threads = 16usize;
+        let authoritative_per_thread = 6usize;
+        let barrier = Arc::new(std::sync::Barrier::new(authoritative_threads));
+        let mut authoritative_handles = Vec::with_capacity(authoritative_threads);
+        for _ in 0..authoritative_threads {
+            let service = service.clone();
+            let root = root.clone();
+            let barrier = barrier.clone();
+            authoritative_handles.push(std::thread::spawn(move || {
+                barrier.wait();
+                let mut latencies = Vec::with_capacity(authoritative_per_thread);
+                for _ in 0..authoritative_per_thread {
+                    let call = std::time::Instant::now();
+                    let body = states(&service, root.clone()).unwrap();
+                    latencies.push(call.elapsed().as_nanos() as u64);
+                    assert!(body.contains("\"entries\""));
+                }
+                latencies
+            }));
+        }
+        let mut authoritative_concurrent = Vec::new();
+        for handle in authoritative_handles {
+            authoritative_concurrent.extend(handle.join().unwrap());
+        }
+        authoritative_concurrent.sort_unstable();
+        service.set_desktop_entries_cache_enabled(true);
+        // Concurrency: same committed generation, root batch only.
+        let mut concurrency_lines = Vec::new();
+        for threads in [1usize, 16, 48] {
+            let calls_per_thread = if threads == 1 { 100 } else { 30 };
+            let barrier = Arc::new(std::sync::Barrier::new(threads));
+            let started = std::time::Instant::now();
+            let mut handles = Vec::with_capacity(threads);
+            for _ in 0..threads {
+                let service = service.clone();
+                let root = root.clone();
+                let barrier = barrier.clone();
+                handles.push(std::thread::spawn(move || {
+                    barrier.wait();
+                    let mut latencies = Vec::with_capacity(calls_per_thread);
+                    for _ in 0..calls_per_thread {
+                        let call = std::time::Instant::now();
+                        let body = states(&service, root.clone()).unwrap();
+                        latencies.push(call.elapsed().as_nanos() as u64);
+                        assert!(body.contains("\"entries\""));
+                    }
+                    latencies
+                }));
+            }
+            let mut latencies = Vec::with_capacity(threads * calls_per_thread);
+            for handle in handles {
+                latencies.extend(handle.join().unwrap());
+            }
+            let elapsed = started.elapsed().as_secs_f64().max(0.000_001);
+            latencies.sort_unstable();
+            let calls = latencies.len();
+            concurrency_lines.push(format!(
+                "concurrency={threads} calls={calls} p50_us={:.1} p95_us={:.1} \
+                 p99_us={:.1} max_us={:.1} throughput_per_s={:.1}",
+                percentile(&latencies, 0.50) as f64 / 1000.0,
+                percentile(&latencies, 0.95) as f64 / 1000.0,
+                percentile(&latencies, 0.99) as f64 / 1000.0,
+                *latencies.last().unwrap() as f64 / 1000.0,
+                calls as f64 / elapsed,
+            ));
+        }
+        eprintln!(
+            "ISSUE30_SCALE nodes={node_count} folders={folders} \
+             files_per_folder={files_per_folder} projection_ready_ms={projection_ready_ms} \
+             cold_root_us={cold_root_us} warm_second_us={warm_second_us} \
+             warm_same_generation_p50_us={:.1} p95_us={:.1} p99_us={:.1} \
+             hits={same_gen_hits} builds={same_gen_builds} tree_walks={same_gen_walks} \
+             page_batch_us={page_batch_us} incremental_us={incremental_us} \
+             incremental_refreshes={incremental_refreshes} \
+             incremental_nodes={incremental_nodes} incremental_builds={incremental_builds} \
+             incremental_tree_walks={incremental_walks} oracle_equal={oracle_equal} \
+             authoritative_root_p50_us={:.1} authoritative_root_p95_us={:.1} \
+             authoritative_16x{}_p50_us={:.1} p95_us={:.1} p99_us={:.1} \
+             setup_hwm_kb={setup_hwm} hwm_kb={} rss_kb={}",
+            percentile(&same_generation_ns, 0.50) as f64 / 1000.0,
+            percentile(&same_generation_ns, 0.95) as f64 / 1000.0,
+            percentile(&same_generation_ns, 0.99) as f64 / 1000.0,
+            percentile(&authoritative_ns, 0.50) as f64 / 1000.0,
+            percentile(&authoritative_ns, 0.95) as f64 / 1000.0,
+            authoritative_per_thread,
+            percentile(&authoritative_concurrent, 0.50) as f64 / 1000.0,
+            percentile(&authoritative_concurrent, 0.95) as f64 / 1000.0,
+            percentile(&authoritative_concurrent, 0.99) as f64 / 1000.0,
+            proc_status("VmHWM:"),
+            proc_status("VmRSS:"),
+        );
+        for line in &concurrency_lines {
+            eprintln!("ISSUE30_SCALE {line}");
+        }
+        assert_eq!(
+            same_gen_hits, sequential,
+            "warm same-generation root batches must all be render hits"
+        );
+        assert_eq!(same_gen_builds, 0);
+        assert_eq!(same_gen_walks, 0);
+        assert_eq!(
+            incremental_refreshes, 1,
+            "one leaf commit must refresh the render incrementally"
+        );
+        assert_eq!(incremental_builds, 0, "a leaf commit rebuilt the whole render");
+        assert_eq!(incremental_walks, 0);
+        assert!(
+            incremental_nodes <= 8,
+            "a leaf commit recomputed {incremental_nodes} entries"
+        );
+        assert!(oracle_equal, "incremental root render differs from authoritative");
         service.shutdown();
         tasks.join();
     }
