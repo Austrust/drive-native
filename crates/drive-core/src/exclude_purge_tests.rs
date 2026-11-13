@@ -4,6 +4,7 @@
 //! dirty content plus any local scheduling state, and never queue a remote
 //! delete. Removing the rules restores the local view.
 use crate::Store;
+use crate::exclude::ExcludeRules;
 use rusqlite::OptionalExtension;
 
 fn open() -> (tempfile::TempDir, Store) {
@@ -402,4 +403,45 @@ fn node(id: &str, parent: Option<&str>, name: &str, directory: bool) -> crate::N
         directory,
         metadata: None,
     }
+}
+
+/// Issue #56: the restore predicate is the caller's policy decision, so the
+/// hidden-exclude mode keeps the rows matched by the remaining rules and
+/// restores the rest. A future local-only mode can pass its own predicate
+/// without changing the store; the marker keeps exactly the still-hidden ids.
+#[test]
+fn restore_unexcluded_nodes_keeps_rows_matching_the_current_rules() {
+    let (_dir, mut store) = open();
+    insert_node(&store, "100", None, "root", true);
+    insert_node(&store, "101", Some("100"), "A.txt", false);
+    insert_node(&store, "200", Some("100"), ".git", true);
+    insert_node(&store, "201", Some("200"), "config", false);
+    insert_node(&store, "300", Some("100"), "cache", true);
+    insert_node(&store, "301", Some("300"), "objects", false);
+    allocate_inodes(&store);
+    store
+        .purge_excluded_nodes(&[
+            "200".to_owned(),
+            "201".to_owned(),
+            "300".to_owned(),
+            "301".to_owned(),
+        ])
+        .unwrap();
+    let rules = ExcludeRules::compile(&[r"(^|/)cache(/|$)"]).unwrap();
+    let restored = store
+        .restore_unexcluded_nodes(|path, is_dir| rules.matches(path, is_dir))
+        .unwrap();
+    assert_eq!(restored, 2, "the .git subtree is restored");
+    assert!(store.node("200").is_ok());
+    assert!(store.node("201").is_ok());
+    assert!(store.node("300").is_err(), "the cache subtree stays hidden");
+    assert!(store.node("301").is_err());
+    assert_eq!(
+        marker(&store, "excluded_purged").as_deref(),
+        Some(r#"["300","301"]"#),
+        "only the still-hidden ids stay marked"
+    );
+    // A later full restore brings back exactly the remaining cache subtree.
+    assert_eq!(store.restore_excluded_nodes().unwrap(), 2);
+    assert!(marker(&store, "excluded_purged").is_none());
 }

@@ -49,6 +49,6 @@
 - 调度入口防御：缓存下载候选（`refresh_cached`/hydrate）、上传 pending、命名空间 rename/remove/replace/mkdir 队列遇到被排除节点时跳过，不发送任何 RPC。
 - 规则变更清理在启动挂载时执行：把规则排除的已导入节点在本地标记为隐藏（与远端删除的本地视图语义相同），取消其上传/下载/草稿/本地创建/命名空间 operation，清掉 dirty 与缓存正文引用并让 `collect_garbage` 回收 blob；节点行本身保留，被排除的 id 记录在 `excluded_purged` metadata 中。**绝不**写入远端删除：测试断言 remove 队列为空、没有 `remove` namespace_ops，冲突节点也保留本地副本不清理。
 - 恢复快照安装前会先按规则清理被排除节点，避免「快照未包含该节点 → 被当成 recovery tombstone/conflict」；隐藏节点保持隐藏，兄弟节点正常更新。
-- 移除规则后重启：`restore_excluded_nodes` 恢复此前隐藏的节点行，但已回收的正文需按需重新下载。
+- 规则变更后重启：按当前规则重新判定 `excluded_purged` 中的节点行——不再命中任何剩余规则的恢复可见（`Store::restore_unexcluded_nodes`），仍命中的保持隐藏并留在 marker 中；全部规则移除时等价于历史的全量 `restore_excluded_nodes`。**部分撤回规则即可恢复对应路径**，无需先清空全部规则；已回收的正文需按需重新下载。
 - 规则变更必须停止并重新启动该挂载才能完全生效；清理后 `GetDirectory` 的 `total` 与 `entries` 一致。GUI 目前没有单独的排除规则编辑页（由其他任务跟踪）；保存 profile 时若含 `exclude_patterns`，会先用 Python `re` 做与 worker 等价的合法性校验，非法规则拒绝保存并在窗口内提示 pattern 与错误原因。
 - 旧 profile 不含该字段时仍可正常读取、保存和挂载。
