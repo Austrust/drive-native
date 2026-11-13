@@ -196,6 +196,10 @@ impl Views {
         let bytes = std::mem::size_of::<DirBlock>()
             .saturating_add(block.entries.capacity() * std::mem::size_of::<drive_core::namespace_index::DirEntryLite>())
             .saturating_add(block.entries.iter().map(|e| e.name.len()).sum::<usize>());
+        // Issue #23 red instrumentation: count every name visited by the
+        // per-open estimate derivation (test builds only, zero production cost).
+        #[cfg(test)]
+        test_hooks::note_index_name_scan(block.entries.len());
         if bytes > MAX_BYTES.saturating_sub(self.charged.load(Ordering::Acquire))
             || self.allocated.load(Ordering::Acquire) >= MAX_HANDLES {
             return Some(Err(libc::ENOMEM));
@@ -1129,6 +1133,16 @@ pub(super) mod test_hooks {
         starts: HashMap<u64, usize>,
     }
 
+    /// Names visited while re-deriving one index view's byte estimate.
+    static INDEX_NAME_SCANS: std::sync::atomic::AtomicUsize =
+        std::sync::atomic::AtomicUsize::new(0);
+    pub(super) fn note_index_name_scan(items: usize) {
+        INDEX_NAME_SCANS.fetch_add(items, std::sync::atomic::Ordering::Relaxed);
+    }
+    pub(super) fn index_name_scans() -> usize {
+        INDEX_NAME_SCANS.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     fn hook() -> &'static Mutex<Hook> {
         static HOOK: OnceLock<Mutex<Hook>> = OnceLock::new();
         HOOK.get_or_init(|| {
@@ -1190,6 +1204,7 @@ pub(super) mod test_hooks {
         let mut hook = hook().lock().unwrap_or_else(|poison| poison.into_inner());
         hook.pauses.clear();
         hook.starts.clear();
+        INDEX_NAME_SCANS.store(0, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Block the next projection of `ino` at the build boundary.
@@ -1247,6 +1262,44 @@ mod index_tests {
         ] })
     }
     fn token() -> CommitState { CommitState { revision: 4, verified: true } }
+    /// Reproducible #23 red on the pre-fix tree: every hot index open walks all
+    /// entry names to re-derive the byte estimate (H x N visits).
+    #[test]
+    fn hot_index_opens_do_not_rescan_every_entry_name() {
+        let _serial = test_hooks::serial();
+        test_hooks::reset();
+        const CHILDREN: usize = 10_000;
+        const OPENS: usize = 100;
+        let big = Arc::new(DirBlock {
+            ino: 1,
+            version: 0,
+            built_at_gen: 3,
+            entries: {
+                let mut entries = Vec::with_capacity(CHILDREN + 2);
+                entries.push(drive_core::namespace_index::DirEntryLite { ino: 1, name: Arc::from(".."), kind: FileKind::Directory });
+                entries.push(drive_core::namespace_index::DirEntryLite { ino: 1, name: Arc::from("."), kind: FileKind::Directory });
+                entries.extend((0..CHILDREN).map(|i| drive_core::namespace_index::DirEntryLite {
+                    ino: 2 + i as u64,
+                    name: Arc::from(format!("file-{i:05}")),
+                    kind: FileKind::File,
+                }));
+                entries
+            },
+        });
+        let views = Views::default();
+        let token = CommitState { revision: 4, verified: true };
+        for _ in 0..OPENS {
+            let handle = views.open_index(big.clone(), token).unwrap().unwrap();
+            views.release(1, handle).unwrap();
+        }
+        assert_eq!(
+            test_hooks::index_name_scans(),
+            0,
+            "hot index opens rescanned {OPENS} directories x {CHILDREN} entries = {} name visits \
+             while holding the handles mutex and projection lease",
+            OPENS * CHILDREN
+        );
+    }
     #[test]
     fn index_views_share_the_original_byte_and_handle_budget() {
         let views = Views::default();
