@@ -626,10 +626,20 @@ fn five_state_protection_plan_is_history_independent_at_100k() {
             plan.iter().any(|line| line.contains("_active")),
             "{label}: five-state branch must use the active partial index: {plan:?}"
         );
-        assert!(
-            !plan.iter().any(|line| line.contains("SCAN operations")),
-            "{label}: five-state branch must not scan history: {plan:?}"
-        );
+        // A full scan of the *partial* index is the expected bounded shape: the
+        // index only contains the five-state protection rows. What must not
+        // appear is the full-history operations_node index or a table scan.
+        for line in &plan {
+            assert!(
+                !line.contains("USING INDEX operations_node (")
+                    && !line.contains("USING INDEX operations_blob ("),
+                "{label}: five-state branch fell back to a full-history index: {plan:?}"
+            );
+            assert!(
+                !line.contains("SCAN operations") || line.contains("operations_node_active"),
+                "{label}: five-state branch must not scan the operations table: {plan:?}"
+            );
+        }
     }
     drop(db);
     drop(store);
