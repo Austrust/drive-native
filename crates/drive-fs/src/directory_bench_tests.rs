@@ -165,3 +165,134 @@ fn getstates_lock_p95_while_opendir_runs() {
     println!("{}", bench_line("opendir_mixed_dir2000", &opendir_ms));
     println!("{}", bench_line("getstates_lock_handoff", &lock_ms));
 }
+
+/// Two sibling authoritative directories with a file in each, fully inode
+/// mapped (the read-only projection path requires that).
+fn two_directories() -> (tempfile::TempDir, Arc<drive_core::SharedStore>) {
+    let temp = tempfile::tempdir().unwrap();
+    let mut store = Store::open(temp.path()).unwrap();
+    let nodes = vec![
+        node("100", None, "root", true),
+        node("200", Some("100"), "first", true),
+        node("201", Some("100"), "second", true),
+        node("202", Some("200"), "first-file", false),
+        node("203", Some("201"), "second-file", false),
+    ];
+    store
+        .install_remote_snapshot(&nodes, "native-v1:1", "server")
+        .unwrap();
+    store.ensure_fs_root("100").unwrap();
+    (temp, Arc::new(drive_core::SharedStore::new(store)))
+}
+
+fn ino(store: &drive_core::SharedStore, id: &str) -> u64 {
+    store.lock().unwrap().record(id).unwrap().ino
+}
+
+fn spawn_open(
+    views: Arc<Views>,
+    store: Arc<drive_core::SharedStore>,
+    dir: u64,
+) -> std::thread::JoinHandle<(Result<(), i32>, Option<Arc<View>>)> {
+    std::thread::spawn(move || match views.open(&store, dir) {
+        Ok(handle) => {
+            let view = views.get(dir, handle).ok();
+            views.release(dir, handle).unwrap();
+            (Ok(()), view)
+        }
+        Err(error) => (Err(error), None),
+    })
+}
+
+/// Residual #23: opening one directory must not wait for an unrelated
+/// in-flight projection. Before per-directory single-flight this blocks on the
+/// per-mount global builder mutex; the bounded receive makes the red state a
+/// deterministic assertion failure instead of a hung test.
+#[test]
+fn opening_a_different_directory_does_not_wait_for_an_inflight_projection() {
+    let _serial = test_hooks::serial();
+    test_hooks::reset();
+    let (_temp, store) = two_directories();
+    let first = ino(&store, "200");
+    let second = ino(&store, "201");
+    assert_ne!(first, second);
+    let views = Arc::new(Views::default());
+    let pause = test_hooks::pause(first);
+
+    let first_opener = spawn_open(views.clone(), store.clone(), first);
+    assert!(
+        pause.wait_reached(Duration::from_secs(10)),
+        "paused projection of the first directory never started"
+    );
+
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let second_opener = {
+        let views = views.clone();
+        let store = store.clone();
+        std::thread::spawn(move || {
+            let result = views.open(&store, second);
+            let _ = done_tx.send(());
+            match result {
+                Ok(handle) => {
+                    let view = views.get(second, handle).ok();
+                    views.release(second, handle).unwrap();
+                    (Ok(()), view)
+                }
+                Err(error) => (Err(error), None),
+            }
+        })
+    };
+    let unrelated_completed = done_rx.recv_timeout(Duration::from_millis(750));
+
+    // Always unblock the paused projection before asserting, so a red run
+    // still joins both threads instead of hanging.
+    pause.release();
+    let first_result = first_opener.join().unwrap().0;
+    let second_result = second_opener.join().unwrap().0;
+    first_result.expect("first directory open");
+    second_result.expect("second directory open");
+    assert!(
+        unrelated_completed.is_ok(),
+        "opening a second directory was blocked by an unrelated in-flight projection"
+    );
+}
+
+/// Residual #23: concurrent opens of the same directory share one projection
+/// and one published view; only the first projects.
+#[test]
+fn concurrent_opens_of_one_directory_share_one_projection() {
+    let _serial = test_hooks::serial();
+    test_hooks::reset();
+    let (_temp, store) = two_directories();
+    let dir = ino(&store, "200");
+    let views = Arc::new(Views::default());
+    let pause = test_hooks::pause(dir);
+
+    let first_opener = spawn_open(views.clone(), store.clone(), dir);
+    assert!(
+        pause.wait_reached(Duration::from_secs(10)),
+        "paused projection of the shared directory never started"
+    );
+    let second_opener = spawn_open(views.clone(), store.clone(), dir);
+
+    pause.release();
+    let (first_result, first_view) = first_opener.join().unwrap();
+    let (second_result, second_view) = second_opener.join().unwrap();
+    first_result.expect("first open");
+    second_result.expect("second open");
+    assert_eq!(
+        test_hooks::starts(dir),
+        1,
+        "a concurrent open of the same directory projected it a second time"
+    );
+    let (first_view, second_view) = (
+        first_view.expect("first handle exposes the view"),
+        second_view.expect("second handle exposes the view"),
+    );
+    assert!(
+        Arc::ptr_eq(&first_view, &second_view),
+        "concurrent opens of one directory did not share the published view"
+    );
+    let names = names(&first_view);
+    assert!(names.contains(&"first-file".to_string()), "{names:?}");
+}
