@@ -1809,10 +1809,64 @@ impl Store {
         Ok(purged)
     }
 
-    /// Issue #50 (phase 4): undo a previous exclusion purge after the rules are
-    /// removed. Restores the rows and marks the derived inode map stale so the
-    /// next mount backfills it again. Returns the number of restored nodes.
-    pub fn restore_excluded_nodes(&mut self) -> Result<u64> {
+    /// Resolve the scope-relative POSIX path of `id` from one namespace read.
+    ///
+    /// The `nodes` rows a previous purge hid are still present (only `deleted`
+    /// changed), so they can be re-matched against the current rules. Returns
+    /// `None` when the row or one of its ancestors is gone or the chain is
+    /// deeper than the namespace allows: such an id cannot be classified and
+    /// stays unresolved.
+    fn relative_path_from_rows(
+        rows: &std::collections::HashMap<String, (Option<String>, String, bool)>,
+        id: &str,
+    ) -> Option<(String, bool)> {
+        let mut names: Vec<&str> = Vec::new();
+        let mut current = id;
+        let mut directory = true;
+        for depth in 0..256 {
+            let (parent, name, is_dir) = rows.get(current)?;
+            if depth == 0 {
+                directory = *is_dir;
+            }
+            match parent {
+                None => {
+                    // The namespace root is the topmost row; its path is empty
+                    // and rules never match it.
+                    let mut path = String::new();
+                    for name in names.iter().rev() {
+                        if !path.is_empty() {
+                            path.push('/');
+                        }
+                        path.push_str(name);
+                    }
+                    return Some((path, directory));
+                }
+                Some(parent) => {
+                    names.push(name.as_str());
+                    current = parent;
+                }
+            }
+        }
+        None
+    }
+
+    /// Issue #50 (phase 4), extended by #56: restore only the rows a previous
+    /// exclusion purge hid that the *current* policy no longer wants hidden.
+    ///
+    /// `keep_hidden(path, is_directory)` is the caller's current policy
+    /// decision for a scope-relative path: `true` keeps the row hidden. The
+    /// hidden-exclude mode passes the compiled rules; the future `local_only`
+    /// mode (#56B) passes its own predicate, so this function does not
+    /// hard-code the hidden semantics. Everything not restored stays in the
+    /// `excluded_purged` marker for a later rule change.
+    ///
+    /// Ids whose parent chain no longer resolves are dropped from the marker:
+    /// they are unreachable in the namespace either way, and keeping them would
+    /// grow the marker forever. Returns the number of rows made visible again.
+    pub fn restore_unexcluded_nodes(
+        &mut self,
+        keep_hidden: impl Fn(&str, bool) -> bool,
+    ) -> Result<u64> {
         let Some(raw) = self
             .db
             .query_row(
@@ -1825,18 +1879,81 @@ impl Store {
             return Ok(0);
         };
         let ids: Vec<String> = serde_json::from_str(&raw).unwrap_or_default();
+        if ids.is_empty() {
+            self.db
+                .execute("DELETE FROM metadata WHERE key='excluded_purged'", [])?;
+            return Ok(0);
+        }
+        // One namespace read instead of a parent walk per purged id: a hidden
+        // directory can contain tens of thousands of ids.
+        let mut rows: std::collections::HashMap<String, (Option<String>, String, bool)> =
+            std::collections::HashMap::with_capacity(ids.len());
+        {
+            let mut query =
+                self.db
+                    .prepare("SELECT id,parent,name,directory FROM nodes")?;
+            let mapped = query.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, bool>(3)?,
+                ))
+            })?;
+            for row in mapped {
+                let (id, parent, name, directory) = row?;
+                rows.insert(id, (parent, name, directory));
+            }
+        }
+        let mut keep: Vec<String> = Vec::with_capacity(ids.len());
+        let mut restore: Vec<String> = Vec::new();
+        for id in &ids {
+            match Self::relative_path_from_rows(&rows, id) {
+                Some((path, directory)) => {
+                    if keep_hidden(&path, directory) {
+                        keep.push(id.clone());
+                    } else {
+                        restore.push(id.clone());
+                    }
+                }
+                // Unresolvable ids are dropped from the marker (see doc).
+                None => {}
+            }
+        }
+        if restore.is_empty() && keep.len() == ids.len() {
+            return Ok(0);
+        }
         let tx = self.db.transaction()?;
         let mut restored = 0u64;
-        for id in &ids {
+        for id in &restore {
             restored += tx.execute(
                 "UPDATE nodes SET deleted=0 WHERE id=?1 AND deleted=1 AND conflict=0",
                 [id],
             )? as u64;
         }
-        tx.execute("DELETE FROM metadata WHERE key='excluded_purged'", [])?;
-        tx.execute("DELETE FROM metadata WHERE key='fs_inodes_complete'", [])?;
+        if keep.is_empty() {
+            tx.execute("DELETE FROM metadata WHERE key='excluded_purged'", [])?;
+        } else {
+            tx.execute(
+                "INSERT OR REPLACE INTO metadata(key,value) VALUES('excluded_purged',?1)",
+                [serde_json::to_string(&keep)?],
+            )?;
+        }
+        if restored > 0 {
+            // The inode map of the newly visible rows is rebuilt on the next
+            // mount (or by the caller before the FUSE map is backfilled).
+            tx.execute("DELETE FROM metadata WHERE key='fs_inodes_complete'", [])?;
+        }
         tx.commit()?;
         Ok(restored)
+    }
+
+    /// Issue #50 (phase 4): undo a previous exclusion purge wholesale. This is
+    /// the historical "rules were all removed" entry point; the mount path uses
+    /// [`Self::restore_unexcluded_nodes`] so a partial rule change can restore
+    /// just the unmatched rows (#56).
+    pub fn restore_excluded_nodes(&mut self) -> Result<u64> {
+        self.restore_unexcluded_nodes(|_, _| false)
     }
 
     /// Persist scheduler intent before starting network I/O. Duplicate tickets coalesce.

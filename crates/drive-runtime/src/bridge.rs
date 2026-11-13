@@ -511,17 +511,22 @@ impl Bridge {
         Ok(())
     }
 
-    /// Issue #50 (phase 4): after the rules are removed, unhide the rows a
-    /// previous purge hid so the mount shows the full namespace again.
+    /// Issue #50 (phase 4), fixed for #56: unhide the rows a previous purge hid
+    /// that the *current* rules no longer match.
+    ///
+    /// This used to run only when every rule had been removed, so deleting one
+    /// of two rules left its paths hidden until the whole list was cleared and
+    /// the mount restarted twice. The restore is now driven by the current match
+    /// result: rows still matched by a remaining rule stay hidden and keep their
+    /// `excluded_purged` marker for a later rule change. The predicate is the
+    /// current hidden-mode policy, so #56B can pass the local-only predicate
+    /// without changing the store.
     pub(crate) fn restore_excluded_from_store(&self) -> io::Result<()> {
-        let state = self.exclusion_state();
-        if state.is_active() {
-            return Ok(());
-        }
+        let rules = self.exclusion_state().rules().clone();
         let _mutation = self.recovery_gate.write().unwrap();
         let mut store = self.store.lock().unwrap();
         if store
-            .restore_excluded_nodes()
+            .restore_unexcluded_nodes(|path, is_dir| rules.matches(path, is_dir))
             .map_err(io::Error::other)?
             > 0
         {

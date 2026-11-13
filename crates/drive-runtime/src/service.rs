@@ -877,35 +877,10 @@ impl Service {
         }
         // Issue #50 (phase 4): reconcile the committed namespace with the active
         // exclusion rules before the mount becomes visible, so the FUSE inode
-        // map is backfilled from the reconciled namespace. With rules, excluded
-        // subtrees are hidden and their local cache/scheduling state is dropped
-        // (never a remote delete); without rules, rows hidden by a previous rule
-        // set come back. Preview mounts have no committed rows yet.
-        let exclusion = self.bridge.exclusion_state();
+        // map is backfilled from the reconciled namespace. Preview mounts have
+        // no committed rows yet.
         if committed_root {
-            {
-                let store = self.bridge.store.lock().unwrap();
-                refresh_exclusion_before_mount(
-                    &exclusion,
-                    &store,
-                    &self.profile.scope.file_id,
-                    true,
-                )?;
-            }
-            if exclusion.is_active() {
-                self.bridge.purge_excluded_from_store()?;
-                // The purge changed the committed namespace; rebuild before the
-                // mount and the inode backfill observe it.
-                let store = self.bridge.store.lock().unwrap();
-                refresh_exclusion_before_mount(
-                    &exclusion,
-                    &store,
-                    &self.profile.scope.file_id,
-                    true,
-                )?;
-            } else {
-                self.bridge.restore_excluded_from_store()?;
-            }
+            self.reconcile_exclusion_before_mount()?;
         }
         // One hub owns the publication gate and invalidation delivery for both
         // the FUSE replies and the runtime's state-change notifications.
@@ -975,6 +950,34 @@ impl Service {
         self.mounted.store(true, Ordering::Release);
         self.control.lock().unwrap().revision += 1;
         Ok(Some(session))
+    }
+    /// Reconcile the committed namespace with the task's exclusion rules before
+    /// the mount becomes visible (issue #50 phase 4, fixed for #56).
+    ///
+    /// A previous mount may have purged paths that the current rules no longer
+    /// match: restore those even while other rules stay active (the old code
+    /// only restored when the whole rule list was empty, so a partial rule
+    /// removal left them hidden until the list was cleared and the service
+    /// restarted twice). The paths the current rules still match are then hidden
+    /// (or stay hidden) and their local cache/scheduling state is dropped; this
+    /// never queues a remote delete.
+    pub(crate) fn reconcile_exclusion_before_mount(&self) -> io::Result<()> {
+        let exclusion = self.bridge.exclusion_state();
+        let root = self.profile.scope.file_id.as_str();
+        {
+            let store = self.bridge.store.lock().unwrap();
+            refresh_exclusion_before_mount(&exclusion, &store, root, true)?;
+        }
+        // Issue #56: restore unmatched rows even when some rules remain active.
+        self.bridge.restore_excluded_from_store()?;
+        if exclusion.is_active() {
+            self.bridge.purge_excluded_from_store()?;
+            // The purge changed the committed namespace; rebuild before the
+            // mount and the inode backfill observe it.
+            let store = self.bridge.store.lock().unwrap();
+            refresh_exclusion_before_mount(&exclusion, &store, root, true)?;
+        }
+        Ok(())
     }
     fn supervise(&self) {
         use crate::connection_diagnostics::{ProcessState, Record, Stage};
@@ -1254,3 +1257,5 @@ mod mount_exclusion_tests;
 #[cfg(test)]
 #[path = "startup_pause_tests.rs"]
 mod startup_pause_tests;
+#[path = "exclude_restore_tests.rs"]
+mod exclude_restore_tests;
