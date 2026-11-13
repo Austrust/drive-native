@@ -286,6 +286,13 @@ pub struct Service {
     /// Expensive overview counters keyed by the committed Store generation;
     /// only read and written off the Store lock (issue #21).
     overview_cache: Mutex<Option<crate::desktop::OverviewDerived>>,
+    /// Issue #67 W1: one committed-projection render reused by warm desktop
+    /// status batches. Guarded and single-flight: a miss builds the render once
+    /// while concurrent batches wait for it.
+    desktop_entries: Mutex<Option<crate::desktop::CachedProjectionEntries>>,
+    /// Warm render cache switch (`DN_DESKTOP_ENTRIES_CACHE=0` disables it for
+    /// A/B diagnosis; the cache-on/off equivalence tests use the same seam).
+    desktop_entries_enabled: AtomicBool,
     pub control: Mutex<Control>,
     changed: Condvar,
     pub stop: AtomicBool,
@@ -410,6 +417,10 @@ impl Service {
             bridge,
             status_cache: std::sync::OnceLock::new(),
             overview_cache: Mutex::new(None),
+            desktop_entries: Mutex::new(None),
+            desktop_entries_enabled: AtomicBool::new(
+                !std::env::var("DN_DESKTOP_ENTRIES_CACHE").is_ok_and(|value| value == "0"),
+            ),
             control: Mutex::new(Control {
                 state: if paused {
                     ConnectionState::Paused
@@ -618,6 +629,25 @@ impl Service {
             .overview_cache
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(derived);
+    }
+    /// Issue #67 W1: the warm committed-projection render cache. Only the
+    /// off-lock desktop projection path reads or writes it.
+    pub(crate) fn desktop_entries_cache(
+        &self,
+    ) -> std::sync::MutexGuard<'_, Option<crate::desktop::CachedProjectionEntries>> {
+        self.desktop_entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+    /// Issue #67 W1: whether warm desktop batches may reuse a committed render.
+    pub(crate) fn desktop_entries_cache_enabled(&self) -> bool {
+        self.desktop_entries_enabled.load(Ordering::Acquire)
+    }
+    /// Test seam: force the committed-render cache on or off so a batch can be
+    /// compared field by field against the historical render.
+    #[cfg(test)]
+    pub(crate) fn set_desktop_entries_cache_enabled(&self, enabled: bool) {
+        self.desktop_entries_enabled.store(enabled, Ordering::Release);
     }
     pub fn cache_policy_changed(&self) {
         self.cache_policy_dirty.store(true, Ordering::Release);
