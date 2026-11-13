@@ -1427,18 +1427,18 @@ fn elapsed_us(start: Instant) -> u64 {
 /// Issue #88: one read of the commit-diagnostics surface GetOverview reports.
 ///
 /// The historical poll ran three queries (`open_unknown`, `needs_attention` and
-/// the top-20 record list). drive-core is adding
-/// `commit_diagnostics::snapshot(&Store)` that returns the same numbers in one
-/// consistent read together with the read-only connection's
-/// `PRAGMA data_version` and a `consistent` flag; this type is the desktop-side
-/// mirror of that contract.
+/// the top-20 record list). drive-core's `commit_diagnostics::snapshot(&Store)`
+/// returns the same numbers in one consistent read together with the read-only
+/// connection's `PRAGMA data_version` and a `consistent` flag; this type is the
+/// desktop-side mirror of that contract.
 #[derive(Clone, Debug)]
 struct OverviewDiagnostics {
     open_unknown: i64,
     needs_attention: i64,
     items: Vec<drive_core::commit_diagnostics::CommitDiagnosticRecord>,
     /// `PRAGMA data_version` of the read-only connection the snapshot was read
-    /// at; `None` while drive-core does not expose it yet.
+    /// at; `None` only when the pragma read failed (the cache then falls back
+    /// to the committed Store state alone).
     data_version: Option<i64>,
     /// False when a cross-connection commit raced the read: the values are
     /// usable but must not be cached.
@@ -1495,22 +1495,25 @@ fn remember_overview_diagnostics(key: DiagnosticsCacheKey, snapshot: OverviewDia
 fn overview_diagnostics(store: &Store) -> io::Result<OverviewDiagnostics> {
     #[cfg(test)]
     counters::count_diagnostics_read();
+    // One consistent read: the two counters and the record list come from the
+    // same read transaction, together with the read-only connection's
+    // `PRAGMA data_version` and the `consistent` flag that says whether a
+    // crossing commit raced the read (a non-consistent snapshot is usable but
+    // must not be cached).
+    let snapshot = drive_core::commit_diagnostics::snapshot(store).map_err(|_| other())?;
     Ok(OverviewDiagnostics {
-        open_unknown: drive_core::commit_diagnostics::open_unknown(store)
-            .map_err(|_| other())?,
-        needs_attention: drive_core::commit_diagnostics::needs_attention(store)
-            .map_err(|_| other())?,
-        items: drive_core::commit_diagnostics::list(store, 20).map_err(|_| other())?,
-        data_version: None,
-        consistent: true,
+        open_unknown: snapshot.open_unknown(),
+        needs_attention: snapshot.needs_attention(),
+        items: snapshot.records,
+        data_version: Some(snapshot.data_version),
+        consistent: snapshot.consistent,
     })
 }
-/// Issue #88: `PRAGMA data_version` of the read-only connection. The drive-core
-/// `Store::data_version()` accessor is not available yet, so this is `None` and
-/// the cache key falls back to the committed Store state alone.
+/// Issue #88: `PRAGMA data_version` of the read-only connection. It is the
+/// cross-connection commit version used beside the committed Store state as the
+/// diagnostics-snapshot cache key.
 fn store_data_version(store: &Store) -> Option<i64> {
-    let _ = store;
-    None
+    store.data_version().ok()
 }
 /// Small metadata snapshot. Every read is a plain SELECT; on the private
 /// read-only connection it never touches the serialized writer.
@@ -3920,6 +3923,51 @@ mod readpath_tests {
             overview_fields(&fourth)["commit_diagnostics"],
             overview_fields(&first)["commit_diagnostics"]
         );
+    }
+
+    /// Issue #89: GetOverview reuses the published storage summary (no
+    /// draft-directory enumeration on the hot path) and exposes the additive
+    /// freshness fields. The values are only a cached derived projection: the
+    /// existing `GetCacheSettings` scan semantics are unchanged.
+    #[test]
+    fn overview_reuses_the_cached_storage_summary() {
+        let (_dir, service) = fixture();
+        {
+            let mut store = service.bridge.store.lock().unwrap();
+            for index in 0..64 {
+                let node = store
+                    .create_local_file("folder", &format!("draft{index:03}"), 0o644)
+                    .unwrap();
+                store.save_local(&node.id, b"draft body").unwrap();
+            }
+        }
+        let stats = || {
+            let handle = read_only(&service).unwrap();
+            handle.storage_summary_stats()
+        };
+        let before = stats();
+        let (first_body, _) = overview_measured(&service).unwrap();
+        let after_first = stats();
+        assert!(
+            after_first.refreshes > before.refreshes,
+            "the first overview must collect a storage summary"
+        );
+        let (second_body, _) = overview_measured(&service).unwrap();
+        let after_second = stats();
+        assert_eq!(
+            after_second.directory_enumerations, after_first.directory_enumerations,
+            "the warm overview re-enumerated the drafts directory"
+        );
+        assert!(
+            after_second.hits > after_first.hits,
+            "the warm overview must report a storage-summary cache hit"
+        );
+        let first: serde_json::Value = serde_json::from_str(&first_body).unwrap();
+        let second: serde_json::Value = serde_json::from_str(&second_body).unwrap();
+        assert_eq!(first["storage"], second["storage"]);
+        assert!(second["storage"]["collected_at"].is_u64());
+        assert_eq!(second["storage"]["stale"], false);
+        assert!(second["storage"]["drafts_bytes"].is_u64());
     }
 
     /// Issue #67 W1: every warm `GetStates` batch on a ready projection used to
