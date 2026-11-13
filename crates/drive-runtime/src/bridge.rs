@@ -271,7 +271,87 @@ pub struct Bridge {
     /// install, recovery snapshot, applied pull). Empty rules keep every check
     /// a constant-time no-op.
     exclusion: std::sync::RwLock<Arc<drive_core::exclude::ExclusionState>>,
+    /// Issue #90-A: restartable, bounded cache-maintenance state for the cache
+    /// loop. The Store/flights locks are released between windows, so a large
+    /// blob/draft directory is re-verified in batches and the round resumes on
+    /// the next wakeup instead of running one long scan under the locks.
+    maintenance: Mutex<CacheMaintenance>,
 }
+
+/// Issue #90-A: phases of one bounded cache-maintenance round. The candidate
+/// inventory is discovered without the Store lock; every other phase is a
+/// short, independently measured lock window.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum MaintenancePhase {
+    #[default]
+    Retire,
+    Reclaim,
+    PruneDrafts,
+    SweepDraftFiles,
+    Quarantine,
+    Usage,
+}
+
+/// Issue #90-A: restartable progress for the cache loop. `maintain_cache`
+/// performs at most `GC_MAX_WINDOWS_PER_CALL` windows per call; when the budget
+/// is exhausted this cursor keeps the remaining work for the next call.
+#[derive(Default)]
+struct MaintenanceCursor {
+    phase: MaintenancePhase,
+    /// Lock-free blob inventory: candidate identities, sizes and logical total.
+    blobs: Vec<drive_core::cache_policy::BlobEntry>,
+    blob_sizes: std::collections::HashMap<String, u64>,
+    blob_total_bytes: u64,
+    blob_pos: usize,
+    blob_removed_bytes: u64,
+    removed_bytes: u64,
+    released: Vec<String>,
+    clean_draft_rows: u64,
+    clean_draft_commits: u64,
+    draft_files_removed: u64,
+    /// This round performs the periodic full calibration (usage is measured
+    /// with a locked walk instead of the lock-free inventory).
+    calibrate_round: bool,
+    orphan_due: bool,
+}
+
+/// Issue #90-A: completed-round memo used for the no-progress pressure backoff.
+struct MaintenanceMemo {
+    revision: u64,
+    at: std::time::Instant,
+    progress: u64,
+    trim: drive_core::cache_policy::CacheTrim,
+}
+
+#[derive(Default)]
+struct CacheMaintenance {
+    cursor: Option<MaintenanceCursor>,
+    memo: Option<MaintenanceMemo>,
+    /// Rounds since the last locked calibration/`quarantine` pass. Both are
+    /// periodic: the orphan pass is a full draft-directory walk and calibration
+    /// re-measures usage through the locked path.
+    rounds_since_calibration: u32,
+}
+
+/// Issue #90-A: a full recalibration round every N maintenance rounds. Policy,
+/// limit and revision changes re-scan sooner because a new round always
+/// re-discovers the inventory.
+const MAINTENANCE_CALIBRATION_ROUNDS: u32 = 8;
+
+/// #90-A: record one measured Store-lock hold.
+fn record_store_lock_hold(
+    stats: &mut drive_core::cache_policy::CacheMaintenanceStats,
+    hold: std::time::Instant,
+) {
+    let elapsed = hold.elapsed().as_nanos() as u64;
+    stats.max_store_lock_hold_ns = stats.max_store_lock_hold_ns.max(elapsed);
+    stats.total_store_lock_hold_ns = stats.total_store_lock_hold_ns.saturating_add(elapsed);
+}
+
+fn store_window_wait(wait: std::time::Instant) -> u64 {
+    wait.elapsed().as_nanos() as u64
+}
+
 impl Bridge {
     pub fn transfer_entries(&self) -> Vec<crate::transfers::TransferEntry> {
         self.connection().transfers.entries()
@@ -385,35 +465,344 @@ impl Bridge {
             .cache_usage(unix_seconds(), &active)
             .map_err(io::Error::other)
     }
+    /// Issue #90-A: bounded, restartable cache maintenance.
+    ///
+    /// The legacy path ran `collect_garbage` + `content_bytes` + an optional
+    /// second GC + `cache_usage` in one uninterrupted flights+Store lock hold,
+    /// so every blob/draft directory walk and every clean-draft autocommit
+    /// shared the same critical section. This path:
+    /// 1. discovers blob candidates with **no lock held** (`scan_blob_inventory`),
+    /// 2. re-verifies and reclaims them in windows of `GC_BLOB_BATCH_SIZE`,
+    ///    re-reading the current keep-set/handles/active flights under the lock
+    ///    before each deletion,
+    /// 3. deletes clean-draft rows in `GC_CLEAN_DRAFT_BATCH_SIZE` transactions,
+    /// 4. reuses that inventory for the usage accounting instead of walking the
+    ///    directories again, with a periodic locked calibration,
+    /// 5. releases the locks between windows and resumes a partially finished
+    ///    round from the persisted cursor on the next call.
+    ///
+    /// The returned `CacheTrim` keeps the historical contract (revision,
+    /// usage, released ids, reclaimed bytes) and adds additive metrics.
     pub fn maintain_cache(&self) -> io::Result<drive_core::cache_policy::CacheTrim> {
-        use drive_core::cache_policy::{CacheMaintenanceStats, scan_blob_inventory};
+        use drive_core::cache_policy::{
+            CacheMaintenanceStats, GC_BLOB_BATCH_SIZE,
+            GC_CLEAN_DRAFT_BATCH_SIZE, GC_MAX_WINDOWS_PER_CALL, GC_NO_PROGRESS_BACKOFF,
+            GC_ROUND_TIME_BUDGET, scan_blob_inventory,
+        };
+        let call_started = std::time::Instant::now();
         let mut stats = CacheMaintenanceStats::default();
-        stats.rounds = 1;
-        // RED measurement (#90-A): the legacy trim below runs the whole
-        // `collect_garbage` + `content_bytes` + optional second GC + `cache_usage`
-        // sequence under one uninterrupted flights+Store lock hold. Record the
-        // directory volume that one hold covers; the bounded path must split it
-        // into re-verified windows and release the locks between them.
-        if let Ok(inventory) = scan_blob_inventory(&self.store.root()) {
-            stats.blobs_discovered = inventory.entries.len() as u64;
-            stats.blob_bytes_discovered = inventory.total_bytes;
-            stats.blobs_examined = inventory.entries.len() as u64;
-            stats.max_blobs_per_window = inventory.entries.len() as u64;
-        }
-        let flights = self.flights.lock().unwrap();
-        stats.flights_lock_windows = 1;
-        let active = flights.keys().map(|(id, _)| id.clone()).collect();
-        let store_wait = std::time::Instant::now();
-        let (mut result, inodes) = {
-            let mut store = self
+        let mut maintenance = self
+            .maintenance
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if maintenance.cursor.is_none() {
+            // Lock-free revision mirror: any Store commit (including policy
+            // edits, which are metadata writes) invalidates the backoff.
+            let revision = self.store.local_revision();
+            if let Some(memo) = &maintenance.memo {
+                if memo.progress == 0
+                    && memo.revision == revision
+                    && memo.at.elapsed() < GC_NO_PROGRESS_BACKOFF
+                {
+                    stats.deferred = true;
+                    let mut trim = memo.trim.clone();
+                    trim.maintenance = stats;
+                    return Ok(trim);
+                }
+            }
+            let wait = std::time::Instant::now();
+            let store = self
                 .store
                 .lock()
                 .map_err(|_| io::Error::other("store lock poisoned"))?;
-            stats.store_lock_windows = 1;
-            stats.max_store_lock_wait_ns = store_wait.elapsed().as_nanos() as u64;
-            let hold = std::time::Instant::now();
-            // Issue #56B: local-only matches keep their cached bodies; automatic
-            // trimming must not turn a visible local file back into "online only".
+            stats.store_lock_windows += 1;
+            stats.max_store_lock_wait_ns = store_window_wait(wait);
+            let limit = store.cache_limit().map_err(io::Error::other)?;
+            let revision = store.local_revision();
+            drop(store);
+            if limit == 0 {
+                // Explicit no-eviction opt-out: match the legacy trim and report
+                // usage without touching any directory.
+                let active = std::collections::HashSet::new();
+                let usage = self
+                    .store
+                    .lock()
+                    .map_err(|_| io::Error::other("store lock poisoned"))?
+                    .cache_usage(unix_seconds(), &active)
+                    .map_err(io::Error::other)?;
+                stats.store_lock_windows += 1;
+                return Ok(drive_core::cache_policy::CacheTrim {
+                    revision,
+                    usage,
+                    released: Vec::new(),
+                    reclaimed_bytes: 0,
+                    maintenance: stats,
+                });
+            }
+            // The expensive directory traversal runs with no lock held; the
+            // locked windows below re-verify every candidate against the current
+            // reference set before deleting it.
+            let inventory = scan_blob_inventory(&self.store.root()).map_err(io::Error::other)?;
+            stats.blobs_discovered = inventory.entries.len() as u64;
+            stats.blob_bytes_discovered = inventory.total_bytes;
+            let calibrate_round = maintenance.memo.as_ref().is_none_or(|memo| memo.revision != revision)
+                || maintenance.rounds_since_calibration >= MAINTENANCE_CALIBRATION_ROUNDS;
+            let orphan_due = maintenance.rounds_since_calibration >= MAINTENANCE_CALIBRATION_ROUNDS;
+            maintenance.cursor = Some(MaintenanceCursor {
+                blobs: inventory.entries,
+                blob_sizes: inventory.sizes,
+                blob_total_bytes: inventory.total_bytes,
+                calibrate_round,
+                orphan_due,
+                ..MaintenanceCursor::default()
+            });
+            stats.rounds = 1;
+        } else {
+            stats.resumed = true;
+            stats.rounds = 1;
+            if let Some(cursor) = &maintenance.cursor {
+                stats.blobs_discovered = cursor.blobs.len() as u64;
+                stats.blob_bytes_discovered = cursor.blob_total_bytes;
+            }
+        }
+        let mut windows = 0u32;
+        let mut produced: Option<drive_core::cache_policy::CacheTrim> = None;
+        while windows < GC_MAX_WINDOWS_PER_CALL as u32
+            && call_started.elapsed() < GC_ROUND_TIME_BUDGET
+        {
+            let cursor = maintenance.cursor.as_mut().expect("maintenance cursor");
+            match cursor.phase {
+                MaintenancePhase::Retire => {
+                    let wait = std::time::Instant::now();
+                    let mut store = self
+                        .store
+                        .lock()
+                        .map_err(|_| io::Error::other("store lock poisoned"))?;
+                    stats.store_lock_windows += 1;
+                    stats.max_store_lock_wait_ns =
+                        stats.max_store_lock_wait_ns.max(store_window_wait(wait));
+                    windows += 1;
+                    let hold = std::time::Instant::now();
+                    store
+                        .gc_retire_retired_pointers()
+                        .map_err(io::Error::other)?;
+                    drop(store);
+                    record_store_lock_hold(&mut stats, hold);
+                    cursor.phase = MaintenancePhase::Reclaim;
+                }
+                MaintenancePhase::Reclaim => {
+                    if cursor.blob_pos >= cursor.blobs.len() {
+                        cursor.phase = MaintenancePhase::PruneDrafts;
+                        continue;
+                    }
+                    let end = (cursor.blob_pos + GC_BLOB_BATCH_SIZE).min(cursor.blobs.len());
+                    let batch = cursor.blobs[cursor.blob_pos..end].to_vec();
+                    // Snapshot the active download flights inside the same window
+                    // as the deletion, then hold Store while re-verifying.
+                    let flights = self
+                        .flights
+                        .lock()
+                        .unwrap_or_else(|poison| poison.into_inner());
+                    stats.flights_lock_windows += 1;
+                    let active: std::collections::HashSet<String> =
+                        flights.keys().map(|(id, _)| id.clone()).collect();
+                    let wait = std::time::Instant::now();
+                    let mut store = self
+                        .store
+                        .lock()
+                        .map_err(|_| io::Error::other("store lock poisoned"))?;
+                    stats.store_lock_windows += 1;
+                    stats.max_store_lock_wait_ns =
+                        stats.max_store_lock_wait_ns.max(store_window_wait(wait));
+                    windows += 1;
+                    let hold = std::time::Instant::now();
+                    let reclaim = store
+                        .gc_reclaim_blobs(&batch, &active)
+                        .map_err(io::Error::other)?;
+                    drop(store);
+                    drop(flights);
+                    record_store_lock_hold(&mut stats, hold);
+                    stats.blobs_examined = stats.blobs_examined.saturating_add(reclaim.examined);
+                    stats.blobs_removed = stats.blobs_removed.saturating_add(reclaim.removed);
+                    stats.max_blobs_per_window = stats.max_blobs_per_window.max(reclaim.examined);
+                    stats.removed_bytes = stats.removed_bytes.saturating_add(reclaim.removed_bytes);
+                    cursor.blob_removed_bytes =
+                        cursor.blob_removed_bytes.saturating_add(reclaim.removed_bytes);
+                    cursor.removed_bytes = cursor.removed_bytes.saturating_add(reclaim.removed_bytes);
+                    cursor.blob_pos = end;
+                }
+                MaintenancePhase::PruneDrafts => {
+                    let wait = std::time::Instant::now();
+                    let mut store = self
+                        .store
+                        .lock()
+                        .map_err(|_| io::Error::other("store lock poisoned"))?;
+                    stats.store_lock_windows += 1;
+                    stats.max_store_lock_wait_ns =
+                        stats.max_store_lock_wait_ns.max(store_window_wait(wait));
+                    windows += 1;
+                    let hold = std::time::Instant::now();
+                    let pruned = store
+                        .prune_clean_drafts(GC_CLEAN_DRAFT_BATCH_SIZE)
+                        .map_err(io::Error::other)?;
+                    drop(store);
+                    record_store_lock_hold(&mut stats, hold);
+                    stats.clean_draft_rows = stats.clean_draft_rows.saturating_add(pruned.rows);
+                    stats.clean_draft_commits =
+                        stats.clean_draft_commits.saturating_add(pruned.commits);
+                    stats.removed_bytes = stats.removed_bytes.saturating_add(pruned.file_bytes);
+                    cursor.clean_draft_rows = cursor.clean_draft_rows.saturating_add(pruned.rows);
+                    cursor.clean_draft_commits =
+                        cursor.clean_draft_commits.saturating_add(pruned.commits);
+                    cursor.removed_bytes = cursor.removed_bytes.saturating_add(pruned.file_bytes);
+                    // A short batch means the clean-row set is exhausted; a full
+                    // batch may have more on the next window.
+                    if pruned.rows < GC_CLEAN_DRAFT_BATCH_SIZE as u64 {
+                        cursor.phase = MaintenancePhase::SweepDraftFiles;
+                    }
+                }
+                MaintenancePhase::SweepDraftFiles => {
+                    let wait = std::time::Instant::now();
+                    let mut store = self
+                        .store
+                        .lock()
+                        .map_err(|_| io::Error::other("store lock poisoned"))?;
+                    stats.store_lock_windows += 1;
+                    stats.max_store_lock_wait_ns =
+                        stats.max_store_lock_wait_ns.max(store_window_wait(wait));
+                    windows += 1;
+                    let hold = std::time::Instant::now();
+                    let pruned = store
+                        .prune_unreferenced_draft_files(GC_BLOB_BATCH_SIZE)
+                        .map_err(io::Error::other)?;
+                    drop(store);
+                    record_store_lock_hold(&mut stats, hold);
+                    stats.draft_files_removed =
+                        stats.draft_files_removed.saturating_add(pruned.files);
+                    stats.removed_bytes = stats.removed_bytes.saturating_add(pruned.bytes);
+                    cursor.draft_files_removed =
+                        cursor.draft_files_removed.saturating_add(pruned.files);
+                    cursor.removed_bytes = cursor.removed_bytes.saturating_add(pruned.bytes);
+                    if pruned.exhausted {
+                        cursor.phase = MaintenancePhase::Quarantine;
+                    }
+                }
+                MaintenancePhase::Quarantine => {
+                    if cursor.orphan_due {
+                        // Issue #60 recovery path: bounded-frequency full draft
+                        // pass, kept as a periodic calibration rather than a
+                        // per-round cost.
+                        let wait = std::time::Instant::now();
+                        let mut store = self
+                            .store
+                            .lock()
+                            .map_err(|_| io::Error::other("store lock poisoned"))?;
+                        stats.store_lock_windows += 1;
+                        stats.max_store_lock_wait_ns =
+                            stats.max_store_lock_wait_ns.max(store_window_wait(wait));
+                        windows += 1;
+                        let hold = std::time::Instant::now();
+                        store
+                            .collect_orphan_drafts(unix_seconds())
+                            .map_err(io::Error::other)?;
+                        drop(store);
+                        record_store_lock_hold(&mut stats, hold);
+                    }
+                    cursor.phase = MaintenancePhase::Usage;
+                }
+                MaintenancePhase::Usage => {
+                    let calibrate = cursor.calibrate_round;
+                    let progress = cursor.removed_bytes
+                        + cursor.clean_draft_rows
+                        + cursor.draft_files_removed
+                        + cursor.released.len() as u64;
+                    let result = self.maintenance_usage_snapshot(cursor, &mut stats, calibrate)?;
+                    maintenance.memo = Some(MaintenanceMemo {
+                        revision: result.revision,
+                        at: std::time::Instant::now(),
+                        progress,
+                        trim: result.clone(),
+                    });
+                    maintenance.rounds_since_calibration = if calibrate {
+                        0
+                    } else {
+                        maintenance.rounds_since_calibration.saturating_add(1)
+                    };
+                    maintenance.cursor = None;
+                    produced = Some(result);
+                    break;
+                }
+            }
+        }
+        if let Some(result) = produced {
+            return Ok(result);
+        }
+        // The call budget was exhausted mid-round: keep the cursor, but still
+        // return a consistent accounting snapshot so the cache loop can update
+        // its pressure/debounce state. The next call resumes the round.
+        let cursor = maintenance.cursor.as_mut().expect("maintenance cursor");
+        let result = self.maintenance_usage_snapshot(cursor, &mut stats, false)?;
+        Ok(result)
+    }
+
+    /// #90-A: one accounting window. Reuses the lock-free inventory (candidate
+    /// sizes + logical blob bytes already tracked through the reclaim windows)
+    /// instead of walking `blobs/` again. `calibrate` performs the periodic full
+    /// locked measurement, which is the only remaining full-traversal window and
+    /// runs once every `MAINTENANCE_CALIBRATION_ROUNDS` rounds.
+    fn maintenance_usage_snapshot(
+        &self,
+        cursor: &mut MaintenanceCursor,
+        stats: &mut drive_core::cache_policy::CacheMaintenanceStats,
+        calibrate: bool,
+    ) -> io::Result<drive_core::cache_policy::CacheTrim> {
+        use drive_core::cache_policy::CacheUsageInputs;
+        let flights = self
+            .flights
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        stats.flights_lock_windows += 1;
+        let active: std::collections::HashSet<String> =
+            flights.keys().map(|(id, _)| id.clone()).collect();
+        let wait = std::time::Instant::now();
+        let mut store = self
+            .store
+            .lock()
+            .map_err(|_| io::Error::other("store lock poisoned"))?;
+        stats.store_lock_windows += 1;
+        stats.max_store_lock_wait_ns =
+            stats.max_store_lock_wait_ns.max(store_window_wait(wait));
+        drop(flights);
+        let hold = std::time::Instant::now();
+        let now = unix_seconds();
+        let drafts = store.draft_usage(now).map_err(io::Error::other)?;
+        let backups = store.backup_inventory().map_err(io::Error::other)?;
+        let usage = if calibrate {
+            stats.calibrated = true;
+            store
+                .cache_usage(now, &active)
+                .map_err(io::Error::other)?
+        } else {
+            let blobs_bytes = cursor
+                .blob_total_bytes
+                .saturating_sub(cursor.blob_removed_bytes);
+            store
+                .cache_usage_with(
+                    now,
+                    &active,
+                    CacheUsageInputs {
+                        blobs_bytes: Some(blobs_bytes),
+                        blob_sizes: Some(&cursor.blob_sizes),
+                        drafts: Some(&drafts),
+                        backups: Some(&backups),
+                    },
+                )
+                .map_err(io::Error::other)?
+        };
+        let limit = store.cache_limit().map_err(io::Error::other)?;
+        let mut released = cursor.released.clone();
+        if limit != 0 && usage.over_target_bytes > 0 {
+            // Issue #56B: local-only matches keep their cached bodies.
             let protected = {
                 let state = self.exclusion_state();
                 if state.is_active() {
@@ -422,25 +811,23 @@ impl Bridge {
                     std::collections::HashSet::new()
                 }
             };
-            let result = store
-                .trim_cache_protected(unix_seconds(), &active, &protected)
+            let (new_released, _projected) = store
+                .release_over_limit(now, &active, &protected, usage.content_bytes, 256)
                 .map_err(io::Error::other)?;
-            let inodes = result
-                .released
-                .iter()
-                .filter_map(|id| store.record(id).ok().map(|r| r.ino))
-                .collect::<Vec<_>>();
-            stats.max_store_lock_hold_ns = hold.elapsed().as_nanos() as u64;
-            stats.total_store_lock_hold_ns = stats.max_store_lock_hold_ns;
-            stats.removed_bytes = result.reclaimed_bytes;
-            stats.released = result.released.len() as u64;
-            (result, inodes)
-        };
-        drop(flights);
-        result.maintenance = stats;
-        for ino in inodes {
-            self.enqueue_invalidation(Invalidation::Inode(ino));
+            stats.released = stats.released.saturating_add(new_released.len() as u64);
+            released.extend(new_released);
         }
+        let revision = store.local_revision();
+        let result = drive_core::cache_policy::CacheTrim {
+            revision,
+            usage,
+            released: released.clone(),
+            reclaimed_bytes: cursor.removed_bytes,
+            maintenance: *stats,
+        };
+        cursor.released = released;
+        drop(store);
+        record_store_lock_hold(stats, hold);
         Ok(result)
     }
     pub fn release_content(&self, id: &str) -> io::Result<drive_core::ReleaseOutcome> {
@@ -507,6 +894,7 @@ impl Bridge {
                     drive_core::exclude::ExcludeRules::default(),
                 ),
             )),
+            maintenance: Mutex::new(CacheMaintenance::default()),
         })
     }
     /// Every upstream queue failure must suspend cacheable publication, not

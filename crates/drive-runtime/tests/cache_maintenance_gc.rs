@@ -72,6 +72,16 @@ fn gc_blob_reclaim_is_split_into_bounded_lock_windows() {
         stats.max_blobs_per_window,
         GC_BLOB_BATCH_SIZE
     );
+    println!(
+        "BOUNDED_SCAN n={N} windows={} flights_windows={} max_window_blobs={} max_store_hold_ns={} total_store_hold_ns={} removed={} removed_bytes={}",
+        stats.store_lock_windows,
+        stats.flights_lock_windows,
+        stats.max_blobs_per_window,
+        stats.max_store_lock_hold_ns,
+        stats.total_store_lock_hold_ns,
+        stats.blobs_removed,
+        stats.removed_bytes,
+    );
 }
 
 #[test]
@@ -96,6 +106,7 @@ fn gc_round_resumes_from_cursor_for_large_directories() {
     assert_eq!(blob_files(&dir), 0, "the persisted cursor must finish the round");
     assert!(resumed, "a later call must report resuming the interrupted round");
     assert!(calls < 16, "bounded windows must finish a {} blob directory", n);
+    println!("CURSOR_RESUME n={n} calls={calls} resumed={resumed}");
 }
 
 #[test]
@@ -148,6 +159,13 @@ fn clean_draft_commits_are_batched_under_maintenance() {
         0,
         "a deleted clean draft must take its body with it"
     );
+    println!(
+        "CLEAN_DRAFT c={C} rows={} commits={} windows={} max_store_hold_ns={}",
+        stats.clean_draft_rows,
+        stats.clean_draft_commits,
+        stats.store_lock_windows,
+        stats.max_store_lock_hold_ns,
+    );
 }
 
 #[test]
@@ -166,4 +184,66 @@ fn no_progress_pressure_is_deferred_instead_of_rescanned() {
     );
     assert_eq!(stats.store_lock_windows, 0, "deferred work takes no Store lock");
     assert_eq!(stats.blobs_examined, 0, "deferred work examines no blobs");
+    println!("NO_PROGRESS_DEFER deferred={} windows={}", stats.deferred, stats.store_lock_windows);
+}
+
+/// Heavy mechanism evidence (#90-A): the same tree, same machine, compares the
+/// legacy "one trim per call" hold against the bounded windows. Compile in the
+/// build slot; run on the remote heavy (exclusive timing) slot only.
+///
+///   cargo test -p drive-runtime --locked --test cache_maintenance_gc -- --ignored --nocapture
+#[test]
+#[ignore = "heavy mechanism timing; run on the remote heavy slot"]
+fn gc_maintenance_legacy_vs_bounded_hold_heavy() {
+    use std::time::Instant;
+    for n in [1_000usize, 10_000] {
+        // Baseline shape: one Store-lock hold runs the complete legacy trim
+        // (collect_garbage + content_bytes + cache_usage) over the whole
+        // directory. `flights` is private to the bridge, so the Store half is
+        // measured here; the legacy code also holds `flights` across the same
+        // span and acquires it without measurable work.
+        let (dir, bridge) = bridge_fixture();
+        write_orphan_blobs(&dir, n);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let started = Instant::now();
+        {
+            let mut store = bridge.store.lock().unwrap();
+            store
+                .trim_cache_protected(
+                    now,
+                    &std::collections::HashSet::new(),
+                    &std::collections::HashSet::new(),
+                )
+                .unwrap();
+        }
+        let legacy_hold = started.elapsed();
+        assert_eq!(blob_files(&dir), 0);
+
+        // Bounded shape: lock-free discovery + 128-candidate re-verified windows.
+        let (dir, bridge) = bridge_fixture();
+        write_orphan_blobs(&dir, n);
+        let mut calls = 0;
+        let started = Instant::now();
+        let mut stats;
+        loop {
+            stats = bridge.maintain_cache().unwrap().maintenance;
+            calls += 1;
+            if blob_files(&dir) == 0 || calls > 64 {
+                break;
+            }
+        }
+        let bounded_elapsed = started.elapsed();
+        println!(
+            "HEAVY_A n={n} legacy_single_hold_ms={:.3} bounded_max_hold_ms={:.3} bounded_total_hold_ms={:.3} windows={} calls={calls} elapsed_ms={:.3}",
+            legacy_hold.as_secs_f64() * 1e3,
+            stats.max_store_lock_hold_ns as f64 / 1e6,
+            stats.total_store_lock_hold_ns as f64 / 1e6,
+            stats.store_lock_windows,
+            bounded_elapsed.as_secs_f64() * 1e3,
+        );
+        assert_eq!(blob_files(&dir), 0);
+    }
 }

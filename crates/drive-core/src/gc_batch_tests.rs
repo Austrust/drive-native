@@ -309,7 +309,10 @@ fn gc_reclaim_reverifies_references_after_lock_free_discovery() {
     //    candidate snapshot must not delete it.
     store
         .db
-        .execute("UPDATE nodes SET blob=?1 WHERE id='live'", [&blob])
+        .execute(
+            "UPDATE nodes SET blob=?1, local_version='1' WHERE id='live'",
+            [&blob],
+        )
         .unwrap();
     let reclaim = store
         .gc_reclaim_blobs(&inventory.entries, &HashSet::new())
