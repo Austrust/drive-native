@@ -572,6 +572,9 @@ mod counters {
         static INCREMENTAL_REFRESHES: Cell<usize> = Cell::new(0);
         /// Issue #30: node entries recomputed by incremental refreshes.
         static INCREMENTAL_NODES: Cell<usize> = Cell::new(0);
+        /// Issue #88: commit-diagnostics reads (the historical three queries)
+        /// executed by GetOverview on this thread.
+        static DIAGNOSTICS_READS: Cell<usize> = Cell::new(0);
     }
     pub(super) fn bump(counter: &'static std::thread::LocalKey<Cell<usize>>) {
         counter.with(|value| value.set(value.get() + 1));
@@ -602,6 +605,15 @@ mod counters {
     }
     pub(super) fn entry_cache_builds() -> usize {
         ENTRY_CACHE_BUILDS.with(Cell::get)
+    }
+    pub(super) fn count_diagnostics_read() {
+        DIAGNOSTICS_READS.with(|value| value.set(value.get() + 1));
+    }
+    pub(super) fn diagnostics_reads() -> usize {
+        DIAGNOSTICS_READS.with(Cell::get)
+    }
+    pub(super) fn reset_diagnostics_reads() {
+        DIAGNOSTICS_READS.with(|value| value.set(0));
     }
     pub(super) fn count_incremental_attempt() {
         INCREMENTAL_ATTEMPTS.with(|value| value.set(value.get() + 1));
@@ -1403,9 +1415,8 @@ struct StoreOverview {
     skipped_symlinks: u64,
     inaccessible: i64,
     download_errors: u64,
-    open_unknown: i64,
-    needs_attention: i64,
-    commit_items: Vec<drive_core::commit_diagnostics::CommitDiagnosticRecord>,
+    /// Issue #88: one consistent commit-diagnostics snapshot.
+    diagnostics: OverviewDiagnostics,
     /// Issue #60: cheap drafts/migration-snapshot storage accounting, additive
     /// to the existing cache_availability block.
     storage: drive_core::state::StorageSummary,
@@ -1413,12 +1424,101 @@ struct StoreOverview {
 fn elapsed_us(start: Instant) -> u64 {
     u64::try_from(start.elapsed().as_micros()).unwrap_or(u64::MAX)
 }
+/// Issue #88: one read of the commit-diagnostics surface GetOverview reports.
+///
+/// The historical poll ran three queries (`open_unknown`, `needs_attention` and
+/// the top-20 record list). drive-core is adding
+/// `commit_diagnostics::snapshot(&Store)` that returns the same numbers in one
+/// consistent read together with the read-only connection's
+/// `PRAGMA data_version` and a `consistent` flag; this type is the desktop-side
+/// mirror of that contract.
+#[derive(Clone, Debug)]
+struct OverviewDiagnostics {
+    open_unknown: i64,
+    needs_attention: i64,
+    items: Vec<drive_core::commit_diagnostics::CommitDiagnosticRecord>,
+    /// `PRAGMA data_version` of the read-only connection the snapshot was read
+    /// at; `None` while drive-core does not expose it yet.
+    data_version: Option<i64>,
+    /// False when a cross-connection commit raced the read: the values are
+    /// usable but must not be cached.
+    consistent: bool,
+}
+/// Issue #88: key of one commit-diagnostics snapshot.
+///
+/// `(committed Store state, data_version)` is the contract key. The store root
+/// and journal epoch make the in-process cache safe across independent
+/// `Service` instances and writer restarts (tests use several in one process).
+#[derive(Clone, PartialEq, Eq)]
+struct DiagnosticsCacheKey {
+    /// Identity tag of the `Service` instance (its stable heap address, never
+    /// dereferenced). The read-only connection cannot read the TEMP journal
+    /// epoch, so this keeps two services in one process from sharing a snapshot.
+    instance: usize,
+    root: std::path::PathBuf,
+    commit: drive_core::shared_store::CommitState,
+    data_version: Option<i64>,
+}
+/// Bounded single-process snapshot cache. GetOverview is the only producer and
+/// consumer; the bound keeps parallel test services from evicting each other's
+/// slot while production keeps exactly one.
+const DIAGNOSTICS_CACHE_SLOTS: usize = 16;
+static OVERVIEW_DIAGNOSTICS: std::sync::Mutex<Vec<(DiagnosticsCacheKey, OverviewDiagnostics)>> =
+    std::sync::Mutex::new(Vec::new());
+
+fn cached_overview_diagnostics(key: &DiagnosticsCacheKey) -> Option<OverviewDiagnostics> {
+    OVERVIEW_DIAGNOSTICS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .find(|(cached, _)| cached == key)
+        .map(|(_, snapshot)| snapshot.clone())
+}
+
+fn remember_overview_diagnostics(key: DiagnosticsCacheKey, snapshot: OverviewDiagnostics) {
+    let mut slots = OVERVIEW_DIAGNOSTICS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    slots.retain(|(cached, _)| cached != &key);
+    slots.push((key, snapshot));
+    if slots.len() > DIAGNOSTICS_CACHE_SLOTS {
+        slots.remove(0);
+    }
+}
+
+/// Issue #88: one commit-diagnostics read for GetOverview.
+///
+/// Until drive-core exposes `commit_diagnostics::snapshot` this shim runs the
+/// historical three queries and reports `data_version: None`, so the snapshot
+/// cache is keyed on the committed Store state and writer epoch (the same
+/// invalidation window GetOverview had before).
+fn overview_diagnostics(store: &Store) -> io::Result<OverviewDiagnostics> {
+    #[cfg(test)]
+    counters::count_diagnostics_read();
+    Ok(OverviewDiagnostics {
+        open_unknown: drive_core::commit_diagnostics::open_unknown(store)
+            .map_err(|_| other())?,
+        needs_attention: drive_core::commit_diagnostics::needs_attention(store)
+            .map_err(|_| other())?,
+        items: drive_core::commit_diagnostics::list(store, 20).map_err(|_| other())?,
+        data_version: None,
+        consistent: true,
+    })
+}
+/// Issue #88: `PRAGMA data_version` of the read-only connection. The drive-core
+/// `Store::data_version()` accessor is not available yet, so this is `None` and
+/// the cache key falls back to the committed Store state alone.
+fn store_data_version(store: &Store) -> Option<i64> {
+    let _ = store;
+    None
+}
 /// Small metadata snapshot. Every read is a plain SELECT; on the private
 /// read-only connection it never touches the serialized writer.
 fn overview_store(
     service: &Service,
     store: &Store,
     derived: Option<OverviewDerived>,
+    cached_diagnostics: Option<OverviewDiagnostics>,
 ) -> io::Result<StoreOverview> {
     let root = &service.profile.scope.file_id;
     let pending = store.pending_operations().map_err(|_| other())?
@@ -1436,6 +1536,12 @@ fn overview_store(
             store.cache_availability().map_err(|_| other())?,
         ),
     };
+    // Issue #88: reuse the diagnostics snapshot of this committed generation
+    // instead of re-running its three historical queries on every poll.
+    let diagnostics = match cached_diagnostics {
+        Some(snapshot) => snapshot,
+        None => overview_diagnostics(store)?,
+    };
     Ok(StoreOverview {
         pending,
         paused_uploads,
@@ -1448,10 +1554,7 @@ fn overview_store(
         skipped_symlinks: store.skipped_symlink_count().map_err(|_| other())?,
         inaccessible: store.inaccessible_count().map_err(|_| other())?,
         download_errors: store.download_failure_count().map_err(|_| other())?,
-        open_unknown: drive_core::commit_diagnostics::open_unknown(store).map_err(|_| other())?,
-        needs_attention: drive_core::commit_diagnostics::needs_attention(store)
-            .map_err(|_| other())?,
-        commit_items: drive_core::commit_diagnostics::list(store, 20).map_err(|_| other())?,
+        diagnostics,
         storage: store.storage_summary().map_err(|_| other())?,
     })
 }
@@ -1516,11 +1619,30 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
     let key = service.bridge.store.change_state();
     let cached = service.overview_derived(key);
     let ro = read_only(service);
+    // Issue #31/#88: the status journal epoch lets a GUI tell a same-daemon
+    // delta from a restarted writer; it also scopes the diagnostics snapshot
+    // cache so two Service instances in one process never share a snapshot.
+    let status_epoch = ro
+        .as_deref()
+        .and_then(|store| store.status_change_watermark().ok())
+        .map(|watermark| watermark.cursor.epoch)
+        .unwrap_or_default();
+    // Issue #88: diagnostics snapshot keyed by (committed Store state,
+    // read-only `data_version`), scoped by store identity and journal epoch.
+    let data_version = ro.as_deref().and_then(store_data_version);
+    let diagnostics_key = DiagnosticsCacheKey {
+        instance: service as *const Service as usize,
+        root: service.bridge.store.root(),
+        commit: key,
+        data_version,
+    };
+    let cached_diagnostics = cached_overview_diagnostics(&diagnostics_key);
+    let reused_diagnostics = cached_diagnostics.is_some();
     let mut query_us = 0;
     let mut snapshot = None;
     if let Some(store) = ro.as_deref() {
         let query = Instant::now();
-        if let Ok(found) = overview_store(service, store, cached) {
+        if let Ok(found) = overview_store(service, store, cached, cached_diagnostics) {
             query_us = elapsed_us(query);
             timings.read_only = true;
             snapshot = Some(found);
@@ -1534,7 +1656,7 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
             let guard = service.bridge.store.lock().unwrap();
             timings.lock_wait_us = elapsed_us(wait);
             let hold = Instant::now();
-            let found = overview_store(service, &guard, None)?;
+            let found = overview_store(service, &guard, None, None)?;
             let local_revision = guard.local_revision();
             timings.lock_hold_us = elapsed_us(hold);
             drop(guard);
@@ -1550,8 +1672,25 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
             service.cache_overview_derived(OverviewDerived {
                 key: after,
                 issue_count: store_overview.issue_count,
-                cache: store_overview.cache,
+                cache: store_overview.cache.clone(),
             });
+        }
+    }
+    // Issue #88: publish the diagnostics snapshot under the same generation
+    // rule, and only for a consistent read. It is keyed on the state observed
+    // after the queries so a commit that raced the read is never cached.
+    if timings.read_only && !reused_diagnostics && store_overview.diagnostics.consistent {
+        let after = service.bridge.store.change_state();
+        if after == key {
+            remember_overview_diagnostics(
+                DiagnosticsCacheKey {
+                    instance: service as *const Service as usize,
+                    root: service.bridge.store.root(),
+                    commit: after,
+                    data_version: store_overview.diagnostics.data_version,
+                },
+                store_overview.diagnostics.clone(),
+            );
         }
     }
     let StoreOverview {
@@ -1566,9 +1705,7 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
         skipped_symlinks,
         inaccessible,
         download_errors,
-        open_unknown,
-        needs_attention,
-        commit_items,
+        diagnostics,
         storage,
     } = store_overview;
     let uncertain = queue_health.namespace_uncertain + queue_health.upload_uncertain;
@@ -1586,7 +1723,7 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
         "checking"
     } else if pending > 0 || uncertain > 0 {
         "pending"
-    } else if paused_uploads > 0 || needs_attention > 0 {
+    } else if paused_uploads > 0 || diagnostics.needs_attention > 0 {
         // Upload commitments that exhausted the read-only reconciliation budget
         // are no longer counted as pending work, but the user still needs a
         // visible, explainable reason to open the issue center. Conflicting or
@@ -1605,14 +1742,11 @@ pub fn overview_measured(service: &Service) -> io::Result<(String, OverviewTimin
         "bound_directory_recovery":true,"abandon_remove":true});
     // Issue #9 TB2: additive, read-only diagnosis list. `items` may contain
     // terminal abandoned rows; `open_unknown`/`needs_attention` exclude them.
-    let commit_diagnostics = commit_diagnostics_json(open_unknown, needs_attention, &commit_items);
-    // Issue #31: the status journal epoch lets a GUI tell a same-daemon delta
-    // from a restarted writer (its cursor epoch differs after a restart).
-    let status_epoch = ro
-        .as_ref()
-        .and_then(|store| store.status_change_watermark().ok())
-        .map(|watermark| watermark.cursor.epoch)
-        .unwrap_or_default();
+    let commit_diagnostics = commit_diagnostics_json(
+        diagnostics.open_unknown,
+        diagnostics.needs_attention,
+        &diagnostics.items,
+    );
     let recovery = service.bridge.recovery_status();
     // Issue #59: additive FUSE data-plane observability. Configured/effective
     // kernel queue tuning, per-opcode latency buckets, timeout counters and the
@@ -3642,7 +3776,7 @@ mod readpath_tests {
         let (_dir, service) = fixture();
         let locked = {
             let guard = service.bridge.store.lock().unwrap();
-            overview_store(&service, &guard, None).unwrap()
+            overview_store(&service, &guard, None, None).unwrap()
         };
         let (body, timings) = overview_measured(&service).unwrap();
         assert!(timings.read_only, "expected the read-only path");
@@ -3715,6 +3849,61 @@ mod readpath_tests {
             service.bridge.store.local_revision()
         );
         assert!(service.bridge.store.local_revision() > before_revision);
+    }
+
+    /// Issue #88: GetOverview must not repeat the three historical commit
+    /// diagnostics queries on every poll. A committed-generation keyed snapshot
+    /// serves them instead; a committed write drops the snapshot.
+    #[test]
+    fn overview_reuses_commit_diagnostics_for_an_unchanged_generation() {
+        let (_dir, service) = fixture();
+        super::counters::reset_diagnostics_reads();
+        let (first, first_timings) = overview_measured(&service).unwrap();
+        assert!(first_timings.read_only);
+        assert_eq!(
+            super::counters::diagnostics_reads(),
+            1,
+            "the first overview must read the commit diagnostics once"
+        );
+        let (second, second_timings) = overview_measured(&service).unwrap();
+        assert!(second_timings.derived_cached);
+        assert_eq!(
+            super::counters::diagnostics_reads(),
+            1,
+            "an unchanged generation re-read the commit diagnostics"
+        );
+        assert_eq!(
+            overview_fields(&first)["commit_diagnostics"],
+            overview_fields(&second)["commit_diagnostics"]
+        );
+        // A committed write drops the cached snapshot and the next poll reads
+        // its own generation.
+        service
+            .bridge
+            .store
+            .lock()
+            .unwrap()
+            .pin("one", true)
+            .unwrap();
+        let (third, third_timings) = overview_measured(&service).unwrap();
+        assert!(!third_timings.derived_cached);
+        assert_eq!(super::counters::diagnostics_reads(), 2);
+        assert_eq!(
+            overview_fields(&third)["commit_diagnostics"],
+            overview_fields(&first)["commit_diagnostics"]
+        );
+        // A non-namespace write does not move the committed Store state, so the
+        // snapshot is still valid and no further diagnostics read happens.
+        service
+            .bridge
+            .store
+            .lock()
+            .unwrap()
+            .set_cache_limit(64 * 1024 * 1024)
+            .unwrap();
+        let (_fourth, fourth_timings) = overview_measured(&service).unwrap();
+        assert!(fourth_timings.derived_cached);
+        assert_eq!(super::counters::diagnostics_reads(), 2);
     }
 
     /// Issue #67 W1: every warm `GetStates` batch on a ready projection used to
