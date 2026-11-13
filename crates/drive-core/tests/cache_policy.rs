@@ -443,6 +443,8 @@ fn migration_backups_rotate_and_leverage_a_space_precheck() {
     );
     let usage = serde_json::to_value(store.cache_usage(now(), &HashSet::new()).unwrap()).unwrap();
     assert!(usage["backup_bytes"].as_u64().unwrap() > 0);
+}
+
 /// Issue #56B: automatic trimming must never evict a `local_only` body; the
 /// same candidate is still released once it is no longer protected.
 #[test]
