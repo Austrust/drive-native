@@ -1,3 +1,44 @@
+drive-native (0.1.0~dev20261118.1) unstable; urgency=medium
+
+  * Packaging-only development build: add experimental RPM packaging on top of
+    the unchanged source tree (no Rust, schema or IPC changes; schema stays 29,
+    IPC stays 21, no migration). This is the first Fedora/RHEL package of the
+    project and it is not a validated release candidate.
+    - packaging/rpm/drive-native.spec packages a pre-staged installation tree
+      instead of compiling a second time: %install copies the tree produced by
+      the shared scripts/build-linux.sh + scripts/stage-linux.sh, so the .deb
+      and .rpm carry the same binaries, PyInstaller GUI bundle, GIO probe,
+      desktop files and documentation. rpmbuild itself compiles nothing. The
+      payload compression is pinned to w19.xzdio (same tree: 73,526,191 B with
+      Ubuntu's default gzip/9 vs 49,213,525 B with xz/19; rpm -K digests OK).
+    - The GIO volume probe is relocated from the Ubuntu multiarch module path
+      (/usr/lib/x86_64-linux-gnu/gio/modules) to /usr/lib64/gio/modules, and the
+      shared module cache is refreshed from guarded %post/%postun scriptlets
+      (removal only; no cache file is shipped). The four per-user systemd units
+      are installed but never enabled, and the removal leaves user
+      configuration and cached content untouched.
+    - The bundled PyInstaller Qt/Python runtime is excluded from automatic
+      Requires/Provides generation and is not stripped (matching
+      dh_strip -Xusr/lib/drive-native/gui); the three native binaries and the
+      GIO module are stripped. Explicit Requires cover the measured native ELF
+      NEEDED (glibc, libgcc) and map the GUI runtime's system libraries to
+      Fedora/RHEL package names; gnome-keyring, Noto CJK fonts and the
+      Nemo/Nautilus Python bindings are weak dependencies.
+    - RPM target is Fedora 40+ / RHEL 10+ (x86_64): the Ubuntu 24.04 staging
+      tree is built against glibc 2.39, which is the effective floor (RHEL 8/9
+      are not supported). The .rpm is unsigned and has not been installed or
+      upgraded on a Fedora/RHEL host; the .deb path and runtime behavior are
+      unchanged by this release.
+  * Add scripts/build-rpm.sh: reads GUI_PYTHON and
+    DRIVE_NATIVE_SOURCE_COMMIT, builds and stages the shared tree, relocates the
+    GIO module, runs rpmbuild -bb with _topdir/_stagedir, verifies the embedded
+    source identity and prints the NEVRA plus SHA256.
+  * Add docs/RPM_INTEGRATION.md (target baseline, file layout, dependency
+    mapping, build/install/uninstall and limitations) and
+    docs/RELEASE_20261118_1.md; extend README with the RPM build/install path.
+
+ -- Drive Native contributors <noreply@example.invalid>  Wed, 18 Nov 2026 11:30:00 +0800
+
 drive-native (0.1.0~dev20261113.2) unstable; urgency=medium
 
   * Performance round 5: fix the 13 remaining hotspots from the 2026-11-13

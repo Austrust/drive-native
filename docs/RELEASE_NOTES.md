@@ -1,3 +1,7 @@
+# 0.1.0~dev20261118.1：首个实验性 RPM 包（Fedora 40+ / RHEL 10+）
+
+本版发布为 `dev20261118.1`（开发包，非 rc1）。本版**只改打包**：新增预 staging 的 RPM 打包资产 `packaging/rpm/drive-native.spec` 与 `scripts/build-rpm.sh`，`.deb` 与 `.rpm` 共用 `scripts/build-linux.sh` + `scripts/stage-linux.sh` 的同一条构建与布局链，rpmbuild 本身不编译任何东西。Rust 源码、schema **29**、IPC **21** 与运行时行为均无变化，本版无迁移；`.deb` 随发布一起 bump 版本。GIO 探针从 Ubuntu multiarch 路径重定位到 `/usr/lib64/gio/modules`，由守卫的 `%post`/`%postun` 刷新模块缓存（包内不携带 `giomodule.cache`）；四个 systemd 用户单元只安装、不启用；PyInstaller GUI bundle 不 strip、不参与自动依赖/提供扫描，GUI 系统库依赖显式映射到 Fedora/RHEL 包名。RPM 目标为 Fedora 40+/RHEL 10+（x86_64），整包 glibc 下限为 **2.39**（`drive-native-fsd` 的 pidfd 符号），**RHEL 8/9 不兼容**；包未签名，未在真实 Fedora/RHEL 主机安装/升级验证。详见 [RELEASE_20261118_1.md](RELEASE_20261118_1.md) 与 [RPM_INTEGRATION.md](RPM_INTEGRATION.md)。
+
 # 0.1.0~dev20261113.2：13 项性能热点收尾（#87–#94 与 #23/#26/#30/#57/#59 补充）
 
 本版已发布为 `dev20261113.2`。合入 draft PR #95–#101，覆盖 2026-11-13 性能复核的全部 13 项：排除清理 O(K²) 去重（#87）、abandoned 五态 partial index（#91）、GetOverview 诊断/存储统计缓存（#88/#89）、GC 分批窗口与 clean draft 批事务（#90）、GUI 传输轮询与追加分页（#92/#93）、ACL READDIRPLUS 分页物化（#26）、热索引 opendir O(1) 估算（#23）、warm 投影增量聚合（#30）、命名空间分页扫描与 reconcile 预算/公平（#57）、FUSE 单次 reply deadline（#59）、性能门禁模式化与机读 verdict（#94）。schema **29**／IPC **21** 不变，无迁移，JSON 仅 additive；FSD/worker/GUI 成对更新。
