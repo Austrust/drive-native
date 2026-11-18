@@ -4,7 +4,7 @@
 
 ## 1. 目标发行版与实测基线
 
-RPM 由 Ubuntu 24.04 构建机上的 `rpmbuild 4.18.2` 组装，但载荷来自 Ubuntu 构建的同一 staging 树，因此运行时下限由该树里的 ELF 决定，而不是由 rpmbuild 版本决定。实测（workstation202611，Ubuntu 24.04.5，glibc 2.39）：
+RPM 由 Ubuntu 24.04 构建机上的 `rpmbuild 4.18.2` 组装，载荷来自与 `.deb` 相同的 source commit 和同一套 build/staging 脚本（独立构建实例），因此运行时下限由该 staging 树的 ELF 决定，而不是由 rpmbuild 版本决定。实测（workstation202611，Ubuntu 24.04.5，glibc 2.39）：
 
 | 载荷 | 实测 glibc 符号下限 | 依据 |
 |---|---:|---|
@@ -21,9 +21,9 @@ RPM 由 Ubuntu 24.04 构建机上的 `rpmbuild 4.18.2` 组装，但载荷来自 
 - 同一构建机的 `.deb` 面向 Ubuntu 24.04 / Mint 22 兼容环境，不受 RPM 目标限制影响；不要据此宣称"通用 Linux"支持。
 - 包为 `x86_64` 单架构；未做 aarch64 交叉打包。
 
-## 2. 与 .deb 的关系：共用一条 staging 链
+## 2. 与 .deb 的关系：同一源码与 staging 脚本，独立构建实例
 
-RPM **不重新编译**，也**不复用 debian/ 的控制文件**。`.deb` 与 `.rpm` 共用同一套构建与布局脚本：
+RPM **不重新编译**，也**不复用 debian/ 的控制文件**。`.deb` 与 `.rpm` 使用同一 source commit 和同一套构建与布局脚本：
 
 ```
 scripts/build-linux.sh  <build>          cargo release bins + gio 模块 + PyInstaller GUI
@@ -34,7 +34,9 @@ scripts/stage-linux.sh  <build> <stage>  安装树（/usr/lib/drive-native、/us
         └── scripts/build-rpm.sh <out> ─► 重定位 gio 模块 ─► rpmbuild -bb ─► .rpm
 ```
 
-好处是安装布局、文档内容（`stage-docs.py` 生成 `SOURCE_COMMIT`/`BUILD_VERSION`）、GIO 模块和 GUI bundle 只有一处定义，不会出现 deb 与 rpm 布局漂移。`packaging/rpm/drive-native.spec` 是"预 staging 模式"：
+好处是安装布局、文档内容（`stage-docs.py` 生成 `SOURCE_COMMIT`/`BUILD_VERSION`）、GIO 模块和 GUI bundle 只有一处定义，不会出现 deb 与 rpm 布局漂移。
+
+两者的关系是**同一输入、独立构建实例**：payload 文件集合一致（Debian 包另有 `changelog.Debian.gz`/`copyright`），但**.deb 与 .rpm 的原生二进制与 PyInstaller bundle 不保证逐字节相同**——两者由不同构建过程生成：原生二进制在打包时的 strip/build-id 处理后可能不同，PyInstaller 归档也会带时间戳/元数据，因此不保证逐字节相同；本发布的逐文件实测对照记录在 `VALIDATION.json` 的 `packaging_validation.rpm_deb_payload_diff`。编译输入自上一发布提交起无运行时改动，功能等价。`packaging/rpm/drive-native.spec` 是"预 staging 模式"：
 
 - 无 `Source`、无 `BuildRequires`、`%prep`/`%build` 为空，`rpmbuild` 只执行 `%install` 拷贝与打包；
 - staging 树由 `--define '_stagedir <绝对路径>'` 传入，默认 `%{_topdir}/stage`；
@@ -69,6 +71,8 @@ bash scripts/build-rpm.sh /absolute/output/dir
 4. 把 gio 模块从 `/usr/lib/x86_64-linux-gnu/gio/modules` 重定位到 `/usr/lib64/gio/modules`（spec `%install` 对裸 staging 树也会兜底）；
 5. `rpmbuild -bb`，`_topdir=<out>/rpmbuild`、`_stagedir=<out>/stage`，完整日志在 `<out>/rpm-build.log`；
 6. 复制 `.rpm` 到输出目录并打印 `RPM_NEVRA`、`RPM_SHA256`、`RPM_FILE`、`SOURCE_COMMIT`、`BUILD_VERSION`、`GITHUB_ASSET_NAME_HINT`（`~`→`.`，仅供 Release 上传命名参考）。
+
+构建参数一致性：`dh` 会把 `dpkg-buildflags` 的 `RUSTFLAGS`（Ubuntu 24.04 为 `-Cforce-frame-pointers=yes`）、`CFLAGS`/`CXXFLAGS`/`CPPFLAGS`/`LDFLAGS`（加固与可复现 flags）以及 `SOURCE_DATE_EPOCH`（取自 `debian/changelog`）注入 `.deb` 构建环境，而直接调用 cargo/build script 不会继承。`build-rpm.sh` 在对应环境变量未显式设置时用同样的 `dpkg-buildflags`/`dpkg-parsechangelog` 补齐并导出——Rust 代码生成与 C/asm 依赖的加固参数都和同机构的 `.deb` 对齐；显式设置的环境变量不会被覆盖；没有 `dpkg-buildflags` 的构建机（如 Fedora/RHEL）自动跳过该段。
 
 产物文件名固定为 `drive-native-<Version>-<Release>.x86_64.rpm`：
 
@@ -115,10 +119,11 @@ spec 固定 `%global _binary_payload w19.xzdio`，不继承构建机的 rpm 宏�
 
 `stage-linux.sh` 在 Ubuntu 构建机按 `pkg-config --variable=giomoduledir gio-2.0` 安装模块到 multiarch 路径。RPM 目标 Fedora/RHEL 的 x86_64 GIO 模块目录是 `/usr/lib64/gio/modules`，因此 spec 与 `build-rpm.sh` 都做重定位，并在 `%files` 中以目标路径声明。
 
-包**不携带** `giomodule.cache`（与 deb 同理，共享目录的缓存由维护脚本生成）：
+包**不携带** `giomodule.cache`：`/usr/lib64/gio/modules` 是 glib2 拥有的共享目录，缓存刷新由 glib2 的 file trigger 负责；本包的 scriptlet 只在命令存在时做幂等补充：
 
-- `%post`：`command -v gio-querymodules` 守卫后执行 `gio-querymodules /usr/lib64/gio/modules`；
-- `%postun`：仅 `$1 -eq 0`（最终卸载，非升级）时刷新，与 deb `postrm` 的 `remove|purge|disappear` guard 对应。
+- Fedora/RHEL 的 glib2 把缓存命令改名为 **`gio-querymodules-64`**（`%files` 为 `gio-querymodules*`，没有裸 `gio-querymodules`），并用 `%transfiletriggerin`/`%transfiletriggerpostun -- %{_libdir}/gio/modules` 负责实际的模块缓存刷新。因此本包 scriptlet 先找 `gio-querymodules-64`、回退 `gio-querymodules`，只有命令存在时才执行；它只是幂等补充，**永不失败**，真正的刷新由 glib2 的 file trigger 完成。
+- `%post`：按上述顺序找到命令后刷新 `/usr/lib64/gio/modules`；
+- `%postun`：仅 `$1 -eq 0`（最终卸载，非升级）时同样刷新，与 deb `postrm` 的 `remove|purge|disappear` guard 对应。
 
 ### 4.2 systemd 用户单元
 
@@ -196,7 +201,7 @@ PyInstaller bundle 内的 Qt/Python/shiboken 私有库不进入 `Requires`/`Prov
 | deb 依赖 | RPM 处理 |
 |---|---|
 | `python3-gi` | `Requires: python3-gobject` |
-| `libglib2.0-bin`（`gio-querymodules`） | 合并到 `Requires: glib2` |
+| `libglib2.0-bin`（`gio-querymodules`） | 合并到 `Requires: glib2`；Fedora/RHEL 的可执行名是 `gio-querymodules-64`（glib2 自带模块目录 file trigger） |
 | `libegl1` / `libgl1` | `mesa-libEGL` / `mesa-libGL` |
 | `libfontconfig1` | `fontconfig` |
 | `libdbus-1-3` | `dbus-libs` |
@@ -256,6 +261,7 @@ sudo dnf remove drive-native
 | rpmbuild（gzip/9 对照） | `rpmbuild -bb`（`_topdir`/`_stagedir`） | 通过：`%install`/`%check` 全绿、无 unpackaged 文件；`drive-native-0.1.0~dev20261118.1-1.x86_64.rpm` **73,526,191 B** |
 | rpmbuild（发布配置 `w19.xzdio`） | 同上，同一 staging 树 | 通过：**49,213,525 B（−33%）**；`PAYLOADCOMPRESSOR=xz FLAGS=19`；`rpm -K` digests OK；`rpm2cpio | cpio -t` 692 条 |
 | 依赖实测 | `rpm -qpR` | 自动 ELF 依赖含 `libc.so.6(GLIBC_2.39)(64bit)`（fsd 的 pidfd 符号）；显式 Requires 全部展开；无 bundled Qt/Python 依赖；`libdrive-native-probe.so()(64bit)` 为 GIO 模块自身 provide |
+| RPM/DEB payload 对照 | `rpm2cpio` / `dpkg-deb -x` 逐文件比较 | 文件集合一致（deb 额外 `changelog.Debian.gz`/`copyright`）；原生二进制（strip/build-id 后处理不同）与 PyInstaller 归档元数据可能不同，不保证逐字节相同；本发布的逐文件实测对照见 `VALIDATION.json` 的 `packaging_validation.rpm_deb_payload_diff` |
 | Fedora/RHEL 实机安装 | — | **未验证** |
 
 > 本表只记录构建机上的打包结果；不代表安装/桌面/NAS 验收。发布构建会从最终 release commit 重新执行 `scripts/build-rpm.sh`，实际 `RPM_SHA256`、NEVRA 与体积以发布资产 `SHA256SUMS` / `VALIDATION.json` 为准。

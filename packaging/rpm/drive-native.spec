@@ -12,6 +12,11 @@
 # path instead of a second, divergent RPM build recipe. %install only copies
 # that tree, relocates the Ubuntu multiarch GIO module to the Fedora/RHEL
 # libdir, and strips the three native binaries plus the GIO module.
+#
+# The .deb and .rpm are independent build instances from the same source commit
+# and the same staging scripts: their payload file sets match (the .deb adds
+# changelog.Debian.gz/copyright), but native binaries and the PyInstaller
+# bundle are not guaranteed byte-identical (build-id/archive metadata differ).
 
 %global debug_package %{nil}
 
@@ -66,7 +71,10 @@ Requires:       glibc
 Requires:       libgcc
 # FUSE mount support and the fusermount3 helper/udev rule set.
 Requires:       fuse3
-# GIO module host (also ships /usr/bin/gio-querymodules used by the scriptlets).
+# GIO module host. Fedora/RHEL glib2 ships the cache helper as
+# gio-querymodules-64 (renamed from gio-querymodules by its %__isa_bits macro)
+# and refreshes /usr/lib64/gio/modules through its own file transfiletrigger;
+# the package scriptlets below only add a guarded, idempotent fallback.
 Requires:       glib2
 # Per-user systemd units are shipped; installing the package needs systemd.
 Requires:       systemd
@@ -217,19 +225,22 @@ for unit in drive-native.service drive-native-unlock.service drive-native@.servi
 done
 
 %post
-# Rebuild the shared GIO module cache so the volume probe is visible to newly
-# started GIO applications. No giomodule.cache is owned by this package.
-if command -v gio-querymodules >/dev/null 2>&1; then
-    gio-querymodules %{gio_moduledir} >/dev/null 2>&1 || :
-fi
+# No giomodule.cache is owned by this package. On Fedora/RHEL glib2 installs
+# the helper as gio-querymodules-64 (the bare name does not exist there) and
+# refreshes %{gio_moduledir} through its own file transfiletrigger; this call
+# is only a guarded, idempotent supplement and must never fail.
+query=gio-querymodules-64
+command -v "$query" >/dev/null 2>&1 || query=gio-querymodules
+command -v "$query" >/dev/null 2>&1 && "$query" %{gio_moduledir} >/dev/null 2>&1 || :
 
 %postun
 # Same as the deb postrm guard: refresh only on final removal, not on upgrade
-# (%post of the new package already refreshed the cache).
+# (%post of the new package already refreshed the cache). glib2's own
+# transfiletrigger remains authoritative on Fedora/RHEL.
 if [ "$1" -eq 0 ]; then
-    if command -v gio-querymodules >/dev/null 2>&1; then
-        gio-querymodules %{gio_moduledir} >/dev/null 2>&1 || :
-    fi
+    query=gio-querymodules-64
+    command -v "$query" >/dev/null 2>&1 || query=gio-querymodules
+    command -v "$query" >/dev/null 2>&1 && "$query" %{gio_moduledir} >/dev/null 2>&1 || :
 fi
 
 %files
@@ -257,9 +268,11 @@ fi
 
 %changelog
 * Wed Nov 18 2026 Drive Native contributors <noreply@example.invalid> - 0.1.0~dev20261118.1-1
-- Initial RPM package, assembled from the same staging tree as the .deb
-  (scripts/build-linux.sh + scripts/stage-linux.sh) instead of a second build
-  recipe.
+- Initial RPM package, assembled from the same source commit and the same
+  staging scripts as the .deb (scripts/build-linux.sh + scripts/stage-linux.sh)
+  instead of a second build recipe. The two packages are independent build
+  instances: the payload file sets match, but native binaries and the
+  PyInstaller bundle are not guaranteed byte-identical.
 - Relocate the GIO volume probe from the Ubuntu multiarch module directory to
   /usr/lib64/gio/modules and refresh the GIO module cache from guarded
   %post/%postun scriptlets.
@@ -268,3 +281,9 @@ fi
 - Exclude the bundled PyInstaller Qt/Python runtime from automatic dependency
   and provide generation; declare the GUI system libraries explicitly and
   leave the bundle unstripped while stripping the native binaries and module.
+- Refresh the GIO module cache through Fedora/RHEL's gio-querymodules-64 with a
+  gio-querymodules fallback (glib2 owns the authoritative file transfiletrigger);
+  the guarded scriptlets never fail.
+- Document that the .deb and .rpm are independent build instances from the same
+  source commit and staging scripts: the payload file sets match, but native
+  binaries and the PyInstaller bundle are not guaranteed byte-identical.

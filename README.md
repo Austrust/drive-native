@@ -2,7 +2,7 @@
 
 面向 **Linux Mint 22.x Cinnamon / Nemo** 的群晖 Drive 按需同步客户端。使用 Rust、FUSE、SQLite、Qt/PySide6 和 Nemo/GIO 扩展实现，直接以原生协议连接 Drive Server，不依赖 WebDAV，也不依赖官方客户端进程。
 
-当前状态：**开发版（Pre-release），持续开发中**。最新开发包为 [`0.1.0~dev20261118.1`](https://github.com/Austrust/drive-native/releases/tag/dev20261118.1)，数据库 schema **29**、IPC **21**（本版无迁移）；发布源码提交即 `dev20261118.1` tag（候选包 `SOURCE_COMMIT` 记录实际 SHA）。本版只改打包：首次提供实验性 `.rpm`（Fedora 40+ / RHEL 10+，x86_64），与 `.deb` 共用 `build-linux.sh` + `stage-linux.sh` 的同一条 staging 链，运行时行为与 `.20261113.2` 相同，详见[本版说明](docs/RELEASE_20261118_1.md)。本版是开发包，不是 rc1；真实 NAS 复核、真实 dpkg/rpm 安装／升级与 Mint／Cinnamon 桌面验收仍未完成。注意排除规则默认行为已变为「本地保留、不同步」，需要旧行为时在 profile 中设置 `"exclude_mode": "hidden"`。
+当前状态：**开发版（Pre-release），持续开发中**。最新开发包为 [`0.1.0~dev20261118.1`](https://github.com/Austrust/drive-native/releases/tag/dev20261118.1)，数据库 schema **29**、IPC **21**（本版无迁移）；发布源码提交即 `dev20261118.1` tag（候选包 `SOURCE_COMMIT` 记录实际 SHA）。本版只改打包：首次提供实验性 `.rpm`（Fedora 40+ / RHEL 10+，x86_64），与 `.deb` 由同一 source commit、同一套 `build-linux.sh` + `stage-linux.sh` 脚本产出（独立构建实例，payload 文件集合一致，但二进制不保证逐字节相同），运行时行为与 `.20261113.2` 相同，详见[本版说明](docs/RELEASE_20261118_1.md)。本版是开发包，不是 rc1；真实 NAS 复核、真实 dpkg/rpm 安装／升级与 Mint／Cinnamon 桌面验收仍未完成。注意排除规则默认行为已变为「本地保留、不同步」，需要旧行为时在 profile 中设置 `"exclude_mode": "hidden"`。
 
 ## 核心能力
 
@@ -72,7 +72,7 @@ export DRIVE_NATIVE_SOURCE_COMMIT="$(git rev-parse HEAD)"
 chmod +x debian/rules debian/drive-native.postinst debian/drive-native.postrm
 dpkg-buildpackage -b -us -uc
 
-# 构建实验性 .rpm（Fedora 40+ / RHEL 10+；复用同一 staging 树，rpmbuild 不重新编译）
+# 构建实验性 .rpm（Fedora 40+ / RHEL 10+；同一套 build/staging 脚本，rpmbuild 只打包不编译）
 export GUI_PYTHON="$PWD/.venv-build/bin/python"
 export DRIVE_NATIVE_SOURCE_COMMIT="$(git rev-parse HEAD)"
 bash scripts/build-rpm.sh "$PWD/../drive-native-rpm"
@@ -80,7 +80,7 @@ bash scripts/build-rpm.sh "$PWD/../drive-native-rpm"
 
 从发布的源码归档构建时，把配套 `SOURCE_COMMIT` 放在解压目录旁，并用 `export DRIVE_NATIVE_SOURCE_COMMIT="$(cat ../SOURCE_COMMIT)"`。kernel FUSE 测试套件需显式串行执行并设置 `DRIVE_NATIVE_FS_DIAGNOSTICS=1`（测试隔离要求，非产品行为）。
 
-RPM 构建机需要 Ubuntu 24.04 自带的 `rpm`/`rpmbuild` 4.18+、`rpm2cpio`、`cpio` 与 `binutils`；`scripts/build-rpm.sh` 会先构建并 staging，再把 GIO 模块重定位到 `/usr/lib64/gio/modules`，最后 `rpmbuild -bb` 并打印 NEVRA 与 sha256。产物为 `drive-native-<版本>-1.x86_64.rpm`，可用 `sudo dnf install ./drive-native-*.rpm` 安装。RPM 目标基线是 glibc 2.39（Fedora 40+ / RHEL 10+，RHEL 8/9 不兼容），包未签名、未在真实 Fedora/RHEL 主机验证；构建、依赖映射、安装/卸载与限制见 [docs/RPM_INTEGRATION.md](docs/RPM_INTEGRATION.md)。
+RPM 构建机需要 Ubuntu 24.04 自带的 `rpm`/`rpmbuild` 4.18+、`rpm2cpio`、`cpio` 与 `binutils`；`scripts/build-rpm.sh` 会先构建并 staging，再把 GIO 模块重定位到 `/usr/lib64/gio/modules`，最后 `rpmbuild -bb` 并打印 NEVRA 与 sha256。`.deb` 与 `.rpm` 是独立构建实例：文件集合一致（deb 额外 `changelog.Debian.gz`/`copyright`），但原生二进制与 PyInstaller bundle 不保证逐字节相同。产物为 `drive-native-<版本>-1.x86_64.rpm`，可用 `sudo dnf install ./drive-native-*.rpm` 安装。RPM 目标基线是 glibc 2.39（Fedora 40+ / RHEL 10+，RHEL 8/9 不兼容），包未签名、未在真实 Fedora/RHEL 主机验证；构建、依赖映射、安装/卸载与限制见 [docs/RPM_INTEGRATION.md](docs/RPM_INTEGRATION.md)。
 
 安装生成的 `.deb`（或 `.rpm`）后从应用菜单打开 Drive Native，首次配置连接地址、证书服务器名称与账号，并选择同步目录。凭据由用户输入并保存到 Secret Service；不要将凭据或用户数据库提交到 Git。仓库只保存源码、合成或脱敏测试夹具与维护文档，实验数据库、NAS 文件、官方二进制与旧安装包不进入 Git 历史。
 

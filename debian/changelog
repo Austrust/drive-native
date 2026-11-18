@@ -6,14 +6,20 @@ drive-native (0.1.0~dev20261118.1) unstable; urgency=medium
     project and it is not a validated release candidate.
     - packaging/rpm/drive-native.spec packages a pre-staged installation tree
       instead of compiling a second time: %install copies the tree produced by
-      the shared scripts/build-linux.sh + scripts/stage-linux.sh, so the .deb
-      and .rpm carry the same binaries, PyInstaller GUI bundle, GIO probe,
-      desktop files and documentation. rpmbuild itself compiles nothing. The
-      payload compression is pinned to w19.xzdio (same tree: 73,526,191 B with
-      Ubuntu's default gzip/9 vs 49,213,525 B with xz/19; rpm -K digests OK).
+      the shared scripts/build-linux.sh + scripts/stage-linux.sh, so the .rpm
+      and .deb come from the same source commit and the same staging scripts
+      with the same payload file set (the .deb adds changelog.Debian.gz and
+      copyright). They are independent build instances: the native binaries and
+      the PyInstaller bundle are not guaranteed byte-identical (build-id and
+      archive metadata differ). rpmbuild itself compiles nothing. The payload
+      compression is pinned to w19.xzdio (same tree: 73,526,191 B with Ubuntu's
+      default gzip/9 vs 49,213,525 B with xz/19; rpm -K digests OK).
     - The GIO volume probe is relocated from the Ubuntu multiarch module path
-      (/usr/lib/x86_64-linux-gnu/gio/modules) to /usr/lib64/gio/modules, and the
-      shared module cache is refreshed from guarded %post/%postun scriptlets
+      (/usr/lib/x86_64-linux-gnu/gio/modules) to /usr/lib64/gio/modules. On
+      Fedora/RHEL glib2 names the cache helper gio-querymodules-64 (not
+      gio-querymodules) and owns the authoritative gio/modules file
+      transfiletrigger; the guarded %post/%postun fallback therefore tries
+      gio-querymodules-64 first, falls back to gio-querymodules and never fails
       (removal only; no cache file is shipped). The four per-user systemd units
       are installed but never enabled, and the removal leaves user
       configuration and cached content untouched.
@@ -33,6 +39,13 @@ drive-native (0.1.0~dev20261118.1) unstable; urgency=medium
     DRIVE_NATIVE_SOURCE_COMMIT, builds and stages the shared tree, relocates the
     GIO module, runs rpmbuild -bb with _topdir/_stagedir, verifies the embedded
     source identity and prints the NEVRA plus SHA256.
+  * scripts/build-rpm.sh mirrors the debhelper-injected build environment when
+    the variables are unset: RUSTFLAGS (Rust codegen), CFLAGS/CXXFLAGS/CPPFLAGS/
+    LDFLAGS (C/asm hardening and reproducibility flags) from dpkg-buildflags and
+    SOURCE_DATE_EPOCH from debian/changelog. A standalone .rpm build on the
+    Ubuntu build host therefore uses the same compile/hardening flags as the
+    .deb built from the same tree. Explicit values are never overridden and
+    hosts without dpkg-buildflags skip the block.
   * Add docs/RPM_INTEGRATION.md (target baseline, file layout, dependency
     mapping, build/install/uninstall and limitations) and
     docs/RELEASE_20261118_1.md; extend README with the RPM build/install path.

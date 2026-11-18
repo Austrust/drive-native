@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 # Build the experimental drive-native RPM.
 #
-# The RPM is assembled from the same staging tree as the .deb: this script runs
-# scripts/build-linux.sh (cargo release binaries, GIO module, PyInstaller GUI)
-# and scripts/stage-linux.sh, then relocates the GIO module to the Fedora/RHEL
-# x86_64 module directory and invokes rpmbuild -bb on packaging/rpm/drive-native.spec.
-# rpmbuild itself never compiles anything (see the spec header).
+# The RPM is assembled from the same source commit and the same staging scripts
+# as the .deb: this script runs scripts/build-linux.sh (cargo release binaries,
+# GIO module, PyInstaller GUI) and scripts/stage-linux.sh, then relocates the
+# GIO module to the Fedora/RHEL x86_64 module directory and invokes rpmbuild -bb
+# on packaging/rpm/drive-native.spec. rpmbuild itself never compiles anything.
+#
+# The .deb and .rpm are independent build instances: their payload file sets
+# match (the .deb adds changelog.Debian.gz/copyright), but native binaries and
+# the PyInstaller bundle are not guaranteed byte-identical because each package
+# build may hit a different incremental cargo/target state.
 #
 # usage:
 #   GUI_PYTHON=/abs/.venv-build/bin/python \
@@ -41,6 +46,46 @@ if [ "${#DRIVE_NATIVE_SOURCE_COMMIT}" -ne 40 ]; then
     printf '%s\n' "DRIVE_NATIVE_SOURCE_COMMIT must be 40 hex characters, got ${#DRIVE_NATIVE_SOURCE_COMMIT}" >&2
     exit 2
 fi
+
+# Build-flag parity with the .deb build. debhelper injects the values of
+# `dpkg-buildflags` (and SOURCE_DATE_EPOCH from debian/changelog) into the
+# debian/rules environment, but direct cargo/build-script invocations do not
+# inherit them. Mirror every unset variable so a standalone .rpm build on the
+# Ubuntu build host uses the same Rust codegen (RUSTFLAGS), the same C/asm
+# hardening and reproducibility flags (CFLAGS/CXXFLAGS/CPPFLAGS/LDFLAGS) and the
+# same reproducible timestamp as the .deb built from the same tree. Explicit
+# environment values are never overridden; hosts without dpkg-buildflags (for
+# example Fedora/RHEL build hosts) simply skip this block.
+if command -v dpkg-buildflags >/dev/null 2>&1; then
+    if [ -z "${RUSTFLAGS:-}" ]; then
+        value=$(dpkg-buildflags --get RUSTFLAGS 2>/dev/null || true)
+        if [ -n "$value" ]; then
+            RUSTFLAGS=$value
+            export RUSTFLAGS
+        fi
+    fi
+    for var in CFLAGS CXXFLAGS CPPFLAGS LDFLAGS; do
+        if [ -z "${!var:-}" ]; then
+            value=$(dpkg-buildflags --get "$var" 2>/dev/null || true)
+            if [ -n "$value" ]; then
+                export "$var=$value"
+            fi
+        fi
+    done
+    if [ -z "${SOURCE_DATE_EPOCH:-}" ] && command -v dpkg-parsechangelog >/dev/null 2>&1; then
+        value=$(dpkg-parsechangelog -S Timestamp 2>/dev/null || true)
+        if [ -n "$value" ]; then
+            SOURCE_DATE_EPOCH=$value
+            export SOURCE_DATE_EPOCH
+        fi
+    fi
+fi
+echo "RUSTFLAGS=${RUSTFLAGS:-<unset>}"
+echo "CFLAGS=${CFLAGS:-<unset>}"
+echo "CXXFLAGS=${CXXFLAGS:-<unset>}"
+echo "CPPFLAGS=${CPPFLAGS:-<unset>}"
+echo "LDFLAGS=${LDFLAGS:-<unset>}"
+echo "SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-<unset>}"
 
 project=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$project"
